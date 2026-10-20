@@ -83,6 +83,8 @@ FUNDIDO_SQL = f"""coalesce(source, 'manual') <> 'open_finance' and exists (
           join open_finance_connections oc on oc.id = oa.connection_id and oc.user_id = launches.user_id
          where o.imported_launch_id = launches.id and o.reconciliation_status in {_FUSED})"""
 
+PAGA_CONTA_SQL = ("((efeitos -> 'bill_id') is not null or exists (select 1 from bill_instances bi "
+                  "where bi.launch_id = launches.id and bi.user_id = launches.user_id))")
 # Estado de cada linha, sobre `launches` SEM alias (dentro do FROM dela; a CTE `pendentes`
 # precisa estar no ar). "Carteira" = manual com `delta_conta` ≠ 0; manual com delta 0 não é.
 _ESTADO_SQL = f"""
@@ -91,9 +93,7 @@ _ESTADO_SQL = f"""
         and (efeitos ->> 'delta_conta')::numeric <> 0 as carteira,
       origem is not null as marcada,
       {VINCULADO_SQL} as especie,
-      (efeitos -> 'bill_id') is not null or exists (
-        select 1 from bill_instances bi where bi.launch_id = launches.id
-           and bi.user_id = launches.user_id) as paga_conta,
+      {PAGA_CONTA_SQL} as paga_conta,
       {FUNDIDO_SQL} as fundido,
       coalesce(id in (select id from pendentes), false) as pendente,
       {DECLARADA_SQL} as declarada,

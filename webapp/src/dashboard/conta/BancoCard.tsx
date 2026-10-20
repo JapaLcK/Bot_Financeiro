@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { moneyText } from "../lib/format.js";
-import { corDoBanco, tomDoEstado } from "../lib/bancos";
+import { corDoBanco, quandoSync, tomDoEstado } from "../lib/bancos";
 import type { Banco } from "../lib/api-v2.gen";
-import type { Conexao } from "./api";
+import { logoDoBanco, type Conexao } from "./api";
 
 export const nomeDoBanco = (c: Conexao) => c.institution_name?.trim() || "Banco";
 // Cópia da regra do app (app/src/features/openFinance/conexoes/BancoCard.tsx): o teste bancos_paridade compara as duas listas (§0.7).
@@ -24,21 +24,32 @@ export function Ladrilho({ nome, logo: url, cor, grande }: { nome: string; logo:
   );
 }
 
-// Pontinho no tom do estado + o rótulo do servidor: o rótulo diz o estado, a cor só acompanha.
+// Pontinho no tom do estado + o rótulo do servidor: o rótulo diz o estado, a cor só acompanha. Exceção (decisão do dono): `updated` diz "Conectado", como no desenho.
 export const Estado = ({ c }: { c: Conexao }) => (
-  <span className={`banco-estado estado-${tomDoEstado(c.ui.state)}`}><span className="ponto" aria-hidden="true" />{c.ui.label || "Pendente"}</span>
+  <span className={`banco-estado estado-${tomDoEstado(c.ui.state)}`}><span className="ponto" aria-hidden="true" />{c.ui.state === "updated" ? "Conectado" : c.ui.label || "Pendente"}</span>
 );
 
-// Um banco conectado, em linha: tocar abre o detalhe (BancoDetalhe), onde estão os valores (`/bancos`, juntados por id, nunca por nome).
-// O botão que abriu entra no `onAbrir` para o foco voltar a ele quando o detalhe fechar.
-export function BancoCard({ c, i, onAbrir }: { c: Conexao; i: number; onAbrir: (botao: HTMLButtonElement) => void }) {
+// Um banco conectado, em linha: ladrilho, nome, estado, última atualização e as ações. "Detalhes" abre o BancoDetalhe (os valores do `/bancos`, juntados por id, nunca por nome);
+// o botão que abriu entra no `onAbrir` para o foco voltar a ele quando o detalhe fechar. "Sincronizar" atualiza TODOS os bancos (o servidor só sabe fazer todos), então todos
+// os botões travam juntos (`sincronizando`). `bloqueado` (reconexão ou diálogo de Desconectar em curso) só PINTA o travamento: quem decide é o `sincronizar` do pai, que confere refs (o estado está velho no mesmo tick).
+// `aria-disabled`, não `disabled`: o botão focado não pode perder o foco no meio da rodada. O menu "…" vem pronto (`menu`).
+export function BancoCard({ c, i, sincronizando, bloqueado, onAbrir, onSincronizar, menu }: { c: Conexao; i: number; sincronizando: boolean; bloqueado: boolean; onAbrir: (botao: HTMLButtonElement) => void; onSincronizar: () => void; menu: ReactNode }) {
+  const nome = nomeDoBanco(c);
   return (
     <li className="banco-card">
-      <button type="button" className="banco-linha" aria-haspopup="dialog" onClick={(e) => onAbrir(e.currentTarget)}>
-        <Ladrilho nome={nomeDoBanco(c)} logo={c.logo_url} cor={corDoBanco(c.institution_name ?? "", i)} />
-        <span className="banco-id"><span className="banco-nome">{nomeDoBanco(c)}</span><Estado c={c} /></span>
-        <i className="ph ph-caret-right" aria-hidden="true" />
-      </button>
+      <Ladrilho nome={nome} logo={logoDoBanco(c)} cor={corDoBanco(c.institution_name ?? "", i)} />
+      <span className="banco-nome">{nome}</span>
+      <Estado c={c} />
+      <span className="banco-quando"><span className="banco-leg">Última atualização</span><span>{quandoSync(c.last_sync_at)}</span></span>
+      <span className="banco-acoes">
+        <button type="button" className="btn btn-ghost banco-acao banco-linha" aria-haspopup="dialog" aria-label={`Detalhes de ${nome}`} onClick={(e) => onAbrir(e.currentTarget)}>
+          <i className="ph ph-eye" aria-hidden="true" /><span className="banco-bt">Detalhes</span>
+        </button>
+        <button type="button" className="btn btn-ghost banco-acao" aria-label={sincronizando ? "Sincronizando…" : "Sincronizar todos os bancos"} aria-busy={sincronizando} aria-disabled={sincronizando || bloqueado || undefined} onClick={() => { if (!sincronizando) onSincronizar(); }}>
+          <i className="ph ph-arrows-clockwise" aria-hidden="true" /><span className="banco-bt">{sincronizando ? "Sincronizando…" : "Sincronizar"}</span>
+        </button>
+        {menu}
+      </span>
     </li>
   );
 }

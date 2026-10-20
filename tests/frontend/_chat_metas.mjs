@@ -43,7 +43,8 @@ export async function perguntar(page, texto) {
 }
 // O texto da última resposta depois de sair do "Calculando…".
 export async function resposta(page) {
-  await page.waitForFunction(() => ![...document.querySelectorAll(".chat > .msg-piggy")].pop().querySelector(".msg-text").textContent.includes("Calculando"), null, { timeout: 15000 });
+  // A pergunta entra depois de conferir a conta (`ask`): até lá não há resposta nenhuma, e a função espera em vez de quebrar.
+  await page.waitForFunction(() => { const m = [...document.querySelectorAll(".chat > .msg-piggy")].pop(); return !!m && !m.querySelector(".msg-text").textContent.includes("Calculando"); }, null, { timeout: 15000 });
   return ultima(page).locator(".msg-text").innerText();
 }
 export const pilulas = (page) => ultima(page).locator(".pilula");

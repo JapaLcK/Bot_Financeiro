@@ -2,39 +2,32 @@ import { useEffect, useState } from "react";
 import { View } from "react-native";
 import type { z } from "zod";
 import type { previsaoSchema } from "@/api/schemas/painel";
+import { useTema } from "@/ui/tema";
 import { ChipPainel as Chip, TextoPainel as Texto } from "./tipografia";
 import { dataPtBr, nomeLegivel } from "./catalogo";
 import { usePainel } from "./provider";
 import { useBloco } from "./blocoContexto";
-import { RecursoDados, Valor, Linha, Vazio, Filtros, useCardAberto } from "./base";
-import { BarrasMensais } from "@/ui/componentes/BarrasMensais";
-import { rotuloCompacto } from "@/ui/componentes/CurvaAcumulada";
+import { RecursoDados, Valor, Curva, Linha, Vazio, Filtros, useCardAberto } from "./base";
 import { LinhaExpansivel } from "./expansao";
 import { useRespondidas } from "./receitas";
+import { LinhaCategoria } from "./gastos";
+import { GASTOS_DIA_A_DIA } from "./previsaoMotivos";
 type DadosPrevisao = z.output<typeof previsaoSchema>;
 type Ocorrencia = NonNullable<DadosPrevisao["compromissos"]>[number]["ocorrencias"][number];
 const ddmm = (iso: string) => dataPtBr(iso).slice(0, 5);
-const COLUNAS = 6; // 6 × 40pt (`COLUNA_MIN`) = 240pt cabe nos 252pt de um card em tela de 320pt; é também o número de meses do "Resumo do mês"
-/** As mesmas colunas do "Resumo do mês" (`BarrasMensais`): o saldo previsto de hoje ao fim do horizonte em até 6 pontos (a curva diária não tinha eixo nem valor); a última, o saldo do horizonte, em destaque. Saldo <= 0 fica só o trilho (a barra não tem lado negativo: o "Menor saldo previsto" da folha cobre). */
-function ColunasPrevisao({ d }: { d: DadosPrevisao }) {
-  const { oculto } = usePainel();
-  if (oculto) return <View style={{ height: 100, justifyContent: "center" }}><Texto tom="inkMuted">Gráfico oculto</Texto></View>;
+/** A curva parte da âncora (hoje), como a do /painel: a trajetória da API começa amanhã. Os eixos (valores e datas) ficam por conta da `Curva`. */
+function CurvaPrevisao({ d }: { d: DadosPrevisao }) {
   const serie = [...(d.ancora ? [{ data: d.ancora.data, saldo: d.ancora.saldo }] : []), ...(d.trajetoria ?? [])];
-  if (!serie.length || serie.some((s) => s.saldo === null)) return <Vazio texto="Trajetória indisponível." />;
-  const idx = [...new Set(Array.from({ length: Math.min(COLUNAS, serie.length) }, (_, k) => Math.round(k * (serie.length - 1) / Math.max(1, Math.min(COLUNAS, serie.length) - 1))))];
-  const pontos = idx.map((i) => serie[i]!);
-  return <View accessible accessibilityLabel={`Saldo previsto ao longo do período: ${pontos.map((s) => `${ddmm(s.data)}, ${rotuloCompacto(s.saldo!)}`).join("; ")}`}>
-    <BarrasMensais parcial={false} meses={pontos.map((s, n) => ({ chave: `${n}`, rotulo: ddmm(s.data), valor: s.saldo!, atual: n === pontos.length - 1 }))} rotuloValor={rotuloCompacto} />
-  </View>;
+  return <Curva valores={serie.map((s) => s.saldo)} datas={serie.map((s) => ddmm(s.data))} />;
 }
 const nome = (o: Ocorrencia, n = o.nome) => o.tipo === "fatura_cartao" ? nomeLegivel(n) : n;
-/** Compacto (card do Resumo, `Bloco` com `detalhes`): horizonte, data, saldo e as colunas, sempre. O resto abre numa folha ao toque no card INTEIRO. */
+/** Compacto (card do Resumo, `Bloco` com `detalhes`): horizonte, data, saldo e a curva, sempre. O resto abre numa folha ao toque no card INTEIRO. */
 /** Montado só com a previsão na tela: avisa o card (`Bloco`) que há o que abrir. */
 function Pronto() { const { avisar } = useCardAberto(); useEffect(() => { avisar(true); return () => avisar(false); }, [avisar]); return null; }
 export function Previsao() {
-  const p = usePainel(), bloco = useBloco(), respondidas = useRespondidas(); const [piorAberto, setPiorAberto] = useState(false), { aberto } = useCardAberto();
+  const p = usePainel(), bloco = useBloco(), respondidas = useRespondidas(); const [piorAberto, setPiorAberto] = useState(false), [estAberta, setEstAberta] = useState(false), { cores } = useTema(), { aberto } = useCardAberto();
   return <RecursoDados nome="previsao">{(d) => {
-    const pior = d.pior_dia, piorLinha = pior && <Linha titulo={`Menor saldo previsto · ${dataPtBr(pior.data)}`} valor={pior.saldo} detalhe={pior.desde && pior.causas.length ? `desde ${ddmm(pior.desde)}` : undefined} />;
+    const pior = d.pior_dia, est = d.estimativa_variavel, maior = Math.max(1, ...(est?.categorias.map((c) => c.despesa_mensal) ?? [])), temCausa = !!pior && (pior.causas.length > 0 || pior.despesa_variavel !== null), piorLinha = pior && <Linha titulo={`Menor saldo previsto · ${dataPtBr(pior.data)}`} valor={pior.saldo} detalhe={pior.desde && temCausa ? `desde ${ddmm(pior.desde)}` : undefined} />;
     return <View style={{ gap: 8 }}>
       <Pronto />
       {!bloco && <Filtros>{d.dias_permitidos.map((dias) => <Chip key={dias} rotulo={`${dias} dias`} selecionado={d.dias === dias} onPress={() => p.mudarDias(dias)} />)}</Filtros>}
@@ -42,12 +35,12 @@ export function Previsao() {
       <Valor valor={d.marcos.find((m) => m.dias === d.dias)?.saldo ?? null} destaque />
       {d.estado === "indisponivel" && <Texto variante="rotulo" tom="warning">Previsão indisponível</Texto>}
       {d.base.bancos_excluidos && <Texto variante="legenda" tom="warning">Bancos conectados fora do cálculo</Texto>}
-      {/* As colunas partem da âncora (hoje), se houver: a trajetória da API começa amanhã. Sempre visíveis. */}
-      {d.trajetoria ? (d.estado === "indisponivel" ? null : <ColunasPrevisao d={d} />) : <Vazio texto="Trajetória indisponível no seu plano." />}
+      {d.trajetoria ? (d.estado === "indisponivel" ? null : <CurvaPrevisao d={d} />) : <Vazio texto="Trajetória indisponível no seu plano." />}
       {aberto && <View style={{ gap: 8 }}>
         {d.ancora && <Linha titulo="Hoje, com as premissas" valor={d.ancora.saldo} />}
         {d.marcos.map((m) => <Linha key={m.dias} titulo={`${m.dias} dias · ${dataPtBr(m.data)}`} valor={m.saldo} />)}
-        {pior && (pior.causas.length ? <LinhaExpansivel testID="pior-dia" linha={piorLinha} aberta={piorAberto} alternar={() => setPiorAberto((a) => !a)}><View style={{ gap: 4 }}>{pior.causas.map((o) => <Linha key={o.chave + o.ciclo} titulo={nome(o)} valor={o.valor} tipo={o.direcao} detalhe={o.data ? ddmm(o.data) : "sem data"} />)}</View></LinhaExpansivel> : piorLinha)}
+        {est && <LinhaExpansivel testID="estimativa-variavel" linha={<Linha titulo={GASTOS_DIA_A_DIA} valor={est.despesa_mensal} tipo="saida" detalhe="por mês" />} aberta={estAberta} alternar={() => setEstAberta((a) => !a)}><View style={{ gap: 4 }}>{est.categorias.map((c) => <LinhaCategoria key={c.chave} titulo={c.nome} valor={c.despesa_mensal} tipo="saida" fracao={Math.max(0, c.despesa_mensal) / maior} cor={cores.inkMuted} />)}</View></LinhaExpansivel>}
+        {pior && (temCausa ? <LinhaExpansivel testID="pior-dia" linha={piorLinha} aberta={piorAberto} alternar={() => setPiorAberto((a) => !a)}><View style={{ gap: 4 }}>{pior.causas.map((o) => <Linha key={o.chave + o.ciclo} titulo={nome(o)} valor={o.valor} tipo={o.direcao} detalhe={o.data ? ddmm(o.data) : "sem data"} />)}{pior.despesa_variavel !== null && <Linha titulo={GASTOS_DIA_A_DIA} valor={pior.despesa_variavel} tipo="saida" />}</View></LinhaExpansivel> : piorLinha)}
         {respondidas}
       </View>}
     </View>;

@@ -8,7 +8,7 @@ import { Texto } from "@/ui/componentes/Texto";
 import { usePressao } from "@/ui/motion";
 import { claro, espaco, texto } from "@/ui/tokens";
 
-import { logoSeguro, type Item } from "./juntar";
+import { logoDoBanco, type Item } from "./juntar";
 
 interface Props {
   item: Item;
@@ -28,7 +28,7 @@ export function BancoCard({ item, indice, aoAbrir }: Props) {
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={`${nome}, ${c.ui.label}`} onPress={aoAbrir} onPressIn={pressao.aoPressionar} onPressOut={pressao.aoSoltar}>
       <Animated.View style={[{ flexDirection: "row", alignItems: "center", gap: espaco.md, minHeight: 56, paddingVertical: espaco.sm }, pressao.estilo]}>
-        <Avatar nome={nome} imagem={logoSeguro(c.logo_url)} tamanho={44} decorativo fundo={claro.bg} letra={corDoBanco(nome, indice, claro)} />
+        <Avatar nome={nome} imagem={logoDoBanco(c)} tamanho={44} decorativo fundo={claro.bg} letra={corDoBanco(nome, indice, claro)} />
         <View style={{ flex: 1, gap: espaco.xs }}>
           <Texto numberOfLines={1} style={{ fontSize: 16, lineHeight: 22, fontFamily: texto.secao.fontFamily }}>{nome}</Texto>
           <ConnectionStatus estado={c.ui.state} label={c.ui.label} />

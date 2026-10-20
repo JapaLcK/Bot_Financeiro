@@ -1,8 +1,9 @@
 /**
  * /painel#/orcamento (Orçamento doméstico, método dos potes) sobre /api/v2/orcamento-domestico:
- * os 6 potes e a renda com origem, o convite do Essencial (sem POST), os erros da leitura, a edição
- * dos percentuais (soma ao vivo, Salvar desligado fora de 100, CSRF, 422, duplo clique), a renda
- * (editar e "Usar a calculada"), o mês da barra de cima, o protótipo (DEMO) e 375/1440 sem rolagem lateral.
+ * os 6 potes (tabela; o modal por pote, o guardado sem alerta e o estouro) e a renda com origem, o convite do
+ * Essencial (sem POST), os erros da leitura, a edição dos percentuais (soma ao vivo, Salvar desligado fora de 100,
+ * CSRF, 422, duplo clique), a renda (editar e "Usar a calculada"), o mês da barra de cima, o protótipo (DEMO) e
+ * 375/1440 sem rolagem lateral. O donut, o toggle Gasto/Orçado e o cabeçalho: dashboard_v2_orcamento_visao.test.mjs.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -20,39 +21,156 @@ async function abrir({ width, ...opts } = {}) {
   await p.ir("/orcamento");
   return { ...p, pedidos };
 }
-const painel = (page) => page.locator("#w-orcamento");
-const aberto = async (opts) => { const p = await abrir(opts); await p.page.locator(".orc-pote").first().waitFor(); return p; };
+const painel = (page) => page.locator(".page-grid");
+const LINHA = ".orc-tabela tbody tr"; // no celular a tabela some e entram os cards (.orc-cards li): os 2 estão no DOM
+const linha = (page, nome) => page.locator(LINHA).filter({ hasText: nome });
+const espera = (page) => page.locator(LINHA).first().waitFor({ state: "attached" });
+const aberto = async (opts) => { const p = await abrir(opts); await espera(p.page); return p; };
 const semRolagem = (page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 
 test("lê os 6 potes e a renda com a origem, pelo mês da barra de cima", async () => {
   const { ctx, page, pedidos, erros } = await aberto();
-  const potes = await page.locator(".orc-pote h3").allInnerTexts();
+  const potes = (await page.locator(".orc-tabela tbody th").allInnerTexts()).map((t) => t.trim());
   const t = await painel(page).innerText();
+  const fixos = await linha(page, "Custos fixos").innerText();
   await ctx.close();
   assert.deepEqual(potes, ["Custos fixos", "Conforto", "Metas", "Prazeres", "Liberdade financeira", "Conhecimento"]);
-  assert.match(t, /Renda do mês\s+R\$ 5\.000,00\s+calculada pelas receitas do mês/);
-  assert.match(t, /Custos fixos[\s\S]*55%[\s\S]*Teto\s+R\$ 2\.750,00[\s\S]*Gasto\s+R\$ 2\.000,00 · 73%[\s\S]*Restante\s+R\$ 750,00/);
-  assert.match(t, /Total dos tetos\s+R\$ 5\.000,00[\s\S]*Gasto no mês\s+R\$ 2\.985,00 · 60%/);
+  assert.match(t, /Renda do mês[\s\S]*R\$ 5\.000,00\s+Calculada automaticamente\s+Soma das suas receitas no mês/);
+  assert.match(fixos, /55%[\s\S]*73%[\s\S]*R\$ 2\.750,00[\s\S]*R\$ 2\.000,00[\s\S]*R\$ 750,00/);
   assert.equal(pedidos[0].u.searchParams.get("mes"), "2026-10");
   assert.deepEqual(erros, []);
 });
 
 test("pote que passou do teto diz \"passou\" em texto, não só na cor", async () => {
   const { ctx, page } = await aberto();
-  const conforto = await page.locator(".orc-pote").filter({ hasText: "Conforto" }).innerText();
-  const warn = await page.locator(".orc-pote").filter({ hasText: "Conforto" }).locator(".meter.warn").count();
+  const conforto = await linha(page, "Conforto").innerText();
+  const warn = await linha(page, "Conforto").locator(".meter.warn").count();
   await ctx.close();
-  assert.match(conforto, /passou R\$ 60,00 do teto/);
+  assert.match(conforto, /passou R\$ 60,00/);
   assert.equal(warn, 1);
+});
+
+test("donut em Gasto: uma fatia por pote com gasto, centro com o gasto e aria-label com a lista dos potes", async () => {
+  const { ctx, page } = await aberto();
+  const fatias = await page.locator(".orc-donut circle.orc-fatia").count();
+  const rotulo = await page.locator(".orc-donut svg").getAttribute("aria-label");
+  const papel = await page.locator(".orc-donut svg").getAttribute("role");
+  const centro = await page.locator(".orc-donut-centro").evaluate((e) => [...e.children].map((c) => c.textContent).join(" "));
+  await ctx.close();
+  assert.equal(fatias, 5); // Metas gastou 0: sem fatia
+  assert.equal(papel, "img");
+  assert.match(rotulo, /Gasto por pote, R\$ 2\.985,00 gasto no mês: Custos fixos 67% \(R\$ 2\.000,00\); Conforto 10% \(R\$ 310,00\);/);
+  assert.match(centro, /R\$ 2\.985,00\s+gasto no mês\s+60% da renda/);
+});
+
+test("donut com renda zero: anel vazio, legenda em 0% e sem NaN, nos dois modos", async () => {
+  const { ctx, page } = await aberto({ orcamento: "renda_zero" });
+  const lido = async () => ({
+    html: await page.locator(".orc-visao").innerHTML(),
+    fatias: await page.locator(".orc-donut circle.orc-fatia").count(),
+    leg: await page.locator(".orc-leg li .faint").allInnerTexts(),
+  });
+  const gasto = await lido();
+  await page.getByRole("radio", { name: "Orçado" }).click();
+  const orcado = await lido();
+  await ctx.close();
+  for (const x of [gasto, orcado]) {
+    assert.equal(x.fatias, 0);
+    assert.doesNotMatch(x.html, /NaN|Infinity/);
+    assert.deepEqual(x.leg, ["0%", "0%", "0%", "0%", "0%", "0%"]);
+  }
+});
+
+test("clicar no pote abre o modal com os lançamentos; Esc fecha e devolve o foco ao card", async () => {
+  const { ctx, page } = await aberto();
+  const botao = page.getByRole("button", { name: "Custos fixos" });
+  await botao.click();
+  const dlg = page.locator("dialog.orc-modal");
+  await dlg.waitFor();
+  const t = await dlg.innerText();
+  const chips = await dlg.locator(".orc-chips li").allInnerTexts();
+  await page.keyboard.press("Escape");
+  await dlg.waitFor({ state: "detached" });
+  const foco = await page.evaluate(() => document.activeElement?.textContent);
+  await ctx.close();
+  assert.match(t, /Custos fixos · outubro de 2026/);
+  assert.match(t, /Categorias neste pote: Alimentação, Mercado, Moradia, Transporte, Saúde, Assinaturas/);
+  assert.match(t, /Gasto R\$ 2\.000,00 de R\$ 2\.750,00/);
+  assert.match(t, /Aluguel\s+R\$ 1\.534,10\s+Moradia · 05\/10/);
+  assert.match(t, /Pão de Açúcar\s+R\$ 320,40\s+Mercado · 08\/10 · Cartão/);
+  assert.doesNotMatch(t.match(/Aluguel[^\n]*\n[^\n]*\n/)[0], /Cartão/);
+  assert.deepEqual(chips.map((c) => c.replace(/\s+R\$.*/s, "")), ["Moradia", "Mercado", "Transporte", "Assinaturas"]);
+  assert.equal(foco, "Custos fixos");
+});
+
+test("pote sem lançamento mostra o estado vazio no modal", async () => {
+  const { ctx, page } = await aberto();
+  await page.getByRole("button", { name: "Metas" }).click();
+  const t = await page.locator("dialog.orc-modal").innerText();
+  await ctx.close();
+  assert.match(t, /Guardado R\$ 0,00 de R\$ 500,00/);
+  assert.match(t, /Nenhum lançamento neste pote em outubro de 2026\./);
+});
+
+test("Metas e Liberdade acima do teto são guardados: sem aviso, sem \"passou\", \"guardou R$ a mais\"; o não guardado no teto fica neutro", async () => {
+  const dados = JSON.parse(JSON.stringify(RESPOSTAS.orcamento_domestico.padrao));
+  const set = (i, gasto, restante) => { dados.potes[i].gasto = gasto; dados.potes[i].restante = restante; dados.potes[i].usado_pct = "120.00"; };
+  set(2, "600.00", "-100.00"); // Metas
+  set(4, "560.00", "-60.00"); // Liberdade financeira
+  dados.potes[1].gasto = "250.00"; dados.potes[1].restante = "0.00"; // Conforto no teto: ninguém não guardado estourou
+  const p = await abrirPainel(browser, { espera: null });
+  await p.ctx.route("**/api/v2/orcamento-domestico*", (r) => r.request().method() === "GET" ? r.fulfill({ json: dados }) : r.fallback());
+  await p.ir("/orcamento");
+  await espera(p.page);
+  const guardados = [];
+  for (const nome of ["Metas", "Liberdade financeira"]) {
+    const c = linha(p.page, nome);
+    guardados.push({ t: await c.innerText(), warn: await c.locator(".warn").count() });
+  }
+  const conforto = linha(p.page, "Conforto");
+  const neutro = { warn: await conforto.locator(".warn, .gain").count(), t: await conforto.innerText() };
+  await p.page.getByRole("button", { name: "Metas" }).click();
+  const modal = await p.page.locator("dialog.orc-modal").innerText();
+  await p.page.keyboard.press("Escape");
+  await p.ctx.close();
+  for (const g of guardados) { assert.equal(g.warn, 0); assert.doesNotMatch(g.t, /passou/); assert.match(g.t, /guardado/); assert.match(g.t, /guardou R\$ \d+,00 a mais/); }
+  assert.equal(neutro.warn, 0); // restante 0: nem verde nem aviso
+  assert.match(neutro.t, /R\$ 0,00/);
+  assert.match(modal, /Guardado R\$ 600,00 de R\$ 500,00/);
+});
+
+test("restante positivo é verde; pote não guardado negativo diz \"passou\" em aviso (controle da regra dos guardados)", async () => {
+  const { ctx, page } = await aberto();
+  const verde = await linha(page, "Custos fixos").locator(".gain").innerText();
+  const aviso = await linha(page, "Conforto").locator(".warn").allInnerTexts();
+  await ctx.close();
+  assert.equal(verde, "R$ 750,00");
+  assert.ok(aviso.some((t) => /passou R\$ 60,00/.test(t)), JSON.stringify(aviso));
+});
+
+test("contorno do botão do pote: aparece com Tab, não aparece após clique de mouse + fechar o modal", async () => {
+  const { ctx, page } = await aberto();
+  const contorno = (nome) => linha(page, nome).locator(".orc-pote-btn").evaluate((e) => getComputedStyle(e).outlineStyle);
+  await page.keyboard.press("Tab");
+  for (let i = 0; i < 40 && !(await page.evaluate(() => document.activeElement?.classList.contains("orc-pote-btn"))); i++) await page.keyboard.press("Tab");
+  const comTab = await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle);
+  await page.getByRole("button", { name: "Conforto" }).click();
+  await page.locator("dialog.orc-modal").waitFor();
+  await page.locator("dialog.orc-modal header").getByRole("button", { name: "Fechar" }).click(); // fechar com o mouse (Esc é teclado e legitimamente acende)
+  await page.locator("dialog.orc-modal").waitFor({ state: "detached" });
+  const aposMouse = await contorno("Conforto");
+  await ctx.close();
+  assert.equal(comTab, "solid");
+  assert.equal(aposMouse, "none");
 });
 
 test("renda informada mostra a origem e \"Usar a calculada\" manda valor null", async () => {
   const { ctx, page, pedidos } = await aberto({ orcamento: "informada" });
-  assert.match(await painel(page).innerText(), /informada por você/);
+  assert.match(await painel(page).innerText(), /Informada por você/);
   // O POST responde a renda calculada (a fixture `padrao`): a espera abaixo só passa depois da resposta.
   await ctx.route("**/api/v2/orcamento-domestico/renda", (r) => r.fulfill({ json: RESPOSTAS.orcamento_domestico.padrao }));
   await page.getByRole("button", { name: "Usar a calculada" }).click();
-  await page.waitForFunction(() => document.querySelector("#w-orcamento")?.textContent.includes("calculada pelas receitas"));
+  await page.waitForFunction(() => document.querySelector(".page-grid")?.textContent.includes("Calculada automaticamente"));
   const post = pedidos.find((p) => p.m === "POST");
   await ctx.close();
   assert.equal(post.u.pathname, "/api/v2/orcamento-domestico/renda");
@@ -65,9 +183,9 @@ test("percentual fracionário sai em pt-BR (33,33%) e o inteiro sem casas (55%)"
   const p = await abrirPainel(browser, { espera: null });
   await p.ctx.route("**/api/v2/orcamento-domestico*", (r) => r.request().method() === "GET" ? r.fulfill({ json: dados }) : r.fallback());
   await p.ir("/orcamento");
-  await p.page.locator(".orc-pote").first().waitFor();
-  const fixos = await p.page.locator(".orc-pote").filter({ hasText: "Custos fixos" }).innerText();
-  const conforto = await p.page.locator(".orc-pote").filter({ hasText: "Conforto" }).innerText();
+  await espera(p.page);
+  const fixos = await linha(p.page, "Custos fixos").innerText();
+  const conforto = await linha(p.page, "Conforto").innerText();
   await p.ctx.close();
   assert.match(fixos, /55%/);
   assert.match(conforto, /33,33%/);
@@ -76,9 +194,10 @@ test("percentual fracionário sai em pt-BR (33,33%) e o inteiro sem casas (55%)"
 test("renda zero: traço no uso e a dica para informar a renda", async () => {
   const { ctx, page } = await aberto({ orcamento: "renda_zero" });
   const t = await painel(page).innerText();
+  const uso = await page.locator(".orc-tabela .orc-uso .num").allInnerTexts();
   await ctx.close();
   assert.match(t, /Sem renda neste mês: informe a renda para dividir nos potes\./);
-  assert.match(t, /Gasto\s+R\$ 0,00(?! ·)/);
+  assert.deepEqual(uso, ["—", "—", "—", "—", "—", "—"]);
 });
 
 test("Essencial vê o convite e nenhum POST sai", async () => {
@@ -99,7 +218,7 @@ test("500 na leitura mostra \"Tentar de novo\" e ele recarrega", async () => {
   await botao.waitFor({ timeout: 20000 });
   assert.match(await painel(p.page).innerText(), /Não deu para carregar o orçamento\./);
   await botao.click();
-  await p.page.locator(".orc-pote").first().waitFor();
+  await espera(p.page);
   await p.ctx.close();
 });
 
@@ -159,7 +278,7 @@ test("422 mostra a mensagem fixa e mantém o rascunho; duplo clique manda um POS
 
 test("editar a renda: valida (zero vale, vírgula vale), manda texto e fecha", async () => {
   const { ctx, page, pedidos } = await aberto();
-  await page.getByRole("button", { name: "Editar renda" }).click();
+  await page.getByRole("button", { name: "Editar", exact: true }).click();
   const campo = page.locator('input[name="valor"]');
   await campo.fill("abc");
   await page.getByRole("button", { name: "Salvar", exact: true }).click();
@@ -208,13 +327,15 @@ test("⌘K lista Orçamento doméstico e navega para #/orcamento", async () => {
   assert.equal(await opcao.count(), 1);
   await p.page.keyboard.press("Enter");
   await p.page.waitForFunction(() => location.hash === "#/orcamento");
-  await p.page.locator(".orc-pote").first().waitFor();
+  await espera(p.page);
   await p.ctx.close();
 });
 test("375 e 1440: sem rolagem lateral, com e sem pote estourado", async () => {
   for (const width of [375, 1440]) {
     for (const orcamento of ["padrao", "informada", "renda_zero"]) {
       const { ctx, page } = await aberto({ width, orcamento });
+      await page.getByRole("button", { name: "Custos fixos" }).click();
+      await page.locator("dialog.orc-modal").waitFor();
       const ok = await semRolagem(page);
       await ctx.close();
       assert.ok(ok, `${width} ${orcamento}`);
@@ -222,13 +343,15 @@ test("375 e 1440: sem rolagem lateral, com e sem pote estourado", async () => {
   }
 });
 
-test("protótipo (DEMO): potes sem requisição e sem botões de editar", async () => {
+test("protótipo (DEMO): potes sem requisição e sem botões de escrita nem o cabeçalho de ações", async () => {
   const { ctx, page, pedidos } = await abrir({ demo: true });
-  await page.locator(".orc-pote").first().waitFor();
-  const botoes = await painel(page).getByRole("button").count();
-  const n = await page.locator(".orc-pote").count();
+  await espera(page);
+  const botoes = await page.getByRole("button", { name: /Editar|Usar a calculada|Gasto fixo/ }).count(); // as linhas só abrem o modal
+  const acoes = await page.locator(".page-acoes").count();
+  const n = await page.locator(LINHA).count();
   await ctx.close();
   assert.equal(n, 6);
   assert.equal(botoes, 0);
+  assert.equal(acoes, 0);
   assert.deepEqual(pedidos, []);
 });

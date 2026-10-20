@@ -25,6 +25,19 @@ class Renda(BaseModel):
     origem: Literal["calculada", "informada"]
 
 
+class PorCategoria(BaseModel):
+    categoria: str
+    total: Decimal
+
+
+class LancamentoPote(BaseModel):
+    data: str  # AAAA-MM-DD
+    descricao: str
+    categoria: str
+    valor: Decimal
+    origem: Literal["conta", "cartao"]
+
+
 class Pote(BaseModel):
     chave: str
     nome: str
@@ -33,13 +46,18 @@ class Pote(BaseModel):
     teto: Decimal
     gasto: Decimal
     restante: Decimal  # negativo = passou do teto
+    guardado: bool  # Metas/Liberdade: passar do teto não é estouro (regra do servidor)
     usado_pct: Decimal | None  # null sem teto (renda 0)
+    categorias: list[str]  # nomes de exibição das categorias que caem no pote
+    por_categoria: list[PorCategoria]
+    lancamentos: list[LancamentoPote]  # do mês, mais novo primeiro; a soma é o `gasto`
 
 
 class Total(BaseModel):
     teto: Decimal
     gasto: Decimal
     restante: Decimal
+    restante_livre: Decimal  # restante sem o excedente dos potes guardados; negativo = estouro de verdade
     usado_pct: Decimal | None
 
 
@@ -84,9 +102,13 @@ def _monta(uid: int, mes: str) -> OrcamentoDomestico:
         renda=Renda(valor=_d(s["income"]["amount"]),
                     origem="informada" if s["income"]["source"] == "override" else "calculada"),
         potes=[Pote(chave=b["key"], nome=b["label"], cor=b["color"], pct=_d(b["pct"]),
-                    teto=_d(b["budget_amount"]), gasto=_d(b["spent"]), restante=_d(b["remaining"]),
-                    usado_pct=_d(b["used_pct"])) for b in s["buckets"]],
-        total=Total(teto=_d(t["budget_amount"]), gasto=_d(t["spent"]), restante=_d(t["remaining"]),
+                    teto=_d(b["budget_amount"]), gasto=_d(b["spent"]), restante=_d(b["remaining"]), guardado=b["guarda"],
+                    usado_pct=_d(b["used_pct"]), categorias=b["categories"],
+                    por_categoria=[PorCategoria(categoria=c["categoria"], total=_d(c["total"])) for c in b["by_category"]],
+                    lancamentos=[LancamentoPote(data=x["data"], descricao=x["descricao"], categoria=x["categoria"],
+                                                valor=_d(x["valor"]), origem=x["origem"]) for x in b["launches"]])
+                for b in s["buckets"]],
+        total=Total(teto=_d(t["budget_amount"]), gasto=_d(t["spent"]), restante=_d(t["remaining"]), restante_livre=_d(t["remaining_free"]),
                     usado_pct=_d(t["used_pct"])),
     )
 

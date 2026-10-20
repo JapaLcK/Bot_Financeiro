@@ -11,7 +11,7 @@ export const det = (page) => page.locator("dialog[open].banco-det"); // o detalh
 export const confirmar = (page, nome = "Desconectar") => dlg(page).getByRole("button", { name: nome, exact: true });
 export const manter = (page) => dlg(page).getByRole("button", { name: "Manter banco", exact: true });
 export const card = (page, nome) => page.locator(".banco-card", { has: page.locator(".banco-nome", { hasText: new RegExp(`^${nome}$`) }) });
-export const linha = (page, nome) => card(page, nome).getByRole("button");
+export const linha = (page, nome) => card(page, nome).locator(".banco-linha"); // o "Detalhes" da linha (a linha agora tem 3 botões)
 export const botao = (page) => det(page).getByRole("button", { name: "Desconectar banco", exact: true }); // o do detalhe aberto
 export const aviso = (page) => page.locator("#main p[role=status].sr-only");
 export const alerta = (page) => page.locator(".page-grid [role=alert], dialog.banco-det [role=alert]"); // a falha vive no detalhe quando ele está aberto, senão acima da lista

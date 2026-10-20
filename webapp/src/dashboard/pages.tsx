@@ -1,4 +1,4 @@
-import { useMemo, useRef, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { BANK_CDB, BANK_CDB_TOTAL, GOALS, MONTHS, caixinhasTotal, goalEta, goalsTotal, isCurrentMonth, keyDate, monthlySaving, trajectory } from "./lib/api";
 import { money0, monthName, monthYear, signedBig, tone } from "./lib/format.js";
 import { mesDe, simActive } from "./lib/store.js";
@@ -14,7 +14,7 @@ import { ContaBancos } from "./conta/Bancos";
 import { ContaCobranca } from "./conta/Cobranca";
 import { ContaConfiguracoes } from "./conta/Configuracoes";
 import { ContaPerfil } from "./conta/Perfil";
-import { DEMO } from "./lib/v2";
+import { DEMO, useAgentesLigados } from "./lib/v2";
 import { useMedia } from "./useMedia";
 import { go, href, route, type Path } from "./router";
 import { Bills } from "./widgets/Bills";
@@ -31,6 +31,7 @@ import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
 import { MetasPainel } from "./widgets/Metas";
+import { AgentesPainel } from "./widgets/Agentes";
 import { MilhaoPainel } from "./widgets/ProgressoMilhao";
 import { OrcamentoPainel } from "./widgets/OrcamentoDomestico";
 import { OrcamentosCategoriaPainel } from "./widgets/OrcamentosCategoria";
@@ -42,12 +43,14 @@ import { TrajectoryChart } from "./widgets/TrajectoryChart";
 import { Wealth } from "./widgets/Wealth";
 
 // Cada página: título, uma linha do que ela responde e os blocos em grade de 12.
-function Page({ path, lede, children }: { path: Path; lede: ReactNode; children: ReactNode }) {
+// `acoes`: o lugar (à direita do título, abaixo do texto no celular) onde a página põe os botões dela.
+function Page({ path, lede, acoes, children }: { path: Path; lede: ReactNode; acoes?: ReactNode; children: ReactNode }) {
   return (
     <>
-      <header className="page-head">
+      <header className={`page-head${acoes ? " page-head-acoes" : ""}`}>
         <h1 id="page-title" tabIndex={-1}>{route(path).title}</h1>
         <p className="page-lede">{lede}</p>
+        {acoes}
       </header>
       <DicaDaTela path={path} />
       <div className="page-grid">{children}</div>
@@ -210,15 +213,16 @@ const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: strin
   { label: "Orçamentos por categoria", line: "Um teto por categoria e um aviso antes de estourar.", icon: "ph-chart-pie", to: "/orcamentos-categoria" },
   { label: "Vale a pena comprar?", line: "Veja o que uma compra faz com o seu saldo nos próximos 90 dias.", icon: "ph-shopping-cart", ...(DEMO ? {} : { to: "/simulador/compra" as Path }) },
   { label: "Progresso ao milhão", line: "Quanto falta e em quanto tempo você chega ao primeiro milhão.", icon: "ph-trophy", to: "/milhao" },
-  { label: "Agentes", line: "Piggys que cuidam de uma parte do seu dinheiro por você.", icon: "ph-robot" },
+  { label: "Agentes", line: "Piggys que cuidam de uma parte do seu dinheiro por você.", icon: "ph-robot", to: "/agentes" },
   ...(DEMO ? [] : [{ label: "Guia do painel", line: "O Piggy te mostra o painel em 3 passos.", icon: "ph-question", run: abrirGuia }]),
 ];
 
 function Tools() {
+  const agentes = useAgentesLigados();
   return (
     <Page path="/ferramentas" lede="Tudo o que ajuda a decidir, num lugar só.">
       <ul className="span-12 tools">
-        {TOOLS.map((t) => {
+        {TOOLS.filter((t) => agentes || t.to !== "/agentes").map((t) => {
           const body = <><i className={`ph ${t.icon}`} aria-hidden="true" /><b>{t.label}</b><span>{t.line}</span></>;
           const link = t.url ?? (t.to && href(t.to));
           return (
@@ -235,9 +239,10 @@ function Tools() {
 }
 
 function Budget({ s }: { s: DashState }) {
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null); // o widget põe os botões aqui (portal) porque o estado dos modais é dele
   return (
-    <Page path="/orcamento" lede="A renda do mês dividida em potes: quanto cabe em cada um e quanto já saiu. Aportes em investimento contam no pote Liberdade financeira.">
-      <OrcamentoPainel s={s} />
+    <Page path="/orcamento" lede="Distribua sua renda entre os potes e acompanhe o mês." acoes={DEMO ? undefined : <div className="page-acoes" ref={setSlot} />}>
+      <OrcamentoPainel s={s} slot={slot} />
     </Page>
   );
 }
@@ -246,6 +251,16 @@ function Milhao() {
   return (
     <Page path="/milhao" lede="Quanto falta para o seu primeiro milhão e quando você chega lá, no ritmo de hoje.">
       <MilhaoPainel />
+    </Page>
+  );
+}
+
+function Agentes() {
+  // Com o freio ligado o /agents responde 404: a tela não pede nada e só avisa (link antigo ou digitado).
+  if (!useAgentesLigados()) return <Page path="/agentes" lede="Os agentes estão indisponíveis no momento.">{null}</Page>;
+  return (
+    <Page path="/agentes" lede="Sete Piggys, cada um cuidando de uma parte do seu dinheiro. Ative os que fazem sentido para o seu momento.">
+      <AgentesPainel />
     </Page>
   );
 }
@@ -260,7 +275,7 @@ function CategoryBudgets() {
 
 export const PAGES: Record<Path, (p: { s: DashState }) => ReactNode> = {
   "/": Home, "/previsao": Forecast, "/gastos": Spending, "/assinaturas": SubscriptionsPage, "/simulador": Simulate, "/simulador/compra": ComprarPage,
-  "/metas": GoalsPage, "/milhao": Milhao, "/patrimonio": Wealthy, "/lancamentos": Launches,
+  "/metas": GoalsPage, "/milhao": Milhao, "/agentes": Agentes, "/patrimonio": Wealthy, "/lancamentos": Launches,
   "/orcamento": Budget, "/orcamentos-categoria": CategoryBudgets, "/ferramentas": Tools, "/piggy": PiggyChat,
   "/conta/perfil": ContaPerfil, "/conta/cobranca": ContaCobranca, "/conta/configuracoes": ContaConfiguracoes, "/conta/bancos": ContaBancos,
 };

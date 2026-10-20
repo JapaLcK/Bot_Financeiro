@@ -119,6 +119,8 @@ TABELA = {
     # ── /api/v2 e WS ──
     ("GET", "/api/v2/me"): (B, "usuario_atual"), ("GET", "/api/v2/eventos"): (B, "usuario_atual"),
     ("GET", "/api/v2/assinaturas"): (B, "usuario_atual"),
+    ("GET", "/api/v2/contas-a-pagar"): (B, "usuario_atual"),
+    ("GET", "/api/v2/caixinhas"): (B, "usuario_atual"),
     ("POST", "/api/v2/assinaturas/marca"): (B, "usuario_atual"),
     ("GET", "/api/v2/perfil"): (B, "usuario_atual"), ("PUT", "/api/v2/perfil"): (B, "usuario_atual"),
     ("GET", "/api/v2/contas"): (B, "usuario_atual"),
@@ -145,9 +147,12 @@ TABELA = {
     ("GET", "/api/v2/orcamentos-categoria"): (B, "usuario_atual"),
     ("POST", "/api/v2/orcamentos-categoria"): (B, "usuario_atual"),
     ("POST", "/api/v2/orcamentos-categoria/apagar"): (B, "usuario_atual"),
+    ("POST", "/api/v2/gastos-fixos"): (B, "usuario_atual"),
     # ── /api/app: mesma guarda de credencial, antes do marco bancário ──
     ("GET", "/api/app/me"): (B, "usuario_do_app"),
     ("GET", "/api/app/assinaturas"): (B, "usuario_do_app"),
+    ("GET", "/api/app/contas-a-pagar"): (B, "usuario_do_app"),
+    ("GET", "/api/app/caixinhas"): (B, "usuario_do_app"),
     ("POST", "/api/app/assinaturas/marca"): (B, "usuario_do_app"),
     ("GET", "/api/app/perfil"): (B, "usuario_do_app"), ("PUT", "/api/app/perfil"): (B, "usuario_do_app"),
     ("GET", "/api/app/contas"): (B, "usuario_do_app"),
@@ -179,6 +184,7 @@ TABELA = {
     ("GET", "/api/app/orcamentos-categoria"): (B, "usuario_do_app"),
     ("POST", "/api/app/orcamentos-categoria"): (B, "usuario_do_app"),
     ("POST", "/api/app/orcamentos-categoria/apagar"): (B, "usuario_do_app"),
+    ("POST", "/api/app/gastos-fixos"): (B, "usuario_do_app"),
     ("WS", "/ws/{user_id}"): (B, "close 4403"),
     # ── HTML autenticado ──
     ("GET", "/app"): (L, "casca; o overlay sobe"), ("GET", "/home"): (L, "casca; o overlay sobe"),
@@ -190,7 +196,7 @@ TABELA = {
 _HTML_PUBLICO = (
     "/", "/login", "/cadastro", "/q", "/recuperar-senha", "/suporte/contato", "/privacy",
     "/termos", "/blog", "/whatsapp", "/funcionalidades", "/comandos", "/comandos-app",
-    "/agents", "/como-funciona", "/precos", "/lp", "/vsl", "/continuar-compra", "/assinar", "/suporte",
+    "/agents", "/como-funciona", "/precos", "/lp", "/oferta", "/vsl", "/continuar-compra", "/assinar", "/suporte",
     "/reset-password", "/redefinir-senha", "/completar-cadastro",
     "/.well-known/apple-app-site-association",
 )

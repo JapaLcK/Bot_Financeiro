@@ -47,6 +47,15 @@ export const DIRECAO: Record<string, string> = {
   so_piora: "o real pode ser melhor",
   ambos: "pode variar para os dois lados",
 };
+/** Rótulo da estimativa do gasto do dia a dia; o /painel tem o mesmo literal em `widgets/Previsao.tsx` (`previsao_motivos_paridade.test.ts` compara). */
+export const GASTOS_DIA_A_DIA = "Gastos do dia a dia";
 export const ESTADO: Record<string, string> = { condicional: "Previsão condicional", a_conferir: "A conferir" };
+/** Os códigos do patrimônio (`db/patrimonio.py`) que o Progresso ao milhão mostra e a previsão não tem (FORA de `MOTIVO`: o teste de paridade exige que ele tenha só os códigos do Python). Cópia de `Selos.tsx` do web, conferida em `previsao_motivos_paridade.test.ts`. */
+export const MOTIVO_PATRIMONIO: Record<string, string> = {
+  manual_e_banco: "manual e banco juntos",
+  caixinha_espelhada_fora: "caixinha do banco fora da soma",
+  conciliacao_pendente: "conciliação pendente",
+  movimentos_pendentes: "movimentos pendentes",
+};
 // Só chave PRÓPRIA: "constructor"/"__proto__" não podem virar função/objeto.
 export const ou = (mapa: Record<string, string>, k: string) => (Object.prototype.hasOwnProperty.call(mapa, k) ? mapa[k]! : k);

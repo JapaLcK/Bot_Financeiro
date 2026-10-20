@@ -190,7 +190,7 @@ describe("open-finance-volta — tela de espera (Organizando seus dados)", () =>
     titulo(true);
   });
 
-  it("R9 — conferindo (GET em voo): barra e contador sem botão antes de 30 s; Sair e o aviso de demora a partir de 30 s", async () => {
+  it("R9 — conferindo (GET em voo): barra e contador sem Sair antes de 30 s; Sair e o aviso de demora a partir de 30 s", async () => {
     const portao = segurar();
     servidor(async () => {
       await portao.promessa;

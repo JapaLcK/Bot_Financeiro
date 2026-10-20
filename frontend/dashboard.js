@@ -5544,6 +5544,13 @@ async function simularPrazo() {
   }
 }
 
+// A estimativa do dia a dia (servidor) entra na conta quando `cobertura.inclui_estimativa_variavel`.
+function _notaProjecao(c) {
+  return (c.cobertura && c.cobertura.inclui_estimativa_variavel)
+    ? "Projeção condicional: saldo + receitas previstas − gastos fixos − boletos − faturas − estimativa dos gastos do dia a dia. Não autoriza uma compra."
+    : "Projeção condicional: saldo + receitas previstas − gastos fixos − boletos − faturas. Não inclui estimativa variável nem autoriza uma compra.";
+}
+
 function _renderProjection(p) {
   const resEl = document.getElementById("boleto-sim-result");
   if (!resEl || !p) return;
@@ -5571,12 +5578,13 @@ function _renderProjection(p) {
       ${line("Gastos fixos", p.gastos_fixos_previstos, false, true)}
       ${line(`Boletos até lá (${p.n_boletos})`, p.boletos_ate, false)}
       ${line("Faturas de cartão até lá", p.faturas_cartao, false, true)}
+      ${p.despesa_variavel_estimada == null ? "" : line("Gastos do dia a dia (estimativa)", p.despesa_variavel_estimada, false, true)}
       ${line("Boleto novo em análise", p.boleto_novo, false, true)}
       <div style="border-top:1px solid rgba(128,128,128,.25);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;font-weight:700">
         <span>Projeção do caixa</span><span style="color:var(--text)">${available ? _fmtBRL(p.projetado) : "Indisponível"}</span>
       </div>
       ${_forecastBanksWarning(p)}
-      <div style="font-size:.68rem;color:var(--text-3);margin-top:6px">Projeção condicional: saldo + receitas previstas − gastos fixos − boletos − faturas. Não inclui estimativa variável nem autoriza uma compra.</div>
+      <div style="font-size:.68rem;color:var(--text-3);margin-top:6px">${_notaProjecao(p)}</div>
     </div>`;
 }
 
@@ -5641,7 +5649,7 @@ function _renderForecast(fc) {
       ${tile(30, h["30"])}${tile(60, h["60"])}${tile(90, h["90"])}
     </div>
     ${_forecastBanksWarning(fc)}
-    <div style="font-size:.68rem;color:var(--text-3);margin-top:8px">Projeção condicional: saldo + receitas previstas − gastos fixos − boletos − faturas. Não inclui estimativa variável nem autoriza uma compra.</div>`;
+    <div style="font-size:.68rem;color:var(--text-3);margin-top:8px">${_notaProjecao(fc)}</div>`;
 }
 
 // Aviso quando a previsão não parte do saldo consolidado: ou o usuário tem bancos
@@ -8194,8 +8202,8 @@ function renderOfFixedIncomePanel(d) {
   if (elS) elS.innerHTML = `
     <div class="chips" style="margin-top:0;margin-bottom:6px">
       <div class="chip"><div class="chip-lbl">Saldo</div><div class="chip-val b">${fmt(sum.balance || 0)}</div></div>
-      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${fmt(sum.invested || 0)}</div></div>
-      <div class="chip"><div class="chip-lbl">Rendeu</div><div class="chip-val">${fmtPnl(sum.pnl || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${sum.invested == null ? "—" : fmt(sum.invested)}</div></div>
+      <div class="chip"><div class="chip-lbl">Rendeu</div><div class="chip-val">${fmtPnl(sum.pnl)}</div></div>
     </div>`;
 
   const elL = document.getElementById("of-rf-list");
@@ -8224,12 +8232,13 @@ const RV_KIND_LABELS = { stock: "Ação", fii: "FII", etf: "ETF", bdr: "BDR", cr
 
 /* Resultado de uma posição. A SETA sai junto com a cor no neutro, e isso é
    decisão, não descuido: "↑" afirma o mesmo que o verde, então "↑ R$ 0,00" em
-   preto continuaria mentindo. Zero aqui é o DEFAULT do código, não borda — os
-   dois chamadores passam `sum.pnl || 0`, e renda variável sem posição (ou
-   posição exatamente no preço de compra) cai nele. Antes: `Number(v) >= 0`
+   preto continuaria mentindo. Zero é posição exatamente no preço de compra;
+   `null` é custo desconhecido (o banco não informou) e vira "—", nunca
+   "R$ 0,00". Antes: `Number(v) >= 0`
    cru, que pintava o zero de verde com seta pra cima e o resíduo de float de
    vermelho. */
 function fmtPnl(v, pct) {
+  if (v == null) return "—";
   const arrow = _toneClass(v, "↑ ", "↓ ");
   const cls = _toneClass(v, "pnl-up", "pnl-down");
   const pctTxt = (pct != null) ? ` (${(Number(pct) * 100).toFixed(2).replace(".", ",")}%)` : "";
@@ -8243,8 +8252,8 @@ function renderVariableIncomePanel(d) {
   const summaryHtml = `
     <div class="chips" style="margin-top:0;margin-bottom:6px">
       <div class="chip"><div class="chip-lbl">Valor de mercado</div><div class="chip-val b">${fmt(sum.market_value || 0)}</div></div>
-      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${fmt(sum.invested || 0)}</div></div>
-      <div class="chip"><div class="chip-lbl">Resultado</div><div class="chip-val">${fmtPnl(sum.pnl || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${sum.invested == null ? "—" : fmt(sum.invested)}</div></div>
+      <div class="chip"><div class="chip-lbl">Resultado</div><div class="chip-val">${fmtPnl(sum.pnl)}</div></div>
     </div>`;
   const listHtml = pos.map(p => {
     const day = (p.last_month_rate != null)

@@ -9,6 +9,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 from datetime import date
 
@@ -18,11 +19,13 @@ import db
 from core.services.ai_chat.tools import get_tool
 from core.services.ai_chat.runner import MAX_TOKENS, OPENAI_TIMEOUT, OPENAI_MAX_RETRIES
 
+from .agent_chat_card import card_da_resposta
 from .agent_chat_data import _snapshot, SNAPSHOT_ITEMS_LIMIT
 from .agent_chat_errors import (ChatError, ModelResponseError, AnswerPolicyError, DataQueryError, handle_failure)
 from .modelo_openai import completion_options
 from .agent_chat_policy import (routing_format, REVIEW_FORMAT, response_text, response_json, routing_prompt, answer_prompt, review_prompt)
 
+logger = logging.getLogger(__name__)
 MODEL = (os.getenv("AGENT_CHAT_MODEL") or "").strip() or "gpt-5.4-mini"
 
 DOMAINS = {
@@ -132,6 +135,12 @@ def execute_read(user_id: int, kind: str, name: str, args: dict):
         return _list_pockets(user_id, args, accrue=False)
     if getattr(tool, "has_side_effects", False):
         return {"error": "Consulta com efeitos colaterais não permitida."}
+    if name == "get_budget_status":
+        # O mês da consulta (db/budgets usa date.today()): o card dos orçamentos o leva e só mostra esse mês, mesmo
+        # que a resposta chegue depois da virada (Codex no #1199).
+        mes = date.today().strftime("%Y-%m")
+        result = tool.execute(user_id, args)
+        return {**result, "mes": mes} if isinstance(result, dict) else result
     return tool.execute(user_id, args)
 
 
@@ -160,15 +169,18 @@ def _route(client, kind: str, text: str, history: list[dict]) -> dict:
             existing = next((r for r in redirects if r["kind"] == target), None)
             if existing:
                 existing["question"] = (existing["question"] + "\n" + question)[:2000]
+                existing["needs_data"] = existing["needs_data"] or part.get("needs_data") is True
             else:
-                redirects.append({"kind": target, "question": question})
+                redirects.append({"kind": target, "question": question, "needs_data": part.get("needs_data") is True})
     if not own and not redirects and not outside:
         raise ModelResponseError("No valid routing target")
     return {"own_question": "\n".join(own)[:2000], "redirects": redirects,
             "outside": outside, "needs_data": needs_data}
 
 
-def _answer(client, user_id: int, kind: str, question: str, history: list[dict], *, needs_data: bool = False) -> str:
+def _answer(client, user_id: int, kind: str, question: str, history: list[dict], *, needs_data: bool = False,
+            consultas: list | None = None) -> str:
+    """`consultas` recebe (nome, args, resultado) de cada consulta permitida: o card é decidido por elas."""
     name, domain = DOMAINS[kind]
     messages = [{"role": "system", "content": answer_prompt(name, domain, date.today().isoformat())}]
     messages += history + [{"role": "user", "content": question}]
@@ -224,6 +236,8 @@ def _answer(client, user_id: int, kind: str, question: str, history: list[dict],
             if allowed and isinstance(result, dict) and result.get("error"):
                 raise DataQueryError("Data query returned an error")
             consulted = consulted or allowed
+            if allowed and consultas is not None:
+                consultas.append((call.function.name, args, result))
             messages.append({"role": "tool", "tool_call_id": call.id,
                              "content": json.dumps(result, ensure_ascii=False, default=str)})
     raise ModelResponseError("Tool loop exhausted")
@@ -245,7 +259,11 @@ def _check_answer(client, kind: str, question: str, reply: str, *, evidence: lis
         raise AnswerPolicyError(reason if reason in {"wrong_domain", "financial_action", "unsupported_claim"} else "policy")
 
 
-def chat(user_id: int, kind: str, text: str, context: str | None = None) -> dict:
+def chat(user_id: int, kind: str, text: str, context: str | None = None, *,
+         forwarded: bool = False, needs_data: bool = False) -> dict:
+    """`forwarded`: a pergunta veio do botão de encaminhamento de outro agente, que já
+    classificou o tema. Ela não passa de novo pelo classificador: quem foi sugerido
+    responde, sem um segundo encaminhamento em cadeia."""
     from core.services.plan_service import ai_monthly_limit_for
     from db.ai_chat import try_consume_usage
     stage = "access"
@@ -262,14 +280,23 @@ def chat(user_id: int, kind: str, text: str, context: str | None = None) -> dict
         from openai import OpenAI
         client = OpenAI(api_key=(os.getenv("OPENAI_API_KEY") or "").strip(), timeout=OPENAI_TIMEOUT, max_retries=OPENAI_MAX_RETRIES)
         stage = "routing"
-        route = _route(client, kind, text, history)
+        route = ({"own_question": text, "redirects": [], "outside": False, "needs_data": needs_data}
+                 if forwarded else _route(client, kind, text, history))
         own = route["own_question"].strip()
         if own and not route["redirects"] and not route["outside"]:
             own = text  # Um classificador não reescreve a intenção de uma pergunta integralmente própria.
         stage = "access_redirect"
         redirects = [{**r, "name": DOMAINS[r["kind"]][0], "access": access_state(user_id, r["kind"])} for r in route["redirects"]]
         stage = "answering"
-        reply = _answer(client, user_id, kind, own, history, needs_data=route.get("needs_data", False)) if own else ""
+        consultas: list = []
+        reply = _answer(client, user_id, kind, own, history, needs_data=route.get("needs_data", False),
+                        consultas=consultas) if own else ""
+        card = None
+        if own:  # cosmético: falha aqui não derruba a resposta
+            try:
+                card = card_da_resposta(user_id, kind, consultas)
+            except Exception:
+                logger.exception("agent_chat: card falhou user_id=%s kind=%s", user_id, kind)
         if redirects:
             names = ", ".join(r["name"] for r in redirects)
             subject = "Essa outra parte" if reply else "Esse assunto"
@@ -289,7 +316,7 @@ def chat(user_id: int, kind: str, text: str, context: str | None = None) -> dict
             if consumed is None:
                 raise ChatError("quota_exhausted", 429, "Você atingiu a cota mensal compartilhada da IA.")
             used = consumed
-        return {"reply": reply, "context": next_context, "redirects": redirects, "usage": {"used": used, "limit": limit}}
+        return {"reply": reply, "context": next_context, "redirects": redirects, "card": card, "usage": {"used": used, "limit": limit}}
     except ChatError:
         raise
     except Exception as exc:

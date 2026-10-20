@@ -24,11 +24,13 @@ const transitoria = (e: unknown) => e instanceof ErroApi ? e.status === 0 || e.s
 // 401 e 402 já foram para o portão (`falhou`): a rodada para em silêncio.
 const silencioso = (e: unknown) => e instanceof ErroApi && (e.status === 401 || e.status === 402);
 
-export function useAtualizarBanco({ ativo, semMotivo, dentro }: { ativo: boolean; semMotivo: boolean; dentro: boolean }) {
+// `automatico: false` (a página Bancos conectados, que só chama `atualizar` no clique do "Sincronizar"): a (a0) não parte sozinha de um banco em `updating`.
+export function useAtualizarBanco({ ativo, semMotivo, dentro, automatico = true }: { ativo: boolean; semMotivo: boolean; dentro: boolean; automatico?: boolean }) {
   const qc = useQueryClient();
   const [estado, setEstado] = useState<{ uid: number; maquina: EstadoAtualizar }>({ uid: 0, maquina: OCIOSO });
   const [dito, setDito] = useState({ t: "", n: 0 });
   const vivo = useRef<AbortController | null>(null);
+  const enviando = useRef(false); // a fase da rodada em ref (síncrona): `acompanhando` segue sozinha e deixa Reconectar/Desconectar livres; só o envio do POST os trava
   const marco = useRef(Date.now());
   const dentroRef = useRef(dentro);
   dentroRef.current = dentro;
@@ -50,6 +52,7 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro }: { ativo: boolean
   const abortar = () => {
     vivo.current?.abort();
     vivo.current = null;
+    enviando.current = false;
     marco.current = Date.now();
     setEstado({ uid: 0, maquina: OCIOSO });
     calar(); // o anúncio é da rodada (e da conta) que acabou: o texto do banco da conta anterior não fica na região viva
@@ -76,7 +79,7 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro }: { ativo: boolean
       atual,
       enviar: () => comPrazo((s) => atualizarBancos(uidDaRodada, s), PRAZO_POST_MS, ctrl.signal),
       ler: () => comPrazo((s) => lerConexoes(uidDaRodada, s, true), PRAZO_LEITURA_MS, ctrl.signal), // a leitura que nunca volta vira AbortError (transitória): a cadência segue e o teto fecha a rodada
-      aoMudar: (maquina) => { if (atual()) setEstado({ uid: uidDaRodada, maquina }); },
+      aoMudar: (maquina) => { if (atual()) { enviando.current = maquina.fase === "enviando"; setEstado({ uid: uidDaRodada, maquina }); } },
       recarregar: () => { if (atual()) { marco.current = Date.now(); void qc.invalidateQueries(); } }, // o mesmo que um aviso do SSE: o aviso some porque o servidor deixa de mandar o motivo
       falhou: (e) => {
         if (!(e instanceof ErroApi)) return;
@@ -92,13 +95,13 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro }: { ativo: boolean
     marco.current = Date.now();
     void entrada(d)
       .catch(() => { if (atual()) setEstado({ uid: uidDaRodada, maquina: OCIOSO }); })
-      .finally(() => { if (vivo.current === ctrl) vivo.current = null; marco.current = Date.now(); });
+      .finally(() => { if (vivo.current === ctrl) { vivo.current = null; enviando.current = false; } marco.current = Date.now(); });
   }
 
   useEffect(() => { marco.current = Date.now(); }, [ligado]); // o aviso entrou ou saiu da tela: o que já estava no cache não parte nada
   // (a0): só parte de uma leitura FEITA depois do último marco, com a fase visível diferente de `resultado`.
   useEffect(() => {
-    if (!ligado || uid === undefined || !conexoes.isSuccess || conexoes.isFetching || conexoes.dataUpdatedAt <= marco.current) return;
+    if (!automatico || !ligado || uid === undefined || !conexoes.isSuccess || conexoes.isFetching || conexoes.dataUpdatedAt <= marco.current) return;
     if (vivo.current || vista.fase === "resultado" || acao?.tipo !== "acompanhar") return;
     correr(uid, (d) => acompanharLista(d, conexoes.data), true);
   }, [conexoes.dataUpdatedAt, conexoes.isFetching, ligado, uid, vista.fase, acao?.tipo]);
@@ -107,5 +110,6 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro }: { ativo: boolean
     acao, maquina: vista, dito, cancelar: abortar,
     atualizar: () => { if (uid !== undefined && !vivo.current) correr(uid, atualizar); }, // o ref, não o estado: dois cliques no mesmo tique fazem 1 POST
     calar,
+    enviando: () => enviando.current, // o POST está saindo (síncrono): quem não pode andar junto com ele confere aqui; no `acompanhando` Reconectar e Desconectar podem
   };
 }

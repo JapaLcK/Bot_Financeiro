@@ -294,6 +294,9 @@ async def xerife_esperado_route(request: Request, user_id: int, launch_id: int, 
 class AgentChatBody(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     context: str | None = Field(default=None, max_length=160000)
+    # Pergunta vinda do botão de encaminhamento: o agente sugerido responde, sem reclassificar.
+    forwarded: bool = False
+    needs_data: bool = False
 
 
 @router.post("/agents/{user_id}/{kind}/chat")
@@ -306,7 +309,8 @@ async def agent_chat_route(request: Request, user_id: int, kind: str, body: Agen
     if not message:
         raise HTTPException(status_code=400, detail="Escreva uma pergunta para o agente.")
     try:
-        return await asyncio.to_thread(chat, user_id, kind, message, body.context)
+        return await asyncio.to_thread(chat, user_id, kind, message, body.context,
+                                     forwarded=body.forwarded, needs_data=body.needs_data)
     except ChatError as exc:
         raise HTTPException(status_code=exc.status, detail={
             "error": exc.code, "message": str(exc),

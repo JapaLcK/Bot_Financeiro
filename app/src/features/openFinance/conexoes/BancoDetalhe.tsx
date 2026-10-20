@@ -14,7 +14,7 @@ import { Texto } from "@/ui/componentes/Texto";
 import { useTema } from "@/ui/tema";
 import { claro, espaco } from "@/ui/tokens";
 
-import { logoSeguro, type Item } from "./juntar";
+import { logoDoBanco, type Item } from "./juntar";
 import { tempoRelativo } from "./tempoRelativo";
 
 /** Mesmo texto de webapp/src/dashboard/conta/BancoDetalhe.tsx; `tests/frontend/bancos_paridade.test.mjs` compara. */
@@ -66,7 +66,7 @@ export function BancoDetalhe({ item, indice, numeros, oculto, agora, podeReconec
     <Folha titulo={nome} aberta fechar={fechar}>
       <View style={{ gap: espaco.lg }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: espaco.md }}>
-          <Avatar nome={nome} imagem={logoSeguro(c.logo_url)} tamanho={64} decorativo fundo={claro.bg} letra={corDoBanco(nome, indice, claro)} />
+          <Avatar nome={nome} imagem={logoDoBanco(c)} tamanho={64} decorativo fundo={claro.bg} letra={corDoBanco(nome, indice, claro)} />
           <View style={{ flex: 1 }}><ConnectionStatus estado={estado} label={c.ui.label} detalhe={estado !== "updated" ? c.ui.detail ?? undefined : undefined} /></View>
         </View>
         {numeros ? (

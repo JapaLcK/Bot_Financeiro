@@ -41,6 +41,8 @@ export function decimal(s) {
   if (escala < 0) { n *= BigInt(10) ** BigInt(-escala); escala = 0; }
   return { n: m[1] ? -n : n, escala };
 }
+// Texto do servidor como comprimento de barra (valor ÷ maior): malformado, infinito, zero ou negativo vira 0 (barra vazia), nunca NaN nem escala fora de [0, 1].
+export const medida = (s) => { const n = Number(s); return Number.isFinite(n) && n > 0 ? n : 0; };
 // O valor que o usuário digita num formulário de escrita (Lançamento, Meta): vírgula vira ponto,
 // no máximo 9 dígitos e 2 casas, maior que zero. Texto, nunca float.
 export const ERRO_VALOR = "Use um valor maior que zero, até 9 dígitos e 2 casas decimais, sem separador de milhares.";

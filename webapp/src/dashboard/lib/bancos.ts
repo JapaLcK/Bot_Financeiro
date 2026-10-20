@@ -1,5 +1,6 @@
-// Bancos conectados (conta/Bancos.tsx): cor do banco, tom do estado e os bancos disponíveis para conectar.
+// Bancos conectados (conta/Bancos.tsx): cor do banco, tom do estado, os bancos disponíveis para conectar e o "quando" da última sincronização.
 import type { Bancos } from "./api-v2.gen";
+import { FUSO, instante } from "./v2";
 
 // Cópia de `coresBanco` (app/src/ui/tokens.ts): os dois projetos npm não se importam, e
 // tests/frontend/bancos_paridade.test.mjs compara o texto dos dois (§0.7).
@@ -36,7 +37,7 @@ export const corDoConector = (hex: unknown, indice: number) => corOuTinta(typeof
 // Disponíveis para conectar: os populares, nesta ordem, que a conta ainda não tem. O NOME só escolhe a ordem de exibição; "já conectado" é
 // pelo ID (`institution_id` do snapshot × `id` do conector): o gêmeo Open Finance de um banco tem nome igual e id diferente, e é outra conexão.
 const POPULARES = ["itau", "bradesco", "banco do brasil", "santander", "caixa", "inter", "c6", "nubank", "btg", "mercado pago"];
-export type Conector = { id: number; name: string; color: string | null; logo: string | null };
+export type Conector = { id: number; name: string; color: string | null; logo: string | null; logo_proprio: string | null };
 export function disponiveis(todos: Conector[], conectados: (string | null)[], max = 5): Conector[] {
   const tem = new Set(conectados);
   const porPosicao = new Map<number, Conector>(); // um por posição: o de nome exato vence o parecido ("Itaú" × "Itaú Personnalité")
@@ -59,8 +60,23 @@ export const TOM_DO_ESTADO: Record<string, "ok" | "pendente" | "erro"> = {
 };
 export const tomDoEstado = (s: unknown) => (Object.prototype.hasOwnProperty.call(TOM_DO_ESTADO, String(s)) ? TOM_DO_ESTADO[String(s)] : "pendente"); // "constructor" não é estado (herdaria função)
 
+// "Hoje, 14:32", "Ontem, 19:45", "03/10, 08:10" ou, de outro ano, "03/10/2025, 08:10" no fuso do painel (nunca o do aparelho); sem data válida, "—". Sem dateStyle/hourCycle: Safari 14.0.
+const AAAA_MM_DD = new Intl.DateTimeFormat("en-CA", { timeZone: FUSO, year: "numeric", month: "2-digit", day: "2-digit" });
+const HORA_MIN = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, hour: "2-digit", minute: "2-digit" });
+export function quandoSync(iso: unknown, agora = Date.now()): string {
+  const ms = instante(iso);
+  if (!Number.isFinite(ms)) return "—";
+  const dia = AAAA_MM_DD.format(ms);
+  const hoje = AAAA_MM_DD.format(agora);
+  const quando = dia === hoje ? "Hoje" : dia === AAAA_MM_DD.format(agora - 864e5) ? "Ontem" : dia.slice(8) + "/" + dia.slice(5, 7) + (dia.slice(0, 4) === hoje.slice(0, 4) ? "" : "/" + dia.slice(0, 4));
+  return `${quando}, ${HORA_MIN.format(ms)}`;
+}
+// A sincronização mais recente entre as conexões (a que o resumo mostra); nenhuma com data válida = null.
+export const ultimaSync = (datas: (string | null)[]): string | null =>
+  datas.reduce<string | null>((a, d) => (Number.isFinite(instante(d)) && (a === null || instante(d) > instante(a)) ? d : a), null);
+
 // A resposta do /bancos tem a forma do contrato? Fora dela a tela trata como leitura falha (nunca quebra a SPA).
-const textos = (m: unknown) => Array.isArray(m) && m.every((s) => typeof s === "string"); // motivo que não é texto derrubaria o Selos (erro #31)
+export const textos = (m: unknown) => Array.isArray(m) && m.every((s) => typeof s === "string"); // motivo que não é texto derrubaria o Selos (erro #31)
 export const bancosValidos = (b: unknown): b is Bancos => {
   const x = b as Bancos | null;
   return !!x && textos(x.motivos) && Array.isArray(x.bancos) && x.bancos.every((y) => !!y && textos(y.motivos));

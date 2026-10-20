@@ -48,6 +48,19 @@ taxas não CDI. Não usa annualRate/lastMonthRate como rendimento recebido.
 Fotos anteriores à posição atual são identificadas por motivo, assim como
 posição fora da última geração e conexão desatualizada. Não lista ids privados.
 
+Além disso o payload ganha `rendimentos` (só acrescenta: `tipo`, `itens` e `motivos` do topo seguem
+iguais): quanto os investimentos renderam no Mês e no Total, ESTIMADO pelo saldo (a Pluggy não manda
+rentabilidade). `{saldo,quantidade,mes:{valor,pct,sem_dado},total:{...},mes_desde,sincronizado_em,
+categorias:[{tipo,rotulo,saldo,quantidade,mes,total,ativos:[{nome,instituicao,logo_proprio,saldo,
+mes:{valor,pct,motivo},total:{...}}]}],motivos}`; dinheiro em texto de 2 casas, `pct` em texto,
+`null` ≠ zero (ativo sem dado traz `motivo`; `sem_dado` conta os ativos de fora).
+`rendimentos` pode vir `null` (o cálculo ou a leitura da foto-base falhou): o app trata como "sem
+dado agora", e `itens`/`motivos` seguem normais. `motivos` do bloco: `sem_posicoes`,
+`banco_desatualizado`, `plano_sem_investimentos` (sem o recurso `investments`: bloco vazio e `itens`
+como sempre). `motivo` por ativo, em `mes` e `total`: `saldo_ausente`, `aplicado_ausente`, `sem_base`,
+`sem_leitura_no_mes`, `sem_custo`, `quantidade_ausente`, `quantidade_mudou`. A regra (custo × cotação,
+base do Mês) e os limites declarados estão na docstring de `db/rendimentos.py`.
+
 `GET /mes-detalhes?mes=AAAA-MM` usa a mesma validação e janela mensal do resumo.
 Retorna `mes`, `ate`, `entrou`, `saiu`, `categorias`, `dias`, `guardado`, `motivos`,
 `fora_do_total` e `criterio_dias`. Categoria é `{categoria,valor,quantidade}`;

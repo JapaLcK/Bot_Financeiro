@@ -412,9 +412,10 @@ async function responder(
 
   if (!resposta.ok) {
     // O corpo é lido UMA vez: num `Response` real a segunda leitura rejeita, e
-    // o `code` do corpo (ex.: `mfa_code_invalid`) sumiria. 5xx não é lido
-    // (ver `mensagemDeErro`).
-    const corpo = resposta.status >= 500 ? undefined : await resposta.json().catch(() => undefined);
+    // o `code` do corpo (ex.: `mfa_code_invalid`) sumiria. 5xx também é lido,
+    // para quem decide por `detail.retryable` (chat dos agentes); o texto do
+    // corpo NUNCA vira mensagem em 5xx (ver `mensagemDeErro`).
+    const corpo = await resposta.json().catch(() => undefined);
     throw new ErroDeApi(resposta.status, mensagemDeErro(resposta.status, corpo), corpo);
   }
   return resposta;

@@ -6,7 +6,7 @@ import json
 
 from core.services import cashflow_snapshot
 from core.services.cashflow import _projection
-from core.services.cashflow_contract import Ocorrencia, Snapshot
+from core.services.cashflow_contract import FONTE_VARIAVEL, Ocorrencia, Snapshot, centavos
 from core.services.cashflow_forecast import _horizons, _trajectory
 from db.connection import get_conn
 from utils_date import now_tz
@@ -46,6 +46,9 @@ def apresentar(snapshot: Snapshot, uid: int, dias: int,
     horizontes = tuple(n for n in permitidos if n <= dias)
     marcos = _horizons(hoje, base, snapshot.ocorrencias, horizontes)["horizons"]
     qualidade = snapshot.qualidade()
+    estimativa = qualidade.pop("estimativa_variavel")  # sai do bloco da qualidade: o servidor fecha o horizonte
+    if estimativa:
+        estimativa = {**estimativa, "despesa_no_horizonte": centavos(estimativa["despesa_mensal"] * dias / 30)}
     dados = {**qualidade, "motivos": _motivos(qualidade["motivos"]),
              "hoje": hoje.isoformat(), "dias": dias, "dias_permitidos": list(permitidos),
              "capacidades": ["marcos"],
@@ -54,14 +57,16 @@ def apresentar(snapshot: Snapshot, uid: int, dias: int,
                          "saldo": marcos[str(n)]["projetado"]} for n in horizontes],
              "periodo": None, "ancora": None, "trajetoria": None,
              "pior_dia": None, "compromissos": None,
-             "receitas_do_banco": snapshot.receitas_do_banco}  # fora do `detalhes`: o Plus também responde
+             "receitas_do_banco": snapshot.receitas_do_banco,  # fora do `detalhes`: o Plus também responde
+             "estimativa_variavel": estimativa}
     if not detalhes:
         return dados
 
     dados["capacidades"] += ["trajetoria", "pior_dia", "compromissos"]
     # O motor seleciona/ordena detalhes já arredondados; o valor público vem do
     # objeto original da mesma snapshot, preservando Decimal e escala da fonte.
-    originais = {e.chave: _ocorrencia(uid, e) for e in snapshot.ocorrencias}
+    ocorrencias = [e for e in snapshot.ocorrencias if e.fonte != FONTE_VARIAVEL]  # a estimativa vive em `estimativa_variavel`
+    originais = {e.chave: _ocorrencia(uid, e) for e in ocorrencias}
     percurso = _trajectory(hoje, base, snapshot.ocorrencias, dias, Decimal(0))
     dados["periodo"] = {"inicio": percurso["period"]["start"], "fim": percurso["period"]["end"]}
     dados["ancora"] = {"data": hoje.isoformat(),
@@ -72,10 +77,10 @@ def apresentar(snapshot: Snapshot, uid: int, dias: int,
     pior = percurso["worst_day"]
     if pior is not None:
         dados["pior_dia"] = {"data": pior["date"], "saldo": pior["saldo_projetado"],
-                             "desde": pior["desde"],
+                             "desde": pior["desde"], "despesa_variavel": pior["despesa_variavel"],
                              "causas": [originais[e["chave"]] for e in pior["causas"]]}
     grupos = {}
-    for e in snapshot.ocorrencias:
+    for e in ocorrencias:
         if e.realizacao == "realizada":
             continue
         chave = _chave(uid, "grupo", e.fonte, e.origem_id)

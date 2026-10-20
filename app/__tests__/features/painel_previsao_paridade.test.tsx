@@ -47,7 +47,7 @@ it("pior dia diz desde quando e, ao toque, as causas com data", async () => {
  expect(hero().getByText("Menor saldo previsto · 25/10/2026")).toBeTruthy(); expect(hero().getByText("desde 14/10")).toBeTruthy();
  expect(hero().queryByText("Aluguel")).toBeNull();
  await apertar(screen.getByTestId("pior-dia"));
- expect(hero().getByText("Aluguel")).toBeTruthy(); expect(hero().getByText("15/10")).toBeTruthy(); expect(hero().getByText("Ultraviolet Black")).toBeTruthy();
+ expect(hero().getByText("Aluguel")).toBeTruthy(); expect(hero().getAllByText("15/10").filter((n) => n.props.testID !== "curva-rotulo-x")).toHaveLength(1); /* o mesmo dd/mm também pode ser rótulo do eixo X */ expect(hero().getByText("Ultraviolet Black")).toBeTruthy();
  expect(hero().getByLabelText(/menos 1800 reais/)).toBeTruthy();
 });
 it("pior dia sem causas é só a linha, sem nada para abrir", async () => {
@@ -99,7 +99,7 @@ it("com valores ocultos, nenhum dígito das causas aparece", async () => {
  await apertar(screen.getByTestId("pior-dia")); expect(hero().getByText("Aluguel")).toBeTruthy(); semDigitos();
 });
 const motivo = (codigo: string, direcao_do_erro = "so_melhora") => ({ codigo, direcao_do_erro });
-const CURVA = /^Saldo previsto ao longo do período/;
+const CURVA = /^Evolução dos valores no período/;
 it("a folha não escreve o estado nem os motivos (só valores e datas), com a previsão a conferir e cheia de motivos", async () => {
  previsao = { ...F, estado: "a_conferir", motivos: [motivo("gastos_variaveis_nao_estimados"), motivo("receita_nao_garantida", "so_piora"), motivo("ambos_x", "ambos"), motivo("codigo_novo")] };
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("A partir de hoje, 06/10")).toBeTruthy());
@@ -117,24 +117,32 @@ it("indisponível sem trajetória (plano): a frase do plano aparece e não há c
  await abrirResumo();
  expect(hero().getByText("Trajetória indisponível no seu plano.")).toBeTruthy(); expect(hero().queryByLabelText(CURVA)).toBeNull();
 });
-it("condicional (positivo): as colunas continuam desenhadas, a última em destaque e sem o '*' de mês em andamento", async () => {
+it("condicional (positivo): a curva continua desenhada, com 3 valores no eixo Y e 3 datas no eixo X", async () => {
  previsao = { ...F, estado: "condicional" }; await abrirResumo();
- const c = within(screen.getByTestId("bloco-hero"));
+ const c = within(screen.getByTestId("bloco-hero")), H = { includeHiddenElements: true };
  expect(c.getByLabelText(CURVA)).toBeTruthy();
- const meses = c.getAllByTestId("barra-mes", { includeHiddenElements: true }), n = meses.length;
- expect(n).toBeGreaterThanOrEqual(2); expect(n).toBeLessThanOrEqual(6);
- expect(c.getAllByTestId("barra-valor", { includeHiddenElements: true })).toHaveLength(1); // só a coluna do fim do horizonte escreve o valor
- for (const m of meses) expect(m.props.children).not.toMatch(/\*/);
- expect(c.queryByText("* mês em andamento")).toBeNull();
+ expect(c.getAllByTestId("curva-rotulo-y", H)).toHaveLength(3); expect(c.getAllByTestId("curva-rotulo-x", H)).toHaveLength(3);
+ expect(c.queryByTestId("barra-mes", H)).toBeNull(); // não é o gráfico de colunas do Resumo do mês
 });
-it("série diária de 31 pontos (o que a API manda): no máximo 6 colunas, da âncora ao fim do horizonte, a última é a que escreve o valor", async () => {
+it("série diária de 31 pontos (o que a API manda): eixo X com a data do início, do meio e do fim; eixo Y com o maior, o do meio e o menor saldo", async () => {
  const dia = (i: number) => new Date(Date.UTC(2026, 9, 6 + i)).toISOString().slice(0, 10), ddmm = (iso: string) => `${iso.slice(8)}/${iso.slice(5, 7)}`;
  previsao = { ...F, ancora: { data: dia(0), saldo: "1000.00" }, trajetoria: Array.from({ length: 30 }, (_, i) => ({ data: dia(i + 1), saldo: `${1000 + (i + 1) * 100}.00`, compromissos: [] })) };
  await abrirResumo();
  const c = within(screen.getByTestId("bloco-hero")), H = { includeHiddenElements: true };
- const rot = c.getAllByTestId("barra-mes", H).map((t) => t.props.children as string);
- expect(rot).toHaveLength(6); expect(rot[0]).toBe(ddmm(dia(0))); expect(rot[5]).toBe(ddmm(dia(30)));
- expect(c.getByTestId("barra-valor", H).props.children).toBe("R$ 4k"); // o saldo do dia 30 (4.000,00), a coluna em destaque
+ expect(c.getAllByTestId("curva-rotulo-x", H).map((t) => t.props.children)).toEqual([ddmm(dia(0)), ddmm(dia(15)), ddmm(dia(30))]);
+ expect(c.getAllByTestId("curva-rotulo-y", H).map((t) => t.props.children)).toEqual(["R$ 4k", "R$ 2,5k", "R$ 1k"]); // 4.000,00 no fim, 2.500,00 no meio, 1.000,00 hoje
+});
+it("o rótulo de acessibilidade da curva traz as datas e os valores dos eixos", async () => {
+ const dia = (i: number) => new Date(Date.UTC(2026, 9, 6 + i)).toISOString().slice(0, 10), ddmm = (iso: string) => `${iso.slice(8)}/${iso.slice(5, 7)}`;
+ previsao = { ...F, ancora: { data: dia(0), saldo: "1000.00" }, trajetoria: Array.from({ length: 30 }, (_, i) => ({ data: dia(i + 1), saldo: `${1000 + (i + 1) * 100}.00`, compromissos: [] })) };
+ await abrirResumo();
+ expect(within(screen.getByTestId("bloco-hero")).getByLabelText(`Evolução dos valores no período: ${ddmm(dia(0))}, R$ 1k; ${ddmm(dia(15))}, R$ 2,5k; ${ddmm(dia(30))}, R$ 4k`)).toBeTruthy();
+});
+it("saldo igual do início ao fim: um rótulo no eixo Y só (três ficariam um por cima do outro)", async () => {
+ previsao = { ...F, ancora: { data: F.ancora?.data ?? F.hoje, saldo: "1000.00" }, trajetoria: F.trajetoria!.map((t) => ({ ...t, saldo: "1000.00" })) };
+ await abrirResumo();
+ const c = within(screen.getByTestId("bloco-hero"));
+ expect(c.getAllByTestId("curva-rotulo-y", { includeHiddenElements: true })).toHaveLength(1);
 });
 it("bancos_excluidos: só o aviso do card ('Bancos conectados fora do cálculo'); nenhum motivo vira linha", async () => {
  previsao = { ...F, base: { ...F.base, bancos_excluidos: true }, motivos: [motivo("banco_desatualizado"), motivo("bancos_excluidos"), motivo("conexao_pausada"), motivo("carteira_nao_confirmada")] };

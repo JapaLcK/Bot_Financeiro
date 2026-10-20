@@ -24,6 +24,7 @@ export type NomeIcone =
   | "Envelope"
   | "Lock"
   | "ArrowLeft"
+  | "ArrowRight"
   | "GoogleLogo"
   | "Eye"
   | "EyeSlash"
@@ -57,7 +58,13 @@ export type NomeIcone =
   | "Phone"
   | "WhatsappLogo"
   | "MagnifyingGlass"
-  | "ArrowDownLeft";
+  | "ArrowDownLeft"
+  | "Wrench"
+  | "ShoppingCart"
+  | "Trophy"
+  | "Lightning"
+  | "ChartPie"
+  | "Robot";
 
 /** Forma mínima que todo ícone do Phosphor e o stub de teste têm em comum. */
 type ComponenteIcone = ComponentType<{ size?: number; color?: string; weight?: string }>;
@@ -119,6 +126,12 @@ const ICONES: Record<NomeIcone, ComponenteIcone> = {
   WhatsappLogo: resolver(require("phosphor-react-native/src/icons/WhatsappLogo"), "WhatsappLogoIcon"),
   MagnifyingGlass: resolver(require("phosphor-react-native/src/icons/MagnifyingGlass"), "MagnifyingGlassIcon"),
   ArrowDownLeft: resolver(require("phosphor-react-native/src/icons/ArrowDownLeft"), "ArrowDownLeftIcon"),
+  Wrench: resolver(require("phosphor-react-native/src/icons/Wrench"), "WrenchIcon"),
+  ShoppingCart: resolver(require("phosphor-react-native/src/icons/ShoppingCart"), "ShoppingCartIcon"),
+  Trophy: resolver(require("phosphor-react-native/src/icons/Trophy"), "TrophyIcon"),
+  Lightning: resolver(require("phosphor-react-native/src/icons/Lightning"), "LightningIcon"),
+  ChartPie: resolver(require("phosphor-react-native/src/icons/ChartPie"), "ChartPieIcon"),
+  Robot: resolver(require("phosphor-react-native/src/icons/Robot"), "RobotIcon"),
 
   CaretLeft: resolver(require("phosphor-react-native/src/icons/CaretLeft"), "CaretLeftIcon"),
   CaretRight: resolver(require("phosphor-react-native/src/icons/CaretRight"), "CaretRightIcon"),
@@ -135,6 +148,7 @@ const ICONES: Record<NomeIcone, ComponenteIcone> = {
   Envelope: resolver(require("phosphor-react-native/src/icons/Envelope"), "EnvelopeIcon"),
   Lock: resolver(require("phosphor-react-native/src/icons/Lock"), "LockIcon"),
   ArrowLeft: resolver(require("phosphor-react-native/src/icons/ArrowLeft"), "ArrowLeftIcon"),
+  ArrowRight: resolver(require("phosphor-react-native/src/icons/ArrowRight"), "ArrowRightIcon"),
   GoogleLogo: resolver(require("phosphor-react-native/src/icons/GoogleLogo"), "GoogleLogoIcon"),
 };
 

@@ -2,7 +2,7 @@
 //   · o título "Converse com o Piggy" só existe para leitor de tela e para o foco da rota;
 //   · estado vazio: logo, "Olá, {nome}" e "Como posso te ajudar?" no centro da coluna;
 //   · as perguntas (sugestões e próximas) ficam numa fileira só, fixa, logo acima da barra;
-//   · a resposta não leva ícone nem a palavra "Piggy"; só a de exemplo leva a linha do selo;
+//   · a resposta leva o autor (ícone e "Piggy", parts/PiggyChat.tsx), fora do .msg-by; só a de exemplo leva a linha do selo;
 //   · o guia destaca o chip da fileira sem o balão nem o Piggy cobrirem a barra.
 // Só a aparência: o conteúdo das respostas é de dashboard_v2_chat*.test.mjs.
 import { test, before, after } from "node:test";
@@ -120,7 +120,7 @@ for (const [width, height] of TELAS) {
     assert.equal(r.docLargo, 0);
   });
 
-  test(`${width}: depois de perguntar, a resposta não leva ícone nem "Piggy"; só a de exemplo leva o selo; as perguntas saem da conversa`, async () => {
+  test(`${width}: depois de perguntar, o .msg-by é só o selo (o autor é outra linha); só a de exemplo leva o selo; as perguntas saem da conversa`, async () => {
     const { ctx, page, erros } = await abrir({ width, height });
     await perguntar(page, "como estão minhas metas?"); // real
     await page.locator(".chat > .msg-piggy").last().locator(".pilula").first().waitFor();
@@ -140,7 +140,7 @@ for (const [width, height] of TELAS) {
         dentroDoChat: document.querySelectorAll(".chat .chat-follow").length,
         fileiras: document.querySelectorAll(".chat-follow").length,
         rotulo: document.querySelector(".chat-follow").getAttribute("aria-label"),
-        // o autor da resposta, só para leitor de tela: primeiro filho, de 1 px, sem aparecer
+        // o autor da resposta (ícone, "Piggy"): primeiro filho, visível, separado do .msg-by
         autor: lis.map((li) => { const e = li.firstElementChild, b = e.getBoundingClientRect(); return [e.className, e.textContent, b.width <= 1 && b.height <= 1]; }),
       };
     });
@@ -160,7 +160,7 @@ for (const [width, height] of TELAS) {
     assert.equal(r.dentroDoChat, 0);
     assert.equal(r.fileiras, 1);
     assert.equal(r.rotulo, "Próximas perguntas");
-    assert.deepEqual(r.autor, [["sr-only", "Piggy: ", true], ["sr-only", "Piggy: ", true]]);
+    assert.deepEqual(r.autor, [["msg-autor", "Piggy", false], ["msg-autor", "Piggy", false]]);
     assert.ok(folga[2] && folga[0] <= folga[1], `a última mensagem termina em ${folga[0]}px e a fileira começa em ${folga[1]}px`);
     assert.deepEqual(erros, []);
   });
@@ -222,6 +222,8 @@ test("375: duplo toque numa pílula manda uma pergunta; o toque depois da janela
     await page.waitForTimeout(intervalo);
     await page.touchscreen.tap(x, y); // o mesmo ponto: agora cai numa pílula da fileira nova
     await page.waitForTimeout(300);
+    // A pergunta entra depois de conferir a conta (`ask`): sob carga a leitura passa dos 300 ms, então a 2ª pode demorar a aparecer.
+    if (intervalo === 700) await page.locator(".chat > .msg-user").nth(1).waitFor({ timeout: 3000 }).catch(() => {});
     vistos[intervalo] = await page.locator(".chat > .msg-user").count();
     await ctx.close();
     assert.deepEqual(erros, []);
@@ -296,7 +298,9 @@ test("1280: display_name que não é texto não derruba a página (cai no e-mail
   assert.deepEqual(vistos, Array(4).fill(["Olá, marina", []]));
 });
 
-test("1280: a conta só é lida no estado vazio; abrir a rota com a conversa já aberta não pede o perfil", async () => {
+// Com a conversa aberta o perfil também é lido: é como a troca de conta noutra aba chega ao `contaDaSessao` (Codex no #1157).
+// Perguntar de outra página lê uma vez: a pergunta confere a conta antes de entrar (`ask`) e abre o chat já, que reaproveita a mesma leitura.
+test("1280: o perfil é lido uma vez no estado vazio e duas ao perguntar de outra página (a leitura da pergunta saiu antes de o chat montar)", async () => {
   const vazio = await abrir({ width: 1280, height: 800 });
   await vazio.page.waitForFunction(() => /^Olá, /.test(document.querySelector(".chat-empty h2")?.textContent ?? ""));
   const noVazio = vazio.pedidos.length;
@@ -307,7 +311,7 @@ test("1280: a conta só é lida no estado vazio; abrir a rota com a conversa já
   await page.waitForTimeout(300);
   await ctx.close();
   assert.equal(noVazio, 1);
-  assert.equal(pedidos.length, 0);
+  assert.equal(pedidos.length, 2); // o chat monta com a leitura da pergunta em voo e confere de novo (Codex no #1157)
   assert.deepEqual(erros, []);
 });
 
