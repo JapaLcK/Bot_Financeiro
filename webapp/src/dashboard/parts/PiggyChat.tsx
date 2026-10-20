@@ -85,7 +85,9 @@ function PiggySays({ m }: { m: Msg }) {
   const texto = typeof m.text === "string" ? m.text : "";
   // Acabada a última palavra, volta ao texto contínuo: spans inline-block por palavra viram uma parada por palavra no leitor de tela.
   const [fim, setFim] = useState(false);
-  const animar = revela.current && m.estado === "pronto" && !!texto && !fim;
+  const revelando = revela.current && m.estado === "pronto" && !!texto;
+  // Com movimento reduzido o texto já vem contínuo, sem spans por palavra (o leitor de tela não para em cada um).
+  const animar = revelando && !fim && !(typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
   const total = Math.min(REVELA_PASSO * texto.split(/\s+/).length, REVELA_MS) + REVELA_ANIM; // a última palavra começa antes e dura REVELA_ANIM
   useEffect(() => {
     if (!animar) return;
@@ -107,7 +109,7 @@ function PiggySays({ m }: { m: Msg }) {
       {m.estado === "erro" && m.repetir && <div className="msg-acoes"><button type="button" className="btn btn-ghost" onClick={() => tentarDeNovo(m.id)}>Tentar de novo</button></div>}
       {(m.estado === "sem_plano" || (m.estado === "sem_energia")) && <div className="msg-acoes"><a className="btn btn-primary" href="/precos">Ver planos</a></div>}
       {m.estado === "pronto" && !!m.redirects?.length && (
-        <div className="msg-acoes" data-revela={animar || undefined} style={animar ? { animationDelay: `${total}ms` } : undefined}>
+        <div className="msg-acoes" data-revela={revelando || undefined} style={revelando ? { animationDelay: `${total}ms` } : undefined}>
           {m.redirects.map((r, i) => <button key={i} type="button" className="btn btn-ghost" disabled={seguindo} onClick={() => void seguir(r)}>Perguntar ao {agenteDe(r.kind)!.nome}</button>)}
         </div>
       )}

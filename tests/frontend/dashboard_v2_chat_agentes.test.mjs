@@ -1463,9 +1463,16 @@ for (const width of TELAS) {
     assert.ok(+(await acoes.evaluate((e) => getComputedStyle(e).opacity)) < 1, "as ações esperam o texto");
     const atrasoAcoes = await acoes.evaluate((e) => e.getAnimations()[0].effect.getTiming().delay);
     assert.ok(atrasoAcoes >= atrasos.at(-1) + 500, `ações em ${atrasoAcoes} ms, última palavra começa em ${atrasos.at(-1)} e dura 500`);
-    await page.waitForFunction(() => !document.getAnimations().some((a) => a.playState !== "finished"), null, { timeout: 5000 });
-    assert.ok((await revelacao(page)).every((p) => p.op === 1));
-    assert.equal(await acoes.evaluate((e) => getComputedStyle(e).opacity), "1");
+    // O fade das ações tem de rodar inteiro, mesmo depois de o texto voltar a ser contínuo (a troca não pode cortá-lo): amostra a opacidade até a animação acabar.
+    const fade = await acoes.evaluate((e) => new Promise((ok) => {
+      const an = e.getAnimations()[0], op = [];
+      const f = () => { op.push(+getComputedStyle(e).opacity); an.playState === "finished" || an.playState === "idle" ? ok({ op, estado: an.playState }) : requestAnimationFrame(f); };
+      f();
+    }));
+    assert.equal(fade.estado, "finished", "a animação das ações não foi cortada");
+    assert.ok(fade.op.some((o) => o > 0 && o < 1), `sem opacidade intermediária: ${[...new Set(fade.op)]}`);
+    assert.equal(fade.op.at(-1), 1);
+    assert.equal(await bolha.locator(".rv").count(), 0, "texto voltou a ser contínuo");
     await ctx.close();
     assert.deepEqual(erros, []);
   });
@@ -1485,8 +1492,7 @@ for (const width of TELAS) {
     await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
     assert.deepEqual(await emAnimacao(page), []);
     assert.equal(await resposta(page).locator(".msg-text").evaluate((e) => getComputedStyle(e).opacity), "1");
-    assert.deepEqual([...new Set(await animacoes(page, ".chat .rv"))], ["none"]);
-    assert.ok((await page.locator(".chat .rv").count()) > 0);
+    assert.equal(await page.locator(".chat .rv").count(), 0, "sem movimento: texto contínuo, sem spans por palavra");
     await ctx.close();
   });
 
