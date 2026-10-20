@@ -249,3 +249,15 @@ test("Resumo: com o card em 60 dias o simulador usa a estimativa DO CARD e não 
   assert.deepEqual(gets, [null, "60"], `GETs: ${gets}`);
   await ctx.close();
 });
+
+test("Piggy notou no Resumo real: a ação não promete um corte que o simulador real não aplica; abre #/simulador", async () => {
+  const { page, ctx, pedidos } = await abrir({ rota: "/" });
+  const ins = page.locator(".insights");
+  await ins.waitFor();
+  assert.equal(await ins.getByRole("button", { name: /−30%/ }).count(), 0);
+  await ins.getByRole("button", { name: "Abrir o simulador" }).click();
+  await page.locator(".lever-habito").first().waitFor();
+  assert.match(page.url(), /#\/simulador$/);
+  assert.equal(pedidos.length, 0); // nenhum corte aplicado
+  await ctx.close();
+});
