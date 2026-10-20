@@ -224,6 +224,8 @@ export const gastosCategoriaQuery = (mes: string, categoria: string) => queryOpt
 
 // Só dentro da árvore que o portão (parts/Entrada.tsx) libera: lá o /me já chegou.
 export const usePlan = () => useQuery(meQuery).data!.plan_tier;
+/** Freio de emergência dos agentes (`AGENTS_UI_ENABLED=0`): ausente (protótipo, resposta antiga) = ligado, como no /auth/me do dashboard antigo. */
+export const useAgentesLigados = () => useQuery(meQuery).data?.agents_ui_enabled !== false;
 
 export const categoriasQuery = {
   queryKey: ["categorias"],
