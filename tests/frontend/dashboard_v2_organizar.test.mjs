@@ -103,7 +103,7 @@ test("Organizar: o Tab percorre os itens e nunca entra num controle de widget", 
 
 // real: radio do horizonte e o controle de corte (RANGE); protótipo: o campo de texto (NUM). Cada handler (keydown e beforeinput) tem uma sonda.
 const ACOES = {
-  real: (campo) => [
+  real: () => [
     ...["ArrowRight", "ArrowLeft"].map((k) => [`radio marcado + ${k}`, `${HERO}[aria-checked=true]`, () => page_.keyboard.press(k)]),
     ...["Enter", " "].map((k) => [`radio desmarcado + "${k}"`, `${HERO}[aria-checked=false]`, () => page_.keyboard.press(k)]),
     ["corte + ArrowRight", RANGE, () => page_.keyboard.press("ArrowRight")],
