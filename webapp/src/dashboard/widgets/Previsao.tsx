@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { EstimativaVariavel, Previsao } from "../lib/api-v2.gen";
-import { dayMonth, isoDay, longDate, moneyText } from "../lib/format.js";
+import { dayMonth, isoDay, longDate, medida, moneyText } from "../lib/format.js";
 import type { Point } from "../lib/types";
 import { ErroApi, previsaoQuery } from "../lib/v2";
 import { CRIAR_SENHA } from "../parts/Entrada";
@@ -164,7 +164,6 @@ export const PrevisaoCard = () => <PrevisaoHero p={usePrevisao()} id="hero" />;
 
 // Categorias na ordem do servidor; Number() só mede a barra (valor ÷ maior), o dinheiro é o texto da API.
 function Estimativa({ e }: { e: EstimativaVariavel }) {
-  const medida = (v: string) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; }; // valor ruim = barra vazia, nunca NaN/escala > 1
   const max = Math.max(...e.categorias.map((c) => medida(c.despesa_mensal)), 0) || 1;
   return (
     <ul className="cats">
