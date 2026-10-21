@@ -1590,7 +1590,7 @@ e o órfão (nada). O e-mail de confirmação discrimina plano, cada caderno e o
 chamada ao Stripe (`pix_extras.conferir_entrega`): cobrança do dono por `user_id` +
 referência (senão `nao_comprou`); status local `refunded`/`refunded_partial`/`chargeback`
 fecha `estornado` sem consultar o Asaas; senão `GET /v3/payments/{id}`: `RECEIVED`/
-`CONFIRMED` sem `refunds` entrega (nome do caderno vem da foto), status de estorno ou
+`CONFIRMED`/`RECEIVED_IN_CASH` (baixa manual) sem `refunds` entrega (nome do caderno vem da foto), status de estorno ou
 contestação, ou `refunds` não vazia, fecha `estornado`; falha ou forma inesperada não
 envia nem fecha (claim expira). Sem `STRIPE_SECRET_KEY` o job não roda, inclusive para
 as linhas Pix. Na junção de contas, caderno ainda não entregue cai com a origem
