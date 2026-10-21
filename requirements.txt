@@ -19,7 +19,15 @@ google-auth==2.57.1
 h11==0.16.0
 h2==4.4.1
 httpcore==1.0.9
+# Transitivos do openai (`httpx2<3,>=2.7.0`); o TestClient da starlette 1.6.0 usa httpx2.
+# O 2.16.0 (IndexedCookieJar) manda primeiro o cookie de dominio menos especifico: o
+# `cookies.set(CSRF_COOKIE_NAME, ...)` sem dominio dos testes perde para o csrf_token do
+# servidor e 21 testes viram 403 (google_web_mfa, onboarding_routes, login_exclusao_vinculo,
+# bank_movements, conta_exclusao_checkout_lock). Para subir: setar com dominio ou apagar o
+# do servidor nesses testes, e subir os dois pinos juntos (httpx2 exige httpcore2 igual).
+httpcore2==2.15.1
 httpx==0.28.1
+httpx2==2.15.1
 idna==3.19
 iniconfig==2.3.0
 jiter==0.16.0

@@ -13,6 +13,7 @@ CONTROLES NEGATIVOS (rodados na entrega, ver o relato):
 from __future__ import annotations
 
 import threading
+from datetime import date
 
 import psycopg
 import pytest
@@ -26,10 +27,23 @@ from tests._of_cash_helpers import q
 from tests._pendencia_credito_helpers import diga
 from tests.test_ai_chat_fatura_do_periodo import fatura
 from tests.test_manual_launches_carteira_piggy import _dashboard_client
-from tests.test_of_fatura_quitada_pelo_banco import F0, P0, P1, fat, rodar  # noqa: F401 (fixture)
+from tests.test_of_cartao_sinal import CARTAO
+from tests.test_of_fatura_quitada_pelo_banco import F0, P0, fat, rodar  # noqa: F401 (fixture)
+from utils_date import billing_period_for_close_day, today_tz
 
 NOME = "Nubank Mastercard"   # o nome do cartão que o sync do `rodar` cria/adota
 FRASE = db.MSG_FATURA_DO_BANCO
+FECHA = date.fromisoformat(CARTAO["creditData"]["balanceCloseDate"]).day   # o dia que o sync dá ao cartão
+
+
+def sincroniza(uid, rodar):
+    """Sync com a "bill-1" aberta no período ANTERIOR ao de hoje, a fatura que `fatura_a_pagar` acha.
+    O período da fatura no Pig sai da data da compra e do dia de fechamento do cartão (fixo): com a
+    compra a 35 dias de hoje ela caía dois períodos atrás do dia 21 ao 24/25, e o "pagar" respondia
+    "nenhuma fatura aberta" antes de chegar à recusa."""
+    inicio, _ = billing_period_for_close_day(today_tz(), FECHA)
+    fecha = (today_tz() - inicio).days + 1          # o último dia do período anterior
+    return rodar(uid, [P0, ("p1", 120, "bill-1", fecha + 5)], [F0, fat("bill-1", 120, fecha=fecha)])
 
 
 def recusou(r):
@@ -48,7 +62,7 @@ def pago(uid):
 
 def banco(uid, rodar):
     """Cartão do banco pelo sync de verdade, com uma fatura aberta."""
-    rodar(uid, [P0, P1], [F0, fat("bill-1", 120)])
+    sincroniza(uid, rodar)
     cid = q("select id from credit_cards where user_id=%s and open_finance_account_id is not null",
             (uid,), True)[0]["id"]
     bill = q("select id from credit_bills where user_id=%s and card_id=%s order by period_start desc limit 1",
@@ -130,7 +144,7 @@ def test_whatsapp_pagar_por_mes_so_manual_com_uma_fatura_paga_direto(uid_pro, ia
 def test_whatsapp_adocao_entre_a_pergunta_e_o_sim_recusa(uid_pro, rodar, ia_fora):
     manual_com_duas_faturas(uid_pro)
     assert "Qual você quer pagar" in diga(uid_pro, "pagar fatura nubank mastercard")
-    rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120)])          # o sync adota o cartão pelo nome
+    sincroniza(uid_pro, rodar)          # o sync adota o cartão pelo nome
     assert q("select 1 from credit_cards where user_id=%s and open_finance_account_id is not null",
              (uid_pro,), True)
     r = diga(uid_pro, "1")
@@ -143,7 +157,7 @@ def test_ia_adocao_entre_a_pergunta_e_o_sim_recusa(uid_pro, rodar):
     runner._dispatch_tool(uid_pro, "pay_bill", {"card_name": NOME, "amount": 50})
     pend = db.ai_get_pending_action(uid_pro)
     assert pend and pend["tool_name"] == "pay_bill"
-    rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120)])
+    sincroniza(uid_pro, rodar)
     r = get_tool("pay_bill").execute(uid_pro, pend["tool_args"])
     assert recusou(r), r
     assert pagamentos(uid_pro) == 0
@@ -199,7 +213,7 @@ def test_cartao_de_outro_usuario_devolve_none_e_nao_toca(uid_pro, rodar):
 # ── lock: o `for share` segura a adoção até o commit ─────────────────────────
 
 def test_lock_do_cartao_segura_a_adocao_ate_o_commit(uid_pro, rodar, monkeypatch):
-    rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120)])           # cria a conta OF (a do banco é livre)
+    sincroniza(uid_pro, rodar)           # cria a conta OF (a do banco é livre)
     conta = db.list_bank_accounts(uid_pro)[0]["id"]
     db.add_launch_and_update_balance(uid_pro, "receita", 1000.0, None, "seed")
     c = db.create_card(uid_pro, "Manual", 10, 17)

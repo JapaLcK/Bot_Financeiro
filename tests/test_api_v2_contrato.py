@@ -537,8 +537,12 @@ def test_fixture_do_simulador_segue_modelo_e_dinheiro_em_texto():
     assert FIXTURES["simulador"]["codigos_422"] == sorted({c for c, _ in CODIGOS_ERRO.values()} | {CODIGO_GENERICO})
     assert s.cabe_nas_premissas is s.cobertura.inclui_estimativa_variavel is False and s.orientacao == "abster"
     ts = (Path(__file__).parent.parent / "webapp/src/dashboard/lib/api-v2.gen.ts").read_text(encoding="utf-8")
-    bloco = "\n".join(l for l in ts.splitlines() if l.startswith(("export type Simulador", "export type ResumoCenario", "export type ContratoSimulador", "export type PontoSimulador")))
-    assert bloco and "saldo: number" not in bloco and "total_pago: number" not in bloco
+    bloco = "\n".join(l for l in ts.splitlines() if l.startswith(("export type Simulador", "export type ResumoCenario", "export type ContratoSimulador", "export type PontoSimulador", "export type Veredito", "export type ResumoCompra")))
+    assert bloco and "saldo: number" not in bloco and "total_pago: number" not in bloco and "valor: number" not in bloco
+    # invariantes do veredito: dia e valor só no risco, bloqueios só nos dados_*, o "cabe" nunca sai
+    for v in (s.atual.veredito, *(c.resumo.veredito for c in s.cenarios)):
+        assert (v.estado == "risco_identificado") == (v.data is not None) == (v.valor is not None)
+        assert bool(v.bloqueios) == v.estado.startswith("dados_") and v.estado != "cabe_nas_premissas"
 
 
 def test_fixture_do_simulador_de_habitos_segue_modelo_e_dinheiro_em_texto():

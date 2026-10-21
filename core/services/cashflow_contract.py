@@ -9,6 +9,7 @@ from math import isfinite
 
 Direction = Literal['so_melhora', 'so_piora', 'ambos']
 FONTE_VARIAVEL = 'estimativa_variavel'  # `Ocorrencia.fonte` da estimativa do dia a dia (core/services/previsao_variavel.py)
+JANELA_CONFERENCIA_DIAS = 3  # ocorrências manuais de [hoje-3, hoje-1] ficam em `Snapshot.conferencia`; antes disso vale "já refletido no saldo"
 PREMISSA_SEM_ESTIMATIVA = 'Não inclui estimativa de gastos variáveis futuros; não autoriza compra segura.'
 
 
@@ -127,6 +128,8 @@ class Snapshot:
     valido_ate: datetime | None = None
     receitas_do_banco: list = field(default_factory=list)  # candidatas do extrato e a resposta do usuário; fora de `qualidade()`
     estimativa_variavel: dict | None = None  # `previsao_variavel.estimar`; None = sem histórico suficiente
+    conferencia: list[Ocorrencia] = field(default_factory=list)  # janela passada; só o veredito a lê, fora de `qualidade()`
+    conferencia_desde: date | None = None  # início da janela, quando algum fixo manual ativo começou antes dela
 
     def qualidade(self):
         return {'estado': 'indisponivel' if self.base['saldo'] is None else

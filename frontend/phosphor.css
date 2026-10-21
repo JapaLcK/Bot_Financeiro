@@ -1,11 +1,11 @@
-/* Phosphor Icons — peso Regular, self-hosted (MIT). SUBSET GERADO — 157 de 1530 ícones.
+/* Phosphor Icons — peso Regular, self-hosted (MIT). SUBSET GERADO — 159 de 1530 ícones.
    Fonte: @phosphor-icons/web@2.1.1, filtrado por scripts/build_phosphor_subset.py.
    Nao editar a mao nem colar o pacote inteiro por cima: rode o script.
    Ícone novo no HTML/JS sem regerar = ícone invisível (tests/test_phosphor_subset.py pega).
    Uso: <i class="ph ph-wallet"></i>  ·  cor via currentColor, tamanho via font-size. */
 @font-face {
   font-family: "Phosphor";
-  src: url("/fonts/Phosphor.woff2?v=9267a7921b87") format("woff2");
+  src: url("/fonts/Phosphor.woff2?v=cc37d7eee08c") format("woff2");
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -440,6 +440,12 @@
 }
 .ph.ph-television:before {
   content: "\e754";
+}
+.ph.ph-thumbs-down:before {
+  content: "\e48c";
+}
+.ph.ph-thumbs-up:before {
+  content: "\e48e";
 }
 .ph.ph-ticket:before {
   content: "\e490";

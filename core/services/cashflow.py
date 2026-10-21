@@ -103,23 +103,32 @@ def _projection(today: date, sb: dict, events: list[Ocorrencia],
     }
 
 
-def _risco(snapshot: Snapshot, target: date, extra=Decimal(0)) -> str:
-    """Aplica direções ao mesmo cálculo: risco precisa sobreviver às dúvidas."""
-    if snapshot.base['saldo'] is None or target < snapshot.hoje:
-        return 'abster'
-    if any(m.direcao_do_erro == 'ambos' or
-           m.direcao_do_erro == 'so_piora' and m.efeito_quantificado is None
-           for m in snapshot.motivos):
-        return 'abster'
+def estruturais(motivos, ignorar=frozenset()) -> list[Motivo]:
+    """Motivos que impedem qualquer veredito: dois sentidos, ou piora sem efeito quantificado."""
+    return [m for m in motivos if m.codigo not in ignorar and (
+        m.direcao_do_erro == 'ambos' or m.direcao_do_erro == 'so_piora' and m.efeito_quantificado is None)]
+
+
+def saida_duvidosa(e: Ocorrencia) -> bool:
+    return e.direcao == 'saida' and (e.realizacao == 'a_conferir' or
+                                     any(m.direcao_do_erro in ('so_piora', 'ambos') for m in e.motivos))
+
+
+def pior_caso_do_risco(snapshot: Snapshot, eventos: list[Ocorrencia]) -> tuple[dict, list[Ocorrencia]]:
+    """Base e eventos do pior caso para o risco: só ajustes da BASE a favor e sem a estimativa nem as saídas duvidosas."""
     base = dict(snapshot.base)
-    # Só ajustes da BASE, não ocorrências (saídas duvidosas saem abaixo).
     base['saldo'] = somar((base['saldo'], *(max(m.efeito_quantificado, Decimal(0))
                          for m in snapshot.motivos
                          if m.codigo in ('conciliacao_a_conferir', 'declaracao_bancaria_a_conferir')
                          and m.efeito_quantificado is not None)))
-    events = [e for e in snapshot.ocorrencias if e.fonte != FONTE_VARIAVEL and not (e.direcao == 'saida'
-              and (e.realizacao == 'a_conferir' or
-                   any(m.direcao_do_erro in ('so_piora', 'ambos') for m in e.motivos)))]
+    return base, [e for e in eventos if e.fonte != FONTE_VARIAVEL and not saida_duvidosa(e)]
+
+
+def _risco(snapshot: Snapshot, target: date, extra=Decimal(0)) -> str:
+    """Aplica direções ao mesmo cálculo: risco precisa sobreviver às dúvidas."""
+    if snapshot.base['saldo'] is None or target < snapshot.hoje or estruturais(snapshot.motivos):
+        return 'abster'
+    base, events = pior_caso_do_risco(snapshot, snapshot.ocorrencias)
     projected = _projection(snapshot.hoje, base, events, target, extra)['projetado']
     return 'risco' if projected is not None and projected < 0 else 'abster'
 

@@ -148,6 +148,13 @@ def _trajectory(today: date, sb: dict[str, Any], events: list[Ocorrencia],
     }
 
 
+def trajetoria_com_hoje(hoje: date, sb: dict[str, Any], events: list[Ocorrencia], days: int,
+                        threshold) -> dict[str, Any]:
+    """O motor puro inicia no dia seguinte à âncora. Ancorar em ontem inclui HOJE como primeiro
+    ponto, sem reler saldo nem mover o fim (hoje + days): days + 1 pontos."""
+    return _trajectory(hoje - timedelta(days=1), sb, events, days + 1, threshold)
+
+
 def forecast_with_trajectory(user_id: int, days: int = 90, threshold: float = 0.0) -> dict[str, Any]:
     """Trajetória diária de saldo projetado (default 90 dias) e o "pior dia" no
     caminho, com os compromissos que levaram até ele, mais os horizontes de

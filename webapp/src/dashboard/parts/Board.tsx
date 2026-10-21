@@ -24,6 +24,7 @@ import { Piggy } from "../widgets/Piggy";
 import { NetWorth } from "../widgets/NetWorth";
 import { Invoice } from "../widgets/Invoice";
 import { Wealth } from "../widgets/Wealth";
+import { ComposicaoReal, PatrimonioReal } from "../widgets/Patrimonio";
 import { Income } from "../widgets/Income";
 import { Yield } from "../widgets/Yield";
 import { Installments } from "../widgets/Installments";
@@ -62,8 +63,8 @@ const ITEM = new Map(ALL.map((w) => [w.id, w]));
 const VIEWS: Record<string, (p: { s: DashState }) => ReactNode> = {
   contas: () => <Contas />, hero: DEMO ? Hero : () => <PrevisaoCard />, resumo: MonthStats,
   categorias: DEMO ? Categories : GastosCategorias, calendario: DEMO ? Calendar : GastosCalendario, simulador: DEMO ? Simulator : () => <SimuladorHabitos />, // lambda: o simulador importa `comCardPrevisao` daqui (ciclo); a referência só é lida no render
-  compromissos: Bills, piggy: Piggy, patrimonio: () => <NetWorth />,
-  fatura: Invoice, wealth: () => <Wealth />,
+  compromissos: Bills, piggy: Piggy, patrimonio: () => (DEMO ? <NetWorth /> : <PatrimonioReal />),
+  fatura: Invoice, wealth: () => (DEMO ? <Wealth /> : <ComposicaoReal />),
   renda: () => <Income />, rendimento: () => <Yield />, parcelas: () => <Installments />,
   assinaturas: () => <Subscriptions />,
 };

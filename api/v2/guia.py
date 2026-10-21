@@ -26,7 +26,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
 
 from api.v2.sessao import usuario_atual
-from core.services.plan_service import plan_gate_ok
+from core.services.plan_service import painel_chat_ia, plan_gate_ok
 from db import guia
 
 router = APIRouter()
@@ -50,6 +50,8 @@ PASSOS = (
               "texto": "Toca numa pergunta pronta e me vê responder."}},
 )
 IDS = [p["id"] for p in PASSOS]
+# Com o freio do chat da IA ligado (PAINEL_CHAT_IA_USER_IDS) o 3º passo é de verdade: o Piggy responde com a conta do usuário.
+PASSO_PIGGY_REAL = {"dado": "real", "fala": {**next(p for p in PASSOS if p["id"] == "piggy.pergunta")["fala"], "apresenta": "Aqui você conversa comigo e eu respondo com os dados da sua conta."}}
 
 DICAS = (
     {"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas",
@@ -130,7 +132,9 @@ def _guia(linha: dict | None, motivo1: str | None, uid: int) -> Guia:
         estado = "em_andamento"
     else:
         estado = "oferecer" if motivo1 is None else "indisponivel"
-    passos = [Passo(**p, disponivel=_disponivel(p["id"], motivo1), motivo=None if i else motivo1,
+    real = painel_chat_ia(uid)
+    passos = [Passo(**(p | PASSO_PIGGY_REAL if real and p["id"] == "piggy.pergunta" else p),
+                    disponivel=_disponivel(p["id"], motivo1), motivo=None if i else motivo1,
                     feito=p["id"] in feitos) for i, p in enumerate(PASSOS)]
     dicas = [Dica(**d, vista=d["id"] in vistas) for d in DICAS if plan_gate_ok(uid, _RECURSO[d["tela"]])]
     return Guia(estado=estado, motivo=motivo1 if estado in ("em_andamento", "indisponivel") else None,

@@ -1,6 +1,6 @@
 import { act } from "react";
 import { Dimensions, StyleSheet } from "react-native";
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen, within } from "@testing-library/react-native";
 import { rendimentoSchema } from "@/api/schemas/painel";
 import { temMotivoBanco } from "@/features/painel/base";
 import { CardRendimentos } from "@/features/painel/cardRendimentos";
@@ -140,6 +140,20 @@ describe("bordas de exibição", () => {
       const antes = screen.getAllByLabelText("mais 120 reais")[0]; // o do herói
       await fonte(2);
       expect(screen.getAllByLabelText("mais 120 reais")[0]).not.toBe(antes);
+    } finally { await act(async () => { Dimensions.set({ window: janela }); }); }
+  });
+  it("saldo de 7 dígitos não vira 'R$ 1…': 2 linhas na fonte padrão; na ampliada, sem limite e o valor desce para baixo do texto", async () => {
+    const janela = Dimensions.get("window");
+    const c = categoria("renda_fixa", "Renda fixa", [ativo("CDB Nubank 120% CDI", "5.00", null, { saldo: "1270222.22" })], { saldo: "1343392.22" });
+    const linhas = () => ["1 ativo · R$ 1.343.392,22", "Nubank · R$ 1.270.222,22", "Renda fixa", "CDB Nubank 120% CDI"].map((t) => screen.getByText(t).props.numberOfLines);
+    const coluna = (t: string) => { let n = screen.getByText(t).parent; while (n && StyleSheet.flatten(n.props.style)?.flex !== 1) n = n.parent; return n!; };
+    const valorNaColuna = () => [within(coluna("1 ativo · R$ 1.343.392,22")).queryAllByText(/^\+R\$ 10,/).length, within(coluna("Nubank · R$ 1.270.222,22")).queryAllByText(/^\+R\$ 5,/).length];
+    desenhar(com(rend({ categorias: [c] }))); abrir("Renda fixa");
+    expect(linhas()).toEqual([2, 2, 2, 2]); expect(valorNaColuna()).toEqual([0, 0]);
+    try {
+      screen.unmount(); await act(async () => { Dimensions.set({ window: { ...janela, fontScale: 2 } }); });
+      render(<TemaProvider esquema="light"><TipografiaPainelProvider><CardRendimentos d={com(rend({ categorias: [c] }))} /></TipografiaPainelProvider></TemaProvider>); abrir("Renda fixa");
+      expect(linhas()).toEqual([undefined, undefined, undefined, undefined]); expect(valorNaColuna()).toEqual([1, 1]);
     } finally { await act(async () => { Dimensions.set({ window: janela }); }); }
   });
   it("oculto: o accessibilityLabel do valor é 'Valor oculto', sem dígito nem ganho/perda", () => {

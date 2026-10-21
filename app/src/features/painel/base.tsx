@@ -139,10 +139,11 @@ export function Folha({ titulo, rotulo, aberta, fechar, ancorada = false, childr
 /**
  * `outra`: segunda série (tracejada) na MESMA escala, p.ex. o saldo sem a compra; as duas precisam ter o mesmo tamanho e nenhum null.
  * `datas` (uma por valor): liga os eixos. Embaixo, a data do início, do meio e do fim; à esquerda, o maior, o do meio e o menor valor (`rotuloCompacto`, em centavos; um só se todos forem iguais). Os valores e as datas entram também no rótulo de acessibilidade. Sem `datas`, a curva é só o desenho.
+ * `cortes`: índices de `valores` onde começa um trecho novo; a linha não liga o ponto anterior a ele (e um trecho de um ponto só vira um ponto).
  * `eixos` (com `datas`): o nome de cada eixo, em cima da coluna dos valores e embaixo das datas. Regra do dono: todo gráfico nomeia os dois eixos.
  */
 const CURVA_Y0 = 15, CURVA_Y1 = 100, CURVA_ALTURA = 112, CURVA_COLUNA_Y = 52;
-export function Curva({ valores, outra, datas, eixos }: { valores: (number | null)[]; outra?: (number | null)[]; datas?: string[]; eixos?: { x: string; y: string } }) {
+export function Curva({ valores, outra, datas, eixos, cortes }: { valores: (number | null)[]; outra?: (number | null)[]; datas?: string[]; cortes?: number[]; eixos?: { x: string; y: string } }) {
   const { oculto } = usePrivacidade(); const { cores } = useTema();
   if (oculto) return <View style={{ height: 100, justifyContent: "center" }}><Texto tom="inkMuted">Gráfico oculto</Texto></View>;
   if (!valores.length || valores.some((v) => v === null) || (outra && (outra.length !== valores.length || outra.some((v) => v === null)))) return <Vazio texto="Trajetória indisponível." />;
@@ -151,8 +152,8 @@ export function Curva({ valores, outra, datas, eixos }: { valores: (number | nul
   const eixoX = marcas?.map((i) => datas![i]!);
   const ticksY = max === min ? [max] : [max, (max + min) / 2, min]; // sem variação, um rótulo só: três iguais ficariam um por cima do outro
   const y = (v: number) => CURVA_Y1 - (v - min) / amplitude * (CURVA_Y1 - CURVA_Y0);
-  const caminho = (ns: number[]) => ns.map((v, i) => `${i ? "L" : "M"}${i * 300 / Math.max(1, ns.length - 1)},${y(v)}`).join(" ");
-  const tracos = <>{eixoX && ticksY.map((v, i) => <Line key={i} x1={0} x2={300} y1={y(v)} y2={y(v)} stroke={cores.border} strokeWidth={1} />)}{outra && <Path d={caminho(outra as number[])} fill="none" stroke={cores.inkMuted} strokeWidth={2} strokeDasharray="6 4" />}<Path d={caminho(nums)} fill="none" stroke={cores.brand} strokeWidth={3} /></>;
+  const caminho = (ns: number[], quebras?: number[]) => ns.map((v, i) => `${i && !quebras?.includes(i) ? "L" : "M"}${i * 300 / Math.max(1, ns.length - 1)},${y(v)}`).join(" ");
+  const tracos = <>{eixoX && ticksY.map((v, i) => <Line key={i} x1={0} x2={300} y1={y(v)} y2={y(v)} stroke={cores.border} strokeWidth={1} />)}{outra && <Path d={caminho(outra as number[])} fill="none" stroke={cores.inkMuted} strokeWidth={2} strokeDasharray="6 4" />}<Path d={caminho(nums, cortes)} fill="none" stroke={cores.brand} strokeWidth={3} />{cortes && nums.map((v, i) => (i === 0 || cortes.includes(i)) && (i === nums.length - 1 || cortes.includes(i + 1)) ? <Circle key={i} cx={i * 300 / Math.max(1, nums.length - 1)} cy={y(v)} r={3} fill={cores.brand} /> : null)}</>;
   if (!marcas || !eixoX) return <Svg width="100%" height={CURVA_ALTURA} viewBox="0 0 300 112" accessible accessibilityLabel="Evolução dos valores no período">{tracos}</Svg>;
   const rotulo = `Evolução dos valores no período: ${marcas.map((i) => `${datas![i]}, ${rotuloCompacto(nums[i]!)}`).join("; ")}`;
   const nomeEixo = { fontWeight: "600" as const };
