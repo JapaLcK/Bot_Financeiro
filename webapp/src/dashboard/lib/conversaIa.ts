@@ -18,8 +18,15 @@ export interface Uso { used: number; limit: number }
 /** `ocupado`: preparando ou em voo (um turno por vez). `cheia`: a cota acabou (ou o plano não tem IA: o servidor responde igual). */
 export interface EstadoIa { ocupado: boolean; uso: Uso | null; cheia: boolean }
 /** Os campos da mensagem do Piggy que vêm da IA (o resto é do `Msg`). */
-export interface CamposIa { ia?: true; passos?: string[]; parcial?: string; blocos?: string[]; messageId?: number | null; chips?: string[] }
+export interface CamposIa {
+  ia?: true; passos?: string[]; parcial?: string; blocos?: string[]; messageId?: number | null; chips?: string[];
+  feedback?: 1 | -1 | null; motivo?: Motivo | null; avaliando?: boolean; avisoAvaliar?: "falha" | "obrigado"; // o 👍👎 (lib/conversation.ts `avaliarIa`)
+}
 
+/** Espelho de `db/ai_feedback.py::MOTIVOS` e de `TEXTO_MAX` em `frontend/routes/ai_chat.py` (§0.7: `tests/test_motivo_feedback_app.py` compara). */
+export const MOTIVOS = { numero_errado: "Número errado", nao_entendeu: "Não entendeu", faltou_card: "Faltou card", outro: "Outro" } as const;
+export type Motivo = keyof typeof MOTIVOS;
+export const TEXTO_MAX = 500;
 export const PRAZO_MS = 60_000; // o turno todo, preparar incluído (o do app)
 export const TETO_DELETE_MS = 15_000;
 export const PREPARANDO = "Preparando a resposta…";

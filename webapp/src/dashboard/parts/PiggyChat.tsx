@@ -302,7 +302,7 @@ export function PiggyChat() {
         {msgs.map((m, i) => (
           <li key={m.id} id={`msg-${m.id}`} tabIndex={-1} ref={i === msgs.length - 2 ? end : undefined} className={m.role === "user" ? "msg-user" : "msg-piggy"}
             data-dado={m.role === "user" ? undefined : m.real && !DEMO ? "real" : "exemplo"}>
-            {m.role === "piggy" ? m.ia ? <PiggyIa m={m} /> : <PiggySays m={m} /> : m.agente && typeof m.text === "string" ? <ComMencoes t={m.text} /> : m.text}
+            {m.role === "piggy" ? m.ia ? <PiggyIa m={m} ultimo={i === msgs.length - 1} /> : <PiggySays m={m} /> : m.agente && typeof m.text === "string" ? <ComMencoes t={m.text} /> : m.text}
           </li>
         ))}
       </ol>

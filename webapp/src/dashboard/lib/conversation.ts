@@ -2,8 +2,8 @@ import { createElement, useSyncExternalStore, type ReactNode } from "react";
 import { go } from "../router";
 import { DEMO, answer, type Answer, type TopicId } from "./topics";
 import { agenteDe, ativar, cardDe, conversar, type Acesso, type CardAgente as Cartao, type Encaminhada, type Redirect } from "./agentes";
-import { ErroApi, detalheDe, semSenha, sessaoDe } from "./v2";
-import { PREPARANDO, SESSAO, abortarIa, enviarIa, iaBloqueada, type CamposIa } from "./conversaIa";
+import { ErroApi, detalheDe, escrever, semSenha, sessaoDe } from "./v2";
+import { PREPARANDO, SESSAO, abortarIa, enviarIa, iaBloqueada, type CamposIa, type Motivo } from "./conversaIa";
 import { CardAgente } from "../parts/CardAgente";
 
 // A conversa com o Piggy: vive enquanto a aba está aberta (troca de página não apaga;
@@ -106,6 +106,35 @@ export function contaDaSessao(uid: number | undefined) {
 
 /** A resposta ainda está na conversa: depois de um `await`, a troca de conta pode tê-la limpado. */
 export const naConversa = (id: number) => msgs.some((x) => x.id === id);
+
+interface Pedido { nota: 1 | -1 | null; motivo?: Motivo; texto?: string }
+const estadoDe = (p: Pedido) => ({ feedback: p.nota, motivo: p.nota === -1 ? p.motivo ?? null : null });
+const pendentes = new Map<number, Pedido>(); // o toque que chegou com o POST da bolha em voo: só o último vale (o servidor grava o estado inteiro)
+const PRAZO_AVALIAR_MS = 15_000; // o `comLimite` do app
+
+/** 👍👎 e motivo de uma resposta da IA (o `gravarAvaliacao` do app). A tela muda na hora. Com um POST desta bolha em voo, o toque fica guardado e sai
+ * quando ele termina (null: ainda não gravou); só o resultado do último vale: falhou = volta ao último estado que o servidor confirmou, com aviso.
+ * true = gravou; false = falhou (revertido); null = descartado (sem dono ou messageId) ou guardado. Cada POST tem prazo de 15 s. Troca de conta: `msgs`
+ * zera e o `seq` não volta, então `naConversa` falha e nada mais sai nem chega à conta nova. O `estado` não é tocado: o anunciador do leitor de tela o lê. */
+export async function avaliarIa(id: number, nota: 1 | -1 | null, motivo?: Motivo, texto?: string): Promise<boolean | null> {
+  const m = msgs.find((x) => x.id === id);
+  if (dono == null || !m?.ia || typeof m.messageId !== "number") return null;
+  let atual: Pedido = { nota, motivo, texto };
+  patch(id, { avaliando: true, avisoAvaliar: undefined, ...estadoDe(atual) });
+  if (m.avaliando) { pendentes.set(id, atual); return null; }
+  let confirmado = { feedback: m.feedback ?? null, motivo: m.motivo ?? null }, ok = false;
+  for (;;) {
+    const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), PRAZO_AVALIAR_MS);
+    try { await escrever("POST", `/ai/messages/${m.messageId}/feedback`, atual, ctrl.signal); ok = true; confirmado = estadoDe(atual); } catch { ok = false; } finally { clearTimeout(timer); }
+    if (!naConversa(id)) { pendentes.delete(id); return null; }
+    const prox = pendentes.get(id);
+    if (!prox) break;
+    pendentes.delete(id);
+    atual = prox;
+  }
+  patch(id, ok ? { avaliando: false, avisoAvaliar: atual.texto ? "obrigado" : undefined } : { avaliando: false, ...confirmado, avisoAvaliar: "falha" });
+  return ok;
+}
 
 const nomeDe = (kind: string) => agenteDe(kind)?.nome ?? "agente";
 const SEM_ENERGIA = (kind: string, e?: { custo: number; livre: number }) => e
