@@ -8470,6 +8470,13 @@
         },
         "dias_abaixo_da_reserva": 0,
         "primeiro_dia_abaixo": null,
+        "veredito": {
+          "estado": "sem_risco_identificado",
+          "data": null,
+          "valor": null,
+          "bloqueios": [],
+          "premissa": null
+        },
         "trajetoria": [
           {
             "data": "2026-10-06",
@@ -8848,6 +8855,13 @@
             },
             "dias_abaixo_da_reserva": 0,
             "primeiro_dia_abaixo": null,
+            "veredito": {
+              "estado": "sem_risco_identificado",
+              "data": null,
+              "valor": null,
+              "bloqueios": [],
+              "premissa": null
+            },
             "trajetoria": [
               {
                 "data": "2026-10-06",

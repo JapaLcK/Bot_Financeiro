@@ -83,7 +83,9 @@ migração de contrato próprias.
 ## Contrato da resposta
 
 O cálculo retorna um estado estruturado: `dados_insuficientes`, `dados_desatualizados`,
-`risco_identificado` ou `cabe_nas_premissas`. O veredito e os números essenciais são montados
+`risco_identificado`, `sem_risco_identificado` (nenhum risco achado nos compromissos conhecidos, com a receita fixa prevista contada como certa;
+sem a estimativa do dia a dia como causa de saldo abaixo do limite: **não é "cabe"**, que segue desligado) ou `cabe_nas_premissas` (declarado no contrato, sem caminho que o
+produza até a Etapa 3). O veredito e os números essenciais são montados
 pelo código a partir desse resultado; o modelo pode explicar, mas sua redação não pode inverter
 o estado. A guarda atual, que só registra logs, não basta para isso.
 
@@ -132,8 +134,8 @@ Uma entrada nova no simulador entra nesta tabela antes de entrar no código. Con
 | Conta ou cartão em moeda estrangeira ou desconhecida | quando a Pluggy não manda `currencyCode`, `normalize_pluggy_account()` (`core/services/pluggy_sync.py`) e `save_open_finance_sync()` gravam `BRL`, e a conta fica indistinguível de uma em reais: a moeda desconhecida precisa de marcador próprio e bloqueia como a estrangeira. Além disso, `BANK_ACCOUNTS_SQL` (`db/open_finance.py`) só soma conta em BRL, então uma conta em outra moeda nem conta como banco excluído; e `import_open_finance_credit()` importa a fatura sem guardar a moeda, tratando o valor como reais | dois sentidos | os dois, enquanto houver conta ou cartão ativo fora de BRL ou com moeda desconhecida (sem conversão com cotação datada) |
 | Ação financeira pendente de confirmação | `pending_actions` em aberto que mexe em dinheiro: lançamento aguardando "sim" (inclusive `confirm_media_launch`), pergunta de valor ou de forma de pagamento, e as pendências do chat (`db/ai_chat.py`). O valor ainda não está no saldo e pode entrar | dois sentidos | os dois; com valor quantificado no payload, vale o pior caso da direção, como na conciliação |
 | Receita fixa ativa em frequência fora da projeção | `once`, `weekly` ou `daily` legados: `_cashflow_events()` pula essas receitas | só piora | risco (ou estender a fonte de eventos) |
-| Ocorrência de receita fixa sem realização conhecida | vale para a próxima ocorrência e para **todas** as ocorrências previstas dentro de uma janela de conferência recente (decisão aberta 7), de qualquer período e de qualquer frequência, inclusive várias diárias ou semanais (no dia 2 de janeiro, o salário de 31 de dezembro que não caiu também some). Não há histórico por período (`last_credited_ym` não é escrito e editar a recorrência sobrescreve valor e calendário), e reconstruir desde o `start_date` duplicaria anos já realizados. Por isso, o que foi previsto antes da janela é tratado como já refletido no saldo, e essa premissa aparece na resposta ("considerei que o previsto antes de DD/MM já aconteceu"). A pergunta lista as ocorrências da janela. Antecipada: o salário caiu antes do `pay_day`, já está no saldo e a ocorrência futura entra de novo. No dia ou atrasada: hoje é o `pay_day` ou ele já passou e o salário ainda não caiu, e `_recurring_occurrence_dates()` só emite datas estritamente depois de hoje, então ela some. Não há marcador: receita recorrente só prevê, e `last_credited_ym` é resto do cobrador removido que nada escreve (`db/recurring_income.py`) | dois sentidos | cada veredito no seu pior caso: o "cabe" sem essas ocorrências e o risco com elas (inclusive a de hoje e as atrasadas). Se o veredito depender delas, perguntar se o salário já caiu |
-| Ocorrência de gasto fixo automático sem realização conhecida | mesma janela de conferência: a próxima e todas as previstas dentro dela, inclusive várias diárias ou semanais; o previsto antes dela é premissa declarada na resposta. Antecipada: saiu antes do `due_day`, já está no saldo e a ocorrência futura sai de novo. No dia ou atrasada: hoje é o `due_day` ou ele já passou e a cobrança ainda não saiu, e a ocorrência some pelo mesmo motivo. Não há marcador: `last_charged_ym` também não é escrito (`db/recurring.py`) | dois sentidos | cada veredito no seu pior caso: o risco sem essas ocorrências e o "cabe" com elas (inclusive a de hoje e as atrasadas). Se o veredito depender delas, perguntar se já foi cobrado |
+| Ocorrência de receita fixa sem realização conhecida | vale para a próxima ocorrência e para **todas** as ocorrências previstas dentro de uma janela de conferência recente (decisão aberta 7), de qualquer período e de qualquer frequência, inclusive várias diárias ou semanais (no dia 2 de janeiro, o salário de 31 de dezembro que não caiu também some). Não há histórico por período (`last_credited_ym` não é escrito e editar a recorrência sobrescreve valor e calendário), e reconstruir desde o `start_date` duplicaria anos já realizados. Por isso, o que foi previsto antes da janela é tratado como já refletido no saldo, e essa premissa aparece na resposta ("considerei que o previsto antes de DD/MM já aconteceu"). A pergunta lista as ocorrências da janela. Antecipada: o salário caiu antes do `pay_day`, já está no saldo e a ocorrência futura entra de novo. No dia ou atrasada: hoje é o `pay_day` ou ele já passou e o salário ainda não caiu, e `_recurring_occurrence_dates()` só emite datas estritamente depois de hoje, então ela some. Não há marcador: receita recorrente só prevê, e `last_credited_ym` é resto do cobrador removido que nada escreve (`db/recurring_income.py`) | dois sentidos | cada veredito no seu pior caso: o "cabe" sem essas ocorrências e o risco com elas (inclusive a de hoje e as atrasadas). Se o veredito depender delas, perguntar se o salário já caiu. Janela de conferência = 3 dias (decisão 7): a receita entra no "não recomendo" e só se pergunta quando o risco deixa de existir sem ela; o previsto antes da janela é premissa declarada ("Considerei que o previsto antes de DD/MM já aconteceu.") |
+| Ocorrência de gasto fixo automático sem realização conhecida | mesma janela de conferência: a próxima e todas as previstas dentro dela, inclusive várias diárias ou semanais; o previsto antes dela é premissa declarada na resposta. Antecipada: saiu antes do `due_day`, já está no saldo e a ocorrência futura sai de novo. No dia ou atrasada: hoje é o `due_day` ou ele já passou e a cobrança ainda não saiu, e a ocorrência some pelo mesmo motivo. Não há marcador: `last_charged_ym` também não é escrito (`db/recurring.py`) | dois sentidos | cada veredito no seu pior caso: o risco sem essas ocorrências e o "cabe" com elas (inclusive a de hoje e as atrasadas). Se o veredito depender delas, perguntar se já foi cobrado. Janela de 3 dias: o gasto da janela fica fora do "não recomendo" e vira pergunta (`realizacao_recente_a_conferir`, com as ocorrências) quando a conclusão depende dele |
 | Boleto pendente | pode já ter sido pago pelo banco: o débito aparece no saldo consolidado, mas o `bill_instances.status` segue `pending`, porque a importação do Open Finance não marca conta paga (nenhum módulo de Open Finance escreve em `bill_instances`), e `_cashflow_events()` subtrai o boleto de novo | só piora | risco: calcular sem o boleto; se o risco depender dele, perguntar se já foi pago |
 | Fatura de cartão em aberto | pode já ter sido paga pelo banco: o débito aparece no saldo consolidado, mas a importação do Open Finance pula o pagamento de fatura (`import_open_finance_credit` em `db/open_finance.py`), e só `pay_bill_amount` (`db/cards.py`) atualiza `paid_amount`/`status`. `_open_card_bills_detail()` subtrai o saldo da fatura de novo | só piora | risco: calcular sem essa fatura; se o risco depender dela, perguntar se já foi paga |
 | Calendário do cartão | `get_or_create_open_finance_card()` (`db/cards.py`) usa dia 1 e dia 10 quando a Pluggy não manda `balanceCloseDate`/`balanceDueDate`, não atualiza o calendário de um cartão já ligado e adota um cartão manual sem validar as datas. O calendário pode ser chute ou estar velho, e move tanto as parcelas novas quanto o vencimento das faturas abertas | dois sentidos | os dois, enquanto o calendário não tiver origem conhecida (vindo da Pluggy nesta sincronização ou confirmado pelo usuário); sem isso, perguntar o fechamento e o vencimento |
@@ -146,7 +148,7 @@ Uma entrada nova no simulador entra nesta tabela antes de entrar no código. Con
 | Gasto fixo automático pago no cartão | `payment_type="credit_card"`: `_cashflow_events()` ignora `payment_type` e tira o valor do caixa no `due_day`, e a mesma função tira a fatura aberta no vencimento dela. Depois que a cobrança é lançada no cartão, o valor sai duas vezes; antes, sai na data da cobrança em vez da data de pagar a fatura | só piora (dupla contagem ou saída antecipada) | risco, até esses gastos passarem pelo calendário da fatura sem duplicar |
 | Gasto fixo manual sem boleto gerado | só entra quando o boleto pendente já existe; conferir na implementação se as ocorrências futuras sem boleto ficam fora | só melhora | cabe |
 | Valor estimado | `variable_amount=true` no gasto fixo, exposto por `db/bills.py` e `db/recurring.py`: `_cashflow_events()` ignora a flag e subtrai a estimativa como valor exato, tanto no boleto pendente quanto no gasto fixo automático. A conta real pode vir maior ou menor | dois sentidos | os dois, até o valor ser confirmado |
-| Gasto variável | fora da projeção até a Etapa 3; depois dela, a estimativa é hipótese e pode vir acima do gasto real | ausente: só melhora; estimada: dois sentidos | a estimativa entra só no cálculo do "cabe". O risco é sempre calculado sem ela, o pior caso da direção dele |
+| Gasto variável | fora da projeção até a Etapa 3; depois dela, a estimativa é hipótese e pode vir acima do gasto real | ausente: só melhora; estimada: dois sentidos | o risco é sempre calculado sem ela, o pior caso da direção dele. **Decidido em 2026-10-21:** se só a estimativa leva o saldo abaixo do limite (zero ou a reserva), o veredito é inconclusivo (`dados_insuficientes`, código `gasto_do_dia_a_dia_estimado`, "Com seus gastos do dia a dia de sempre, você fica negativo em DD/MM."; com reserva informada, "abaixo da sua reserva"), nunca `risco_identificado`, e nunca `sem_risco_identificado`. A receita fixa prevista segue contando como certa (`receita_nao_garantida` não bloqueia o "não recomendo" nem o "sem risco"); isso é limite declarado do 4º estado, não aparece na resposta |
 | Saída avulsa futura conhecida | conta grande prevista que não é boleto nem recorrência (matrícula na semana que vem, IPVA): `_cashflow_events()` não inclui gasto avulso futuro | só melhora | cabe: o cenário aceita saídas avulsas datadas, e a Piggy pergunta se há alguma prevista até o fim do horizonte antes de dizer "cabe"; a informada na conversa entra no cálculo |
 | Entrada avulsa futura informada | dinheiro que o usuário diz que vai entrar e que não é receita recorrente (restituição, venda, reembolso): `_cashflow_events()` pula receita `once`, e a entrada pode não vir ou atrasar | dois sentidos | cada veredito no seu pior caso: o risco é calculado com ela, e o "cabe" sem ela, salvo se o usuário a confirmar como garantida |
 | Custos da oferta ausentes | frete, IOF, seguro, tarifa ou CET não informados | só melhora | cabe |
@@ -286,17 +288,40 @@ paralelo.
 
 1. Qual reserva mínima usar se o usuário nunca informou uma? Bloqueia o "cabe" e o
    `risco_identificado` baseado em reserva (sem ela, só vale o risco de saldo negativo).
+   **Decidido em 2026-10-20: sem reserva informada, o risco é só o saldo negativo (`< 0`); com a
+   reserva R informada, ficar abaixo de R é risco.**
 2. Que cobertura e método de estimativa de gasto variável bastam, especialmente com cartão e Open
    Finance juntos? Bloqueia o "cabe".
 3. Qual sincronização máxima do Open Finance conta como saldo confiável? Bloqueia a Etapa 1.
+   **Decidido em 2026-10-20: 48 h, que é `db.patrimonio.BANCO_VELHO` (fonte única; o veredito
+   não mede idade, só lê o motivo `banco_desatualizado`).**
 4. Até que prazo há dados confiáveis para orientar e qual é o limite de parcelas?
 5. Qual tier e teto de custo permitem print de oferta? Política igual entre WhatsApp e web.
 6. Que métrica de uso do print justifica o cliente de desktop, e qual sistema vem primeiro?
 7. Qual é o tamanho da janela de conferência das ocorrências recorrentes (ex.: 7 dias, ou desde a
    última confirmação do saldo)? Bloqueia a Etapa 1.
+   **Decidido em 2026-10-20: 3 dias (`JANELA_CONFERENCIA_DIAS`, `cashflow_contract.py`). No pior
+   caso do "não recomendo", a receita da janela entra e o gasto da janela sai; só se pergunta
+   quando a resposta muda a conclusão. O previsto antes da janela é tratado como já refletido
+   no saldo, e a resposta diz isso (`veredito.premissa`).**
 
 ## Faixa do time-dev
 Etapas 1 a 4: **Completo** (dinheiro; o print também envolve gate de plano pago e PII).
+
+## Estado da Etapa 1, PR 3a (servidor)
+
+Revisão do plano (dono, 2026-10-21): a linha 5 da máquina do veredito passa a incluir a estimativa do
+dia a dia. Se só ela leva o saldo abaixo do limite, o bloqueio é `gasto_do_dia_a_dia_estimado` (sem `itens`,
+`dados_insuficientes`: atualizar não resolve). Caso misto, também do dono (2026-10-21, "Perguntar e avisar"): com
+dúvida datada, fica inconclusivo e a resposta pergunta das dúvidas que decidem; o aviso do dia a dia só aparece
+quando a estimativa sozinha, contando as dúvidas a favor (o pior caso do risco + a estimativa), já leva abaixo
+do limite, e então vem JUNTO com as dúvidas, sem substituí-las. Receita fixa prevista continua certa.
+
+`POST /api/v2/simulador` devolve `veredito` no `atual` e em cada cenário (`core/services/veredito.py`,
+chave `SIMULADOR_VEREDITO_ENABLED`, padrão ligada). A tool do chat (3b) e as telas (3c) ainda não o
+leem. **Alcance:** conta com banco conectado sempre sai `dados_insuficientes`, porque a snapshot
+emite `cobertura_bancaria_nao_comprovada` (dois sentidos) em toda conta com banco; isso só muda nos
+PRs 4a a 4d, que trocam o motivo estrutural por checagem real.
 
 ## Fontes no repositório
 `core/services/decision_simulator.py`, `core/services/cashflow.py`,

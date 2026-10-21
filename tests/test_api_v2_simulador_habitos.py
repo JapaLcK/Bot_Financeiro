@@ -108,7 +108,9 @@ def test_atual_do_habito_e_o_atual_do_simulador_de_compra(uid, dia_fixo):
     com_historico(uid, dia_fixo, mercado=600)
     h = ok(uid, corte(("mercado", 20)))["atual"]
     r = post_compra(uid, {"reserva_minima": "0", "cenarios": [{"nome": "x", "preco": "1"}]})
-    assert r.status_code == 200 and r.json()["atual"] == h
+    # o `atual` da compra ganhou o `veredito` (PR 3a); o do hábito não, porque veredito de compra num corte seria errado
+    assert r.status_code == 200 and {k: v for k, v in r.json()["atual"].items() if k != "veredito"} == h
+    assert "veredito" not in h
 
 
 # ── isolamento ──────────────────────────────────────────────────────────────

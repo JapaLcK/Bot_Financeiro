@@ -586,8 +586,15 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`msg` fixo "Valor inválido."). Um teste enumera os `raise ValueError` do modelo e falha se algum não tiver código.
   As `premissas` da resposta são as da snapshot (as mesmas da Previsão, inclusive a do banco quando há) mais `PREMISSAS_V2` (escritas para a pessoa), não a `PREMISSAS` da tool; um teste liga as duas listas regra a regra (§0.7). Resposta: dinheiro em texto, `atual` e cada cenário com
   `saldo_final`, `pior_dia`, dias abaixo da reserva e `trajetoria` diária (hoje..hoje+90, 91 pontos: um a mais
-  que a da Previsão, que começa amanhã), `delta_vs_atual`, `contrato`. `cabe_nas_premissas` é sempre false e
-  `orientacao` sempre `abster`: sem veredito. Não grava nada. A tela é `#/simulador/compra`
+  que a da Previsão, que começa amanhã), `delta_vs_atual`, `contrato`. `cabe_nas_premissas` do topo é sempre false e
+  `orientacao` sempre `abster` (legado). O **veredito** (`core/services/veredito.py`, texto dos bloqueios em `TEXTO`) sai no `atual` e em
+  cada cenário: `risco_identificado` ("não recomendo", com `data` e `valor` do pior dia no pior caso), `dados_insuficientes`,
+  `dados_desatualizados` e `sem_risco_identificado` (não é "cabe": `cabe_nas_premissas` está no enum e nenhum caminho o produz). O pior caso
+  é `cashflow.pior_caso_do_risco` (sem a estimativa nem as saídas duvidosas); se o risco só existe contando as dúvidas, o estado é
+  inconclusivo e os `bloqueios[].itens` listam o que perguntar. Se só a estimativa do dia a dia (com as dúvidas a favor) leva abaixo do limite, é
+  `dados_insuficientes` com `gasto_do_dia_a_dia_estimado` (nunca `risco_identificado`), junto com as perguntas das dúvidas que decidem, se houver; a receita fixa prevista conta como certa. Janela de conferência (`JANELA_CONFERENCIA_DIAS`,
+  `Snapshot.conferencia`, fora de `qualidade()`). Chave `SIMULADOR_VEREDITO_ENABLED` (padrão ligada, lida uma vez por pedido, `veredito.ligado`): desligada, `veredito` sai `null`. A tool `simulate_purchase` (3b) e as telas (3c) ainda não o leem. **Com banco conectado o veredito é sempre
+  inconclusivo** (`cobertura_bancaria_nao_comprovada`, até os PRs 4a a 4d). Não grava nada. A tela é `#/simulador/compra`
   (`widgets/SimuladorCompra.tsx`, fora do protótipo e do menu lateral; entra pela ferramenta "Vale a pena
   comprar?"). O `atual` inclui a estimativa do dia a dia (mediana, ver Previsão); em aberto: o corte de hábito real
   por categoria. No app: folha `app/(app)/simulador-compra.tsx` (`features/painel/simuladorCompra.ts`,
