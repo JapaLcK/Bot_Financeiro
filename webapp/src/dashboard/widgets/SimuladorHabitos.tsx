@@ -56,6 +56,8 @@ function Resultado({ d, full }: { d: Resposta; full: boolean }) {
   );
 }
 
+// Só chave própria: uma categoria chamada "constructor" ou "toString" não pode ler o protótipo do objeto.
+const de = (m: Cortes, k: string) => (Object.prototype.hasOwnProperty.call(m, k) ? m[k] : 0);
 const PRIMEIRO = <p className="sim-prompt">Arraste um controle para ver quanto sobra por mês.</p>;
 const GENERICO = "Não deu para calcular agora.";
 const MUDOU = "Seus gastos do dia a dia mudaram. Ajuste de novo.";
@@ -78,7 +80,7 @@ export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean
   const est = dados?.estimativa_variavel ?? null;
   const cats = (est?.categorias ?? []).slice(0, full ? undefined : MAX_NO_RESUMO);
   // Só chaves da estimativa atual, na ordem dela, e só com corte: sem nenhum, não há POST nem resultado.
-  const lista = cats.filter((c) => cortes[c.chave] > 0).map((c) => ({ categoria: c.chave, percentual: cortes[c.chave] }));
+  const lista = cats.filter((c) => de(cortes, c.chave) > 0).map((c) => ({ categoria: c.chave, percentual: de(cortes, c.chave) }));
   const corpo: RotasPost["/simulador/habitos"]["corpo"] | null = lista.length ? { cortes: lista } : null;
   const q = useQuery({
     queryKey: ["simulador-habitos", dados?.calculado_em, corpo], // a versão do snapshot: previsão relida com as mesmas chaves não reaproveita o resultado velho
@@ -108,7 +110,7 @@ export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean
   else alavancas = (
     <div className="levers">
       {cats.map((c) => (
-        <Alavanca key={c.chave} c={c} valor={rascunho[c.chave] ?? 0}
+        <Alavanca key={c.chave} c={c} valor={de(rascunho, c.chave)}
           mexe={(v) => setRascunho((r) => ({ ...r, [c.chave]: v }))}
           solta={(v) => { setAvisoMudou(false); setCortes((x) => ({ ...x, [c.chave]: v })); }} />
       ))}

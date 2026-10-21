@@ -277,3 +277,21 @@ test("Piggy notou no Resumo real: a ação não promete um corte que o simulador
   assert.equal(pedidos.length, 0); // nenhum corte aplicado
   await ctx.close();
 });
+
+test("categoria com nome de propriedade do protótipo (constructor) começa em 0% e vai no corpo", async () => {
+  const base = RESPOSTAS.previsao.pro90_com_estimativa;
+  const comProto = { ...base, estimativa_variavel: { ...base.estimativa_variavel, categorias: [...base.estimativa_variavel.categorias, { chave: "constructor", nome: "Constructor", despesa_mensal: "10.00" }] } };
+  const r = await abrirPainel(browser, { ...BASE });
+  const pedidos = [];
+  await r.ctx.route("**/api/v2/previsao*", (rt) => rt.fulfill({ json: comProto }));
+  await r.ctx.route("**/api/v2/simulador/habitos", (rt) => { pedidos.push(rt.request().postDataJSON()); return rt.fulfill({ json: OK }); });
+  await r.ir("/simulador");
+  const l = r.page.locator(".lever-habito", { hasText: "Constructor" });
+  await l.waitFor();
+  assert.equal(await l.locator("input[type=range]").inputValue(), "0");
+  assert.match(await l.innerText(), /0%/);
+  await tecla(r.page, "Constructor", 1);
+  await r.page.locator(".sim-facts").waitFor();
+  assert.deepEqual(pedidos.at(-1), { cortes: [{ categoria: "constructor", percentual: 10 }] });
+  await r.ctx.close();
+});

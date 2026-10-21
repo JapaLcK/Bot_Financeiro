@@ -47,6 +47,13 @@ it("cortes de várias categorias vão juntos: o 2º POST leva Mercado e Transpor
  await abrir(); await soltar("Corte em Transporte", 50); await soltar("Corte em Mercado", 30);
  expect(corpo(posts()[1]!)).toEqual({ cortes: [{ categoria: "mercado", percentual: 30 }, { categoria: "transporte", percentual: 50 }] });
 });
+it("categoria com nome de propriedade do protótipo (constructor) começa em 0 e vai no corpo", async () => {
+ const base = V2.previsao.pro90_com_estimativa as { estimativa_variavel: { categorias: unknown[] } };
+ previsao = { ...base, estimativa_variavel: { ...base.estimativa_variavel, categorias: [...base.estimativa_variavel.categorias, { chave: "constructor", nome: "Constructor", despesa_mensal: "10.00" }] } };
+ await abrir(); expect(screen.getByLabelText("Corte em Constructor").props.value).toBe(0);
+ await soltar("Corte em Constructor", 30);
+ expect(corpo(posts()[0]!)).toEqual({ cortes: [{ categoria: "constructor", percentual: 30 }] });
+});
 it("Zerar aborta o que está no ar, limpa o resultado e volta os sliders a 0", async () => {
  const lenta = segurar(); habitos = async () => { await lenta.promessa; return resposta(200, RESP); };
  await abrir(); await soltar("Corte em Mercado", 50);

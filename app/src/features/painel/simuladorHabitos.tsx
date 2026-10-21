@@ -18,6 +18,8 @@ import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 
 type Res = z.output<typeof S.simuladorHabitosSchema>;
 const MUDOU = "Seus gastos do dia a dia mudaram. Ajuste de novo.";
+// Só chave própria: uma categoria chamada "constructor" ou "toString" não pode ler o protótipo do objeto.
+const de = (m: Record<string, number>, k: string) => (Object.prototype.hasOwnProperty.call(m, k) ? m[k]! : 0);
 const passo = (v: number) => Math.round(v / 10) * 10; // o slider nativo entrega qualquer número: o passo é 10 e o corpo só leva inteiro
 const mudouDeCategoria = (e: unknown) => e instanceof ErroDeApi && e.status === 422 && ((e.corpo as { error?: { details?: { type?: unknown }[] } } | null | undefined)?.error?.details ?? []).some((d) => d?.type === "categoria_fora_da_estimativa");
 
@@ -39,7 +41,7 @@ export function SimuladorHabitos() {
   useEffect(() => { if (v === null || bloco) return; if (versao.current !== null && versao.current !== v) { limpar(); setFalha((f) => (f === MUDOU ? f : null)); } versao.current = v; }, [v, bloco]);
   async function soltou(categorias: { chave: string }[], chave: string, v: number) {
     const novo = { ...cortes, [chave]: v };
-    const lista = categorias.filter((c) => (novo[c.chave] ?? 0) > 0).map((c) => ({ categoria: c.chave, percentual: novo[c.chave]! }));
+    const lista = categorias.filter((c) => de(novo, c.chave) > 0).map((c) => ({ categoria: c.chave, percentual: de(novo, c.chave) }));
     setCortes(novo); setFalha(null);
     op.current?.controlador.abort(); // o 2º toque cancela o 1º: a resposta velha nunca chega à tela
     if (!lista.length) { op.current = null; setRes(null); return; }
@@ -58,7 +60,7 @@ export function SimuladorHabitos() {
     if (!categorias) return <Vazio texto="Ainda sem histórico para estimar." />;
     return <View style={{ gap: 8 }}>
       {categorias.map((c, i) => {
-        const corte = cortes[c.chave] ?? 0, linha = res?.cortes.find((x) => x.chave === c.chave);
+        const corte = de(cortes, c.chave), linha = res?.cortes.find((x) => x.chave === c.chave);
         return <View key={c.chave}>
           <View style={{ flexDirection: "row", flexWrap: ampliado ? "wrap" : "nowrap", justifyContent: "space-between", alignItems: "center", columnGap: 8 }}>
             <Texto variante="rotulo" numberOfLines={ampliado ? undefined : 1} style={{ flexShrink: 1 }}>{c.nome}</Texto>
