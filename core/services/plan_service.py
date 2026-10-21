@@ -23,6 +23,7 @@ frontend/finance_bot_websocket_custom.py para evitar import circular com
 _get_current_user — ela usa os helpers daqui.
 """
 
+import logging
 import os
 from datetime import date, datetime, timedelta, timezone
 
@@ -38,6 +39,8 @@ from .plan_limits import (
     limits_for_tier,
     tier_at_least,
 )
+
+logger = logging.getLogger(__name__)
 
 # Valores aceitos na coluna auth_accounts.plan e o tier v2 correspondente.
 _STORED_PLAN_TO_TIER = {
@@ -319,6 +322,32 @@ def agents_ui_enabled(user_id: int, email: str | None = None) -> bool:
     if (os.getenv("AGENTS_UI_ENABLED") or "").strip().lower() in ("0", "false", "no", "off"):
         return agents_beta_tester(user_id, email)
     return True
+
+
+_chat_ia_avisado: str | None = None  # a env ruim que já foi avisada: o aviso sai uma vez por valor, não a cada /me
+
+
+def painel_chat_ia(user_id: int) -> bool:
+    """Freio do chat com a IA no /painel: só os user_id listados em PAINEL_CHAT_IA_USER_IDS
+    (ids separados por vírgula, lida a cada chamada). Ausente, vazia ou sem nenhum id válido =
+    NINGUÉM (desligado por padrão, ao contrário do `agents_ui_enabled`). Token que não é inteiro
+    ASCII de até 18 dígitos é ignorado, com um aviso (uma vez por valor da env) que diz só quantos,
+    nunca o valor. O limite de 18 evita o ValueError do `int()` em dígitos demais (/me e /guia viravam 500)."""
+    global _chat_ia_avisado
+    raw = os.getenv("PAINEL_CHAT_IA_USER_IDS") or ""
+    ids, ruins = set(), 0
+    for tok in raw.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        if tok.isascii() and tok.isdigit() and len(tok) <= 18:
+            ids.add(int(tok))
+        else:
+            ruins += 1
+    if ruins and raw != _chat_ia_avisado:
+        logger.warning("PAINEL_CHAT_IA_USER_IDS: %d token(s) ignorado(s) (não são ids)", ruins)
+    _chat_ia_avisado = raw if ruins else None
+    return int(user_id) in ids
 
 
 # Allowlist padrão do beta da lista completa de bancos (modal com busca). Mesma

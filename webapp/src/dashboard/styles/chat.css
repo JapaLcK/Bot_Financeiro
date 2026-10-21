@@ -150,3 +150,12 @@ body[data-mencoes] .chat-follow { visibility: hidden; }
 @keyframes carga-brilho { to { background-position: 0 0; } }
 @keyframes rv-entra { from { opacity: 0; filter: blur(4px); transform: translateY(4px); } }
 @keyframes rv-acoes { from { opacity: 0; visibility: hidden; } } /* hidden: sem foco nem clique enquanto invisíveis; visível assim que o fade começa */
+
+/* A resposta do Piggy quando o chat vai à IA (parts/PiggyIa.tsx, parts/TextoPiggy.tsx). Grid e não flex gap (Safari 14). */
+.msg-ia { display: grid; gap: 10px; }
+.msg-ia p { white-space: pre-line; } /* as quebras de linha de dentro do parágrafo são do servidor */
+.msg-ia ul { display: grid; gap: 4px; padding-left: 20px; list-style: disc; }
+.msg-bloco, .msg-nota, .chat-uso { font-size: 13px; color: var(--ink-3); }
+.chat-uso { margin-top: 12px; }
+.chat-uso a { color: var(--pink-ink); text-decoration: underline; text-underline-offset: 2px; font-weight: 600; }
+.askbar-stop { display: inline-block; vertical-align: middle; width: 12px; height: 12px; border-radius: 2px; background: currentColor; }

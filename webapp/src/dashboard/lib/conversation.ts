@@ -2,13 +2,15 @@ import { createElement, useSyncExternalStore, type ReactNode } from "react";
 import { go } from "../router";
 import { DEMO, answer, type Answer, type TopicId } from "./topics";
 import { agenteDe, ativar, cardDe, conversar, type Acesso, type CardAgente as Cartao, type Encaminhada, type Redirect } from "./agentes";
-import { ErroApi } from "./v2";
+import { ErroApi, detalheDe, semSenha, sessaoDe } from "./v2";
+import { PREPARANDO, SESSAO, abortarIa, enviarIa, iaBloqueada, type CamposIa } from "./conversaIa";
 import { CardAgente } from "../parts/CardAgente";
 
 // A conversa com o Piggy: vive enquanto a aba está aberta (troca de página não apaga;
 // recarregar começa de novo). Guardar histórico é fase posterior, com backend.
-export type EstadoAgente = "enviando" | "pronto" | "erro" | "inativo" | "sem_energia" | "sem_plano";
-export interface Msg extends Partial<Omit<Answer, "text">> {
+// `parou` e `cota` são só da IA (lib/conversaIa.ts).
+export type EstadoAgente = "enviando" | "pronto" | "erro" | "inativo" | "sem_energia" | "sem_plano" | "parou" | "cota";
+export interface Msg extends Partial<Omit<Answer, "text">>, CamposIa {
   id: number; role: "user" | "piggy"; text: ReactNode;
   // Conversa com um agente (@): `agente` é o kind (na bolha do usuário, o que ela destaca); o resto é o estado da resposta.
   agente?: string; estado?: EstadoAgente; redirects?: Redirect[]; pergunta?: string; repetir?: boolean;
@@ -36,6 +38,13 @@ const metas = (t: string) => { const n = semAcento(t); return /\bmetas?\b/.test(
 // (que passa pelo `contaDaSessao`); no protótipo, nada a conferir.
 let conferirConta: () => Promise<unknown> = () => Promise.resolve();
 export const aoConferirConta = (f: () => Promise<unknown>) => { conferirConta = f; };
+// O freio do chat com a IA (`chat_ia` do /me): main.tsx liga a leitura do cache e a releitura do /me. Desligado, `ask` é o de sempre (protótipo, assuntos reais, atalhos).
+// A conta pode ter mudado na conferência, ou a troca ter sido percebida antes (foco) com o /me novo ainda em voo: o do cache é da anterior,
+// então o freio que vale é o relido (falhou = desligado). `velho` diz que o /me do cache está nesse intervalo.
+let chatIa: () => boolean = () => false;
+let reler: () => Promise<boolean> = () => Promise.resolve(false);
+let velho: () => boolean = () => false;
+export const aoSaberChatIa = (f: () => boolean, releitura: () => Promise<boolean>, desatualizado: () => boolean) => { chatIa = f; reler = releitura; velho = desatualizado; };
 let perguntando = false; // a conferência em voo segura um 2º toque (chip, faixa do Piggy) até a pergunta entrar
 /** Há uma pergunta esperando a conta ser conferida: o chat mostra "Carregando a conversa…" em vez de nada (Codex no #1157). */
 export const usePerguntando = () => useSyncExternalStore((f) => { subs.add(f); return () => subs.delete(f); }, () => perguntando);
@@ -45,18 +54,35 @@ export const usePerguntando = () => useSyncExternalStore((f) => { subs.add(f); r
  * conferir, entra assim mesmo: o PiggyChat não mostra a conversa sem conta conferida. */
 export function ask(q: { text: string; topic?: TopicId | null; cat?: string | null; key?: string }) {
   if (perguntando) return false; // falso = a pergunta não entrou (o texto fica na barra)
+  if (chatIa() && iaBloqueada()) { go("/piggy"); return false; } // um turno por vez, e sem cota não há o que enviar
   perguntando = true;
+  const antes = dono;
   const conferindo = conferirConta().catch(() => {});
   subs.forEach((f) => f());
   go("/piggy"); // já: com a conta lenta, o chat mostra que a pergunta está a caminho
-  void conferindo.then(() => {
+  void conferindo.then(async () => {
+    // Ligado, TUDO vai à IA: texto livre, chip, faixa do Piggy; `topic`, `key` e os assuntos reais ficam de fora. O freio é lido DEPOIS da
+    // conferência: se a conta mudou, o do cache era da anterior e mandaria a conta nova à IA sem ela estar na lista.
+    const ia = chatIa() && (dono !== antes || velho()) ? await reler().catch(() => false) : chatIa(); // desligado no cache: o lado seguro, sem esperar o /me
     perguntando = false;
+    if (ia) return perguntarIa(q.text);
     const topic = q.topic ?? (investido(q.text) ? "investido" : metas(q.text) ? "metas" : null);
     const a = topic ? answer(topic, q.cat ?? null, q.key) : DEMO;
     msgs = [...msgs, { id: ++seq, role: "user", text: q.text }, { id: ++seq, role: "piggy", ...a }];
     subs.forEach((f) => f());
   });
   return true;
+}
+
+/** O turno da IA: a bolha do usuário e a do Piggy entram já, a do Piggy se atualiza por id enquanto o stream chega (lib/conversaIa.ts).
+ * Sem conta conferida (`dono` vazio) nada sai: o POST lê o usuário da sessão, e a conversa é de uma conta só. */
+function perguntarIa(texto: string) {
+  const bolha = ++seq, resp = ++seq;
+  msgs = [...msgs, { id: bolha, role: "user", text: texto },
+    { id: resp, role: "piggy", ia: true, real: true, estado: "enviando", text: PREPARANDO, passos: [], parcial: "", blocos: [] }];
+  notifica();
+  if (dono == null) { patch(resp, { estado: "erro", text: SESSAO }); return; }
+  void enviarIa(texto, (p) => { if (naConversa(resp)) patch(resp, p); });
 }
 
 // --- Conversa com um agente (@Nome na barra) ---
@@ -74,7 +100,7 @@ const patch = (id: number, p: Partial<Msg>) => { msgs = msgs.map((m) => (m.id ==
 let dono: number | undefined;
 export function contaDaSessao(uid: number | undefined) {
   if (uid == null) return;
-  if (dono != null && dono !== uid) { msgs = []; contextos.clear(); emVoo.clear(); notifica(); }
+  if (dono != null && dono !== uid) { msgs = []; contextos.clear(); emVoo.clear(); abortarIa(); notifica(); }
   dono = uid;
 }
 
@@ -92,17 +118,7 @@ const estadoSemChat = (kind: string, acesso: Exclude<Acesso, "ready">, e?: { cus
   : { estado: "inativo", text: INATIVO(kind, e) };
 
 const CODIGO_ACESSO: Record<string, Exclude<Acesso, "ready">> = { activate: "activate", upgrade: "upgrade", no_energy: "no_energy" };
-const detalheDe = (e: unknown): { error?: string; message?: string; retryable?: boolean } => {
-  const d = (e instanceof ErroApi ? (e.corpo as { detail?: unknown } | undefined)?.detail : undefined);
-  return d && typeof d === "object" ? d : {};
-};
-
 const SEM_SENHA = "Crie sua senha para conversar com os agentes. Depois de criar, volte para o painel novo.";
-/** `/agents/*` fica fora do `/api/v2`: o corpo real é `{"detail":{"error":"password_required"}}`; `code` cobre o envelope v2. */
-const semSenha = (e: unknown) => e instanceof ErroApi && (e.code === "password_required" || detalheDe(e).error === "password_required");
-const SESSAO = "Sua sessão terminou. Recarregue a página.";
-// Sessão/CSRF: o mesmo TEXTO de MetasResposta/InvestidoResposta, critério próprio (401 e 403 sem `error` de objeto, que cobre o CSRF `{"detail": "Token CSRF…"}` e o "Acesso negado para este usuário" da troca de conta em outra aba). Repetir não adianta. Vale no chat e no "Ativar e responder".
-const sessaoDe = (e: unknown) => e instanceof ErroApi && (e.status === 401 || (e.status === 403 && !detalheDe(e).error));
 
 async function enviar(id: number, kind: string, texto: string, uid: number, encaminhada?: Encaminhada) {
   emVoo.set(`${uid}:${kind}`, id);
