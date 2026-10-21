@@ -1,4 +1,5 @@
-import { StyleSheet, Text } from "react-native";
+import { act } from "@testing-library/react-native";
+import { Dimensions, StyleSheet, Text } from "react-native";
 
 import { Texto } from "@/ui/componentes/Texto";
 import { texto as escalas } from "@/ui/tokens";
@@ -70,5 +71,23 @@ describe("Texto", () => {
     const corClara = claro.getByText("x").props.style.find((s: { color?: string }) => s?.color)?.color;
     const corEscura = escuro.getByText("x").props.style.find((s: { color?: string }) => s?.color)?.color;
     expect(corClara).not.toBe(corEscura);
+  });
+
+  it("Dynamic Type ao vivo recria o nó do texto, e só quando a escala muda", async () => {
+    // Medida velha corta o rótulo ("Mês" vira "Mê") quando a troca de fonte
+    // coincide com um commit do React; o nó novo é medido do zero.
+    const janela = Dimensions.get("window");
+    const janelaCom = (fontScale: number, width = janela.width) => act(async () => { Dimensions.set({ window: { ...janela, width, fontScale } }); });
+    try {
+      await janelaCom(1);
+      const { claro } = renderNosDoisTemas(<Texto>Mês</Texto>);
+      const antes = claro.getByText("Mês");
+      await janelaCom(1, janela.width + 100); // gira/redimensiona: re-renderiza, mas a escala é a mesma
+      expect(claro.getByText("Mês")).toBe(antes);
+      await janelaCom(1.3);
+      expect(claro.getByText("Mês")).not.toBe(antes);
+    } finally {
+      await act(async () => { Dimensions.set({ window: janela }); });
+    }
   });
 });
