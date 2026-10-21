@@ -184,6 +184,8 @@ for (const width of [1280, 1440]) {
     await corpo.waitFor();
     const m = await corpo.evaluate((c) => ({ rola: c.scrollHeight > c.clientHeight, tabindex: c.getAttribute("tabindex"), nome: c.getAttribute("aria-label") }));
     assert.deepEqual(m, { rola: true, tabindex: "0", nome: "Comparação do mês" });
+    // o nome só vale com papel: `aria-label` em `generic` é proibido (ARIA 1.2); o par é parts/PotesTabela.tsx
+    assert.equal(await page.getByRole("region", { name: "Comparação do mês" }).count(), 1);
     let tabs = 0;
     while (tabs++ < 80 && !(await corpo.evaluate((c) => c === document.activeElement))) await page.keyboard.press("Tab");
     assert.ok(tabs <= 80, "o Tab não chegou ao corpo");

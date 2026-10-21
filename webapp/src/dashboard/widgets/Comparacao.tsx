@@ -50,7 +50,7 @@ function Corpo({ d }: { d: Dados }) {
     return <div className="empty"><i className="ph ph-clock-counter-clockwise" aria-hidden="true" /><p>O mês anterior está fora do histórico do seu plano.</p></div>;
   }
   return (
-    <div className="cmp-corpo" tabIndex={0} aria-label="Comparação do mês">
+    <div className="cmp-corpo" role="region" tabIndex={0} aria-label="Comparação do mês">
       <p className="w-lede cmp-lede">{d.escolha}</p>
       <ul className="cats cmp-totais" aria-label="Totais">
         <Linha nome="Saiu" l={d.despesa} bom={-1} antes={antes} aberto={aberto} />
