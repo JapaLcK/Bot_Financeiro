@@ -10,10 +10,11 @@ export const FrameScope = createContext("");
 
 // Moldura comum dos widgets: título, ação à direita e corpo. Bloco que não é `real` (o dado
 // ainda é inventado) leva o selo "demonstração"; no protótipo, todos levam.
-export function Frame({ id, title, aside, children, className = "", real = false }: {
+export function Frame({ id, title, aside, info, children, className = "", real = false }: {
   id: string;
   title: ReactNode;
   aside?: ReactNode;
+  info?: ReactNode; // o <Info> do bloco: logo depois do título, fora do h2
   children: ReactNode;
   className?: string;
   real?: boolean;
@@ -22,11 +23,12 @@ export function Frame({ id, title, aside, children, className = "", real = false
   const key = `${useContext(FrameScope)}w-${id}`;
   return (
     <article className={`w ${className}`} id={key} aria-labelledby={`${key}-h`} data-dado={real && !DEMO ? "real" : "exemplo"}>
-      <header className="w-head">
+      <header className={`w-head${info ? " w-head-info" : ""}`}>
         <h2 id={`${key}-h`} className="w-title">
           <span>{title}</span>
           {(!real || DEMO) && <Demonstracao />}
         </h2>
+        {info}
         {aside && <div className="w-aside">{aside}</div>}
         {to && (
           <a className="w-open" href={href(to)} aria-label={`Abrir ${route(to).label}`}>

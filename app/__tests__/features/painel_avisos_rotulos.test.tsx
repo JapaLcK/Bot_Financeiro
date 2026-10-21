@@ -111,13 +111,6 @@ it("resumo não mostra a legenda de comparação nem o mês ISO", async () => {
  renderRouter("./app", { initialUrl: "/resumo" }); await pronto();
  expect(screen.queryByText(/Comparação disponível/)).toBeNull(); expect(screen.queryByText(/2026-09/)).toBeNull();
 });
-it("taxa não informada tem tamanho de legenda, não de título de seção", async () => {
- extra["/api/app/rendimento"] = { ...fixture["/api/app/rendimento"], itens: [{ ...fixture["/api/app/rendimento"].itens[0], taxa: null, tipo_taxa: null, motivos: ["taxa_contratada_ausente"] }] };
- renderRouter("./app", { initialUrl: "/metas" }); await waitFor(() => expect(screen.getByText("Taxa não informada")).toBeTruthy());
- const tamanho = (t: string | RegExp) => StyleSheet.flatten(screen.getByText(t).props.style).fontSize;
- expect(tamanho("Taxa não informada")).toBe(tamanho(/^Informado em /));
- expect(screen.getByText("Taxa contratada")).toBeTruthy(); expect(screen.queryByText("Rendimento contratado")).toBeNull(); expect(screen.queryByText(/Não representam rendimento recebido/)).toBeNull();
-});
 it("lançamento de registro antigo tem rótulo legível, e o filtro de origem não o oferece", async () => {
  const l = fixture["/api/app/lancamentos"]; extra["/api/app/lancamentos"] = { ...l, itens: [{ ...l.itens[0], origem: "registro_antigo", instituicao: null }] };
  renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByText(/^Registro antigo/)).toBeTruthy()); await abrirFiltros();

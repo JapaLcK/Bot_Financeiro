@@ -9,6 +9,7 @@ import type { Point } from "../lib/types";
 import { ErroApi, previsaoQuery } from "../lib/v2";
 import { CRIAR_SENHA } from "../parts/Entrada";
 import { Frame } from "../parts/Frame";
+import { Info } from "../parts/Info";
 import { Seg } from "../parts/Seg";
 import { MotivosPrevisao, Selos } from "../parts/Selos";
 import { Compromissos, ConvitePro, ddmm, saida, valorOc } from "./Compromissos";
@@ -132,7 +133,8 @@ export function PrevisaoHero({ p, id }: { p: Estado; id: string }) {
         options={opcoes.map((n) => ({ value: String(n), label: `${n} dias` }))} />
     : opcoes.length === 1 ? <span className="w-lede">{opcoes[0]} dias</span> : null;
   return (
-    <Frame id={id} title="Saldo previsto" className="w-hero" real aside={aside}>
+    <Frame id={id} title="Saldo previsto" className="w-hero" real aside={aside}
+      info={d && <Info rotulo="Como esta previsão foi feita"><ComoFoiFeita d={d} /></Info>}>
       {aviso && <p role="status" className="w-lede">{aviso}</p>}
       {e4 ? <Bloqueio e={e4} />
         : !d ? (q.isError && !q.isFetching
@@ -166,15 +168,17 @@ export const PrevisaoCard = () => <PrevisaoHero p={usePrevisao()} id="hero" />;
 function Estimativa({ e }: { e: EstimativaVariavel }) {
   const max = Math.max(...e.categorias.map((c) => medida(c.despesa_mensal)), 0) || 1;
   return (
-    <ul className="cats">
-      {e.categorias.map((c) => (
-        <li key={c.chave} className="cat-est">
-          <span className="cat-name"><span className="cat-nome">{c.nome}</span></span>
-          <span className="cat-val num">{saida(c.despesa_mensal) ?? "indisponível"}</span>
-          <span className="cat-track" aria-hidden="true"><span className="cat-fill" style={{ background: "var(--ink-3)", transform: `scaleX(${medida(c.despesa_mensal) / max})` }} /></span>
-        </li>
-      ))}
-    </ul>
+    <Frame id="previsao-gastos" title={GASTOS_DIA_A_DIA} real>
+      <ul className="cats">
+        {e.categorias.map((c) => (
+          <li key={c.chave} className="cat-est">
+            <span className="cat-name"><span className="cat-nome">{c.nome}</span></span>
+            <span className="cat-val num">{saida(c.despesa_mensal) ?? "indisponível"}</span>
+            <span className="cat-track" aria-hidden="true"><span className="cat-fill" style={{ background: "var(--ink-3)", transform: `scaleX(${medida(c.despesa_mensal) / max})` }} /></span>
+          </li>
+        ))}
+      </ul>
+    </Frame>
   );
 }
 
@@ -184,23 +188,16 @@ function ComoFoiFeita({ d }: { d: Previsao }) {
     : b.origem === "consolidated" ? `Carteira + ${b.contas_bancarias} ${b.contas_bancarias === 1 ? "conta" : "contas"} do Open Finance`
     : "sem saldo de partida";
   return (
-    <Frame id="previsao-qualidade" title="Como esta previsão foi feita" real>
+    <>
       <div className="prev-base">
-        <p><span className="selo">{ESTADO[d.estado] ?? d.estado}</span></p>
         <p className="w-lede">Saldo de partida: {origem}{b.bancos_excluidos && " · bancos conectados fora do cálculo"}</p>
         <Selos motivos={b.motivos} />
       </div>
       {d.motivos.length > 0 && <><h3 className="prev-h">Por que é condicional</h3><MotivosPrevisao motivos={d.motivos} /></>}
-      {d.estimativa_variavel && (
-        <>
-          <h3 className="prev-h">{GASTOS_DIA_A_DIA}</h3>
-          <Estimativa e={d.estimativa_variavel} />
-        </>
-      )}
       <h3 className="prev-h">Premissas</h3>
       <ul className="premissas">{d.premissas.map((t) => <li key={t}>{t}</li>)}</ul>
       {d.cobertura.janela_conferencia_inicio && <p className="w-lede">Conferência desde {ddmm(d.cobertura.janela_conferencia_inicio)}</p>}
-    </Frame>
+    </>
   );
 }
 
@@ -217,8 +214,8 @@ export function PrevisaoPainel() {
       <div className="panel span-12"><PrevisaoHero p={p} id="previsao" /></div>
       {d && (
         <>
-          <div className="panel span-7"><Compromissos grupos={d.compromissos} dias={d.dias} hoje={d.hoje} /></div>
-          <div className="panel span-5"><ComoFoiFeita d={d} /></div>
+          <div className={`panel ${d.estimativa_variavel ? "span-7" : "span-12"}`}><Compromissos grupos={d.compromissos} dias={d.dias} hoje={d.hoje} /></div>
+          {d.estimativa_variavel && <div className="panel span-5"><Estimativa e={d.estimativa_variavel} /></div>}
           <RespondidasDoBanco lista={d.receitas_do_banco ?? []} />
         </>
       )}
