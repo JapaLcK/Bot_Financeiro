@@ -245,6 +245,31 @@ def calcular(cur, user_id: int) -> dict:
     }
 
 
+# Estados em que a conexão sai do total: o `_TERMINAL` visto pelo `connection_ui_state`.
+_FORA_DO_TOTAL = ("paused", "removed")
+
+
+def _marca(base):
+    try:
+        return (base["v"],
+                frozenset(k for k, e in base["conexoes"].items() if e not in _FORA_DO_TOTAL),
+                frozenset(base["contas"]), frozenset(base["posicoes"]), base["fora"]["moeda"])
+    except (TypeError, KeyError, AttributeError):
+        return None  # base ilegível
+
+
+def quebra(a, b) -> bool:
+    """True se a linha do patrimônio não emenda entre as `base` de dois pontos consecutivos.
+
+    Posição sozinha não quebra (CDB/resgate); conexão viva que muda sem as posições
+    mudarem também não (reconexão por item novo, mesmos ids). Base ilegível isola o ponto."""
+    x, y = _marca(a), _marca(b)
+    if x is None or y is None:
+        return True
+    (v1, viv1, c1, p1, m1), (v2, viv2, c2, p2, m2) = x, y
+    return v1 != v2 or m1 != m2 or c1 != c2 or (viv1 != viv2 and p1 != p2)
+
+
 def gravar_foto(user_id: int, dia: date) -> bool:
     """Grava a foto do dia, se ainda não houver. False = não gravou.
 

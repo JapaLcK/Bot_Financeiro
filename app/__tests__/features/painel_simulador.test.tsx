@@ -2,6 +2,7 @@ jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({ __esModule
 import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { Dimensions, StyleSheet, View } from "react-native";
 import { CORES_CATEGORIA } from "@/ui/tokens";
+import * as haptics from "@/ui/haptics";
 import { guardarCredenciais } from "@/storage/secure";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
@@ -42,6 +43,20 @@ it("a base é a estimativa da previsão; arrastar não envia; soltar envia UM PO
  expect(screen.getByText("Sobra por mês")).toBeTruthy(); expect(screen.getByLabelText("mais 12 reais e 34 centavos")).toBeTruthy();
  expect(screen.getByLabelText("mais 9 reais e 99 centavos")).toBeTruthy(); // economia da categoria, vinda da resposta
  expect(screen.getByText("Com corte")).toBeTruthy(); expect(screen.getByText("Sem corte")).toBeTruthy();
+});
+it("haptic: um tique a cada passo novo de 10 no arraste, nenhum no mesmo passo nem ao recomeçar do valor em que parou", async () => {
+ await abrir(); const tique = jest.spyOn(haptics, "selecao");
+ await mover("Corte em Mercado", 33.7); expect(tique).toHaveBeenCalledTimes(1); // 0 -> 30
+ await mover("Corte em Mercado", 34.9); expect(tique).toHaveBeenCalledTimes(1); // ainda 30
+ await mover("Corte em Mercado", 41); expect(tique).toHaveBeenCalledTimes(2); // 30 -> 40
+ await soltar("Corte em Mercado", 41);
+ await mover("Corte em Mercado", 38); expect(tique).toHaveBeenCalledTimes(2); // novo arraste a partir de 40: ainda 40
+ await mover("Corte em Transporte", 4); expect(tique).toHaveBeenCalledTimes(2); // outra categoria, de 0 a 0
+ await mover("Corte em Transporte", 6); expect(tique).toHaveBeenCalledTimes(3); // 0 -> 10
+ await soltar("Corte em Transporte", 0); tique.mockClear();
+ await act(async () => { for (const v of [31, 32, 33, 34]) fireEvent(screen.getByLabelText("Corte em Mercado"), "valueChange", v); }); // rajada num só render: o estado ainda não chegou
+ expect(tique).toHaveBeenCalledTimes(1);
+ await mover("Corte em Mercado", NaN); await mover("Corte em Mercado", 500); expect(tique).toHaveBeenCalledTimes(2); // NaN ignorado; 500 prende em 100 (um tique)
 });
 it("cortes de várias categorias vão juntos: o 2º POST leva Mercado e Transporte, na ordem da estimativa (não na do toque)", async () => {
  await abrir(); await soltar("Corte em Transporte", 50); await soltar("Corte em Mercado", 30);
