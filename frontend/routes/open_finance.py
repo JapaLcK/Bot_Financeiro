@@ -2695,13 +2695,19 @@ class BankMovementUndo(BaseModel):
     transaction_id: int  # o par que o cliente viu (CAS)
 
 
+class BankMovementCash(BaseModel):
+    launch_id: int
+    carteira_launch_id: int | None = None  # presente = selecionar esse lançamento; ausente = converter
+
+
 @router.get("/open-finance/{user_id}/movements")
 @shared.limiter.limit("60/minute")
 async def bank_movements_route(request: Request, user_id: int, launch_id: int | None = None):
     shared.authorize_dashboard_access(request, user_id)
     from db.bank_conferencia import list_bank_movements
+    from db.accounts import get_balance
     rows = await asyncio.to_thread(list_bank_movements, user_id, launch_id)
-    return {"ok": True, "movements": rows}
+    return {"ok": True, "movements": rows, "wallet_balance": float(await asyncio.to_thread(get_balance, user_id))}
 
 
 async def _bank_movement_action(user_id, fn, *args):
@@ -2732,6 +2738,14 @@ async def bank_movement_undo_route(request: Request, user_id: int, body: BankMov
     shared.authorize_dashboard_access(request, user_id)
     from db.bank_conferencia import undo_bank_movement
     return await _bank_movement_action(user_id, undo_bank_movement, body.launch_id, body.transaction_id)
+
+
+@router.post("/open-finance/{user_id}/movements/cash")
+@shared.limiter.limit("30/minute")
+async def bank_movement_cash_route(request: Request, user_id: int, body: BankMovementCash):
+    shared.authorize_dashboard_access(request, user_id)
+    from db.bank_dinheiro import foi_em_dinheiro
+    return await _bank_movement_action(user_id, foi_em_dinheiro, body.launch_id, body.carteira_launch_id)
 
 
 # `shared_limit(scope=)` e não `limit()`: com o `key_style="url"` do slowapi cada

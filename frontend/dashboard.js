@@ -9045,6 +9045,10 @@ function closeLaunchDetail() {
   }
 }
 
+const _cashDeclarationWhen = c => new Date(c.declarada_em).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: APP_TZ });
+const _cashDeclarationAlvo = c => String(c.alvo ?? "").trim() || "sem descrição";  // alvo NULL (ex.: "gastei 50") não vira "null"
+const _cashDeclarationText = c => `${_cashDeclarationWhen(c)}: ${_cashDeclarationAlvo(c)}, ${fmt(Number(c.valor))}${String(c.nota ?? "").trim() ? ` - ${c.nota}` : ""}`;
+
 function _renderLaunchDetail(l) {
   _ensureLaunchDetailModal();
   const typeLabel = (l.is_internal_movement && INTERNAL_LABELS[l.tipo])
@@ -9056,6 +9060,8 @@ function _renderLaunchDetail(l) {
   if (l.categoria) rows.push(["Categoria", l.categoria]);
   if (l.is_internal_movement) rows.push(["Movimentação", "interna"]);
   rows.push(["Data", fmtLaunchWhen(l)]);
+  // "Foi em dinheiro" (ADR 0006): a declaração do banco que foi associada a este lançamento da Carteira.
+  if (l.cash_declaration) rows.push(["Declarada pelo banco", _cashDeclarationText(l.cash_declaration)]);
   document.getElementById("ld-meta").innerHTML = rows.map(([k, v]) =>
     `<div class="ld-row"><span class="ld-k">${escapeHtmlSafe(k)}</span>` +
     `<span class="ld-v">${escapeHtmlSafe(String(v))}</span></div>`
@@ -9282,7 +9288,7 @@ function _launchDetailDelete() {
   _forgetCategoryLaunches(false);
   closeLaunchDetail();
   const descTxt = describeLaunch(l).replace(/<[^>]+>/g, "").trim();
-  confirmDeleteLaunch(l.id, descTxt, l.valor, l.tipo === "credito", l.installments_total || null);
+  confirmDeleteLaunch(l.id, descTxt, l.valor, l.tipo === "credito", l.installments_total || null, l.cash_declaration);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -9759,7 +9765,7 @@ document.getElementById("edit-launch-overlay").addEventListener("click", e => {
 });
 
 let deleteLaunchInFlight = false;
-async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false, installmentsTotal = null) {
+async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false, installmentsTotal = null, cashDeclaration = null) {
   if (deleteLaunchInFlight) return;
   if (!launchId) return;
   const _returnToHistory = (_editDeleteReturnTo === "history");
@@ -9772,7 +9778,8 @@ async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false,
     ? (isInstallment
         ? `${desc}${valFmt ? ` · ${valFmt}` : ""}\n\nEsta compra faz parte de um parcelamento em ${installmentsTotal}x. **TODAS as ${installmentsTotal} parcelas** serão apagadas. Essa ação não pode ser desfeita.`
         : `${desc}${valFmt ? ` · ${valFmt}` : ""}\n\nA compra será removida da fatura. Essa ação não pode ser desfeita.`)
-    : `${desc}${valFmt ? ` · ${valFmt}` : ""}\n\nO efeito no saldo (e em caixinhas/investimentos, se houver) será revertido. Essa ação não pode ser desfeita.`;
+    : `${desc}${valFmt ? ` · ${valFmt}` : ""}\n\nO efeito no saldo (e em caixinhas/investimentos, se houver) será revertido. Essa ação não pode ser desfeita.` +
+      (cashDeclaration ? `\n\nEste lançamento está associado à declaração de ${_cashDeclarationAlvo(cashDeclaration)}, ${fmt(Number(cashDeclaration.valor))}, de ${_cashDeclarationWhen(cashDeclaration)}. Apagar remove os dois registros.` : "");
 
   const ok = await confirmModal(body, {
     title: isCredit ? "Apagar compra no crédito" : "Apagar lançamento",

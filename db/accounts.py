@@ -1366,7 +1366,7 @@ _EFEITOS_REVERSIVEIS = frozenset({
     "investment_lot_create", "investment_lot_withdrawals",
     # informativas: ficam só no histórico, não há efeito a desfazer
     "funding_source", "tax_summary", "investment_meta",
-    "ofx", "open_finance", "time_known", "of_original",
+    "ofx", "open_finance", "time_known", "of_original", "foi_em_dinheiro",
 })
 
 # Classificadas e DE FORA da allowlist de propósito: são gravadas
