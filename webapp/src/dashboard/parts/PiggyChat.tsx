@@ -8,11 +8,14 @@ import type { TopicId } from "../lib/topics";
 import { FrameScope } from "./Frame";
 import { LiveAnswer } from "./LiveAnswer";
 import { ICON, agenteImg } from "../lib/brand";
-import { DEMO, contaQuery, lerContaFresca, perfilQuery } from "../lib/v2";
+import { DEMO, contaQuery, lerContaFresca, perfilQuery, useChatIa } from "../lib/v2";
+import { SEM_COTA, useIa } from "../lib/conversaIa";
 import { Demonstracao } from "./Selos";
 import { Anuncio } from "./InvestidoResposta";
 import { Carregando } from "./Carregando";
 import { PainelChat } from "./PainelChat";
+import { PiggyIa } from "./PiggyIa";
+import { semNegrito } from "./TextoPiggy";
 import { useMedia } from "../useMedia";
 
 const TRAVA_MS = 500; // a fileira nova ignora o toque por esse tempo: mais que o intervalo de um duplo toque, menos que ler a resposta
@@ -147,6 +150,7 @@ function PiggySays({ m }: { m: Msg }) {
 export function PiggyChat() {
   const msgs = useConversation();
   const perguntando = usePerguntando();
+  const chatIa = useChatIa(), ia = useIa(); // com o freio ligado a conversa vai à IA: sugestões sem o filtro de assunto, e "N de M" perto do fim da cota
   // O perfil é o do Board: com backend, o do servidor; no protótipo, o que main.tsx semeou do navegador.
   const perfil = useQuery(perfilQuery);
   // Nome como no app (nomeDe): nome → parte do e-mail antes do @ → "Você". Sem a conta lida (carregando, erro, protótipo), só "Olá".
@@ -228,7 +232,7 @@ export function PiggyChat() {
       const agora = m.estado ?? "pronto";
       if (estados.get(m.id) === agora) continue;
       estados.set(m.id, agora);
-      if (agora !== "enviando") { fila.push({ id: m.id, text: m.text ?? null }); novas++; }
+      if (agora !== "enviando") { fila.push({ id: m.id, text: m.ia && typeof m.text === "string" ? semNegrito(m.text) : m.text ?? null }); novas++; }
     }
     // Sem cleanup aqui: uma bolha de outro agente entrando em "Preparando…" não cancela o anúncio pendente. Sem novidade, só sai
     // a fila que sobrou de uma desmontagem (a resposta terminou e o usuário saiu antes dos 60 ms).
@@ -243,18 +247,19 @@ export function PiggyChat() {
 
   const mine = ((BY_PROFILE as Record<string, Prompt[]>)[perfil.data?.perfil ?? "padrao"] ?? []);
   // Enquanto o perfil carrega, sem sugestões: os chips não trocam embaixo do dedo.
-  const ideas = perfil.isPending ? [] : [...mine, ...(COMMON as Prompt[])].filter((p) => p.ask && p.topic).slice(0, 5);
+  const ideas = perfil.isPending ? [] : [...mine, ...(COMMON as Prompt[])].filter((p) => p.ask && (chatIa || p.topic)).slice(0, 5);
   // O chip que o guia destaca (parts/Guia.tsx): o do gasto do mês, se estiver entre as sugestões.
   const guia = Math.max(0, ideas.findIndex((p) => p.key === "normal"));
   const lastMsg = msgs[msgs.length - 1];
   const chips = !msgs.length
     ? ideas.map((p, i) => ({ key: p.key, label: p.ask!, topic: p.topic, cat: p.cat, guia: i === guia }))
+    : lastMsg.ia ? (lastMsg.estado === "pronto" ? lastMsg.chips ?? [] : []).map((label) => ({ key: label, label, topic: undefined, cat: undefined, guia: false })) // os chips do `fim` do último turno
     : (lastMsg.follow ?? []).map((f) => ({ key: f.key, label: f.label, topic: f.topic, cat: f.cat, guia: false }));
   // Uma fileira fixa acima da barra (chat.css), com as sugestões do chat vazio ou as próximas perguntas da última resposta.
   // `key` por resposta: a fileira nova começa do início, sem herdar a rolagem lateral da anterior (Codex no #1136).
   const fileira = !!chips.length && (
     <ul key={msgs.length} className="chat-follow" aria-label={msgs.length ? "Próximas perguntas" : "Sugestões"} inert={reconferindo} data-reconferindo={reconferindo || undefined}>
-      {chips.map((c) => <li key={c.label}><button type="button" className="chip" data-guia={c.guia ? "piggy.chip" : undefined} onClick={() => { if (performance.now() - desde.current >= TRAVA_MS) ask({ text: c.label, topic: c.topic, cat: c.cat, key: c.key }); }}>{c.label}</button></li>)}
+      {chips.map((c) => <li key={c.label}><button type="button" className="chip" disabled={chatIa && ia.cheia} data-guia={c.guia ? "piggy.chip" : undefined} onClick={() => { if (performance.now() - desde.current >= TRAVA_MS) ask({ text: c.label, topic: c.topic, cat: c.cat, key: c.key }); }}>{c.label}</button></li>)}
     </ul>
   );
 
@@ -297,10 +302,13 @@ export function PiggyChat() {
         {msgs.map((m, i) => (
           <li key={m.id} id={`msg-${m.id}`} tabIndex={-1} ref={i === msgs.length - 2 ? end : undefined} className={m.role === "user" ? "msg-user" : "msg-piggy"}
             data-dado={m.role === "user" ? undefined : m.real && !DEMO ? "real" : "exemplo"}>
-            {m.role === "piggy" ? <PiggySays m={m} /> : m.agente && typeof m.text === "string" ? <ComMencoes t={m.text} /> : m.text}
+            {m.role === "piggy" ? m.ia ? <PiggyIa m={m} /> : <PiggySays m={m} /> : m.agente && typeof m.text === "string" ? <ComMencoes t={m.text} /> : m.text}
           </li>
         ))}
       </ol>
+      {/* Cota cheia: o envio à IA fica desligado (parts/AskBar.tsx) e a barra não diz por quê, então o aviso mora aqui (a resposta 403 já traz o dela). */}
+      {chatIa && ia.cheia && msgs[msgs.length - 1]?.estado !== "cota" ? <p className="chat-uso" role="status">{SEM_COTA} <a href="/precos">Ver planos</a></p>
+        : chatIa && ia.uso && ia.uso.used * 5 >= ia.uso.limit * 4 && !ia.cheia && <p className="chat-uso">{ia.uso.used} de {ia.uso.limit} mensagens</p>}
       {fileira}
       {painel(msgs)}
     </>

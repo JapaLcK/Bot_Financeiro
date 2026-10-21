@@ -59,7 +59,7 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Conversa | De exemplo (`CHAT_REAL = false`); só o assunto `investido` é real | Real (`/ai/chat/stream`, feedback, cancelar pendência) | — | Web | a discutir com o dono |
+| Conversa | Atrás do freio `PAINEL_CHAT_IA_USER_IDS` (lista de user_id; ausente = ninguém): ligado, texto em `/ai/chat/stream` (Etapa 7 PR 1); desligado, de exemplo, só `investido` e `metas` reais | Real (`/ai/chat/stream`, feedback, cancelar pendência) | — | Web | a discutir com o dono |
 | Cards no chat | Renderiza cards de exemplo montados no cliente (`lib/topics.tsx`), não os que o servidor manda | Renderiza os cards reais que o servidor manda (período, caixinhas, metas, gastos e os blocos do catálogo) | O web não lê os cards do servidor | Web | a discutir com o dono |
 | Guia do Piggy e dicas | `Guia.tsx`, `Dica.tsx` | Não há | — | App | a discutir com o dono |
 

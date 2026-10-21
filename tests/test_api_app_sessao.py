@@ -33,7 +33,7 @@ def test_assinante_sem_beta_le_e_escreve_perfil_sem_cookie():
     uid = completo(usuario_pagante())
     c = cliente(uid)
     assert not c.cookies
-    assert c.get("/api/app/me").json() == {"plan_tier": "plus", "agents_ui_enabled": True}
+    assert c.get("/api/app/me").json() == {"plan_tier": "plus", "agents_ui_enabled": True, "chat_ia": False}
     # TestClient guarda o Set-Cookie de CSRF do pai. O app usa credentials:omit
     # e não envia essa jar; não simular aqui um navegador com cookie.
     c.cookies.clear()
@@ -76,7 +76,7 @@ def test_carencia_real_abre_e_marco_sem_banco_nao_e_revogado():
     em_carencia(uid)
     completo(uid)
     r = cliente(uid).get("/api/app/me")
-    assert (r.status_code, r.json()) == (200, {"plan_tier": "free", "agents_ui_enabled": True})
+    assert (r.status_code, r.json()) == (200, {"plan_tier": "free", "agents_ui_enabled": True, "chat_ia": False})
 
 
 def test_banco_sincronizado_no_site_promove_marco_e_remocao_nao_revoga():

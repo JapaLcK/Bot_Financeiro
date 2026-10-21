@@ -5,7 +5,8 @@ import type { Path } from "../router";
 import { ICON } from "../lib/brand";
 import { AGENTES, acessoDe, agentesQuery, energiaDe, mencaoDe, mencoes, semAcento, tokenEm } from "../lib/agentes";
 import { uidValido } from "../conta/api";
-import { CHAT_REAL, DEMO, contaQuery, lerContaFresca } from "../lib/v2";
+import { DEMO, contaQuery, lerContaFresca, useChatIa } from "../lib/v2";
+import { pararIa, useIa } from "../lib/conversaIa";
 import { GRUPO, GRUPOS, Mencoes, type ItemMencao } from "./Mencoes";
 
 // A barra de conversa com o Piggy. No desktop flutua em todas as páginas; no celular só
@@ -22,6 +23,7 @@ export function AskBar({ path }: { path: Path }) {
   const input = useRef<HTMLInputElement>(null);
   const depois = useRef<number | null>(null); // onde o cursor fica depois de inserir a menção
   const here = path === "/piggy";
+  const chatIa = useChatIa(), ia = useIa(), parando = chatIa && ia.ocupado; // com um turno da IA em voo o botão para a resposta; com a cota cheia o Enviar desliga (aviso em PiggyChat); `@agente` segue liberado nos dois (cota própria)
   // Trocar de página fecha a lista (como o Esc): no celular a barra some fora do /piggy e a lista ficaria solta sobre a página nova.
   const [rota, setRota] = useState(path);
   if (rota !== path) { setRota(path); setFechada(true); }
@@ -114,7 +116,7 @@ export function AskBar({ path }: { path: Path }) {
   return (<>
     {aberta && <Mencoes aqui={here} itens={itens} ativo={marcado} onAtivo={setAtivo} onEscolher={escolher} />}
     <form className="askbar" data-here={here || undefined} role="search" aria-label="Conversa com o Piggy"
-      data-guia="piggy.pergunta" data-dado={CHAT_REAL ? "real" : "exemplo"}
+      data-guia="piggy.pergunta" data-dado={chatIa ? "real" : "exemplo"}
       onSubmit={async (e) => {
         e.preventDefault();
         const t = text.trim();
@@ -149,8 +151,12 @@ export function AskBar({ path }: { path: Path }) {
         onBlur={(e) => { if (e.relatedTarget) setFechada(true); }} // o foco foi a outro controle (teclado, leitor de tela); sem alvo é a janela ou um toque, que o pointerdown cobre
         role="combobox" aria-expanded={aberta} aria-controls="mencoes-lista" aria-autocomplete="list" aria-activedescendant={aberta ? `mencao-${marcado}` : undefined}
         placeholder="Converse com o Piggy…" aria-label="Pergunte ao Piggy" autoComplete="off" enterKeyHint="send" />
-      <button type="submit" className="askbar-send" aria-label="Enviar" disabled={!text.trim()}>
-        <i className="ph ph-arrow-up" aria-hidden="true" />
+      {/* O mesmo botão nos dois papéis (o foco não se perde na troca). Sem ícone de "parar" no subset do Phosphor: o quadrado é CSS.
+          Parar cancela o padrão do clique: o abort libera o turno antes do clique acabar, o botão já é "submit" e enviaria o texto do campo.
+          `detail >= 2` é o 2º toque de um duplo clique no Enviar, que cai no Parar recém-trocado; teclado (Enter/Espaço) dá 0. */}
+      <button type={parando ? "button" : "submit"} className="askbar-send" aria-label={parando ? "Parar resposta" : "Enviar"} disabled={!parando && (!text.trim() || (chatIa && ia.cheia && !quer))}
+        onClick={parando ? (e) => { e.preventDefault(); if (e.detail < 2) pararIa(); } : undefined}>
+        {parando ? <span className="askbar-stop" aria-hidden="true" /> : <i className="ph ph-arrow-up" aria-hidden="true" />}
       </button>
     </form>
   </>);
