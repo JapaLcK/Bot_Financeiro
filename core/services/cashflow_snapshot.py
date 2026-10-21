@@ -173,7 +173,9 @@ def ler(cur, user_id: int, today: date, until: date, now: datetime,
                     continue
                 s.conferencia.append(Ocorrencia('receita_recorrente' if income else 'gasto_recorrente',
                     r['id'], d.isoformat(), d, 'receita' if income else 'gasto_fixo', r['name'], valor,
-                    'entrada' if income else 'saida', realizacao='a_conferir'))
+                    'entrada' if income else 'saida', realizacao='a_conferir',
+                    motivos=(Motivo('valor_recorrente_estimado', 'ambos', r['id']),)
+                    if not income and r.get('variable_amount') else ()))
             for d in futuras:
                 b = by_cycle.get((r['id'], d)) if not income else None
                 if b:

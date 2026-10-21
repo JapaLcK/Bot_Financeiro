@@ -4,6 +4,7 @@ Só V2c e V9 são puros: o estado que provam não é alcançável com dado real 
 carrega `cobertura_bancaria_nao_comprovada`). A Carteira nasce de lançamento verificável: o saldo
 sem lançamento a deixa "não confirmada" e tudo vira inconclusivo.
 """
+import json
 import re
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal as D
@@ -512,3 +513,28 @@ def test_receita_a_conferir_de_ontem_tambem_pergunta_e_nao_acusa_o_dia_a_dia():
     v = ver.veredito(_puro(100, 10, [receita]), [], 0, 90)
     assert v["estado"] == "dados_insuficientes" and [b["codigo"] for b in v["bloqueios"]] == [ver.DUVIDA_RECENTE]
     assert v["bloqueios"][0]["itens"] == [{"nome": "Salário", "data": ontem.isoformat()}]
+
+
+# ── fixo de valor estimado que só tem ocorrência na janela de conferência (sem futura nos 90 dias) ──
+
+def _janela_estimada(u, variavel):
+    d = hoje() - timedelta(days=1)  # `once` vencido ontem: só a janela o vê
+    create_recurring_expense(u, "Luz fixa", 100, "outros", d.day, "account", frequency="once", start_date=d,
+                             variable_amount=variavel)
+
+
+def test_fixo_estimado_so_na_janela_bloqueia_com_valor_recorrente_estimado(novo):
+    u = novo(500)
+    _janela_estimada(u, True)
+    r = rodar(u, cen(preco="10"))
+    v = v_cen(r)
+    assert v["estado"] == "dados_insuficientes" and codigos(v) == ["valor_recorrente_estimado"]
+    # /previsao não ganha o motivo (só o veredito lê a janela)
+    from tests.test_api_v2_previsao import ok as previsao
+    assert "valor_recorrente_estimado" not in json.dumps(previsao(u))
+
+
+def test_fixo_sem_valor_estimado_so_na_janela_segue_sem_risco(novo):
+    u = novo(500)
+    _janela_estimada(u, False)
+    assert v_cen(rodar(u, cen(preco="10")))["estado"] == "sem_risco_identificado"

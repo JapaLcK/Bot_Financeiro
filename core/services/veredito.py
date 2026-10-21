@@ -107,9 +107,11 @@ def veredito(snapshot: Snapshot, extra: list[Ocorrencia], reserva, dias: int) ->
     if snapshot.base["saldo"] is None:
         return saida("dados_insuficientes", {"saldo_indisponivel": []})
     # A janela substitui `realizacao_passada_desconhecida` (continua bloqueando o `project()`).
-    estrutural = cashflow.estruturais(snapshot.motivos, {"realizacao_passada_desconhecida"})
+    # Motivos da janela (valor estimado de um fixo que só tem ocorrência nela) não vão a `snapshot.motivos`: só o veredito os lê.
+    estrutural = cashflow.estruturais([*snapshot.motivos, *(m for e in snapshot.conferencia for m in e.motivos)],
+                                      {"realizacao_passada_desconhecida"})
     if estrutural:
-        return falta({m.codigo: [] for m in estrutural})
+        return falta({c: [] for c in dict.fromkeys(m.codigo for m in estrutural)})
 
     limite = centavos(reserva)
     eventos = [*snapshot.ocorrencias, *snapshot.conferencia, *extra]
