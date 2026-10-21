@@ -65,7 +65,7 @@ def test_patrimonio_publico_reusa_calculo_sem_double_count_e_sem_ids(uid):
 
 
 def test_patrimonio_historico_so_fotos_existentes_e_janela(uid, monkeypatch):
-    import api.nativo.patrimonio as rota
+    import api.v2.patrimonio as rota
 
     ontem = today_tz() - timedelta(days=1)
     antigo = ontem - timedelta(days=365)
