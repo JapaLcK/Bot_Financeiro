@@ -193,6 +193,23 @@ test("422 categoria_fora_da_estimativa: relê a previsão, avisa e não mostra n
   await ctx.close();
 });
 
+test("422 com a categoria que sumiu da previsão relida: o aviso fica até a pessoa mexer de novo", async () => {
+  const resposta = (n, rt) => rt.fulfill(n === 1 ? env(422, "validation_error", [{ loc: ["body", "cortes", 0, "categoria"], msg: "Valor inválido.", type: "categoria_fora_da_estimativa" }]) : { json: OK });
+  const { page, ctx } = await abrir({ resposta });
+  await page.locator(".lever-habito").first().waitFor();
+  const base = RESPOSTAS.previsao.pro90_com_estimativa;
+  const semMercado = { ...base, calculado_em: "2026-10-06T15:05:00Z", estimativa_variavel: { ...base.estimativa_variavel, categorias: base.estimativa_variavel.categorias.filter((c) => c.chave !== "mercado") } };
+  await ctx.route("**/api/v2/previsao*", (rt) => rt.fulfill({ json: semMercado }));
+  await tecla(page, "Mercado", 1);
+  await page.locator(".lever-habito", { hasText: "Mercado" }).waitFor({ state: "detached" }); // a releitura tirou a categoria
+  await page.waitForTimeout(300);
+  assert.equal(await page.getByText("Seus gastos do dia a dia mudaram. Ajuste de novo.").count(), 1);
+  await tecla(page, "Lazer", 1);
+  await page.locator(".sim-facts").waitFor();
+  assert.equal(await page.getByText("Seus gastos do dia a dia mudaram. Ajuste de novo.").count(), 0);
+  await ctx.close();
+});
+
 test("falha genérica: mensagem curta e nenhum número; depois do erro um 200 mostra os números", async () => {
   const resposta = (n, rt) => rt.fulfill(n === 1 ? env(500, "internal_error") : { json: OK });
   const { page, ctx } = await abrir({ resposta });

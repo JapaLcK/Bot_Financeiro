@@ -58,6 +58,7 @@ function Resultado({ d, full }: { d: Resposta; full: boolean }) {
 
 const PRIMEIRO = <p className="sim-prompt">Arraste um controle para ver quanto sobra por mês.</p>;
 const GENERICO = "Não deu para calcular agora.";
+const MUDOU = "Seus gastos do dia a dia mudaram. Ajuste de novo.";
 
 export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean }) {
   const pro = usePlan() === "pro";
@@ -72,6 +73,8 @@ export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean
   const dados = comCard ? doCard : prev.data;
   const [rascunho, setRascunho] = useState<Cortes>({});
   const [cortes, setCortes] = useState<Cortes>({});
+  // O aviso do 422 sobrevive à releitura (a categoria some da lista, o corpo muda e o erro vai junto): só sai quando a pessoa mexe de novo.
+  const [avisoMudou, setAvisoMudou] = useState(false);
   const est = dados?.estimativa_variavel ?? null;
   const cats = (est?.categorias ?? []).slice(0, full ? undefined : MAX_NO_RESUMO);
   // Só chaves da estimativa atual, na ordem dela, e só com corte: sem nenhum, não há POST nem resultado.
@@ -88,7 +91,7 @@ export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean
   useEffect(() => {
     if (!e) return;
     if (e.status === 401 || e.status === 402) void qc.refetchQueries({ queryKey: meQuery.queryKey }); // o portão decide
-    if (mudou) void qc.invalidateQueries({ queryKey: ["previsao"] }); // sem retentativa aqui: a releitura traz outro `calculado_em` (chave nova) e o corpo só leva categorias da estimativa nova, então é um POST, sem laço
+    if (mudou) { setAvisoMudou(true); void qc.invalidateQueries({ queryKey: ["previsao"] }); } // sem retentativa aqui: a releitura traz outro `calculado_em` (chave nova) e o corpo só leva categorias da estimativa nova, então é um POST, sem laço
   }, [e, mudou, qc]);
 
   const titulo = full ? "Seus gastos do dia a dia" : "Simulador";
@@ -107,7 +110,7 @@ export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean
       {cats.map((c) => (
         <Alavanca key={c.chave} c={c} valor={rascunho[c.chave] ?? 0}
           mexe={(v) => setRascunho((r) => ({ ...r, [c.chave]: v }))}
-          solta={(v) => setCortes((x) => ({ ...x, [c.chave]: v }))} />
+          solta={(v) => { setAvisoMudou(false); setCortes((x) => ({ ...x, [c.chave]: v })); }} />
       ))}
     </div>
   );
@@ -116,9 +119,10 @@ export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean
   if (corpo && e) {
     saida = e.code === "pro_required" ? <ConvitePro texto="O simulador é do Pro." />
       : e.code === "password_required" ? <a className="btn btn-primary" href={CRIAR_SENHA.href}>{CRIAR_SENHA.texto}</a>
-      : <p role="alert" className="warn">{mudou ? "Seus gastos do dia a dia mudaram. Ajuste de novo." : GENERICO}</p>;
+      : <p role="alert" className="warn">{mudou ? MUDOU : GENERICO}</p>;
   } else if (corpo && q.data) saida = <div className="hab-res" aria-busy={q.isPlaceholderData}><Resultado d={q.data} full={full} /></div>;
   else if (corpo) saida = <p className="w-lede">Calculando…</p>;
+  if (avisoMudou && !(corpo && mudou)) saida = <><p role="alert" className="warn">{MUDOU}</p>{saida}</>;
 
   if (!full) return <Frame id={id} title={titulo} real>{alavancas}<div className="sim-out" aria-live="polite">{est && saida}</div></Frame>;
   return (
