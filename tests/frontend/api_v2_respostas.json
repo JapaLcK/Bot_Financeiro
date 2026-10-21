@@ -7663,14 +7663,16 @@
           "nome": "mercado",
           "despesa_mensal": "600.00",
           "percentual": 50,
-          "economia_mensal": "300.00"
+          "economia_mensal": "300.00",
+          "valor_pedido": null
         },
         {
           "chave": "lazer",
           "nome": "lazer",
           "despesa_mensal": "300.00",
           "percentual": 10,
-          "economia_mensal": "30.00"
+          "economia_mensal": "30.00",
+          "valor_pedido": null
         }
       ],
       "atual": {

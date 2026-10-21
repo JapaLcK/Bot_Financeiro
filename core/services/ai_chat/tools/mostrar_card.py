@@ -22,6 +22,7 @@ from utils_date import now_tz
 from .. import streaming
 from .._context import CARDS_DO_TURNO, CATEGORIAS_NAO_ACHADAS_DO_TURNO, FALHAS_DE_CARD_DO_TURNO, JANELAS_DO_TURNO, metas_do_turno
 from ..cards import IDS, MAX_CATEGORIA, MAX_MESES, MAX_MESES_PERIODO, MAX_POR_TURNO, TOOLS_DE_TEXTO, CardIndisponivel, montar
+from ..cards_corte import MAX_CORTES, PedidoInvalido, validar_cortes
 from ._base import Tool
 from .launches import _AVISO_12, _AVISO_FIM
 
@@ -142,8 +143,15 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         elif pedido:
             limitado, fim_cortado, extra = pedido["meses"], pedido["fim"], pedido["pedido"]
 
+    bruto = args.get("cortes")
+    if card != "simulador" and bruto:
+        return _erro("cortes_so_no_simulador", "cortes só vale para o card simulador. Chame show_card simulador, ou omita cortes.")
     try:
-        bloco, visao = montar(card, user_id, {"meses": meses if card in _COM_MES else [],
+        cortes = validar_cortes(bruto) if card == "simulador" else []
+    except PedidoInvalido as e:
+        return _erro(e.codigo, str(e))
+    try:
+        bloco, visao = montar(card, user_id, {"meses": meses if card in _COM_MES else [], "cortes": cortes,
                                               "dias": None if dias is None else str(dias),
                                               "quantidade_meses": qtd, **de_ate, "categoria": categoria})
     except HTTPException as e:
@@ -155,6 +163,8 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             return _falha(card, "pro_required", "Esse card faz parte de um plano superior. Ofereça o upgrade com jeitinho, sem números.")
         return _falha(card, d.get("error") or f"http_{e.status_code}",
                       "O card não está disponível agora. Explique isso e responda em texto, sem inventar números.")
+    except PedidoInvalido as e:  # antes de `CardIndisponivel`; a falha é do pedido: o card segue livre no turno
+        return _erro(e.codigo, str(e)) | e.extra
     except CardIndisponivel as e:
         return _falha(card, "indisponivel", str(e))
     except RequestValidationError:
@@ -188,7 +198,7 @@ SCHEMA = {
             f"no máximo {MAX_POR_TURNO} por resposta, e escreva os números a partir do resultado desta tool. "
             "Cards: contas (saldo total e por conta: 'meu saldo'), hero (previsão de saldo), compromissos (próximos "
             "pagamentos), resumo (SÓ o gasto do mês e o ritmo contra o mês passado, não o que entrou), categorias (gastos por categoria; aceita "
-            "até 3 meses, uma aba por mês), calendario (gastos por dia), simulador (Pro: cortar gastos do dia a dia), patrimonio, "
+            "até 3 meses, uma aba por mês), calendario (gastos por dia), simulador (Pro: cortar gastos do dia a dia; com cortes, o resultado do corte pedido em % ou em R$), patrimonio, "
             "wealth (distribuição do patrimônio), rendimento (quanto os investimentos renderam no mês e no total, por categoria e ativo), assinaturas, "
             "metas (caixinhas com meta), fatura (cartões e limite), parcelas, renda (o que ENTROU × saiu "
             "mês a mês, até 12 meses; se recusar por plano, o dado de UM mês sai em texto pelo get_period_summary), piggy (insights), periodo (2 a 12 meses inteiros, 'março a agosto', "
@@ -208,6 +218,13 @@ SCHEMA = {
                 "ate": {"type": "string", "description": "AAAA-MM do último mês, só para periodo (obrigatório)."},
                 "categoria": {"type": "string", "description": "categoria: só para periodo/categorias — a categoria que o "
                               "usuário citou ('mercado'); o resultado traz o valor dela em categoria_pedida."},
+                "cortes": {"type": "array", "maxItems": MAX_CORTES, "description": "Só para simulador: o corte pedido, um item "
+                           "por pedido. Omita para abrir o simulador sem corte.", "items": {"type": "object", "properties": {
+                               "categoria": {"type": "string", "description": "a categoria como o usuário disse"},
+                               "todas": {"type": "boolean", "description": "true = todas as categorias do dia a dia ('corta 10% de tudo')"},
+                               "percentual": {"type": "integer", "minimum": 1, "maximum": 100},
+                               "valor": {"type": "number", "exclusiveMinimum": 0,
+                                         "description": "reais por mês a menos ('gastar R$ 200 a menos'): use em vez de percentual"}}}},
             },
             "required": ["card"],
         },
