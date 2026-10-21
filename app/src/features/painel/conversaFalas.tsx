@@ -98,6 +98,7 @@ export function tituloCard(card: CardChat, aba: BlocoChat["abas"][number]) {
   if (card === "fim_do_mes") return tituloFimDoMes(aba.recursos.fim_do_mes);
   if (card === "comparacao") return tituloComparacao(aba.recursos.comparacao);
   if (card === "ultimos_lancamentos" || card === "sem_categoria") return TITULO_LANCAMENTOS[card];
+  if (card === "simulador") return tituloWidget(card); // a base é a estimativa (mediana), não o mês do bloco
   return aba.mes ? `${tituloWidget(card)} · ${nomeMes(aba.mes)}` : tituloWidget(card, aba.recursos.previsao?.dias);
 }
 /** Um card por bloco; com mais de uma aba (meses do `categorias`), abas no topo. Tudo acontece dentro do card, no chat: não há folha nem toque que abra outra tela. */

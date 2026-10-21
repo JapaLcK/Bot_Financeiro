@@ -41,7 +41,7 @@ function usePrevisao() {
   // Carregando o horizonte novo (sem `d` e sem 4xx) a última lista fica: apagá-la tirava a receita da pilha, desmontava o botão com o POST no ar e zerava a seleção.
   // Resposta boa troca a lista; 4xx (downgrade, portão) a apaga: 4xx nunca mostra dado guardado.
   const [, setLista] = useListaDaPagina();
-  useEffect(() => { if (d || e4) setLista(d?.receitas_do_banco ?? null); }, [d, e4, setLista]);
+  useEffect(() => { if (d || e4) setLista(d ?? null); }, [d, e4, setLista]);
   useEffect(() => () => setLista(null), [setLista]);
   return { q, d, e4, dias, aviso, permitidos: permitidos.current, escolher: (n: Dias) => { setAviso(""); setDias(n); } };
 }

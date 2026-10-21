@@ -9245,6 +9245,10 @@
       "juros_sem_parcelas",
       "nomes_repetidos",
       "valor_invalido"
+    ],
+    "codigos_422_habitos": [
+      "categoria_fora_da_estimativa",
+      "categorias_repetidas"
     ]
   },
 

@@ -876,7 +876,13 @@ A tela do app está feita (folha na aba Gastos, só Pro). O bloco de hábitos em
 `simulador` do chat com a previsão (ver `docs/CLAUDE.md`, "API v2"). Decisões do dono: Q1 (a) o /painel real só com os
 cortes e o resultado (meta, gasto fixo novo e presets ficam no protótipo); Q2 (a) o app usa o gasto mensal estimado e a
 curva antes × depois; Q3 (a) o card do chat vira o real; Q4 passo 10 %, rótulo "Sobra por mês". As telas (web e app)
-são o PR 3b; até lá o bloco de hábitos segue demonstrativo.
+são o PR 3b (abaixo).
+
+**Corte de hábito real, telas (PR 3b, 20/10/2026).** /painel: `SimuladorHabitos.tsx` no Resumo (`MAX_NO_RESUMO` maiores categorias) e em
+`#/simulador` (todas, com economia por categoria e curva antes × depois; sem motivos nem premissas na tela, a pedido do dono); a curva foi extraída para
+`CurvaComparada.tsx` (o simulador de compra a usa). App: `simuladorHabitos.tsx` na aba Gastos e no card do chat
+("Sobra por mês" + curva). O Piggy lê a mediana (`gasto_do_dia_a_dia`) para todos os builds: o dono usa só o próprio app
+e dispensou o marcador de capacidade. Os cortes do bloco do Resumo não viajam para `#/simulador` (estado local).
 
 ### Etapa 3 — PR3: tela real da previsão (implementação local, 07/10/2026)
 

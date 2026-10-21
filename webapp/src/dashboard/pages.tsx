@@ -38,6 +38,7 @@ import { OrcamentosCategoriaPainel } from "./widgets/OrcamentosCategoria";
 import { PrevisaoPainel } from "./widgets/Previsao";
 import { Simulator } from "./widgets/Simulator";
 import { SimuladorCompra } from "./widgets/SimuladorCompra";
+import { SimuladorHabitos } from "./widgets/SimuladorHabitos";
 import { SubscriptionList } from "./widgets/Subscriptions";
 import { TrajectoryChart } from "./widgets/TrajectoryChart";
 import { Wealth } from "./widgets/Wealth";
@@ -136,6 +137,7 @@ function SimChart({ s }: { s: DashState }) {
 }
 
 function Simulate({ s }: { s: DashState }) {
+  if (!DEMO) return <Page path="/simulador" lede="Corte um gasto do dia a dia e veja quanto sobra por mês e o seu saldo nos próximos 90 dias."><SimuladorHabitos full /></Page>;
   return (
     <Page path="/simulador" lede="Corte um hábito ou some um gasto novo e veja o saldo e as metas mudarem na hora.">
       <Panel span={5}><Simulator s={s} full /></Panel>
@@ -207,7 +209,7 @@ function Launches({ s }: { s: DashState }) {
 // (ou são novas) e entram uma de cada vez. O Painel antigo sai do v2 para o /app. O guia mora
 // aqui também (e no Cmd-K e na Ajuda do Menu do celular).
 const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: string; run?: () => void }[] = [
-  { label: "Simulador", line: "E se você cortasse o delivery pela metade? Veja o saldo e as metas mudarem na hora.", icon: "ph-lightning", to: "/simulador" },
+  { label: "Simulador", line: DEMO ? "E se você cortasse o delivery pela metade? Veja o saldo e as metas mudarem na hora." : "Corte um gasto do dia a dia e veja quanto sobra por mês.", icon: "ph-lightning", to: "/simulador" },
   { label: "Painel antigo", line: "O dashboard de sempre, com os seus dados de verdade.", icon: "ph-chart-bar", url: "/app" },
   { label: "Orçamento doméstico", line: "Divida a renda do mês em 6 potes e veja quanto ainda cabe em cada um.", icon: "ph-house", to: "/orcamento" },
   { label: "Orçamentos por categoria", line: "Um teto por categoria e um aviso antes de estourar.", icon: "ph-chart-pie", to: "/orcamentos-categoria" },

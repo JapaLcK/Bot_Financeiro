@@ -193,9 +193,13 @@ def simulador(corpo: SimuladorIn, uid: int = Depends(_assinante)):
 
 
 
+FORA_DA_ESTIMATIVA, REPETIDAS = "categoria_fora_da_estimativa", "categorias_repetidas"
+CODIGOS_HABITOS = (FORA_DA_ESTIMATIVA, REPETIDAS)
+
+
 class CorteIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    categoria: str = Field(min_length=1, max_length=120)
+    categoria: str = Field(min_length=1)  # sem teto: a chave vem de coluna text sem teto (legado); o do corpo protege
     percentual: int = Field(strict=True, ge=0, le=100)
 
 
@@ -243,13 +247,13 @@ def _422(codigo: str, loc: list) -> JSONResponse:
 def simulador_habitos(corpo: HabitosIn, uid: int = Depends(_assinante)):
     chaves = [c.categoria for c in corpo.cortes]
     if len(set(chaves)) != len(chaves):
-        return _422("categorias_repetidas", ["body", "cortes"])
+        return _422(REPETIDAS, ["body", "cortes"])
     snap = ler_snapshot(uid, DIAS)  # a estimativa é a do próprio uid: é contra ela que a categoria é validada
     est = snap.estimativa_variavel
     conhecidas = {c["chave"] for c in est["categorias"]} if est else set()
     for i, k in enumerate(chaves):
         if k not in conhecidas:
-            return _422("categoria_fora_da_estimativa", ["body", "cortes", i, "categoria"])
+            return _422(FORA_DA_ESTIMATIVA, ["body", "cortes", i, "categoria"])
     r = simular_corte(snap, {c.categoria: c.percentual for c in corpo.cortes})
     return SimuladorHabitos(
         hoje=r["today"], calculado_em=r["calculado_em"], valido_ate=r["valido_ate"], dias=DIAS,

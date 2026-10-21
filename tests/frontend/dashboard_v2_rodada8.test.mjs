@@ -40,7 +40,7 @@ const SIM = '[data-widget-id="simulador"]';
 const alavanca = (page, nome) => page.locator(`${SIM} .lever`, { hasText: nome }).locator("input[type=range]");
 
 test("Simulador: desligar o chip desfaz só o chip, o ajuste em outra alavanca fica", async () => {
-  const { ctx, page } = await abrir();
+  const { ctx, page } = await abrir("#/", true);
   const chip = page.locator(`${SIM} .chip`, { hasText: "Delivery pela metade" });
   await chip.click();
   await alavanca(page, "Lazer").focus();
@@ -55,7 +55,7 @@ test("Simulador: desligar o chip desfaz só o chip, o ajuste em outra alavanca f
 });
 
 test("Simulador: ligar um chip mantém o ajuste feito à mão em outra alavanca", async () => {
-  const { ctx, page } = await abrir();
+  const { ctx, page } = await abrir("#/", true);
   await alavanca(page, "Lazer").focus();
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
@@ -67,7 +67,7 @@ test("Simulador: ligar um chip mantém o ajuste feito à mão em outra alavanca"
 });
 
 test("Simulador: dois chips ligados juntos; desligar um mantém o outro", async () => {
-  const { ctx, page } = await abrir();
+  const { ctx, page } = await abrir("#/", true);
   const delivery = page.locator(`${SIM} .chip`, { hasText: "Delivery pela metade" });
   const role = page.locator(`${SIM} .chip`, { hasText: "Um rolê a menos" });
   await delivery.click();
@@ -81,7 +81,7 @@ test("Simulador: dois chips ligados juntos; desligar um mantém o outro", async 
 });
 
 test("Paleta: 'Simular: <pronta>' mantém o ajuste feito à mão em outra alavanca", async () => {
-  const { ctx, page } = await abrir();
+  const { ctx, page } = await abrir("#/", true);
   await alavanca(page, "Lazer").focus();
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
@@ -96,7 +96,7 @@ test("Paleta: 'Simular: <pronta>' mantém o ajuste feito à mão em outra alavan
 });
 
 test("Piggy: 'Simular delivery −30%' mantém o ajuste feito à mão em outra alavanca", async () => {
-  const { ctx, page } = await abrir();
+  const { ctx, page } = await abrir("#/", true);
   await alavanca(page, "Lazer").focus();
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
