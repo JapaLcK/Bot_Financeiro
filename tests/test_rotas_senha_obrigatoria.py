@@ -121,6 +121,7 @@ TABELA = {
     ("GET", "/api/v2/assinaturas"): (B, "usuario_atual"),
     ("GET", "/api/v2/contas-a-pagar"): (B, "usuario_atual"),
     ("GET", "/api/v2/caixinhas"): (B, "usuario_atual"),
+    ("GET", "/api/v2/patrimonio"): (B, "usuario_atual"),
     ("POST", "/api/v2/assinaturas/marca"): (B, "usuario_atual"),
     ("GET", "/api/v2/perfil"): (B, "usuario_atual"), ("PUT", "/api/v2/perfil"): (B, "usuario_atual"),
     ("GET", "/api/v2/contas"): (B, "usuario_atual"),

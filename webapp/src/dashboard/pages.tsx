@@ -27,6 +27,7 @@ import { GastosCompras } from "./widgets/GastosCompras";
 import { GastosDetalhe } from "./widgets/GastosDetalhe";
 import { Goals } from "./widgets/Goals";
 import { GoalsTimeline } from "./widgets/GoalsTimeline";
+import { TituloDaPagina } from "./parts/Info";
 import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
@@ -38,18 +39,20 @@ import { OrcamentosCategoriaPainel } from "./widgets/OrcamentosCategoria";
 import { PrevisaoPainel } from "./widgets/Previsao";
 import { Simulator } from "./widgets/Simulator";
 import { SimuladorCompra } from "./widgets/SimuladorCompra";
+import { SimuladorHabitos } from "./widgets/SimuladorHabitos";
 import { SubscriptionList } from "./widgets/Subscriptions";
 import { TrajectoryChart } from "./widgets/TrajectoryChart";
 import { Wealth } from "./widgets/Wealth";
 
 // Cada página: título, uma linha do que ela responde e os blocos em grade de 12.
 // `acoes`: o lugar (à direita do título, abaixo do texto no celular) onde a página põe os botões dela.
-function Page({ path, lede, acoes, children }: { path: Path; lede: ReactNode; acoes?: ReactNode; children: ReactNode }) {
+// A linha de subtítulo saiu da tela: `lede` abre no ⓘ ao lado do título. `estado` é aviso de estado da tela (fica à vista).
+function Page({ path, lede, estado, acoes, children }: { path: Path; lede?: ReactNode; estado?: ReactNode; acoes?: ReactNode; children: ReactNode }) {
   return (
     <>
       <header className={`page-head${acoes ? " page-head-acoes" : ""}`}>
-        <h1 id="page-title" tabIndex={-1}>{route(path).title}</h1>
-        <p className="page-lede">{lede}</p>
+        <TituloDaPagina titulo={route(path).title} info={lede} />
+        {estado && <p className="page-lede">{estado}</p>}
         {acoes}
       </header>
       <DicaDaTela path={path} />
@@ -63,8 +66,7 @@ function Home({ s }: { s: DashState }) {
   return (
     <>
       <header className="page-head">
-        <h1 id="page-title" tabIndex={-1}>Resumo de {monthName(keyDate(mesDe(s)))}</h1>
-        <p className="page-lede">O mês inteiro num lugar. A seta de cada bloco abre a página dele.</p>
+        <TituloDaPagina titulo={<>Resumo de {monthName(keyDate(mesDe(s)))}</>} info="O mês inteiro num lugar. A seta de cada bloco abre a página dele." />
       </header>
       <Board s={s} />
     </>
@@ -136,6 +138,7 @@ function SimChart({ s }: { s: DashState }) {
 }
 
 function Simulate({ s }: { s: DashState }) {
+  if (!DEMO) return <Page path="/simulador" lede="Corte um gasto do dia a dia e veja quanto sobra por mês e o seu saldo nos próximos 90 dias."><SimuladorHabitos full /></Page>;
   return (
     <Page path="/simulador" lede="Corte um hábito ou some um gasto novo e veja o saldo e as metas mudarem na hora.">
       <Panel span={5}><Simulator s={s} full /></Panel>
@@ -207,7 +210,7 @@ function Launches({ s }: { s: DashState }) {
 // (ou são novas) e entram uma de cada vez. O Painel antigo sai do v2 para o /app. O guia mora
 // aqui também (e no Cmd-K e na Ajuda do Menu do celular).
 const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: string; run?: () => void }[] = [
-  { label: "Simulador", line: "E se você cortasse o delivery pela metade? Veja o saldo e as metas mudarem na hora.", icon: "ph-lightning", to: "/simulador" },
+  { label: "Simulador", line: DEMO ? "E se você cortasse o delivery pela metade? Veja o saldo e as metas mudarem na hora." : "Corte um gasto do dia a dia e veja quanto sobra por mês.", icon: "ph-lightning", to: "/simulador" },
   { label: "Painel antigo", line: "O dashboard de sempre, com os seus dados de verdade.", icon: "ph-chart-bar", url: "/app" },
   { label: "Orçamento doméstico", line: "Divida a renda do mês em 6 potes e veja quanto ainda cabe em cada um.", icon: "ph-house", to: "/orcamento" },
   { label: "Orçamentos por categoria", line: "Um teto por categoria e um aviso antes de estourar.", icon: "ph-chart-pie", to: "/orcamentos-categoria" },
@@ -257,7 +260,7 @@ function Milhao() {
 
 function Agentes() {
   // Com o freio ligado o /agents responde 404: a tela não pede nada e só avisa (link antigo ou digitado).
-  if (!useAgentesLigados()) return <Page path="/agentes" lede="Os agentes estão indisponíveis no momento.">{null}</Page>;
+  if (!useAgentesLigados()) return <Page path="/agentes" estado="Os agentes estão indisponíveis no momento.">{null}</Page>;
   return (
     <Page path="/agentes" lede="Sete Piggys, cada um cuidando de uma parte do seu dinheiro. Ative os que fazem sentido para o seu momento.">
       <AgentesPainel />

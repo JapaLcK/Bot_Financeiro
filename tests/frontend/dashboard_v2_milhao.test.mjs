@@ -9,7 +9,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
+import { abrirInfo, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -33,14 +33,16 @@ test("padrão: R$ 48.250,37, falta R$ 951.750, chega em agosto de 2058", async (
   const { ctx, page, erros, pedidos } = await pronto();
   const t = await texto(page);
   const aria = await page.locator("#w-milhao svg[role=img]").getAttribute("aria-label");
+  const info = await (await abrirInfo(page, "#w-milhao")).innerText();
   await ctx.close();
+  assert.match(info, /Conta de juros compostos com taxa fixa: não é promessa de rendimento\. Patrimônio = Carteira, contas, caixinhas e investimentos\./);
   assert.match(t, /Faltam R\$ 951\.750/);
   assert.match(t, /Hoje R\$ 48\.250,37 · 4%/);
   assert.match(t, /Você chega em agosto de 2058/);
   assert.match(t, /Daqui a 31 anos e 10 meses/);
   assert.match(t, /Guardar por mês R\$ 0/);
   assert.match(t, /Rendimento ao ano 10%/);
-  assert.match(t, /não é promessa de rendimento/);
+  assert.doesNotMatch(t, /promessa de rendimento/); // a explicação mora no ⓘ, não no card
   assert.match(aria, /até R\$ 1 milhão em agosto de 2058/);
   assert.equal(pedidos.length, 1);
   assert.deepEqual(erros, []);

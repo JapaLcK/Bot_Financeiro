@@ -3,16 +3,16 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CenarioOut, Simulador, SimuladorIn } from "../lib/api-v2.gen";
-import { ERRO_VALOR, dayMonth, isoDay, moneyText, normalizaValor } from "../lib/format.js";
+import { ERRO_VALOR, moneyText, normalizaValor } from "../lib/format.js";
 import { hojeNoFuso } from "../lib/metas-textos";
-import type { Point } from "../lib/types";
 import { ErroApi, apiPost, meQuery, usePlan } from "../lib/v2";
 import { CRIAR_SENHA } from "../parts/Entrada";
 import { Frame } from "../parts/Frame";
+import { Info } from "../parts/Info";
 import { MotivosPrevisao } from "../parts/Selos";
 import { ConvitePro, ddmm } from "./Compromissos";
+import { CurvaComparada } from "./CurvaComparada";
 import { hora } from "./Previsao";
-import { TrajectoryChart } from "./TrajectoryChart";
 
 type Campo = "nome" | "preco" | "entrada" | "parcelas" | "juros_mensal_pct" | "data_compra" | "custos_unicos" | "despesa_mensal_nova";
 type Cen = Record<Campo, string>;
@@ -91,23 +91,7 @@ function falhaDe(e: unknown, n: number): Falha {
 }
 
 function Grafico({ d, c }: { d: Simulador; c: CenarioOut }) {
-  const pts: Point[] = d.atual.trajetoria.map((p, i) => {
-    const com = c.resumo.trajetoria[i];
-    return { date: isoDay(p.data), value: Number(p.saldo), sim: Number(com.saldo), real: false, events: [], texto: moneyText(p.saldo) ?? undefined };
-  });
-  if (!pts.length || d.atual.trajetoria.some((p, i) => p.saldo === null || c.resumo.trajetoria[i]?.saldo == null)) {
-    return <p className="w-lede">Sem saldo de partida, não dá para desenhar a curva.</p>;
-  }
-  return (
-    <>
-      <ul className="legend" aria-label="Legenda do gráfico">
-        <li><span className="key forecast" />Sem a compra</li>
-        <li><span className="key sim" />Com a compra</li>
-        <li className="faint">de {dayMonth(pts[0].date)} a {dayMonth(pts[pts.length - 1].date)}</li>
-      </ul>
-      <TrajectoryChart traj={{ points: pts, end: pts[pts.length - 1], start: pts[0].value }} simOn highlight={null} drawKey={`compra-${c.nome}`} />
-    </>
-  );
+  return <CurvaComparada antes={d.atual.trajetoria} depois={c.resumo.trajetoria} rotulos={["Sem a compra", "Com a compra"]} drawKey={`compra-${c.nome}`} />;
 }
 
 const reais = (s: string | null) => (s === null ? "indisponível" : moneyText(s) ?? "indisponível");
@@ -213,14 +197,17 @@ export function SimuladorCompra() {
         </Frame>
       </div>
       <div className="panel span-7">
-        <Frame id="compra-resultado" title="O que muda no seu saldo" real>
+        <Frame id="compra-resultado" title="O que muda no seu saldo" real
+          info={d && <Info rotulo="Como esta simulação foi feita">
+            <p className="w-lede">Projeção condicional de {d.dias} dias, sem apontar vencedor.</p>
+            <MotivosPrevisao motivos={d.motivos} />
+            <h3 className="prev-h">Premissas</h3>
+            <ul className="premissas">{d.premissas.map((t) => <li key={t}>{t}</li>)}</ul>
+          </Info>}>
           {d ? (
             <div className="comp-corpo" aria-busy={m.isPending}>
-              <p className="w-lede">Projeção condicional de {d.dias} dias, sem apontar vencedor. Calculada às {hora(d)}.</p>
-              <MotivosPrevisao motivos={d.motivos} />
+              <p className="w-lede">Calculada às {hora(d)}.</p>
               {d.cenarios.map((c) => <Resultado key={c.nome} d={d} c={c} />)}
-              <h3 className="prev-h">Premissas</h3>
-              <ul className="premissas">{d.premissas.map((t) => <li key={t}>{t}</li>)}</ul>
             </div>
           ) : <p className="w-lede">{m.isPending ? "Calculando…" : "Preencha ao menos nome e preço e toque em Calcular."}</p>}
         </Frame>

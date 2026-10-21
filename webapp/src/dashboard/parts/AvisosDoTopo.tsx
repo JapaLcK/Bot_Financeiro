@@ -52,7 +52,7 @@ export function AvisosDoTopo({ path }: { path: Path }) {
       id: "banco", tom: "alerta" as const, icone: "ph-warning", titulo: "Dados do banco desatualizados", aoFechar: () => { banco.cancelar(); setFechado(true); },
       corpo: <CorpoAvisoBanco padrao={`Os dados de ${nomes.length ? nomes.join(", ") : "um banco conectado"} precisam ser atualizados. Alguns valores podem estar incompletos.`} acao={banco.acao} maquina={banco.maquina} atualizar={banco.atualizar} />,
     }] : []),
-    ...itensDeReceita((dentro && (path === "/previsao" || (resumo && comCard)) ? listaDaPagina : sozinha && !e4 ? previsao.data?.receitas_do_banco : null) ?? [], r),
+    ...itensDeReceita((dentro && (path === "/previsao" || (resumo && comCard)) ? listaDaPagina?.receitas_do_banco : sozinha && !e4 ? previsao.data?.receitas_do_banco : null) ?? [], r),
   ];
   // As regiões de alerta e anúncio existem enquanto há receita a responder ou algo a anunciar (um alerta/status vazio em toda tela atrapalharia o resto do painel).
   // O alerta de falha só vale na tela de onde o POST saiu: o que volta 500 depois de o usuário trocar de tela não deixa alerta onde não há receita a repetir.

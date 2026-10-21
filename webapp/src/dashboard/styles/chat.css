@@ -1,18 +1,28 @@
 /* Conversa com o Piggy (#/piggy) e a barra de conversa. Onde dá, grid (o Safari 14 não
    tem flex gap, nem dvh). */
 :root { --askbar-bottom: 20px; --askbar-h: 48px; } /* a barra: 6 + 36 + 6 */
-.chat { display: grid; gap: 22px; max-width: 920px; }
+/* A geometria da conversa, declarada UMA vez: a coluna (.page do /piggy), a barra, a fileira de perguntas e a lista do @ leem as mesmas
+   variáveis. No `body` e não no `:root`: uma custom property não registrada resolve o `var()` no elemento onde é declarada; com --chat-w
+   no :root e --painel-w no body[data-chat-painel], o --chat-w sairia calculado com o painel em 0. O painel (parts/PainelChat.tsx) só
+   reserva espaço em tela larga e só enquanto existe (data-chat-painel); sem ele a conta é a da coluna centralizada. */
+body {
+  --painel-w: 0px; --painel-gap: 0px;
+  --chat-w: min(760px, calc(100vw - var(--rail-w) - 2 * var(--gutter) - var(--painel-w) - var(--painel-gap)));
+  --chat-x: calc(var(--rail-w) + (100vw - var(--rail-w) - var(--chat-w) - var(--painel-gap) - var(--painel-w)) / 2);
+}
+@media (min-width: 1181px) { body[data-chat-painel] { --painel-w: 264px; --painel-gap: 24px; } }
+.chat { display: grid; gap: 22px; }
 .msg-user {
   justify-self: end; max-width: min(560px, 85%); padding: 10px 14px;
   border-radius: 16px 16px 4px 16px; background: var(--plane-3);
   font-size: 15px; line-height: 1.45; scroll-margin-top: 80px;
 }
-.msg-piggy { display: grid; gap: 12px; }
+.msg-piggy { display: grid; gap: 12px; } /* sem scroll-margin-top: o scroll-padding-top do html (88 px) já deixa o índice do painel parar abaixo da barra do topo; somar 80 pararia a 168 px */
 /* Quem fala: avatar, nome e, no agente, a etiqueta de estado. Separado do .msg-by, que é só o selo de demonstração. */
 .msg-autor { display: grid; grid-auto-flow: column; justify-content: start; align-items: center; column-gap: 8px; font-size: 13px; color: var(--ink-2); }
 .msg-autor img { border-radius: 50%; }
 /* O retrato do agente é de corpo inteiro (~265x433): cover no quadrado 22px mostra cabeça e chapéu. O ícone do Piggy não entra. */
-.msg-autor img[src*="/agents/"], .mencoes .cmdk-item img[src*="/agents/"] { object-fit: cover; object-position: 50% 4%; }
+.msg-autor img[src*="/agents/"], .mencoes .cmdk-item img[src*="/agents/"], .chat-painel img[src*="/agents/"] { object-fit: cover; object-position: 50% 4%; }
 .msg-autor b { font-weight: 600; color: var(--ink); }
 .msg-tag { padding: 2px 6px; border-radius: 6px; background: var(--plane-3); font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; color: var(--ink-3); }
 .msg-pre { white-space: pre-line; } /* a resposta do agente é texto, com as quebras de linha dele */
@@ -85,7 +95,7 @@ body[data-mencoes] .chat-follow { visibility: hidden; }
   color: var(--ink); text-decoration: none;
   view-transition-name: askbar;
 }
-.askbar[data-here], .chat-follow, .mencoes[data-here] { --follow-w: min(760px, calc(100vw - var(--rail-w) - 2 * var(--gutter))); width: var(--follow-w); }
+.askbar[data-here], .chat-follow, .mencoes[data-here] { --follow-w: var(--chat-w); width: var(--follow-w); }
 .askbar input { min-width: 0; height: 36px; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; outline: none; }
 .askbar input::placeholder { color: var(--ink-3); }
 .askbar:focus-within { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), inset 0 0 0 2px var(--pink); }
@@ -93,6 +103,12 @@ body[data-mencoes] .chat-follow { visibility: hidden; }
 .askbar-send:disabled { background: var(--plane-3); color: var(--ink-4); cursor: default; }
 ::view-transition-group(askbar) { animation-duration: 320ms; animation-timing-function: var(--ease-out); }
 
+/* Na conversa a barra, a fileira, a lista do @ e a coluna (.page) saem do mesmo --chat-x: alinhadas por construção, com ou sem painel. Dentro do
+   media para não vencer o bloco do celular (≤760). */
+@media (min-width: 761px) {
+  .askbar[data-here], .chat-follow, .mencoes[data-here] { left: var(--chat-x); transform: none; }
+  .page[data-page="/piggy"] { max-width: none; margin: 0; padding-left: calc(var(--chat-x) - var(--rail-w)); padding-right: 0; grid-template-columns: var(--chat-w); }
+}
 /* O conteúdo termina acima da barra. */
 @media (min-width: 761px) { .page { padding-bottom: 120px; } }
 /* Na conversa, acima também da fileira de perguntas (8 + 44) e com a folga de 24 px. */

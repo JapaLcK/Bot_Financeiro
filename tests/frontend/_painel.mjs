@@ -157,3 +157,13 @@ export async function abrirFiltros(page) {
   const botao = page.getByRole("button", { name: "Filtros", exact: true });
   if ((await botao.getAttribute("aria-expanded")) !== "true") await botao.click();
 }
+
+// Abre o ⓘ do bloco `sel` (ex.: "#w-previsao") e devolve o diálogo, achado pelo nome que o botão leva em `aria-label`.
+// O conteúdo do ⓘ só existe no DOM com ele aberto, e num portal no body: não procure dentro do card.
+export async function abrirInfo(page, sel) {
+  const botao = page.locator(`${sel} .w-info`);
+  await botao.click();
+  const dialogo = page.getByRole("dialog", { name: await botao.getAttribute("aria-label") });
+  await dialogo.waitFor();
+  return dialogo;
+}

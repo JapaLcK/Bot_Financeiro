@@ -5,8 +5,12 @@ import { useActions } from "../lib/actions";
 import { dayKey } from "../lib/store.js";
 import type { DashState, Launch } from "../lib/types";
 import { Frame } from "../parts/Frame";
+import { Info } from "../parts/Info";
 
 const DAY = 86400000;
+const daysTo = (b: Launch) => Math.round((b.date.getTime() - TODAY.getTime()) / DAY);
+// Item futuro, fora do cartão, com valor estimado ou a definir: ganha o status "estimado" (e o ⓘ do card).
+const isEstimado = (b: Launch) => b.source !== "cartao" && daysTo(b) > 0 && (!!b.estimated || b.amount == null);
 
 // Compromissos dos últimos 5 dias (já pagos) e dos próximos `span` dias.
 export function Bills({ s, days: span = 30 }: { s: DashState; days?: number }) {
@@ -27,14 +31,14 @@ export function Bills({ s, days: span = 30 }: { s: DashState; days?: number }) {
   };
 
   return (
-    <Frame id="compromissos" title={`Próximos ${span} dias`}>
-      <p className="w-lede">A pagar <span className="num">{money0(known)}</span> · as marcadas como estimadas ainda podem mudar</p>
+    <Frame id="compromissos" title={`Próximos ${span} dias`} info={items.some(isEstimado) ? <Info rotulo="Sobre os valores estimados"><p>As marcadas como estimadas ainda podem mudar</p></Info> : undefined}>
+      <p className="w-lede">A pagar <span className="num">{money0(known)}</span></p>
       <ol className="bills" onPointerLeave={restore}>
         {items.map((b, i) => {
-          const days = Math.round((b.date.getTime() - TODAY.getTime()) / DAY);
+          const days = daysTo(b);
           const card = b.source === "cartao";
           const paid = days <= 0;
-          const status = card ? "no cartão" : paid ? (b.kind === "income" ? "recebido" : "pago") : b.estimated || b.amount == null ? "estimado" : relativeDays(days);
+          const status = card ? "no cartão" : paid ? (b.kind === "income" ? "recebido" : "pago") : isEstimado(b) ? "estimado" : relativeDays(days);
           return (
             <li key={i}>
               <button type="button" className="bill" data-paid={paid || undefined} data-on={s.highlight === dayKey(b.date) || undefined} aria-pressed={pinned === i}

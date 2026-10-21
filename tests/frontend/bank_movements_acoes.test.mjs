@@ -136,6 +136,8 @@ test("afterSave: ok leva a mensagem, 404 leva undefined sem alerta; outro erro a
         await page.locator("#generic-confirm-ok").click();
       }
       await until(() => gets.length === 2);
+      // o GET conta quando a rota o recebe; o afterSave só roda depois que o load() termina
+      await page.waitForFunction(n => window.__saved.length >= n, esperado[status].length);
       assert.equal(await page.getByText("Não foi possível concluir", { exact: false }).isVisible(), false, `status ${status}`);
       assert.deepEqual(await page.evaluate(() => window.__saved), esperado[status], `afterSave com status ${status}`);
     } finally { await page.close(); }

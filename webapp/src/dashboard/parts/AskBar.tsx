@@ -3,12 +3,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ask, perguntarAoAgente } from "../lib/conversation";
 import type { Path } from "../router";
 import { ICON } from "../lib/brand";
-import { AGENTES, acessoDe, agentesQuery, energiaDe, mencaoDe, semAcento, tokenEm } from "../lib/agentes";
+import { AGENTES, acessoDe, agentesQuery, energiaDe, mencaoDe, mencoes, semAcento, tokenEm } from "../lib/agentes";
 import { uidValido } from "../conta/api";
 import { CHAT_REAL, DEMO, contaQuery, lerContaFresca } from "../lib/v2";
-import { GRUPO, Mencoes, type ItemMencao } from "./Mencoes";
-
-const GRUPOS = ["Agentes ativos", "Ativar para conversar", "No PigBank+"];
+import { GRUPO, GRUPOS, Mencoes, type ItemMencao } from "./Mencoes";
 
 // A barra de conversa com o Piggy. No desktop flutua em todas as páginas; no celular só
 // aparece na página da conversa (lá o acesso é o botão do meio). Na #/piggy ela é a
@@ -66,22 +64,45 @@ export function AskBar({ path }: { path: Path }) {
   });
   useEffect(() => { document.getElementById(`mencao-${marcado}`)?.scrollIntoView({ block: "nearest" }); }, [marcado, aberta]);
 
-  const escolher = (a: ItemMencao) => {
-    if (!token) return;
-    const nova = `${text.slice(0, token.ini)}@${a.nome} `;
-    depois.current = nova.length;
-    // Troca o token inteiro, também o que está depois do cursor ("@Det|etive"): só as letras do nome (as mesmas do `tokenEm`), não a
-    // pontuação colada, mais as palavras seguintes de um nome composto que já estejam lá ("@Far|ia Limer"), e não dobra o espaço (Codex no #1157).
-    let fim = cursor + /^[\p{L}\p{M}]*/u.exec(text.slice(cursor))![0].length;
-    for (const w of a.nome.split(" ").slice(1)) {
-      const p = /^\s([\p{L}\p{M}]+)/u.exec(text.slice(fim));
+  // Troca o token inteiro, também o que está depois do cursor ("@Det|etive"): só as letras do nome (as mesmas do `tokenEm`), não a
+  // pontuação colada, mais as palavras seguintes de um nome composto que já estejam lá ("@Far|ia Limer"), e não dobra o espaço (Codex no #1157).
+  const trocaToken = (nome: string, t: string, c: number, ini: number) => {
+    let fim = c + /^[\p{L}\p{M}]*/u.exec(t.slice(c))![0].length;
+    for (const w of nome.split(" ").slice(1)) {
+      const p = /^\s([\p{L}\p{M}]+)/u.exec(t.slice(fim));
       if (!p || semAcento(p[1]) !== semAcento(w)) break;
       fim += p[0].length;
     }
-    setText(nova + text.slice(fim).replace(/^\s/, ""));
+    return `${t.slice(0, ini)}@${nome} ${t.slice(fim).replace(/^\s/, "")}`;
+  };
+  const escolher = (a: ItemMencao) => {
+    if (!token) return;
+    depois.current = token.ini + a.nome.length + 2;
+    setText(trocaToken(a.nome, text, cursor, token.ini));
     setFechada(false);
     setAtivo(0);
   };
+  // Um clique no painel lateral (parts/PainelChat.tsx) chama o agente: troca o token em edição; senão a menção do começo do texto; senão
+  // põe "@Nome " antes. Nada que o usuário escreveu se apaga. Lê o texto por ref: o listener é um só e o updater do setText não tem efeito colateral.
+  const est = useRef({ text, cursor });
+  est.current = { text, cursor };
+  useEffect(() => {
+    const aoMencionar = (e: Event) => {
+      const nome = (e as CustomEvent<{ nome?: unknown }>).detail?.nome;
+      if (!AGENTES.some((a) => a.nome === nome)) return;
+      const { text: t, cursor: c } = est.current, tk = tokenEm(t, c), m = mencoes(t)[0];
+      const nova = tk ? trocaToken(nome as string, t, c, tk.ini)
+        : m?.ini === 0 ? `@${nome}${t.slice(m.fim) || " "}`
+        : `@${nome} ${t}`;
+      depois.current = nova.length;
+      setText(nova);
+      setFechada(false);
+      setAtivo(0);
+      input.current?.focus();
+    };
+    window.addEventListener("dash:mencao", aoMencionar);
+    return () => window.removeEventListener("dash:mencao", aoMencionar);
+  }, []);
   const aoTeclar = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!aberta || e.nativeEvent.isComposing || e.keyCode === 229) return; // IME: Enter/Tab/setas são da composição
     if (e.key === "ArrowDown") { e.preventDefault(); setAtivo(Math.min(itens.length - 1, marcado + 1)); }
@@ -107,7 +128,9 @@ export function AskBar({ path }: { path: Path }) {
           if (quer) {
             try {
               if (!DEMO) u = (await lerContaFresca(qc)).user_id;
-              // O catálogo também é relido: o plano ou um agente pode ter mudado noutra aba com a mesma conta (Codex no #1157).
+              // O catálogo também é relido: o plano ou um agente pode ter mudado noutra aba com a mesma conta (Codex no #1157). Uma leitura
+              // em voo pode ter saído antes da mudança (o painel lateral a mantém viva): cancelada, para o envio sempre ler de novo.
+              if (DEMO || uidValido(u)) await qc.cancelQueries({ queryKey: agentesQuery(u).queryKey, exact: true });
               d = DEMO || uidValido(u) ? await qc.fetchQuery(agentesQuery(u)) : undefined;
             } catch { d = undefined; /* sem conta conferida ou sem catálogo: vai ao Piggy */ }
           }

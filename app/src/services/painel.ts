@@ -24,3 +24,5 @@ export const editarMeta = (corpo: object, pai: AbortController) => chamar("/api/
 export const apagarMeta = (id: number, pai: AbortController) => chamar("/api/app/metas/apagar", S.metaGravadaSchema, { metodo: "POST", corpo: { id }, sinal: comLimite(undefined, pai) });
 /** Simulador de compra: POST só de cálculo (não grava nada). O corpo é montado por `simuladorCompra.ts`. */
 export const simularCompra = (corpo: object, pai: AbortController) => chamar("/api/app/simulador", S.simuladorSchema, { metodo: "POST", corpo, sinal: comLimite(undefined, pai) });
+/** Simulador de hábito: POST só de cálculo (não grava). Corpo: `{ cortes: [{ categoria, percentual }] }`, montado por `simuladorHabitos.tsx`. */
+export const simularHabitos = (corpo: object, pai: AbortController) => chamar("/api/app/simulador/habitos", S.simuladorHabitosSchema, { metodo: "POST", corpo, sinal: comLimite(undefined, pai) });

@@ -155,10 +155,21 @@ def test_sem_estimativa_422_e_repetidas(uid, dia_fixo):
 @pytest.mark.parametrize("corpo", [
     corte(("mercado", 101)), corte(("mercado", -1)), corte(("mercado", 30.5)), corte(("mercado", "30")),
     corte(("mercado", True)), {"cortes": []}, {"cortes": [{"categoria": "m", "percentual": 1}] * 51},
-    corte(("", 10)), corte(("x" * 121, 10)), {"cortes": [{"categoria": "m", "percentual": 1, "x": 1}]}, {}])
+    corte(("", 10)), {"cortes": [{"categoria": "m", "percentual": 1, "x": 1}]}, {}])
 def test_corpo_invalido_422_sem_eco_e_antes_da_leitura(uid, espiao, corpo):
     r = post(uid, corpo)
-    assert r.status_code == 422 and '"input"' not in r.text and "x" * 121 not in r.text
+    assert r.status_code == 422 and '"input"' not in r.text
+
+
+def test_categoria_sem_teto_de_tamanho_e_sem_eco(uid, dia_fixo):
+    """Nome legado de 200 caracteres (coluna text sem teto) tem de poder ser cortado; um que a estimativa não
+    tem é 422 próprio, sem eco."""
+    nome = "x" * 200
+    com_historico(uid, dia_fixo, **{nome: 600})
+    r = ok(uid, corte((nome, 50)))
+    assert D(r["economia_mensal"]) == D("300.00") and r["cortes"][0]["chave"] == nome
+    r = post(uid, corte(("y" * 121, 10)))
+    assert r.status_code == 422 and det(r)["type"] == "categoria_fora_da_estimativa" and "y" * 121 not in r.text
 
 
 # ── gate ────────────────────────────────────────────────────────────────────
@@ -221,8 +232,30 @@ def test_card_do_chat_traz_a_previsao_e_mantem_o_mes(uid, dia_fixo):
     bloco, visao = montar("simulador", uid, {"meses": [], "dias": None})
     rec = bloco["abas"][0]["recursos"]
     assert {"detalhes", "previsao"} <= set(rec) and rec["previsao"]["estimativa_variavel"]["despesa_mensal"] == "900.00"
-    # a visão do modelo é a de antes (o Piggy só lê a mediana no PR 3b): só estas chaves, nada da previsão
-    assert set(visao["abas"][0]) == {"mes", "categorias", "motivos"}
+    # a visão do modelo é a mediana (o que o card desenha), nunca o mês nem a previsão inteira
+    v = visao["abas"][0]
+    assert set(v) == {"mes", "gasto_do_dia_a_dia"} and v["gasto_do_dia_a_dia"]["despesa_mensal"] == 900.0
+    assert {(c["nome"], c["despesa_mensal"]) for c in v["gasto_do_dia_a_dia"]["categorias"]} == {("mercado", 600.0), ("lazer", 300.0)}
+    from core.services.ai_guard import check
+    nao = lambda ev: [c for c in check("Você gasta cerca de R$ 900,00 por mês.", [ev]) if not c.supported]  # noqa: E731
+    assert nao(json.dumps(visao)) == []  # sustentado; controle negativo logo abaixo
+    mutada = json.dumps(visao).replace("despesa_mensal", "mensal")
+    assert nao(mutada)  # chave não monetária: não sustentado
+
+
+def test_card_do_chat_trunca_o_nome_da_categoria_na_visao(uid, dia_fixo):
+    from core.services.ai_chat.cards import montar
+    com_historico(uid, dia_fixo, **{"x" * 200: 600})
+    q("update auth_accounts set open_finance_onboarding_completed_at=now() where user_id=%s", (uid,))
+    _, visao = montar("simulador", uid, {"meses": [], "dias": None})
+    assert [len(c["nome"]) for c in visao["abas"][0]["gasto_do_dia_a_dia"]["categorias"]] == [60]
+
+
+def test_card_do_chat_sem_historico_visao_nula(uid, dia_fixo):
+    from core.services.ai_chat.cards import montar
+    q("update auth_accounts set open_finance_onboarding_completed_at=now() where user_id=%s", (uid,))
+    bloco, visao = montar("simulador", uid, {"meses": [], "dias": None})
+    assert visao["abas"][0]["gasto_do_dia_a_dia"] is None and "previsao" in bloco["abas"][0]["recursos"]
 
 
 # ── ataque (provado pelo Tester) ────────────────────────────────────────────

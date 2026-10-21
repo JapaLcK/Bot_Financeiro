@@ -33,6 +33,7 @@ from api.v2.metas import Metas
 from api.v2.orcamento_domestico import OrcamentoDomestico
 from api.v2.orcamentos_categoria import OrcamentosCategoria
 from api.v2.progresso_milhao import ProgressoMilhao
+from api.v2.patrimonio import Patrimonio
 from api.v2.perfil import Perfil
 from api.v2.previsao import Previsao
 from api.v2.resumo_mes import ResumoDoMes
@@ -325,6 +326,37 @@ def test_fixture_padrao_de_bancos_e_a_do_app():
     assert FIXTURES["bancos"]["padrao"] == json.loads((Path(__file__).parent / "fixtures" / "app_bancos.json").read_text(encoding="utf-8"))
 
 
+@pytest.mark.parametrize("nome", sorted(FIXTURES["patrimonio"]))
+def test_fixture_de_patrimonio_segue_o_modelo(nome):
+    """Trechos crescentes e sem sobreposição; o último termina em hoje (= `variacao.ate`);
+    `variacao.desde` = começo do último trecho; null só com um ponto no trecho atual."""
+    p = Patrimonio.model_validate(FIXTURES["patrimonio"][nome])
+    assert p.trechos and all(t.desde <= t.ate for t in p.trechos)
+    assert all(a.ate < b.desde for a, b in zip(p.trechos, p.trechos[1:]))
+    if p.variacao:
+        assert p.variacao.desde == p.trechos[-1].desde and p.variacao.ate == p.trechos[-1].ate
+        assert p.variacao.desde < p.variacao.ate
+    else:
+        assert p.trechos[-1].desde == p.trechos[-1].ate
+    # o servidor soma as partes no total, ou avisa que o arredondamento por grupo diverge
+    from decimal import Decimal
+
+    from api.nativo.dinheiro import soma_arredondada_diverge
+
+    f = FIXTURES["patrimonio"][nome]
+    for x in [f, *f["historico"]]:
+        partes = [Decimal(v) for v in x["partes"].values()]
+        dif = abs(sum(partes) - Decimal(x["total"]))
+        if "arredondamento_por_grupo" in x["motivos"]:
+            assert dif <= Decimal("0.01") * len(partes)  # só centavos de arredondamento
+        else:
+            assert not soma_arredondada_diverge(partes, Decimal(x["total"]))
+    # variação = total de hoje − total da foto do 1º dia do trecho atual (quando essa foto existe e não é hoje)
+    foto = next((x for x in f["historico"] if x["dia"] == p.trechos[-1].desde != p.trechos[-1].ate), None)
+    if foto:
+        assert Decimal(f["variacao"]["valor"]) == Decimal(f["total"]) - Decimal(foto["total"])
+
+
 @pytest.mark.parametrize("nome", sorted(FIXTURES["metas"]))
 def test_fixture_de_metas_segue_o_modelo(nome):
     """Dinheiro é texto com 2 casas (ou null); `falta`/`percentual` seguem de `atual` e `alvo`;
@@ -533,6 +565,8 @@ def test_fixture_do_simulador_de_habitos_segue_modelo_e_dinheiro_em_texto():
     assert len(s.cortes) == 2 and s.economia_mensal == sum(c.economia_mensal for c in s.cortes)
     assert s.com_corte.delta_vs_atual == 3 * s.economia_mensal and s.atual.pior_dia.saldo < 0
     assert f["premissas"][-len(PREMISSAS_HABITOS_V2):] == PREMISSAS_HABITOS_V2
+    from api.v2.simulador import CODIGOS_HABITOS
+    assert FIXTURES["simulador"]["codigos_422_habitos"] == sorted(CODIGOS_HABITOS)  # os que `SimuladorHabitos.tsx` cobre
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["orcamentos_categoria"]))

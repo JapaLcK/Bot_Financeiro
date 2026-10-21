@@ -249,3 +249,7 @@
 .nw-area { fill: rgba(244, 244, 246, 0.06); }
 @media (max-width: 528px) { .nw-parts { display: none; } }
 @container (max-width: 460px) { .nw-parts { display: none; } }
+.lever-habito .lever-name { white-space: normal; min-width: 0; overflow-wrap: anywhere; }
+.lever-habito .lever-base { min-width: 0; overflow-wrap: anywhere; }
+.hab-res { display: flow-root; } /* a margem negativa do .sim-facts (flexgap.css) não vaza para fora do wrapper */
+.hab-res .sim-facts + .premissas { margin: 14px 0 12px; }

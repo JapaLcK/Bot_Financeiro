@@ -12,6 +12,7 @@ import { mesDe } from "../lib/store.js";
 import { categoriasQuery, gastosCategoriaQuery, gastosQuery, lancamentosQuery } from "../lib/v2";
 import type { DashState } from "../lib/types";
 import { Frame } from "../parts/Frame";
+import { Info } from "../parts/Info";
 import { estadoGastos } from "../parts/GastosEstado";
 import { GastosDiaTopo } from "../parts/GastosDiaTopo";
 import { LancamentoLinha } from "../parts/LancamentoLinha";
@@ -94,7 +95,9 @@ export function GastosCompras({ s, chegada }: { s: DashState; chegada: { current
 
   return (
     <div ref={ref} className="panel" role="region" id="gastos-compras" tabIndex={-1} aria-labelledby={dia ? "w-compras-h w-compras-data" : "w-compras-h"} onKeyDown={(e) => { if (e.key === "Escape") fechar(); }}>
-      <Frame id="compras" real title={titulo} aside={dia && cat && nome && <span className="tag-demo">Só {nome}</span>}>
+      <Frame id="compras" real title={titulo}
+        info={itens.some(marcada) && <Info rotulo="O que fica fora do total"><p>Movimentos entre contas, guardados e valores em outra moeda ficam fora do total e vêm com o rótulo ou o símbolo da moeda.</p></Info>}
+        aside={dia && cat && nome && <span className="tag-demo">Só {nome}</span>}>
         {estado ?? <>
           {dia ? <GastosDiaTopo d={d!} dia={dia} catalogo={geral.data?.categorias ?? []} porCategoria={!!cat} ir={(k) => { porSeta.current = k; set({ gastosAberto: { dia: k } }); }} /> : (
             <>
@@ -112,7 +115,6 @@ export function GastosCompras({ s, chegada }: { s: DashState; chegada: { current
           )}
           {lista.data && !itens.length && comTotal && <p className="faint">Nenhum lançamento encontrado.</p>}
           {itens.length > 0 && <ul className="compras-lista">{itens.map((item) => <LancamentoLinha key={item.id} item={item} categorias={cats.data?.categorias ?? []} />)}</ul>}
-          {itens.some(marcada) && <p className="faint compras-nota">Movimentos entre contas, guardados e valores em outra moeda ficam fora do total e vêm com o rótulo ou o símbolo da moeda.</p>}
           {lista.hasNextPage && (
             <div className="compras-mais">
               {lista.isFetchNextPageError && <p role="alert">Não deu para carregar mais.</p>}

@@ -294,6 +294,7 @@ for (const width of [1440, 390]) {
   test(`${width}px: sem rolagem lateral, alvos de 44px, total dentro da faixa e contraste do rosa ≥ 3:1`, async () => {
     const { ctx, page } = await abrir({ width });
     await abrirDia(page, 2);
+    await page.addStyleTag({ content: ".w-info::after { display: none; }" }); // o alvo de 44px do ⓘ passa do botão de propósito
     const m = await page.evaluate(() => {
       const box = (s) => { const r = document.querySelector(`#gastos-compras ${s}`).getBoundingClientRect(); return { x: r.x, r: r.right, w: r.width, h: r.height }; };
       const rgb = (c) => c.match(/[\d.]+/g).map(Number);

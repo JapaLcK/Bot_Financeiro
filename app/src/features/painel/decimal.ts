@@ -30,13 +30,6 @@ export function somarCentavos(valores: number[]): number {
   }, 0);
 }
 
-export function percentualEmCentavos(valor: number, percentual: number): number {
-  if (!Number.isSafeInteger(valor) || !Number.isInteger(percentual) || percentual < 0 || percentual > 100) throw new Error("Percentual inválido.");
-  const produto = BigInt(valor) * BigInt(percentual);
-  const modulo = produto < 0n ? -produto : produto;
-  const resultado = (modulo + 50n) / 100n;
-  return Number(produto < 0n ? -resultado : resultado);
-}
 /** % de `valor` em `total`, inteiro, HALF_UP afastando do zero; 0 com total 0. Espelha `api/nativo/mes_detalhes.py::periodo` (`percentual`); paridade em `tests/fixtures/percentual_categorias.json`. */
 export function percentualDe(valor: number, total: number): number {
   if (total === 0) return 0;

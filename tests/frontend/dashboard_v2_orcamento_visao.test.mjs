@@ -7,7 +7,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
+import { RESPOSTAS, abrirInfo, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -78,19 +78,21 @@ for (const width of [1280, 375]) {
   });
 }
 
-test("375px: sem rolagem lateral, na ordem Renda, Visão, Potes, legenda só com %, cards no lugar da tabela", async () => {
+test("375px: sem rolagem lateral, na ordem Renda, Visão, Potes, legenda só com %, cards no lugar da tabela, e o ⓘ da Renda existe e abre com o texto", async () => {
   const { ctx, page } = await abrir({ width: 375 });
   const y = (id) => page.locator(`#w-orcamento-${id}`).evaluate((e) => e.getBoundingClientRect().top);
   const ordem = [await y("renda"), await y("visao"), await y("potes")];
   const valorNaLegenda = await page.locator(".orc-leg-valor").first().isVisible();
   const tabela = await page.locator(".orc-tabela").isVisible();
   const cards = await page.locator(".orc-cards li").count();
-  const nota = await page.locator(".orc-nota").isVisible();
+  const info = await page.locator("#w-orcamento-renda .w-info").isVisible();
   const ok = await semRolagem(page);
+  const texto = await (await abrirInfo(page, "#w-orcamento-renda")).innerText();
   if (process.env.PB_SHOT) await page.screenshot({ path: `${process.env.PB_SHOT}-orcamento-375.png`, fullPage: true });
   await ctx.close();
   assert.ok(ordem[0] < ordem[1] && ordem[1] < ordem[2], JSON.stringify(ordem));
-  assert.deepEqual([valorNaLegenda, tabela, cards, nota], [false, false, 6, false]);
+  assert.deepEqual([valorNaLegenda, tabela, cards, info], [false, false, 6, true]);
+  assert.match(texto, /Os percentuais valem sobre a sua renda\. Metas e Liberdade financeira contam o que você guardou; os outros potes, o que você gastou\./);
   assert.ok(ok);
 });
 
@@ -110,13 +112,13 @@ test("botões do cabeçalho: à direita do título no desktop, em linha própria
   for (const [width, desktop] of [[1280, true], [375, false]]) {
     const { ctx, page } = await abrir({ width });
     const h1 = await page.locator("#page-title").boundingBox();
-    const lede = await page.locator(".page-lede").boundingBox();
+    const titulo = await page.locator(".page-head-t").boundingBox();
     const acoes = await page.locator(".page-acoes").boundingBox();
     const nomes = await page.locator(".page-acoes button").allInnerTexts();
     await ctx.close();
     assert.deepEqual(nomes.map((n) => n.trim()), ["Gasto fixo", "Editar percentuais"]);
-    if (desktop) assert.ok(acoes.x > h1.x + 400 && acoes.y < lede.y + lede.height, JSON.stringify({ h1, lede, acoes }));
-    else assert.ok(acoes.y >= lede.y + lede.height && acoes.width > 330, JSON.stringify({ lede, acoes }));
+    if (desktop) assert.ok(acoes.x > h1.x + 400 && acoes.y < titulo.y + titulo.height, JSON.stringify({ h1, titulo, acoes }));
+    else assert.ok(acoes.y >= titulo.y + titulo.height && acoes.width > 330, JSON.stringify({ titulo, acoes }));
   }
   const { ctx, page } = await abrir();
   await page.getByRole("button", { name: "Gasto fixo", exact: true }).click();

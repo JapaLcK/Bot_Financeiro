@@ -12,6 +12,14 @@
   box-shadow: var(--lift);
 }
 .w-head { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+/* O ⓘ do bloco (parts/Info.tsx): 28px desenhados, alvo de 44px por ::after, como o .w-open (pages.css). Empurra o aside para a direita. */
+.w-head-info .w-title { flex: 0 1 auto; }
+.w-head-info .w-info { margin-right: auto; }
+.w-info { position: relative; display: grid; place-items: center; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--ink-3); font-size: 15px; transition: color var(--t-fast) ease, background-color var(--t-fast) ease; }
+.w-info::after { content: ""; position: absolute; top: -8px; right: -8px; bottom: -8px; left: -8px; }
+@media (hover: hover) and (pointer: fine) { .w-info:hover { color: var(--ink); background: var(--plane-2); } }
+.board[data-editing] .w-info { display: none; }
+.info-corpo { display: grid; gap: 12px; }
 /* Sem lugar ao lado do título, o selo desce para a linha de baixo: nenhum dos dois é cortado.
    Margem no título, não gap: Safari 14.0. */
 .w-title {

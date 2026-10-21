@@ -10,7 +10,7 @@ from api.v2.app import criar_app
 from api.v2.sessao import usuario_assinante, usuario_atual
 from db.open_finance_onboarding import get_open_finance_onboarding
 
-from . import mes_detalhes, patrimonio, rendimento
+from . import mes_detalhes, rendimento
 
 
 def exigir_onboarding(uid: int) -> None:
@@ -29,5 +29,5 @@ def usuario_do_app(request: Request) -> int:
 # revalida por foco/foreground e não oferece esse contrato de eventos web.
 app = criar_app("/api/app", com_eventos=False)
 app.dependency_overrides[usuario_atual] = usuario_do_app
-for modulo in (patrimonio, rendimento, mes_detalhes):
+for modulo in (rendimento, mes_detalhes):
     app.include_router(modulo.router)

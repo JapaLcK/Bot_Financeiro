@@ -36,7 +36,8 @@ export function insights(s: DashState): Insight[] {
         ask: `Por que meu gasto com ${rise.c.label.toLowerCase()} subiu ${Math.round(rise.d * 100)}% em ${monthName(keyDate(s.month))}?`,
         topic: "categoria", cat: rise.c.id,
         text: <><b>{rise.c.label}</b> subiu {Math.round(rise.d * 100)}%: {money0(rise.now)} contra {money0(rise.then)} em {monthName(keyDate(prev))}{current ? ` até o dia ${day}` : ""}.</>,
-        action: { label: `Simular ${rise.c.label.toLowerCase()} −30%`, run: () => { setCut(rise.c.id, 0.3); go("/simulador"); } },
+        // O simulador real começa sem corte (estado dele, não o do exemplo): a ação só abre a página.
+        action: DEMO ? { label: `Simular ${rise.c.label.toLowerCase()} −30%`, run: () => { setCut(rise.c.id, 0.3); go("/simulador"); } } : { label: "Abrir o simulador", run: () => go("/simulador") },
       });
     }
   }
