@@ -73,14 +73,14 @@ describe("Texto", () => {
     expect(corClara).not.toBe(corEscura);
   });
 
-  it("Dynamic Type ao vivo recria o nó do texto, e só quando a escala muda", async () => {
+  it.each(VARIANTES)("Dynamic Type ao vivo recria o nó do texto (%s), e só quando a escala muda", async (variante) => {
     // Medida velha corta o rótulo ("Mês" vira "Mê") quando a troca de fonte
     // coincide com um commit do React; o nó novo é medido do zero.
     const janela = Dimensions.get("window");
     const janelaCom = (fontScale: number, width = janela.width) => act(async () => { Dimensions.set({ window: { ...janela, width, fontScale } }); });
     try {
       await janelaCom(1);
-      const { claro } = renderNosDoisTemas(<Texto>Mês</Texto>);
+      const { claro } = renderNosDoisTemas(<Texto variante={variante}>Mês</Texto>);
       const antes = claro.getByText("Mês");
       await janelaCom(1, janela.width + 100); // gira/redimensiona: re-renderiza, mas a escala é a mesma
       expect(claro.getByText("Mês")).toBe(antes);
