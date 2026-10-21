@@ -1,5 +1,5 @@
 import type { Ref } from "react";
-import { StyleSheet, Text, type TextProps } from "react-native";
+import { StyleSheet, Text, useWindowDimensions, type TextProps } from "react-native";
 
 import { useTema } from "@/ui/tema";
 import { texto, type Paleta } from "@/ui/tokens";
@@ -26,9 +26,16 @@ interface Props extends Omit<TextProps, "maxFontSizeMultiplier"> {
  * `maxFontSizeMultiplier` fixo em 1.3 e NÃO pode ser sobrescrito pelo
  * chamador: acima disso o texto quebra layout em vez de só crescer, e não é
  * decisão de tela por tela.
+ *
+ * `key={fontScale}`: o nó nativo é recriado quando o Dynamic Type muda com o
+ * app aberto. Sem isso, se a mesma troca também faz o React commitar (o
+ * painel remonta peças pelo `fontScale`), os `Text` que não remontaram ficam
+ * com a medida do tamanho antigo e cortam ("Mês" vira "Mê"). Só o nó do
+ * texto remonta; estado e dados ficam no pai.
  */
 export function Texto({ variante = "corpo", tom = "ink", numerico = false, style, ...resto }: Props) {
   const { cores, acesso } = useTema();
+  const { fontScale } = useWindowDimensions();
   // `fontWeight` do chamador nunca passa adiante: peso + família custom cai
   // de volta no sistema no Android (mesmo motivo do comentário em
   // `tokens.ts`) — o peso vem da família de `texto[variante]`, não de um
@@ -36,6 +43,7 @@ export function Texto({ variante = "corpo", tom = "ink", numerico = false, style
   const { fontWeight: _fontWeightDoChamador, ...estiloDoChamador } = StyleSheet.flatten(style) ?? {};
   return (
     <Text
+      key={fontScale}
       {...resto}
       maxFontSizeMultiplier={1.3}
       style={[
