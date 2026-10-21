@@ -24,6 +24,8 @@ from datetime import datetime
 import pytest
 
 from core.services.pluggy_health import (
+    _MOTIVO_POR_CODIGO_NU,
+    _ORDEM_DAS_FRASES,
     connection_ui_state,
     derive_item_health,
     resolve_connection_state,
@@ -170,10 +172,11 @@ def test_warning_chega_ao_health_sem_pii():
 
 
 # ── POR QUE o produto não veio: código do warning → frase nossa ─────────────
-# Relato do dono, não medido em produção: investimentos com `updated=false` e 30
-# warnings de código relatado como `004` (prefixo não confirmado), e ninguém soube
-# o motivo — o código chegava ao navegador dentro do JSON e NENHUMA superfície o
-# mostrava. A mensagem da Pluggy continua descartada (ela cita nome, conta e
+# Medido em 20/10/2026 (GET /items/{id} de um item Nubank Open Finance em
+# produção): `updated=false`, e `004` CRU em creditCards (1 warning) e investments
+# (26), com message "Open Finance monthly rate limit reached (HTTP 423)". Ninguém
+# soube o motivo — o código chegava ao navegador dentro do JSON e NENHUMA
+# superfície o mostrava. A mensagem da Pluggy continua descartada (ela cita nome, conta e
 # CPF); quem fala é a frase nossa.
 
 def _ui_stale(**por_produto) -> dict:
@@ -240,19 +243,19 @@ def test_investimento_diz_por_que_nao_veio(code, trecho):
 # ENTRE produtos deixa vermelho o caso em que o cru está no produto que vem
 # primeiro em `_PRODUCT_KEYS`.
 
-@pytest.mark.parametrize("ordem", [["004", "CC_001"], ["CC_001", "004"]])
+@pytest.mark.parametrize("ordem", [["001", "CC_001"], ["CC_001", "001"]])
 def test_no_mesmo_produto_o_motivo_vence_o_codigo_cru_em_qualquer_ordem(ordem):
     detalhe = _detalhe(creditCards=[{"code": c} for c in ordem])
     assert detalhe == (CONTEXTO_PARCIAL + "Cartão desatualizado desde 12/08 — você não liberou esse "
                        "dado ao conectar o banco, reconecte para liberar"), detalhe
 
 
-@pytest.mark.parametrize("contas, cartao", [(["004"], ["CC_001"]), (["CC_001"], ["004"])])
+@pytest.mark.parametrize("contas, cartao", [(["001"], ["CC_001"]), (["CC_001"], ["001"])])
 def test_entre_produtos_o_motivo_vence_o_codigo_cru(contas, cartao):
     detalhe = _detalhe(accounts=[{"code": c.replace("CC_", "ACCT_")} for c in contas],
                        creditCards=[{"code": c} for c in cartao])
     assert "você não liberou esse dado" in detalhe, detalhe
-    assert "código 004" not in detalhe, detalhe
+    assert "código 001" not in detalhe, detalhe
 
 
 @pytest.mark.parametrize("ordem", [["CC_002", "CC_004"], ["CC_004", "CC_002"]])
@@ -307,23 +310,78 @@ def test_codigo_de_sub_dado_nao_vira_frase_sobre_o_produto(code):
         assert frase not in detalhe, f"{code} ganhou instrução que a doc não sustenta: {detalhe}"
 
 
+@pytest.mark.parametrize("ordem", [["004", "CC_001"], ["CC_001", "004"]])
+def test_004_cru_no_cartao_vence_o_reconecte_em_qualquer_ordem(ordem):
+    detalhe = _detalhe(creditCards=[{"code": c} for c in ordem])
+    assert detalhe.endswith("volta sozinho na virada do período"), detalhe
+    assert "reconecte" not in detalhe, detalhe
+
+
+def test_004_cru_no_cartao_e_reconecte_nos_investimentos_mantem_a_regra_entre_produtos():
+    """Guarda da regra ENTRE produtos, NÃO prova o mapa: com `_MOTIVO_POR_CODIGO_NU`
+    vazio ele passa igual (o cru cai na prioridade 6 e perde para INV_001). Quem
+    discrimina o mapa são `test_item_nubank_de_producao_em_20_10`,
+    `test_004_cru_no_cartao_vence_o_reconecte_em_qualquer_ordem` ([004, CC_001]) e
+    `test_004_cru_no_cartao_vence_motivo_pior_de_outro_produto` (ACCT_003)."""
+    detalhe = _detalhe(creditCards=[{"code": "004"}], investments=[{"code": "INV_001"}])
+    assert detalhe.endswith(" — Investimentos: você não liberou esse dado ao conectar o banco, "
+                            "reconecte para liberar"), detalhe
+
+
+def test_item_nubank_de_producao_em_20_10():
+    """O formato medido: `004` cru em cartão (1) e investimentos (26)."""
+    aviso = {"code": "004",
+             "message": "Open Finance monthly rate limit reached (HTTP 423) on product "
+                        "'creditCards', number 0000. The product could not be updated.",
+             "providerMessage": "Access to this resource is temporarily unavailable because "
+                                "the participant has reached the operational limit."}
+    agora = datetime(2026, 10, 20, 12, 0, 0, tzinfo=_tz())
+    health = derive_item_health({
+        "id": "item-prod", "status": "UPDATED", "executionStatus": "PARTIAL_SUCCESS",
+        "statusDetail": {
+            "accounts": {"isUpdated": True, "lastUpdatedAt": "2026-10-20T11:00:00.000Z", "warnings": []},
+            "transactions": {"isUpdated": True, "lastUpdatedAt": "2026-10-20T11:00:00.000Z", "warnings": []},
+            "creditCards": {"isUpdated": False, "lastUpdatedAt": "2026-10-08T13:59:36.509Z",
+                            "warnings": [aviso]},
+            "investments": {"isUpdated": False, "lastUpdatedAt": None, "warnings": [aviso] * 26},
+        },
+    }, now=agora)
+    detalhe = connection_ui_state({"status": "ACTIVE", "health": health,
+                                   "last_sync_at": agora})["detail"]
+    assert detalhe == (CONTEXTO_PARCIAL + "Cartão e Investimentos desatualizados desde 08/10 — "
+                       "o banco bateu o limite de consultas do Open Finance, volta sozinho na "
+                       "virada do período"), detalhe
+    assert "0000" not in detalhe and "HTTP 423" not in detalhe, detalhe
+    assert health["products"]["CREDIT"]["warnings"] == ["004"]
+
+
+def test_004_cru_no_cartao_vence_motivo_pior_de_outro_produto():
+    """Discrimina o mapa: ACCT_003 tem prioridade 3, pior que o limite (2). Sem o
+    `004` -> limite, o cru (6) perderia e a frase seria a das contas."""
+    detalhe = _detalhe(creditCards=[{"code": "004"}], accounts=[{"code": "ACCT_003"}])
+    assert detalhe.endswith("volta sozinho na virada do período"), detalhe
+    assert "algumas horas" not in detalhe, detalhe
+
+
+def test_motivos_do_codigo_nu_estao_na_ordem_das_frases():
+    assert set(_MOTIVO_POR_CODIGO_NU.values()) <= set(_ORDEM_DAS_FRASES)
+
+
 def test_partial_sem_warning_mantem_a_frase_de_hoje():
     """CONTROLE POSITIVO: o conserto ANEXA, nunca reescreve. Sem ele o grupo
     acima passaria num código que carimba frase em toda conexão parcial."""
     assert _detalhe(creditCards=[]) == CONTEXTO_PARCIAL + "Cartão desatualizado desde 12/08"
 
 
-def test_codigo_desconhecido_mostra_o_codigo_cru():
-    """`004` nu não está na doc de Open Finance (conector direto usa código nu, que
-    significa coisa diferente em cada conector). Mostrar o código é honesto;
-    adivinhar o significado não. É também o CONTROLE POSITIVO da prioridade: sem
-    motivo explicável, o cru É o motivo.
-
-    Se o dono confirmar que o código dele era `INV_004`, o caso real dele não é
-    este — é o de `test_trinta_warnings_iguais_viram_uma_frase`."""
-    detalhe = _detalhe(creditCards=[{"code": "004"}])
-    assert "004" in detalhe, detalhe
-    assert "você não liberou" not in detalhe and "limite de consultas" not in detalhe, detalhe
+@pytest.mark.parametrize("produto, code", [("accounts", "004"), ("transactions", "004"),
+                                           ("creditCards", "001")])
+def test_codigo_desconhecido_mostra_o_codigo_cru(produto, code):
+    """CONTROLE POSITIVO: `004` cru só é "limite" em cartão e investimentos (pares
+    medidos); em conta e transações, e `001` cru em qualquer produto, o código
+    aparece como veio. Mostrar o código é honesto; adivinhar o significado não."""
+    detalhe = _detalhe(**{produto: [{"code": code}]})
+    assert f"o banco avisou com o código {code}" in detalhe, detalhe
+    assert "limite de consultas" not in detalhe, detalhe
 
 
 # ── o SUJEITO e o MOTIVO têm de casar ───────────────────────────────────────
@@ -367,10 +425,10 @@ def test_produto_sem_warning_nenhum_nao_herda_o_motivo_do_vizinho():
 def test_motivo_igual_nos_dois_produtos_dispensa_o_nome():
     """CONTROLE POSITIVO do par acima: quando o motivo vale para TODO o sujeito,
     nomear produto seria ruído."""
-    detalhe = _detalhe(creditCards=[{"code": "004"}] * 30,
-                       investments=[{"code": "004"}] * 30)
+    detalhe = _detalhe(creditCards=[{"code": "001"}] * 30,
+                       investments=[{"code": "001"}] * 30)
     assert detalhe == (CONTEXTO_PARCIAL + "Cartão e Investimentos desatualizados desde 12/08 — "
-                       "o banco avisou com o código 004, sem explicar o motivo"), detalhe
+                       "o banco avisou com o código 001, sem explicar o motivo"), detalhe
 
 
 def test_trinta_warnings_iguais_viram_uma_frase():
@@ -444,6 +502,19 @@ def test_health_malformado_nao_derruba_a_tela(health):
              "last_sync_at": AGORA, "health": health}
     ui = connection_ui_state(linha)
     assert isinstance(ui["detail"], str)
+
+
+def test_no_accounts_com_004_cru_nos_investimentos_diz_o_limite():
+    """Segunda prova do par ("INVESTMENTS", "004") do `_MOTIVO_POR_CODIGO_NU`."""
+    ui = connection_ui_state({
+        "status": "ACTIVE", "status_reason": "no_accounts", "last_sync_at": AGORA,
+        "health": {"item_status": "UPDATED", "stale_products": [],
+                   "products": {"INVESTMENTS": {"updated": False, "warnings": ["004"]}}},
+    })
+    assert ui["state"] == "no_accounts"
+    assert ui["detail"] == ("O banco não devolveu contas nem investimentos — o banco bateu o "
+                            "limite de consultas do Open Finance, volta sozinho na virada "
+                            "do período"), ui["detail"]
 
 
 def test_no_accounts_tambem_diz_o_motivo():
@@ -1492,7 +1563,7 @@ def test_mescla_nao_muta_os_argumentos():
 @pytest.mark.parametrize("campos, detalhe_anterior, atrasados", [
     pytest.param(
         {"health": derive_item_health(ITEM_PARCIAL, now=AGORA)},
-        "Cartão desatualizado desde 12/08 — o banco avisou com o código 004, sem explicar o motivo",
+        "Cartão desatualizado desde 12/08 — o banco bateu o limite de consultas do Open Finance, volta sozinho na virada do período",
         ["CREDIT"], id="produto-warning-data"),
     pytest.param(
         {"health": {"item_status": "UPDATED", "execution_status": "PARTIAL_SUCCESS"}},
@@ -1507,7 +1578,7 @@ def test_mescla_nao_muta_os_argumentos():
     pytest.param(
         {"health": derive_item_health(ITEM_PARCIAL, now=AGORA),
          "status_reason": "investments_read_failed"},
-        "Cartão desatualizado desde 12/08 — o banco avisou com o código 004, sem explicar o motivo"
+        "Cartão desatualizado desde 12/08 — o banco bateu o limite de consultas do Open Finance, volta sozinho na virada do período"
         "; investimentos não vieram nesta atualização",
         ["CREDIT"], id="produto-e-leitura-parciais"),
     pytest.param(
@@ -1519,7 +1590,7 @@ def test_mescla_nao_muta_os_argumentos():
         {"status_reason": "partial"}, None, [], id="motivo-local-sem-detalhe"),
     pytest.param(
         {"health": derive_item_health({**ITEM_PARCIAL, "status": "UPDATING"}, now=AGORA)},
-        "Cartão desatualizado desde 12/08 — o banco avisou com o código 004, sem explicar o motivo",
+        "Cartão desatualizado desde 12/08 — o banco bateu o limite de consultas do Open Finance, volta sozinho na virada do período",
         ["CREDIT"], id="coleta-em-curso-com-sync-anterior-valido"),
 ])
 def test_dados_parciais_separam_autorizacao_e_dado_sem_apagar_motivo(
