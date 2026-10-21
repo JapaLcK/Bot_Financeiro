@@ -591,9 +591,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   cada cenário: `risco_identificado` ("não recomendo", com `data` e `valor` do pior dia no pior caso), `dados_insuficientes`,
   `dados_desatualizados` e `sem_risco_identificado` (não é "cabe": `cabe_nas_premissas` está no enum e nenhum caminho o produz). O pior caso
   é `cashflow.pior_caso_do_risco` (sem a estimativa nem as saídas duvidosas); se o risco só existe contando as dúvidas, o estado é
-  inconclusivo e os `bloqueios[].itens` listam o que perguntar. Janela de conferência de 3 dias (`JANELA_CONFERENCIA_DIAS`,
-  `Snapshot.conferencia`, fora de `qualidade()`). Chave `SIMULADOR_VEREDITO_ENABLED` (padrão ligada, lida a cada pedido): só `0`, `false`,
-  `no` e `off` (sem distinguir maiúsculas nem espaços nas pontas) deixam `veredito: null`; qualquer outro valor liga. A tool `simulate_purchase` (3b) e as telas (3c) ainda não o leem. **Com banco conectado o veredito é sempre
+  inconclusivo e os `bloqueios[].itens` listam o que perguntar. Se só a estimativa do dia a dia (com as dúvidas a favor) leva abaixo do limite, é
+  `dados_insuficientes` com `gasto_do_dia_a_dia_estimado` (nunca `risco_identificado`), junto com as perguntas das dúvidas que decidem, se houver; a receita fixa prevista conta como certa. Janela de conferência (`JANELA_CONFERENCIA_DIAS`,
+  `Snapshot.conferencia`, fora de `qualidade()`). Chave `SIMULADOR_VEREDITO_ENABLED` (padrão ligada, lida uma vez por pedido, `veredito.ligado`): desligada, `veredito` sai `null`. A tool `simulate_purchase` (3b) e as telas (3c) ainda não o leem. **Com banco conectado o veredito é sempre
   inconclusivo** (`cobertura_bancaria_nao_comprovada`, até os PRs 4a a 4d). Não grava nada. A tela é `#/simulador/compra`
   (`widgets/SimuladorCompra.tsx`, fora do protótipo e do menu lateral; entra pela ferramenta "Vale a pena
   comprar?"). O `atual` inclui a estimativa do dia a dia (mediana, ver Previsão); em aberto: o corte de hábito real

@@ -2,13 +2,15 @@
 
 Função pura sobre a snapshot (o isolamento por usuário já vem dela). Estados: `risco_identificado`
 ("não recomendo", com dia e valor), `dados_insuficientes`, `dados_desatualizados` (atualizar ou
-conferir resolve) e `sem_risco_identificado` (dados confiáveis e nenhum risco achado: NÃO é "cabe",
-que fica desligado até a Etapa 3 de `docs/plano-piggy-assistente-contextual.md`). A regra, em ordem:
-saldo ausente, motivo estrutural, risco no pior caso, risco que só some com uma dúvida a favor.
+conferir resolve) e `sem_risco_identificado` (dados confiáveis, nenhum risco achado e a estimativa do dia a dia não
+leva abaixo do limite: NÃO é "cabe", que fica desligado até a Etapa 3 de `docs/plano-piggy-assistente-contextual.md`).
+A regra, em ordem: saldo ausente, motivo estrutural, risco no pior caso, estimativa do dia a dia sozinha abaixo do limite
+(`ESTIMATIVA`, nunca "não recomendo"), risco que só some com uma dúvida a favor (pergunta; junto com a estimativa, se houver).
 """
 from __future__ import annotations
 
 import os
+from datetime import date
 
 from core.services import cashflow
 from core.services.cashflow_contract import FONTE_VARIAVEL, Snapshot, Ocorrencia, centavos
@@ -18,6 +20,7 @@ from core.services.cashflow_forecast import trajetoria_com_hoje
 DESATUALIZADOS = frozenset({"banco_desatualizado", "conta_fora_do_ultimo_sync", "recorrencias_banco_nao_lidas",
                             "conciliacao_a_conferir", "declaracao_bancaria_a_conferir"})
 DUVIDA_RECENTE = "realizacao_recente_a_conferir"  # fixo ou receita manual dos últimos dias, sem marcador
+ESTIMATIVA = "gasto_do_dia_a_dia_estimado"  # só a estimativa leva o saldo abaixo do limite
 GENERICO = "Há um dado a conferir antes de concluir."
 
 # Fonte única do texto dos bloqueios (código -> frase de ação). {N} = horas de `BANCO_VELHO`.
@@ -61,6 +64,9 @@ TEXTO = {
     "realizacao_boleto_a_conferir": "Estes boletos já foram pagos?",
     "realizacao_fatura_a_conferir": "Estas faturas já foram pagas?",
     DUVIDA_RECENTE: "Estes já caíram ou já foram cobrados?",
+    # A estimativa do dia a dia não foi validada: sozinha, ela nunca vira "não recomendo". {B} = "negativo" ou
+    # "abaixo da sua reserva" (reserva informada), {D} = DD/MM do 1º dia abaixo do limite com a estimativa.
+    ESTIMATIVA: "Com seus gastos do dia a dia de sempre, você fica {B} em {D}.",
     "data_parcela_presumida": "Quando vence a primeira parcela? Considerei um mês depois da compra.",
     "data_despesa_mensal_presumida": "Quando começa a despesa mensal nova? Considerei um mês depois da compra.",
     # Só melhoram a conta (não bloqueiam o "não recomendo"); o "cabe" vai usá-los.
@@ -77,9 +83,9 @@ def ligado() -> bool:
     return os.getenv("SIMULADOR_VEREDITO_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
-def _texto(codigo: str) -> str:
+def _texto(codigo: str, **kw) -> str:
     from db.patrimonio import BANCO_VELHO  # fonte única do limite de 48 h; o veredito não mede idade
-    return TEXTO.get(codigo, GENERICO).format(N=int(BANCO_VELHO.total_seconds() // 3600))
+    return TEXTO.get(codigo, GENERICO).format(N=int(BANCO_VELHO.total_seconds() // 3600), **kw)
 
 
 def _duvida(e: Ocorrencia) -> str:
@@ -90,13 +96,13 @@ def veredito(snapshot: Snapshot, extra: list[Ocorrencia], reserva, dias: int) ->
     premissa = (f"Considerei que o previsto antes de {snapshot.conferencia_desde:%d/%m} já aconteceu."
                 if snapshot.conferencia_desde else None)
 
-    def saida(estado, grupos=None, data=None, valor=None):
+    def saida(estado, grupos=None, data=None, valor=None, **kw):
         return {"estado": estado, "data": data, "valor": valor, "premissa": premissa,
-                "bloqueios": [{"codigo": c, "texto": _texto(c), "itens": i} for c, i in (grupos or {}).items()]}
+                "bloqueios": [{"codigo": c, "texto": _texto(c, **kw), "itens": i} for c, i in (grupos or {}).items()]}
 
-    def falta(grupos):
+    def falta(grupos, **kw):
         return saida("dados_desatualizados" if all(c in DESATUALIZADOS for c in grupos) else "dados_insuficientes",
-                     grupos)
+                     grupos, **kw)
 
     if snapshot.base["saldo"] is None:
         return saida("dados_insuficientes", {"saldo_indisponivel": []})
@@ -112,15 +118,27 @@ def veredito(snapshot: Snapshot, extra: list[Ocorrencia], reserva, dias: int) ->
     if dia is not None and dia["saldo_projetado"] < limite:
         return saida("risco_identificado", data=dia["date"], valor=dia["saldo_projetado"])
 
-    # Sem risco no pior caso a favor. Se as dúvidas contra (saída que pode já ter saído a mais, entrada que
-    # pode não ter vindo) o criariam, o veredito depende delas: pergunta em vez de concluir.
-    contra = [e for e in eventos if e.fonte != FONTE_VARIAVEL
-              and not (e.direcao == "entrada" and e.realizacao == "a_conferir")]
-    primeiro = next((p["date"] for p in trajetoria_com_hoje(snapshot.hoje, snapshot.base, contra, dias, limite)
+    # Sem risco no pior caso a favor. Duas perguntas separadas: (1) só a estimativa do dia a dia, contando as
+    # dúvidas a favor (o pior caso acima + a estimativa), leva abaixo do limite? Então `ESTIMATIVA`, com a data
+    # DESSA trajetória (nunca "não recomendo"; a receita prevista segue contando como certa). (2) As dúvidas
+    # contra (saída que pode já ter saído a mais, entrada que pode não ter vindo) criam o risco? Então pergunta.
+    contra = [e for e in eventos if not (e.direcao == "entrada" and e.realizacao == "a_conferir")]
+
+    def primeiro_dia(evs, b=snapshot.base):
+        return next((p["date"] for p in trajetoria_com_hoje(snapshot.hoje, b, evs, dias, limite)
                      ["trajectory"] if p["abaixo_do_limite"]), None)
-    if primeiro is None:
+    est = primeiro_dia([*pior, *(e for e in eventos if e.fonte == FONTE_VARIAVEL)], base)
+    sem_est = primeiro_dia([e for e in contra if e.fonte != FONTE_VARIAVEL])
+    abaixo = primeiro_dia(contra)
+    if est is None and abaixo is None:
         return saida("sem_risco_identificado")
-    grupos: dict[str, list] = {}
+    grupos: dict[str, list] = {ESTIMATIVA: []} if est else {}
+    kw = {"D": f"{date.fromisoformat(est):%d/%m}" if est else "", "B": "abaixo da sua reserva" if limite > 0 else "negativo"}
+    if est and sem_est is None:  # as dúvidas não mudam nada: com ou sem elas a estimativa sozinha já leva abaixo
+        return falta(grupos, **kw)
+    # Dúvidas datadas até o 1º dia abaixo SEM a estimativa (a pergunta que muda a conclusão, mesmo se a estimativa
+    # cruza antes); sem ele, até o 1º dia abaixo com ela (só a soma dúvida + estimativa cruza).
+    primeiro = sem_est or abaixo
     for m in snapshot.motivos:  # ajuste de conciliação a favor entrou só no pior caso
         if (m.codigo in ("conciliacao_a_conferir", "declaracao_bancaria_a_conferir")
                 and m.efeito_quantificado is not None and m.efeito_quantificado > 0):
@@ -130,4 +148,4 @@ def veredito(snapshot: Snapshot, extra: list[Ocorrencia], reserva, dias: int) ->
                 and e.data.isoformat() <= primeiro and e.fonte != FONTE_VARIAVEL
                 and (cashflow.saida_duvidosa(e) or e.direcao == "entrada" and e.realizacao == "a_conferir")):
             grupos.setdefault(_duvida(e), []).append({"nome": e.nome, "data": e.data.isoformat()})
-    return falta(grupos)
+    return falta(grupos, **kw)

@@ -5,7 +5,7 @@ carrega `cobertura_bancaria_nao_comprovada`). A Carteira nasce de lançamento ve
 sem lançamento a deixa "não confirmada" e tudo vira inconclusivo.
 """
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal as D
 from pathlib import Path
 
@@ -17,7 +17,7 @@ import frontend.finance_bot_websocket_custom as dashboard
 from _apoio_auth_app import sessao_de
 from conftest import usuario_pagante
 from core.services import carteira, previsao_v2, veredito as ver
-from core.services.cashflow_contract import JANELA_CONFERENCIA_DIAS, Motivo, Ocorrencia, Snapshot
+from core.services.cashflow_contract import FONTE_VARIAVEL, JANELA_CONFERENCIA_DIAS, Motivo, Ocorrencia, Snapshot
 from core.services.decision_simulator import Simulacao, simulate
 from db.bills import create_boleto
 from db.recurring import create_recurring_expense
@@ -25,6 +25,7 @@ from db.recurring_income import create_recurring_income
 from tests._patrimonio_helpers import conexao, conta, horas_atras
 from tests.test_api_v2_simulador import ok
 from tests.test_cashflow_snapshot import q
+from tests.test_previsao_variavel import _tz
 
 RAIZ = Path(__file__).parent.parent
 
@@ -69,7 +70,9 @@ def rodar(u, *cenarios, reserva=None):
         corpo["reserva_minima"] = reserva
     r = ok(u, corpo)
     for v in (r["atual"]["veredito"], *(c["resumo"]["veredito"] for c in r["cenarios"])):
-        if v:
+        if v:  # invariantes do contrato em TODO veredito real: dia e valor só no risco, bloqueio só nos dados_*
+            assert (v["estado"] == "risco_identificado") == (v["data"] is not None) == (v["valor"] is not None)
+            assert bool(v["bloqueios"]) == v["estado"].startswith("dados_")
             assert v["estado"] != "cabe_nas_premissas" and r["cabe_nas_premissas"] is False  # o "cabe" nunca sai
     return r
 
@@ -384,17 +387,18 @@ def _ocorrencia(valor, dias):
                       D(valor), "saida")
 
 
+# Pares reais da snapshot (`cashflow_snapshot.py:132-139`): efeito > 0 = so_piora, efeito < 0 = so_melhora.
 @pytest.mark.parametrize("codigo", ["conciliacao_a_conferir", "declaracao_bancaria_a_conferir"])
 def test_t4a_ajuste_a_favor_que_tira_o_risco_vira_bloqueio(codigo):
     s = Snapshot(hoje(), datetime.now(timezone.utc), {"saldo": D(0)}, [_ocorrencia(50, 2)],
-                 [Motivo(codigo, "so_melhora", 7, efeito_quantificado=D(100))])
+                 [Motivo(codigo, "so_piora", 7, efeito_quantificado=D(100))])
     v = ver.veredito(s, [], 0, 90)  # no pior caso 0+100-50 >= 0; só com a dúvida contra (sem o ajuste) o dia +2 fica em -50
     assert v["estado"] == "dados_desatualizados" and codigos(v) == [codigo]
 
 
 def test_t4b_ajuste_contra_nao_entra_no_pior_caso_do_risco():
     s = Snapshot(hoje(), datetime.now(timezone.utc), {"saldo": D(0)}, [],
-                 [Motivo("conciliacao_a_conferir", "so_piora", 7, efeito_quantificado=D(-100))])
+                 [Motivo("conciliacao_a_conferir", "so_melhora", 7, efeito_quantificado=D(-100))])
     assert ver.veredito(s, [], 0, 90)["estado"] == "sem_risco_identificado"
 
 
@@ -407,3 +411,104 @@ def test_t5_so_zero_false_no_off_desligam(monkeypatch, valor, esperado):
     if valor is not None:
         monkeypatch.setenv("SIMULADOR_VEREDITO_ENABLED", valor)
     assert ver.ligado() is esperado
+
+
+# ── A1 (decisão do dono, 2026-10-21): só a estimativa do dia a dia leva abaixo do limite = inconclusivo ──
+
+def _historico_de_mercado(u, valor):
+    """Carteira confirmada 2000 (sem banco) e `valor` de mercado em 3 janelas de 30 dias: liga a estimativa."""
+    def quando(atras):
+        return datetime.combine(hoje() - timedelta(days=atras), time(12), tzinfo=_tz())
+    carteira.lancar(u, "receita", 6500, "Salário", "Salário antigo", "salario", criado_em=quando(100))
+    for atras in (10, 40, 70):
+        carteira.lancar(u, "despesa", valor, "Mercado", "Mercado", "mercado", criado_em=quando(atras))
+
+
+def test_a1_so_a_estimativa_abaixo_de_zero_e_inconclusivo_com_a_data(novo):
+    u = novo()
+    _historico_de_mercado(u, 1500)
+    r = rodar(u, cen(preco="10"))
+    assert r["cobertura"]["inclui_estimativa_variavel"] is True
+    for v, resumo in ((v_atual(r), r["atual"]), (v_cen(r), r["cenarios"][0]["resumo"])):
+        assert v["estado"] == "dados_insuficientes" and v["valor"] is None and codigos(v) == [ver.ESTIMATIVA]
+        assert v["bloqueios"][0]["itens"] == []
+        d = date.fromisoformat(next(p["data"] for p in resumo["trajetoria"] if D(p["saldo"]) < 0))
+        assert v["bloqueios"][0]["texto"] == f"Com seus gastos do dia a dia de sempre, você fica negativo em {d:%d/%m}."
+
+
+def test_a1_estimativa_que_nao_leva_abaixo_continua_sem_risco(novo):
+    u = novo()
+    _historico_de_mercado(u, 30)
+    r = rodar(u, cen(preco="10"))
+    assert r["cobertura"]["inclui_estimativa_variavel"] is True
+    assert v_atual(r)["estado"] == v_cen(r)["estado"] == "sem_risco_identificado"
+
+
+def test_a1_com_reserva_a_frase_fala_da_reserva(novo):
+    u = novo()
+    _historico_de_mercado(u, 100)  # estimativa pequena: a Carteira de 6500-300 não fica negativa em 90 dias
+    r = rodar(u, cen(preco="10"), reserva="6190")
+    b = v_atual(r)["bloqueios"][0]
+    assert codigos(v_atual(r)) == [ver.ESTIMATIVA] and "abaixo da sua reserva em" in b["texto"]
+
+
+def test_a1_risco_que_existe_sem_a_estimativa_continua_risco(novo):
+    u = novo()
+    _historico_de_mercado(u, 1500)
+    gasto(u, "Aluguel", 9000, 5)  # sozinho leva o saldo abaixo de zero, sem a estimativa
+    v = v_atual(rodar(u, cen(preco="10")))
+    assert v["estado"] == "risco_identificado" and v["data"] == iso(5) and v["bloqueios"] == []
+
+
+# ── Caso misto (dono, 2026-10-21, "Perguntar e avisar"): estimativa + dúvida datada ──
+
+def test_r1_duvida_mais_estimativa_pergunta_e_nao_acusa_o_dia_a_dia(novo):
+    u = novo()
+    _historico_de_mercado(u, 100)  # Carteira 6200, estimativa pequena: sozinha não fica negativa em 90 dias
+    gasto(u, "Academia", 6000, -1)  # fixo de ontem, sem marcador: dúvida da janela de conferência
+    r = rodar(u, cen(preco="10"))
+    assert r["cobertura"]["inclui_estimativa_variavel"] is True
+    v = v_atual(r)
+    assert v["estado"] == "dados_insuficientes" and codigos(v) == [ver.DUVIDA_RECENTE]
+    assert v["bloqueios"][0]["itens"] == [{"nome": "Academia", "data": iso(-1)}]
+
+
+def test_caso_y_estimativa_cruza_cedo_e_a_duvida_so_depois_os_dois_bloqueios(novo):
+    u = novo()
+    _historico_de_mercado(u, 2000)  # Carteira 500: a estimativa sozinha leva a zero em poucos dias
+    create_boleto(u, "Luz", 800, hoje() + timedelta(days=40))  # sem a estimativa, só ele leva abaixo de zero
+    r = rodar(u, cen(preco="10"))
+    v = v_atual(r)
+    d = date.fromisoformat(next(p["data"] for p in r["atual"]["trajetoria"] if D(p["saldo"]) < 0))
+    assert d < hoje() + timedelta(days=40)
+    assert v["estado"] == "dados_insuficientes" and codigos(v) == [ver.ESTIMATIVA, "realizacao_boleto_a_conferir"]
+    assert v["bloqueios"][0]["texto"] == f"Com seus gastos do dia a dia de sempre, você fica negativo em {d:%d/%m}."
+    assert v["bloqueios"][1]["itens"] == [{"nome": "Luz", "data": iso(40)}]
+
+
+def test_caso_y2_duvida_que_nao_decide_so_a_estimativa_bloqueia_com_a_data_do_grafico(novo):
+    u = novo()
+    _historico_de_mercado(u, 2000)  # Carteira 500: a estimativa sozinha leva abaixo de zero em poucos dias
+    gasto(u, "Academia", 300, -1)  # dúvida de ontem: sozinha 500-300 >= 0 (não decide); com a estimativa antecipa o dia
+    r = rodar(u, cen(preco="10"))
+    v = v_atual(r)
+    d = date.fromisoformat(next(p["data"] for p in r["atual"]["trajetoria"] if D(p["saldo"]) < 0))
+    assert v["estado"] == "dados_insuficientes" and codigos(v) == [ver.ESTIMATIVA]
+    assert v["bloqueios"][0]["texto"] == f"Com seus gastos do dia a dia de sempre, você fica negativo em {d:%d/%m}."
+
+
+def _puro(saldo, estimativa, conferencia=(), futuras=()):
+    h = date.today()
+    est = [Ocorrencia(FONTE_VARIAVEL, "m", str(i), h + timedelta(days=i), "variavel", "Dia a dia", D(estimativa), "saida")
+           for i in range(1, 31)]
+    return Snapshot(h, datetime.now(timezone.utc), {"saldo": D(saldo)}, est + list(futuras), [], conferencia=list(conferencia))
+
+
+def test_receita_a_conferir_de_ontem_tambem_pergunta_e_nao_acusa_o_dia_a_dia():
+    ontem = date.today() - timedelta(days=1)
+    receita = Ocorrencia("receita_recorrente", 7, ontem.isoformat(), ontem, "receita_fixa", "Salário", D(500), "entrada",
+                         realizacao="a_conferir")
+    # com a receita a favor a estimativa (30 x 10) não leva a zero (100 + 500 - 300); sem ela (contra) leva
+    v = ver.veredito(_puro(100, 10, [receita]), [], 0, 90)
+    assert v["estado"] == "dados_insuficientes" and [b["codigo"] for b in v["bloqueios"]] == [ver.DUVIDA_RECENTE]
+    assert v["bloqueios"][0]["itens"] == [{"nome": "Salário", "data": ontem.isoformat()}]

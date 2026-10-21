@@ -83,8 +83,8 @@ migração de contrato próprias.
 ## Contrato da resposta
 
 O cálculo retorna um estado estruturado: `dados_insuficientes`, `dados_desatualizados`,
-`risco_identificado`, `sem_risco_identificado` (dados confiáveis e nenhum risco achado: **não é
-"cabe"**, que segue desligado) ou `cabe_nas_premissas` (declarado no contrato, sem caminho que o
+`risco_identificado`, `sem_risco_identificado` (nenhum risco achado nos compromissos conhecidos, com a receita fixa prevista contada como certa;
+sem a estimativa do dia a dia como causa de saldo abaixo do limite: **não é "cabe"**, que segue desligado) ou `cabe_nas_premissas` (declarado no contrato, sem caminho que o
 produza até a Etapa 3). O veredito e os números essenciais são montados
 pelo código a partir desse resultado; o modelo pode explicar, mas sua redação não pode inverter
 o estado. A guarda atual, que só registra logs, não basta para isso.
@@ -148,7 +148,7 @@ Uma entrada nova no simulador entra nesta tabela antes de entrar no código. Con
 | Gasto fixo automático pago no cartão | `payment_type="credit_card"`: `_cashflow_events()` ignora `payment_type` e tira o valor do caixa no `due_day`, e a mesma função tira a fatura aberta no vencimento dela. Depois que a cobrança é lançada no cartão, o valor sai duas vezes; antes, sai na data da cobrança em vez da data de pagar a fatura | só piora (dupla contagem ou saída antecipada) | risco, até esses gastos passarem pelo calendário da fatura sem duplicar |
 | Gasto fixo manual sem boleto gerado | só entra quando o boleto pendente já existe; conferir na implementação se as ocorrências futuras sem boleto ficam fora | só melhora | cabe |
 | Valor estimado | `variable_amount=true` no gasto fixo, exposto por `db/bills.py` e `db/recurring.py`: `_cashflow_events()` ignora a flag e subtrai a estimativa como valor exato, tanto no boleto pendente quanto no gasto fixo automático. A conta real pode vir maior ou menor | dois sentidos | os dois, até o valor ser confirmado |
-| Gasto variável | fora da projeção até a Etapa 3; depois dela, a estimativa é hipótese e pode vir acima do gasto real | ausente: só melhora; estimada: dois sentidos | a estimativa entra só no cálculo do "cabe". O risco é sempre calculado sem ela, o pior caso da direção dele |
+| Gasto variável | fora da projeção até a Etapa 3; depois dela, a estimativa é hipótese e pode vir acima do gasto real | ausente: só melhora; estimada: dois sentidos | o risco é sempre calculado sem ela, o pior caso da direção dele. **Decidido em 2026-10-21:** se só a estimativa leva o saldo abaixo do limite (zero ou a reserva), o veredito é inconclusivo (`dados_insuficientes`, código `gasto_do_dia_a_dia_estimado`, "Com seus gastos do dia a dia de sempre, você fica negativo em DD/MM."; com reserva informada, "abaixo da sua reserva"), nunca `risco_identificado`, e nunca `sem_risco_identificado`. A receita fixa prevista segue contando como certa (`receita_nao_garantida` não bloqueia o "não recomendo" nem o "sem risco"); isso é limite declarado do 4º estado, não aparece na resposta |
 | Saída avulsa futura conhecida | conta grande prevista que não é boleto nem recorrência (matrícula na semana que vem, IPVA): `_cashflow_events()` não inclui gasto avulso futuro | só melhora | cabe: o cenário aceita saídas avulsas datadas, e a Piggy pergunta se há alguma prevista até o fim do horizonte antes de dizer "cabe"; a informada na conversa entra no cálculo |
 | Entrada avulsa futura informada | dinheiro que o usuário diz que vai entrar e que não é receita recorrente (restituição, venda, reembolso): `_cashflow_events()` pula receita `once`, e a entrada pode não vir ou atrasar | dois sentidos | cada veredito no seu pior caso: o risco é calculado com ela, e o "cabe" sem ela, salvo se o usuário a confirmar como garantida |
 | Custos da oferta ausentes | frete, IOF, seguro, tarifa ou CET não informados | só melhora | cabe |
@@ -309,6 +309,13 @@ paralelo.
 Etapas 1 a 4: **Completo** (dinheiro; o print também envolve gate de plano pago e PII).
 
 ## Estado da Etapa 1, PR 3a (servidor)
+
+Revisão do plano (dono, 2026-10-21): a linha 5 da máquina do veredito passa a incluir a estimativa do
+dia a dia. Se só ela leva o saldo abaixo do limite, o bloqueio é `gasto_do_dia_a_dia_estimado` (sem `itens`,
+`dados_insuficientes`: atualizar não resolve). Caso misto, também do dono (2026-10-21, "Perguntar e avisar"): com
+dúvida datada, fica inconclusivo e a resposta pergunta das dúvidas que decidem; o aviso do dia a dia só aparece
+quando a estimativa sozinha, contando as dúvidas a favor (o pior caso do risco + a estimativa), já leva abaixo
+do limite, e então vem JUNTO com as dúvidas, sem substituí-las. Receita fixa prevista continua certa.
 
 `POST /api/v2/simulador` devolve `veredito` no `atual` e em cada cenário (`core/services/veredito.py`,
 chave `SIMULADOR_VEREDITO_ENABLED`, padrão ligada). A tool do chat (3b) e as telas (3c) ainda não o

@@ -266,11 +266,12 @@ def simular(snapshot: Snapshot, simulacao: Simulacao) -> dict[str, Any]:
     days = DIAS
     until = today + timedelta(days=days)
     reserva = simulacao.reserva_minima
+    com_veredito = ligado()  # uma leitura por pedido: trocar a env no meio não mistura null com veredito
     sb, events = snapshot.base, snapshot.ocorrencias
 
     # Compra hoje pode violar a reserva e ser encoberta por um salário amanhã: `_curva` inclui hoje.
     atual = _curva(snapshot, events, reserva)
-    atual["veredito"] = veredito(snapshot, [], reserva, days) if ligado() else None
+    atual["veredito"] = veredito(snapshot, [], reserva, days) if com_veredito else None
     cenarios = []
     for cen in simulacao.cenarios:
         extra, contrato = _decision_events(cen, today, until)
@@ -279,7 +280,7 @@ def simular(snapshot: Snapshot, simulacao: Simulacao) -> dict[str, Any]:
                                   if resumo["saldo_final_90"] is not None and atual["saldo_final_90"] is not None else None)
         # Compra datada depois da janela: o saldo de 90 dias é igual ao atual, e sem
         # este marcador a resposta pareceria "não muda nada".
-        resumo["veredito"] = veredito(snapshot, extra, reserva, days) if ligado() else None
+        resumo["veredito"] = veredito(snapshot, extra, reserva, days) if com_veredito else None
         resumo["compra_fora_da_janela"] = contrato["data_compra"] > until.isoformat()
         cenarios.append({"nome": cen.nome, "resumo": resumo, "contrato": contrato})
 
