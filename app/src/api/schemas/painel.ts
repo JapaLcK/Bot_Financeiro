@@ -24,7 +24,19 @@ export const lancamentoSchema = z.object({ id: z.string(), data: z.string(), hor
 export const lancamentosSchema = z.object({ mes: z.string(), itens: z.array(lancamentoSchema), proximo: texto, motivos });
 const partes = z.object({ carteira: dinheiro, bancos: dinheiro, investimentos_banco: dinheiro, caixinhas: dinheiro, investimentos_manuais: dinheiro });
 export const patrimonioSchema = z.object({ total: dinheiro, partes, motivos, historico: z.array(z.object({ dia: z.string(), total: dinheiro, partes, motivos })), historico_desde: texto });
-export const rendimentoSchema = z.object({ tipo: z.literal("contratado"), itens: z.array(z.object({ nome: texto, instituicao: texto, taxa: texto, tipo_taxa: texto, observado_em: texto, motivos })), motivos });
+/**
+ * `rendimentos` (acrescentado em `GET /api/app/rendimento`): o quanto os investimentos renderam, ESTIMADO pelo saldo; `null` ≠ zero. Ausente (servidor antigo) ou fora do contrato = `null`
+ * (a tela diz que não deu para ler; `itens` e `motivos` seguem). `pct` é texto só para exibir. Tolerante POR ATIVO e POR CATEGORIA, como o `bancosSchema`: o item que não passa sai da lista.
+ */
+const periodo = z.object({ valor: dinheiro.nullable(), pct: texto, sem_dado: z.number().int() });
+const periodoAtivo = z.object({ valor: dinheiro.nullable(), pct: texto, motivo: texto });
+const ativoRendimento = z.object({ nome: texto, instituicao: texto, logo_proprio: texto, saldo: dinheiro.nullable(), mes: periodoAtivo, total: periodoAtivo });
+const categoriaRendimento = z.object({
+  tipo: z.string(), rotulo: z.string(), saldo: dinheiro.nullable(), quantidade: z.number().int(), mes: periodo, total: periodo,
+  ativos: z.array(z.unknown()).transform((itens) => itens.flatMap((i) => { const a = ativoRendimento.safeParse(i); return a.success ? [a.data] : []; })),
+});
+const rendimentos = z.object({ saldo: dinheiro.nullable(), quantidade: z.number().int(), mes: periodo, total: periodo, mes_desde: z.string(), sincronizado_em: texto, categorias: z.array(z.unknown()).transform((itens) => itens.flatMap((i) => { const c = categoriaRendimento.safeParse(i); return c.success ? [c.data] : []; })), motivos }).nullable().catch(null);
+export const rendimentoSchema = z.object({ tipo: z.literal("contratado"), itens: z.array(z.object({ nome: texto, instituicao: texto, taxa: texto, tipo_taxa: texto, observado_em: texto, motivos })), motivos, rendimentos });
 export const detalhesMesSchema = z.object({ mes: z.string(), ate: z.string(), entrou: dinheiro, saiu: dinheiro, categorias: z.array(z.object({ categoria: texto, valor: dinheiro, quantidade: z.number().int() })), origens: z.object({ cartao: dinheiro, banco: dinheiro, carteira: dinheiro, registro_antigo: dinheiro }).optional(), dias: z.array(z.object({ dia: z.string(), entrou: dinheiro, saiu: dinheiro })), guardado: z.object({ aportes: dinheiro, saques: dinheiro, liquido: dinheiro, cobertura: z.literal("movimentos_registrados") }), motivos, fora_do_total: z.number().int(), criterio_dias: z.literal("data_do_lancamento_ou_compra_na_fatura_do_mes") });
 const motivoPrevisao = z.object({ codigo: z.string(), direcao_do_erro: z.enum(["so_melhora", "so_piora", "ambos"]) });
 const ocorrencia = z.object({ chave: z.string(), ciclo: z.string(), data: texto, fonte: z.string(), tipo: z.string(), nome: z.string(), valor: dinheiro.nullable(), direcao: z.enum(["entrada", "saida"]), qualidade_valor: z.string(), qualidade_data: z.string(), realizacao: z.string(), incluida_no_calculo: z.boolean(), motivos: z.array(motivoPrevisao) });
