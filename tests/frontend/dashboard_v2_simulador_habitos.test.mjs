@@ -295,3 +295,18 @@ test("categoria com nome de propriedade do protótipo (constructor) começa em 0
   assert.deepEqual(pedidos.at(-1), { cortes: [{ categoria: "constructor", percentual: 10 }] });
   await r.ctx.close();
 });
+
+test("2º corte com o POST lento: o resultado anterior sai da tela até a resposta nova chegar", async () => {
+  let solta; const segura = new Promise((r) => { solta = r; });
+  const resposta = async (n, rt) => { if (n === 2) await segura; return rt.fulfill({ json: n === 1 ? OK : { ...OK, economia_mensal: "22.22" } }); };
+  const { page, ctx } = await abrir({ resposta });
+  await page.locator(".lever-habito").first().waitFor();
+  await tecla(page, "Mercado", 1);
+  await page.getByText("R$ 12,34").waitFor();
+  await tecla(page, "Mercado", 1);
+  await page.waitForFunction(() => document.querySelector(".hab-res")?.getAttribute("aria-busy") === "true");
+  assert.equal(await page.getByText("R$ 12,34").count(), 0, "número da chave anterior na tela");
+  solta();
+  await page.getByText("R$ 22,22").waitFor();
+  await ctx.close();
+});

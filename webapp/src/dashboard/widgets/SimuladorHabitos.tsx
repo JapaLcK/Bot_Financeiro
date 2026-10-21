@@ -122,7 +122,7 @@ export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean
     saida = e.code === "pro_required" ? <ConvitePro texto="O simulador é do Pro." />
       : e.code === "password_required" ? <a className="btn btn-primary" href={CRIAR_SENHA.href}>{CRIAR_SENHA.texto}</a>
       : <p role="alert" className="warn">{mudou ? MUDOU : GENERICO}</p>;
-  } else if (corpo && q.data) saida = <div className="hab-res" aria-busy={q.isPlaceholderData}><Resultado d={q.data} full={full} /></div>;
+  } else if (corpo && q.data) saida = <div className="hab-res" aria-busy={q.isPlaceholderData}>{q.isPlaceholderData ? <p className="w-lede">Calculando…</p> : <Resultado d={q.data} full={full} />}</div>; // o número da chave anterior nunca fica ao lado do corte novo
   else if (corpo) saida = <p className="w-lede">Calculando…</p>;
   if (avisoMudou && !(corpo && mudou)) saida = <><p role="alert" className="warn">{MUDOU}</p>{saida}</>;
 
