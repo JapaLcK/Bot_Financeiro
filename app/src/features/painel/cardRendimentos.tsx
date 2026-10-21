@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { View } from "react-native";
 import type { z } from "zod";
 import type { rendimentoSchema } from "@/api/schemas/painel";
@@ -15,13 +15,19 @@ import { dataCurta, diaMes } from "./catalogo";
 import { LinhaExpansivel } from "./expansao";
 import { FRASE_RITMO } from "./metasTextos";
 import { usePainel } from "./provider";
-import { TextoPainel as Texto } from "./tipografia";
+import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 
 type Rendimentos = NonNullable<z.output<typeof rendimentoSchema>["rendimentos"]>;
 type Categoria = Rendimentos["categorias"][number];
 type Periodo = "Mês" | "Total";
 const ABAS = ["Mês", "Total"], ACESSIVEIS = ["Rendimento do mês", "Rendimento total desde a aplicação"];
 const ATIVOS_VISIVEIS = 5;
+/** Como a `Linha` de `base.tsx`: o texto tem 2 linhas, e com fonte ampliada não tem limite e o valor desce para baixo dele (lado a lado, o saldo virava "R$ 1…" ou quebrava no meio do número). */
+function Colunas({ texto, valor }: { texto: ReactNode; valor: ReactNode }) {
+  const { ampliado } = useTipografiaPainel();
+  return <><View style={{ flex: 1, minWidth: 0 }}>{texto}{ampliado && <View style={{ alignItems: "flex-start" }}>{valor}</View>}</View>{!ampliado && <View style={{ alignItems: "flex-end" }}>{valor}</View>}</>;
+}
+const useLinhas = () => (useTipografiaPainel().ampliado ? undefined : 2);
 const frase = (k: string) => FRASE_RITMO[k] as string; // as duas usadas aqui são texto fixo (não função)
 const FIM = { Mês: "neste mês", Total: "desde a aplicação" } as const;
 
@@ -36,21 +42,20 @@ function Ganho({ centavos, display = false }: { centavos: number | null; display
 const saldoTexto = (c: number | null, oculto: boolean) => oculto ? MASCARA_OCULTA : c === null ? null : reais(c);
 
 function Ativos({ ativos, periodo, oculto }: { ativos: Categoria["ativos"]; periodo: Periodo; oculto: boolean }) {
-  const [todos, setTodos] = useState(false), k = periodo === "Mês" ? "mes" : "total";
+  const [todos, setTodos] = useState(false), linhas = useLinhas(), k = periodo === "Mês" ? "mes" : "total";
   const ordenados = [...ativos].sort((a, b) => (a[k].valor === null ? 1 : 0) - (b[k].valor === null ? 1 : 0) || (b[k].valor ?? 0) - (a[k].valor ?? 0)); // nulos no fim; o resto, do que mais rendeu
   if (!ativos.length) return <Texto variante="legenda" tom="inkMuted">Não informado</Texto>;
   const visiveis = todos ? ordenados : ordenados.slice(0, ATIVOS_VISIVEIS);
   return <View style={{ gap: 4 }}>
     {visiveis.map((a, i) => <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44 }}>
       <Avatar nome={a.instituicao ?? a.nome ?? "?"} imagem={logoDoBanco({ logo_proprio: a.logo_proprio })} tamanho={32} decorativo />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Texto variante="rotulo" numberOfLines={1}>{a.nome ?? "Investimento"}</Texto>
-        {(a.instituicao || saldoTexto(a.saldo, oculto)) && <Texto variante="legenda" tom="inkMuted" numberOfLines={1}>{[a.instituicao, saldoTexto(a.saldo, oculto)].filter(Boolean).join(" · ")}</Texto>}
-      </View>
-      <View style={{ alignItems: "flex-end" }}>
+      <Colunas texto={<>
+        <Texto variante="rotulo" numberOfLines={linhas}>{a.nome ?? "Investimento"}</Texto>
+        {(a.instituicao || saldoTexto(a.saldo, oculto)) && <Texto variante="legenda" tom="inkMuted" numberOfLines={linhas}>{[a.instituicao, saldoTexto(a.saldo, oculto)].filter(Boolean).join(" · ")}</Texto>}
+      </>} valor={<>
         <Ganho centavos={a[k].valor} />
         {!oculto && pctTexto(a[k].pct) && <Texto variante="legenda" tom="inkMuted">{pctTexto(a[k].pct)}</Texto>}
-      </View>
+      </>} />
     </View>)}
     {ordenados.length > ATIVOS_VISIVEIS && <Acao rotulo={todos ? "Ver menos" : `Ver mais ${ordenados.length - ATIVOS_VISIVEIS}`} onPress={() => setTodos((t) => !t)} />}
   </View>;
@@ -61,7 +66,7 @@ function Ativos({ ativos, periodo, oculto }: { ativos: Categoria["ativos"]; peri
  * quando o Mês não tem nenhum ativo com dado. O app só exibe: soma, base e pct vêm do servidor.
  */
 export function CardRendimentos({ d: dado }: { d: z.output<typeof rendimentoSchema> }) {
-  const { oculto } = usePainel(), { cores, esquema } = useTema(), [escolha, setEscolha] = useState<Periodo | null>(null), [aberta, setAberta] = useState<string | null>(null);
+  const { oculto } = usePainel(), { cores, esquema } = useTema(), linhas = useLinhas(), [escolha, setEscolha] = useState<Periodo | null>(null), [aberta, setAberta] = useState<string | null>(null);
   const d = dado.rendimentos;
   if (!d) return <Vazio texto="Não foi possível ler seus rendimentos agora." />;
   if (d.motivos.includes("plano_sem_investimentos")) return <Vazio texto={frase("plano_sem_investimentos")} />;
@@ -93,8 +98,8 @@ export function CardRendimentos({ d: dado }: { d: z.output<typeof rendimentoSche
       {d.categorias.map((c, i) => <LinhaExpansivel key={c.tipo} testID={`categoria-${c.tipo}`} aberta={aberta === c.tipo} alternar={() => setAberta(aberta === c.tipo ? null : c.tipo)}
         linha={<View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <View testID={`tile-${c.tipo}`} style={{ width: 32, height: 32, borderRadius: raio.controle, backgroundColor: tingir(serie[i % serie.length]!, ALFA_WASH_SERIE), alignItems: "center", justifyContent: "center" }}><Icone nome="TrendUp" tamanho={20} cor={serie[i % serie.length]} /></View>
-          <View style={{ flex: 1, minWidth: 0 }}><Texto variante="rotulo" numberOfLines={1}>{c.rotulo}</Texto><Texto variante="legenda" tom="inkMuted" numberOfLines={1}>{[c.ativos.length === 1 ? "1 ativo" : `${c.ativos.length} ativos`, saldoTexto(c.saldo, oculto)].filter(Boolean).join(" · ")}</Texto></View>
-          <View style={{ alignItems: "flex-end" }}><Ganho centavos={c[k].valor} />{!oculto && pctTexto(c[k].pct) && <Texto variante="legenda" tom="inkMuted">{pctTexto(c[k].pct)}</Texto>}</View>
+          <Colunas texto={<><Texto variante="rotulo" numberOfLines={linhas}>{c.rotulo}</Texto><Texto variante="legenda" tom="inkMuted" numberOfLines={linhas}>{[c.ativos.length === 1 ? "1 ativo" : `${c.ativos.length} ativos`, saldoTexto(c.saldo, oculto)].filter(Boolean).join(" · ")}</Texto></>}
+            valor={<><Ganho centavos={c[k].valor} />{!oculto && pctTexto(c[k].pct) && <Texto variante="legenda" tom="inkMuted">{pctTexto(c[k].pct)}</Texto>}</>} />
         </View>}>
         <Ativos ativos={c.ativos} periodo={periodo} oculto={oculto} />
       </LinhaExpansivel>)}
