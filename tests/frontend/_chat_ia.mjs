@@ -3,6 +3,7 @@
 // serve stream de verdade; por isso o `fetch` da página é trocado, só para essa URL, por uma Response com um ReadableStream que o teste
 // enche e fecha byte a byte (corte no meio da linha, no meio de um caractere de 2 bytes). O resto passa pelo `fetch` real (e pelo `ctx.route`).
 // Não é `*.test.mjs` de propósito: o `node --test tests/frontend/*.test.mjs` não o roda como suíte.
+import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 export { RESPOSTAS };
@@ -87,3 +88,51 @@ export const texto = (page) => ultima(page).locator(".msg-ia").innerText().catch
 export const botao = (page) => page.locator(".askbar-send");
 /** A troca de conta em outra aba: o foco relê o perfil, que chega ao `contaDaSessao`. */
 export const trocarConta = async (page, conta, uid) => { conta.uid = uid; await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange"))); };
+
+/**
+ * `POST /ai/messages/{id}/feedback` (o 👍👎): registra `{url, metodo, corpo, csrf}` em `f.reqs` e responde da fila `f.fila` (`{status, json}`, `{abortar: true}`
+ * ou `{segurar: true}` = fica preso até o teste chamar `f.solta({status, json})`). Sem fila, 200. O glob não colide com `**\/ai/messages?limit=1`.
+ */
+export async function rotaFeedback(ctx) {
+  const f = { reqs: [], fila: [], presos: [], solta: (resp = {}) => f.presos.shift()?.(resp) };
+  await ctx.route("**/ai/messages/*/feedback", async (r) => {
+    const req = r.request();
+    f.reqs.push({ url: new URL(req.url()).pathname, metodo: req.method(), corpo: JSON.parse(req.postData()), csrf: req.headers()["x-csrf-token"] });
+    let resp = f.fila.shift() ?? {};
+    if (resp.segurar) resp = await new Promise((ok) => f.presos.push(ok));
+    if (resp.abortar) return r.abort();
+    return r.fulfill({ status: resp.status ?? 200, json: resp.json ?? { ok: true } });
+  });
+  return f;
+}
+
+// Ajudantes dos testes do 👍👎 (dashboard_v2_chat_ia_feedback*.test.mjs).
+export const FALHA = "Não conseguimos registrar sua avaliação.";
+export const esperaRotulo = (page) => page.waitForFunction(() => document.querySelector(".askbar-send")?.getAttribute("aria-label") === "Enviar", null, { timeout: 3000 });
+export const ate = async (cond) => { for (let i = 0; i < 80 && !cond(); i++) await new Promise((r) => setTimeout(r, 25)); };
+/** Uma conversa com a rota do feedback. */
+export async function iniciarConversa(opts) {
+  const c = await abrir(opts);
+  c.f = await rotaFeedback(c.ctx);
+  return c;
+}
+/** A n-ésima resposta (i = 0, 1…) já pronta com `message_id`. */
+export async function responder({ page, flux }, i, id = 7, reply = `ok ${i}`) {
+  await enviar(page, `pergunta ${i}`);
+  await flux.espera(i + 1);
+  await flux.push(i, evento(fim(reply, { message_id: id })));
+  await esperaRotulo(page);
+}
+export const gostei = (page) => page.getByRole("button", { name: "Gostei da resposta", exact: true });
+export const naoGostei = (page) => page.getByRole("button", { name: "Não gostei da resposta", exact: true });
+export const motivo = (page, nome) => page.getByRole("button", { name: nome, exact: true });
+export const marcado = (loc) => loc.getAttribute("aria-pressed");
+export const alerta = (page) => page.getByRole("alert").filter({ hasText: FALHA });
+/** Clica e espera o POST sair (e um respiro para a tela assentar). */
+export async function clica(loc, f) {
+  const n = f.reqs.length;
+  await loc.click();
+  await ate(() => f.reqs.length > n);
+  assert.ok(f.reqs.length > n, "o clique tinha de mandar um POST");
+  await loc.page().waitForTimeout(150);
+}

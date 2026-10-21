@@ -49,7 +49,7 @@ test("freio ligado: DELETE, GET da cota e POST, nessa ordem; corpo sem uid; CSRF
   await flux.push(0, delta("ão passou do teto.") + evento(fim("Você gastou R$ 10 e não passou do teto.")));
   await page.waitForFunction(() => document.querySelector(".askbar-send")?.getAttribute("aria-label") === "Enviar");
   assert.equal(await texto(page), "Você gastou R$ 10 e não passou do teto.");
-  assert.equal(await page.locator(".chat > .msg-piggy button", { hasText: /copiar|👍|👎/i }).count(), 0, "Q12: sem Copiar nem 👍👎");
+  assert.equal(await page.locator(".chat > .msg-piggy button", { hasText: /copiar/i }).count(), 0, "Q12: sem Copiar (o 👍👎 é de tests/frontend/dashboard_v2_chat_ia_feedback.test.mjs)");
   // 2º envio na mesma carga: sem novo DELETE nem GET
   await enviar(page, "e no mês passado?");
   await flux.espera(2);
