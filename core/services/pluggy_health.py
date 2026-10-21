@@ -403,18 +403,33 @@ _FIXED_DETAIL = {
 # A mensagem da Pluggy (`message`/`providerMessage`) cita nome, conta e documento
 # do titular e por isso é descartada no `_warning_codes` — decisão que não muda.
 # Só que aí o motivo virava um código que nenhuma superfície mostra. Relato do
-# dono (não medido — o SELECT em produção foi negado): investimentos com 30
-# warnings de código relatado como `004`, prefixo não confirmado, e ninguém soube
-# por que não vieram. Traduzir o código é a saída que não carrega PII.
+# dono: investimentos com dezenas de warnings de código `004` e ninguém soube por
+# que não vieram. Medido em 20/10/2026 (GET /items/{id} de um item Nubank Open
+# Finance em produção): o `004` vem CRU, sem prefixo, em `creditCards` (1 warning)
+# e em `investments` (26), com message "Open Finance monthly rate limit reached
+# (HTTP 423)". A doc diz que `CC_004` é "Unavailable" e o dado a contradiz.
+# Traduzir o código é a saída que não carrega PII.
 #
 # Agrupado por AÇÃO do usuário, não por produto: o que muda a frase é o que ele
 # pode fazer, e o mesmo motivo cai em conta, cartão e investimento.
 #
 # Fonte: docs.pluggy.ai/docs/warnings-status-codes (relido em 16/09/2026; remeça
-# antes de reusar). SÓ conector Open Finance entra: os códigos de conector
-# DIRETO são nus (`001`, `002`, `003`) e significam coisa diferente em cada
-# conector — o `001` do Itaú PJ não é o do Santander PJ —, então mapeá-los seria
-# chutar. Eles caem no fallback do `_frase_do_codigo`, que é honesto.
+# antes de reusar). Código COM prefixo é o da doc. Código NU depende do conector:
+# os de conector DIRETO (`001`, `002`, `003`) significam coisa diferente em cada
+# um — o `001` do Itaú PJ não é o do Santander PJ —, então mapeá-los seria chutar,
+# e eles caem no fallback do `_frase_do_codigo`, que é honesto. Já o Nubank, que é
+# Open Finance, manda código cru: só os pares medidos entram em
+# `_MOTIVO_POR_CODIGO_NU`.
+# RISCO ACEITO: o health não guarda se o conector é direto ou Open Finance, então
+# um `004` cru de conector direto em cartão ou investimentos também vira "limite".
+# Sem medição, a doc só lista 001, 002 e 003 para conector direto. Se aparecer, o
+# conserto é guardar `item.connector.isOpenFinance` no health. E se a Pluggy passar
+# a mandar `CC_004` com prefixo para o limite do cartão, a contradição volta.
+# LIMITE CONHECIDO, aceito pelo dono: se o MESMO produto trouxer `004` cru E
+# `CC_004` com prefixo, o cru ganha por prioridade (limite 2 < "não adianta" 4), e
+# a frase promete "volta sozinho" onde a Pluggy disse "indisponível". Nunca foi
+# observado: a Pluggy não mandou os dois juntos em nenhuma medição. Se aparecer, o
+# conserto é no mesmo produto o código com prefixo vencer o cru.
 # `LOAN_*` e `ID_*` ficam de fora porque `_PRODUCT_KEYS` não lê esses produtos:
 # entrada para código inalcançável é o código morto que este módulo já proíbe.
 #
@@ -473,7 +488,9 @@ _MOTIVO_POR_WARNING = {
         (_RECONECTE,
          ("ACCT_001", "CC_001", "TXN_001", "TXN_004", "INV_001", "INV_002")),
         # INV_004 é "Open Finance monthly rate limit reached"; TXN_003/TXN_006 a
-        # doc chama só de "rate limit reached" — daí "período", e não "mês".
+        # doc chama só de "rate limit reached" — daí "período", e não "mês". O `004`
+        # cru de cartão e investimentos (Nubank) também é este grupo, mas entra
+        # pelo `_MOTIVO_POR_CODIGO_NU`, porque o cru não tem prefixo.
         (_LIMITE_DE_CONSULTAS,
          ("INV_004", "TXN_003", "TXN_006")),
         ("o banco não liberou esse dado agora, deve voltar sozinho em algumas horas",
@@ -490,6 +507,14 @@ _MOTIVO_POR_WARNING = {
 }
 _ORDEM_DAS_FRASES = list(dict.fromkeys(_MOTIVO_POR_WARNING.values()))
 
+# (produto, código CRU) → frase. Os valores têm de estar em `_MOTIVO_POR_WARNING`:
+# a prioridade sai de `_ORDEM_DAS_FRASES.index`. O código segue salvo cru no health;
+# a tradução acontece só ao montar a frase. Só pares medidos (ver comentário acima).
+_MOTIVO_POR_CODIGO_NU = {
+    ("CREDIT", "004"): _LIMITE_DE_CONSULTAS,
+    ("INVESTMENTS", "004"): _LIMITE_DE_CONSULTAS,
+}
+
 # A FORMA documentada de um código, e ela decide o que vai pra TELA — não o que
 # se armazena, que continua sendo assunto do `safe_code`. Duas regras de
 # propósito: `safe_code` aceita "1234-5" (6 caracteres, 5 dígitos), que é a cara
@@ -501,7 +526,7 @@ _ORDEM_DAS_FRASES = list(dict.fromkeys(_MOTIVO_POR_WARNING.values()))
 _CODE_EXIBIVEL = re.compile(r"[A-Z]{2,5}_[0-9]{3}|[0-9]{3}")
 
 
-def _frase_do_codigo(code: Any) -> tuple[int, str] | None:
+def _frase_do_codigo(code: Any, produto: str | None = None) -> tuple[int, str] | None:
     """`(prioridade, frase)` de UM código — menor vence —, ou None.
 
     O código CRU tem a pior prioridade de todas: ele só aparece quando não há
@@ -509,10 +534,13 @@ def _frase_do_codigo(code: Any) -> tuple[int, str] | None:
     posição: o resultado não pode depender da ORDEM em que a Pluggy manda a lista
     — com "o primeiro que achar", `[004, CC_001]` e `[CC_001, 004]` davam frases
     diferentes para o mesmo produto.
+
+    `produto` (chave de `_PRODUCT_KEYS`) só serve ao código cru de
+    `_MOTIVO_POR_CODIGO_NU`, cujo sentido depende do produto.
     """
     if not isinstance(code, str):
         return None
-    frase = _MOTIVO_POR_WARNING.get(code)
+    frase = _MOTIVO_POR_WARNING.get(code) or _MOTIVO_POR_CODIGO_NU.get((produto, code))
     if frase:
         return _ORDEM_DAS_FRASES.index(frase), frase
     # Código desconhecido aparece CRU: foi exatamente o que faltou no caso do
@@ -556,7 +584,7 @@ def _motivo_do_warning(health: dict | None, produtos) -> str:
             # banco sem investimentos.
             continue
         codes = detalhe.get("warnings") if isinstance(detalhe, dict) else None
-        candidatos = [c for c in map(_frase_do_codigo, codes) if c] \
+        candidatos = [c for c in (_frase_do_codigo(c, produto) for c in codes) if c] \
             if isinstance(codes, list) else []
         # EXCEÇÃO, só dentro do mesmo produto: limite vence "reconecte". A cota é
         # por CPF + instituição + produto, CRIAR ITEM a consome, e a doc

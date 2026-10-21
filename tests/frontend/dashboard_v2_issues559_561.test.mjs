@@ -100,7 +100,7 @@ test("#560: o iFood de 23/09 escolhido na paleta abre só aquele dia no extrato"
 });
 
 test("#561: tabela acessível do patrimônio, uma linha por mês, igual ao tooltip do gráfico", async () => {
-  const { ctx, page } = await abrir("/patrimonio");
+  const { ctx, page } = await abrir("/patrimonio", 1440, true); // o protótipo: com backend a tela é a real (dashboard_v2_patrimonio.test.mjs)
   const tabela = await page.locator(".w-nw table tbody tr").evaluateAll((trs) =>
     trs.map((tr) => [...tr.children].map((c) => c.textContent.trim())));
   const box = await page.locator(".w-nw .nw-chart").boundingBox();
