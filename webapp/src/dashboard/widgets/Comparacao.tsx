@@ -2,14 +2,13 @@
 // recalcular. O período e a base do cartão são o texto `escolha` do servidor. Dinheiro é texto
 // (moneyText); Number() só escolhe seta e tom. Erro vem antes do dado: o TanStack guarda o
 // `data` antigo quando o refetch falha, e o downgrade no meio da sessão mostraria número velho.
-import { useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Comparacao as Dados, LinhaComparada } from "../lib/api-v2.gen";
 import { isoDay, monthName, moneyText } from "../lib/format.js";
 import { mesDe } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { ErroApi, comparacaoQuery } from "../lib/v2";
-import { Frame, FrameLink } from "../parts/Frame";
+import { Frame } from "../parts/Frame";
 import { Selos } from "../parts/Selos";
 import { ConvitePro } from "./Compromissos";
 
@@ -41,16 +40,17 @@ function Linha({ nome, l, bom, antes, aberto }: { nome: string; l: LinhaComparad
 }
 
 // No Resumo a célula tem altura fixa e, na grade de 4 colunas, é estreita: o corpo inteiro rola
-// (os totais ficam no topo, nada some). O teclado tem de alcançar a rolagem, como no "Para onde vai".
+// (os totais ficam no topo, nada some). O teclado tem de alcançar a rolagem: o bloco só existe no Resumo
+// e não tem página (`PAGE: null`, então o `FrameLink` do "Para onde vai" não serve), e o corpo não tem
+// nada focável dentro; o Safari não põe rolagem no Tab sozinho.
 function Corpo({ d }: { d: Dados }) {
   const antes = monthName(isoDay(d.anterior.inicio));
-  const rola = useContext(FrameLink) !== null;
   const aberto = d.modo === "mes_aberto";
   if (d.motivo === "inicio_do_historico" || !d.despesa || !d.receita || !d.resultado) {
     return <div className="empty"><i className="ph ph-clock-counter-clockwise" aria-hidden="true" /><p>O mês anterior está fora do histórico do seu plano.</p></div>;
   }
   return (
-    <div className="cmp-corpo" tabIndex={rola ? 0 : undefined} aria-label={rola ? "Comparação do mês" : undefined}>
+    <div className="cmp-corpo" tabIndex={0} aria-label="Comparação do mês">
       <p className="w-lede cmp-lede">{d.escolha}</p>
       <ul className="cats cmp-totais" aria-label="Totais">
         <Linha nome="Saiu" l={d.despesa} bom={-1} antes={antes} aberto={aberto} />

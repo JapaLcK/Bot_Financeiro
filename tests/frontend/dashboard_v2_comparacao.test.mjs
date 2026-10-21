@@ -173,6 +173,26 @@ for (const width of [375, 390, 1280, 1366, 1440]) {
   });
 }
 
+// O corpo rola dentro da célula fixa do Resumo e não tem nada focável dentro: tem de estar no Tab por si
+// (tabindex), com nome. O Chromium põe rolagem no Tab sozinho e o Safari não: por isso o atributo é
+// medido, além do Tab (que no Chromium passaria mesmo sem ele).
+for (const width of [1280, 1440]) {
+  test(`${width}px: o corpo que rola entra no Tab, com nome, e a seta rola`, async () => {
+    const { ctx, page, ir } = await abrir({ plano: "plus", width, comparacao: "muitas", layout: ["comparacao", "resumo"] });
+    await ir();
+    const corpo = page.locator(`${W} .cmp-corpo`);
+    await corpo.waitFor();
+    const m = await corpo.evaluate((c) => ({ rola: c.scrollHeight > c.clientHeight, tabindex: c.getAttribute("tabindex"), nome: c.getAttribute("aria-label") }));
+    assert.deepEqual(m, { rola: true, tabindex: "0", nome: "Comparação do mês" });
+    let tabs = 0;
+    while (tabs++ < 80 && !(await corpo.evaluate((c) => c === document.activeElement))) await page.keyboard.press("Tab");
+    assert.ok(tabs <= 80, "o Tab não chegou ao corpo");
+    await page.keyboard.press("PageDown");
+    await page.waitForFunction((w) => document.querySelector(`${w} .cmp-corpo`).scrollTop > 0, W);
+    await ctx.close();
+  });
+}
+
 // O único caminho em que a invalidação muda algo: fora do Resumo a consulta não tem observador e,
 // com `gcTime: 0`, sai do cache (volta ao Resumo = pedido novo de qualquer jeito). Mas quem volta
 // ao Resumo com o POST ainda no ar lê o número de ANTES da gravação; só a invalidação no fim do
