@@ -64,6 +64,7 @@ from core.services.pix_drain_effects import (
     alertar_valor,
     janela_de_acesso,
 )
+from core.services.pix_pago_sem_qr import avisar as avisar_pago_sem_qr
 from db.pix_charges import (
     buscar_por_asaas_payment_id,
     buscar_por_external_reference,
@@ -80,7 +81,8 @@ REFERENCIA_NOSSA = re.compile(r"^pix:[0-9]+$")
 # `ebook` logo depois do `grant`: grava a pendência dos cadernos da foto
 # (`pix_drain_effects._ebook`); sem cadernos é no-op registrado.
 EFEITOS_DE_COMPRA = ("stripe_cancel", "grant", "ebook", "ga4", "capi", "email")
-_ORIGENS_DE_PAGAMENTO = ("pending", "canceling", "canceled", "expired")
+# `draft`/`creating` entram: o QR pode ter falhado e o cliente pagou assim mesmo (#819).
+_ORIGENS_DE_PAGAMENTO = ("draft", "creating", "pending", "canceling", "canceled", "expired")
 _APAGAM_O_QR = ("paid", "paid_orphan", "canceled", "expired")
 
 # `event_type` → (origens permitidas, destino, efeitos). `origens` vazia quer
@@ -176,7 +178,9 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
         )
         return None
     origens, destino, efeitos = rota
-    payment_id = payment_id or cobranca["asaas_payment_id"]
+    payment_id = (payment_id if isinstance(payment_id, str) else "") or cobranca["asaas_payment_id"]
+    if efeitos and not payment_id:  # sem id o efeito não se registra e o evento repete sem fim
+        return ("PagamentoSemId", None)
 
     # B) GUARDA DE ÓRFÃO, antes do laço: titular excluído (§13.4). Nenhum efeito
     # de compra — não há a quem conceder —, e o `CHECK` da janela não se aplica.
@@ -204,18 +208,14 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
         alertar_valor(cobranca, pagamento.get("value"))
 
     if destino and origens:
-        # A linha NOVA substitui a lida no começo: os efeitos leem
-        # `access_starts_at`/`access_expires_at`, que só existem depois desta
-        # escrita. Sem a troca o `grant` recebia `None` nos dois e o `not null`
-        # de `plan_grants` derrubava a concessão de TODA venda — medido.
-        # `None` (a transição não aplicou) obriga a RELER: uma das razões do
-        # `None` é outra passada ter aplicado no meio, e aí a linha lida lá em
-        # cima está velha — sem janela. Medido com duas threads: sem a releitura
-        # a segunda passada chamava `grant` com `access_*` nulo e morria de
-        # `NotNullViolation`, o que ESCONDIA a duplicata que D5-a mede.
+        # A linha NOVA substitui a lida: os efeitos leem `access_*`, que só existem
+        # depois desta escrita (sem a troca o `grant` morria de NotNull — medido).
+        # `None` (outra passada aplicou no meio) obriga a RELER, pelo mesmo motivo.
         nova, falha = _transicionar(cobranca, origens, destino, payment_id)
         if falha:
             return falha
+        if nova and destino == "paid" and cobranca["status"] in ("draft", "creating"):
+            avisar_pago_sem_qr(cobranca)  # ponytail: perdido se morrer aqui; é só aviso
         cobranca = nova or buscar_por_asaas_payment_id(payment_id) or cobranca
 
     if evt["event_type"] in _ALERTAM:
@@ -318,7 +318,7 @@ def _orfao(event_id, cobranca, destino, origens, payment_id):
                      asaas_payment_id=payment_id,
                      apagar_qr=alvo in _APAGAM_O_QR)
     with lock_efeito(payment_id, "orphan_notified"):
-        if not efeito_registrado(payment_id, "orphan_notified"):
+        if destino == "paid" and not efeito_registrado(payment_id, "orphan_notified"):
             registrar_efeito(payment_id, "orphan_notified", event_id)
             admin_notify.notify_pix_alerta(
                 f"🚨 **Pix órfão** cobrança `{cobranca['id']}` — pagamento de "
