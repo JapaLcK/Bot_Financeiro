@@ -23,7 +23,7 @@ export function AskBar({ path }: { path: Path }) {
   const input = useRef<HTMLInputElement>(null);
   const depois = useRef<number | null>(null); // onde o cursor fica depois de inserir a menção
   const here = path === "/piggy";
-  const chatIa = useChatIa(), ia = useIa(), parando = chatIa && ia.ocupado; // com um turno da IA em voo o botão para a resposta; com a cota cheia o Enviar desliga (aviso em PiggyChat); `@agente` segue liberado nos dois (cota própria)
+  const chatIa = useChatIa(), ia = useIa(), parando = chatIa && ia.ocupado; // com um turno da IA em voo o botão para a resposta; com a cota cheia o Enviar desliga (aviso em PiggyChat); o `@agente` divide a mesma cota (agent_chat.py), então também fica desligado
   // Trocar de página fecha a lista (como o Esc): no celular a barra some fora do /piggy e a lista ficaria solta sobre a página nova.
   const [rota, setRota] = useState(path);
   if (rota !== path) { setRota(path); setFechada(true); }
@@ -154,7 +154,7 @@ export function AskBar({ path }: { path: Path }) {
       {/* O mesmo botão nos dois papéis (o foco não se perde na troca). Sem ícone de "parar" no subset do Phosphor: o quadrado é CSS.
           Parar cancela o padrão do clique: o abort libera o turno antes do clique acabar, o botão já é "submit" e enviaria o texto do campo.
           `detail >= 2` é o 2º toque de um duplo clique no Enviar, que cai no Parar recém-trocado; teclado (Enter/Espaço) dá 0. */}
-      <button type={parando ? "button" : "submit"} className="askbar-send" aria-label={parando ? "Parar resposta" : "Enviar"} disabled={!parando && (!text.trim() || (chatIa && ia.cheia && !quer))}
+      <button type={parando ? "button" : "submit"} className="askbar-send" aria-label={parando ? "Parar resposta" : "Enviar"} disabled={!parando && (!text.trim() || (chatIa && ia.cheia))}
         onClick={parando ? (e) => { e.preventDefault(); if (e.detail < 2) pararIa(); } : undefined}>
         {parando ? <span className="askbar-stop" aria-hidden="true" /> : <i className="ph ph-arrow-up" aria-hidden="true" />}
       </button>

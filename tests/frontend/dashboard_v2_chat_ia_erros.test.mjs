@@ -141,3 +141,40 @@ test("freio DESLIGADO + troca de conta: a pergunta entra sem esperar a releitura
   soltar?.();
   await page.context().close();
 });
+
+// A trava de A (cota cheia) não prende B: a pergunta barrada fora do /piggy (faixa do Resumo) abre o /piggy, que monta relendo o perfil, e a troca solta a trava.
+test("cota cheia de A, a sessão vira B sem o foco chegar: o clique barrado na faixa abre o /piggy, que percebe a troca, e o envio seguinte de B sai", async () => {
+  const { page, log, conta, cota, posts, flux } = await abrir({ usage: { used: 100, limit: 100 } });
+  await enviar(page, "de A");
+  await ultima(page).getByText(SEM_COTA).first().waitFor();
+  await page.evaluate(() => { location.hash = "#/"; });
+  const faixa = page.locator(".piggy-band");
+  await faixa.waitFor();
+  conta.uid = 2; cota.used = 0; // B tem cota livre; sem visibilitychange: só a montagem do /piggy percebe
+  const perfis = page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+  await faixa.click();
+  await perfis;
+  await page.waitForFunction(() => !document.body.textContent.includes("de A"), null, { timeout: 3000 }); // a conta nova limpa a conversa de A
+  assert.equal(posts.length, 0, "a pergunta barrada não saiu (e a de A parou no GET 403)");
+  await enviar(page, "de B");
+  await flux.espera(1);
+  assert.deepEqual(rede(log).slice(-3), ["DELETE /ai/pending", "GET /ai/messages", "POST /ai/chat/stream"]);
+  assert.equal(posts.length, 1);
+  await page.context().close();
+});
+
+test("com a cota livre o @agente segue indo ao agente (nada de IA do Piggy)", async () => {
+  const { ctx, page, posts } = await abrir();
+  const chats = [];
+  await ctx.route(/\/agents\/1(\/|$)/, (r) => {
+    const m = new URL(r.request().url()).pathname.match(/^\/agents\/1\/(\w+)\/chat$/);
+    if (!m) return r.fulfill({ json: { catalog: [{ kind: "xerife", nome: "Xerife", disponivel: true, status: "active", energy_cost: 2 }], can_chat: true, can_activate: true, energy_enabled: false, energy_budget: 99, energy_used: 0 } });
+    chats.push(m[1]);
+    return r.fulfill({ json: { reply: "Oi do agente.", context: "c", redirects: [] } });
+  });
+  await enviar(page, "@Xerife oi");
+  await ultima(page).getByText("Oi do agente.").waitFor({ timeout: 3000 });
+  assert.deepEqual(chats, ["xerife"]);
+  assert.equal(posts.length, 0, "o Piggy não foi chamado");
+  await page.context().close();
+});

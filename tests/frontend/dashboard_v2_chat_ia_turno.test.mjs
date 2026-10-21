@@ -170,7 +170,7 @@ test("prazo de 60 s com o stream mudo: aborta, mostra o texto de prazo e suja a 
   await page.context().close();
 });
 
-test("cota cheia pelo `fim.usage`: Enviar desliga, Enter não cria bolha nem POST, o aviso com Ver planos aparece; @agente segue liberado", async () => {
+test("cota cheia pelo `fim.usage`: Enviar desliga, Enter não cria bolha nem POST, o aviso com Ver planos aparece; o @agente divide a cota e também desliga", async () => {
   const { page, flux, posts } = await abrir();
   await enviar(page, "oi");
   await flux.espera(1);
@@ -186,7 +186,7 @@ test("cota cheia pelo `fim.usage`: Enviar desliga, Enter não cria bolha nem POS
   assert.equal(await respostas(page).count(), 1);
   assert.equal(posts.length, 1);
   await campo(page).fill("@Pig oi");
-  assert.equal(await botao(page).isDisabled(), false, "o @agente tem cota própria");
+  assert.equal(await botao(page).isDisabled(), true, "o @agente divide a cota (agent_chat.py responde 429 no limite): nada sai pela barra");
   await page.context().close();
 });
 
