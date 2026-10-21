@@ -238,7 +238,7 @@ test("selo de demonstração: em todo bloco inventado do Resumo, e não em Conta
   });
   await ctx.close();
   // "Saldo previsto" é a /api/v2/previsao desde a Etapa 3 PR3 (decisão do dono, Q1 = a); "Para onde vai" e "Dia a dia", a /api/v2/gastos (Etapa 5 PR 2)
-  assert.deepEqual(r.blocos, { contas: false, hero: false, resumo: false, categorias: false, calendario: false, simulador: true, compromissos: true, piggy: true, patrimonio: true });
+  assert.deepEqual(r.blocos, { contas: false, hero: false, resumo: false, categorias: false, calendario: false, simulador: false, compromissos: true, piggy: true, patrimonio: true });
   assert.deepEqual(r.stats, [null, null, "demonstração"]);
   assert.equal(r.etiqueta, false);
 });

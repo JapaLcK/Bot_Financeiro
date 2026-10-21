@@ -38,7 +38,7 @@ async function abrirLanding({ logado = false } = {}) {
     r.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
   await page.route("**/vsl.mp4*", route =>
     route.fulfill({ status: 200, contentType: "audio/wav", body: wav }));
-  await page.goto(`${ORIGIN}/index.html`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${ORIGIN}/inicio-antiga.html`, { waitUntil: "domcontentloaded" });
   await page.evaluate(async uri => {
     const v = document.getElementById("vsl-video");
     v.src = uri; v.load();
@@ -140,7 +140,7 @@ test("quem já tem conta continua sendo direcionado ao dashboard", async () => {
 test("sem JavaScript o cadastro também fica disponível", async () => {
   const ctx = await browser.newContext({ javaScriptEnabled: false });
   const page = await ctx.newPage();
-  await page.goto(`${ORIGIN}/index.html`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${ORIGIN}/inicio-antiga.html`, { waitUntil: "domcontentloaded" });
   const b = await page.$eval("#vsl-cta", el => ({
     href: el.getAttribute("href"), classe: el.className,
     aria: el.getAttribute("aria-disabled"), texto: el.textContent.trim(),

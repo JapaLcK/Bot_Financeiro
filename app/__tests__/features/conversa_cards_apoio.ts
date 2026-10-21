@@ -13,12 +13,12 @@ import v2Json from "../../../tests/frontend/api_v2_respostas.json";
 export const F = fixture as Record<string, any>;
 export const PERIODO = periodoJson as Record<string, any>;
 /** Respostas reais da `/api/v2` (o `metas` do chat vem neste formato). */
-export const V2 = v2Json as unknown as { metas: Record<string, any> };
+export const V2 = v2Json as unknown as { metas: Record<string, any>; previsao: Record<string, any> };
 /** card -> recursos que o servidor embute (espelha `tests/_cards_apoio.py::CASOS`). */
 export const RECURSOS: Record<string, Record<string, unknown>> = {
   contas: { contas: F["/api/app/contas"] }, hero: { previsao: F["/api/app/previsao"] }, compromissos: { previsao: F["/api/app/previsao"] },
   resumo: { resumo: F["/api/app/resumo-do-mes"], detalhes: F["/api/app/mes-detalhes"] },
-  categorias: { detalhes: F["/api/app/mes-detalhes"], contas: F["/api/app/contas"] }, calendario: { detalhes: F["/api/app/mes-detalhes"] }, simulador: { detalhes: F["/api/app/mes-detalhes"] },
+  categorias: { detalhes: F["/api/app/mes-detalhes"], contas: F["/api/app/contas"] }, calendario: { detalhes: F["/api/app/mes-detalhes"] }, simulador: { detalhes: F["/api/app/mes-detalhes"], previsao: V2.previsao.pro90_com_estimativa },
   patrimonio: { patrimonio: F["/api/app/patrimonio"] }, wealth: { patrimonio: F["/api/app/patrimonio"] }, rendimento: { rendimento: F["/api/app/rendimento"] },
   assinaturas: { assinaturas: F["/api/app/assinaturas"] }, metas: { metas: V2.metas.varios }, fatura: { cartoes: F["/cards/1/summary"] },
   parcelas: { parcelas: F["/installments/1/list"] }, renda: { renda: F["/analytics/1/evolution"] }, piggy: { insights: F["/insights/1/current"] },

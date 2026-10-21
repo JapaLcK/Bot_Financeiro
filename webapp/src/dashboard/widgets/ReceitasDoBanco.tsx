@@ -26,12 +26,12 @@ type Modo = "pendentes" | "respondidas";
 // o alerta aparece onde a ação falhou, e um sucesso (ou resposta que pegou) em qualquer uma o limpa.
 const ContextoFalha = createContext<[Modo | null, (m: Modo | null) => void]>([null, () => {}]);
 export const useFalhaReceita = () => useContext(ContextoFalha);
-// A lista de receitas que a PÁGINA /previsao leu (no horizonte que ela mostra): a pilha do topo a usa em vez de ler a previsão por conta própria,
-// porque um segundo observador da chave padrão guardaria o dado do plano antigo enquanto a página está em 60 ou 90 dias (e ela o adotaria no downgrade).
-const ContextoLista = createContext<[Previsao["receitas_do_banco"] | null, (l: Previsao["receitas_do_banco"] | null) => void]>([null, () => {}]);
+// A previsão que o card/PÁGINA /previsao leu (no horizonte que ela mostra): a pilha do topo (receitas) e o simulador do Resumo (estimativa) a usam em vez de ler a previsão por conta própria,
+// porque um segundo observador da chave padrão guardaria o dado do plano antigo enquanto o card está em 60 ou 90 dias (e ele o adotaria no downgrade).
+const ContextoLista = createContext<[Previsao | null, (l: Previsao | null) => void]>([null, () => {}]);
 export const useListaDaPagina = () => useContext(ContextoLista);
 export function ReceitasProvider({ children }: { children: ReactNode }) {
-  return <ContextoFalha.Provider value={useState<Modo | null>(null)}><ContextoLista.Provider value={useState<Previsao["receitas_do_banco"] | null>(null)}>{children}</ContextoLista.Provider></ContextoFalha.Provider>;
+  return <ContextoFalha.Provider value={useState<Modo | null>(null)}><ContextoLista.Provider value={useState<Previsao | null>(null)}>{children}</ContextoLista.Provider></ContextoFalha.Provider>;
 }
 
 export function useReceitas(modo: Modo) {

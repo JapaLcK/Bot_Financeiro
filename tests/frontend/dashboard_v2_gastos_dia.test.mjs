@@ -2,7 +2,7 @@
  * /painel /gastos, "fazer tudo na mesma tela": tocar num dia do "Dia a dia" (ou em "Ver compras" do Detalhe) abre o
  * card de compras ali mesmo, sem ir aos Lançamentos (docs/plano-etapa5-gastos.md §4.4).
  *
- *   · a soma, em centavos, das linhas que o total soma (sem marca) é o total do dia; a nota só vem com linha marcada;
+ *   · a soma, em centavos, das linhas que o total soma (sem marca) é o total do dia; o ⓘ com a nota só vem com linha marcada;
  *   · comportamento: abrir, fechar no mesmo dia, trocar de dia, "Dia mais caro", Esc e foco, aria-expanded/controls,
  *     modo categoria, categoria escolhida, troca de mês, carregando, erro e "Carregar mais";
  *   · layout com números: coluna da direita acima de 1100px, depois do calendário (dia) ou do Detalhe (categoria) abaixo;
@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { RAIZ, RESPOSTAS, abrirFiltros, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
+import { RAIZ, RESPOSTAS, abrirFiltros, abrirInfo, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -33,9 +33,12 @@ const pedidos = (page) => {
   return urls;
 };
 // O que a pessoa vê no card: o total do dia, e cada linha com a marca que o servidor mandou.
-const lerCard = (page) => page.evaluate(() => { const lede = () => { const r = document.querySelector("#gastos-compras .dia-rotulo"), t = document.querySelector("#gastos-compras .dia-total"); return r && `${r.textContent} · ${t.textContent}`; }; return {
+const lerCard = async (page) => ({ ...await lerCardSemNota(page), nota: await notaDoCard(page) });
+// A nota "fica fora do total" mora no ⓘ do card, que só existe com linha marcada.
+const notaDoCard = async (page) => ((await page.locator("#w-compras .w-info").count()) ? (await abrirInfo(page, "#w-compras")).locator("p").innerText() : null);
+const lerCardSemNota = (page) => page.evaluate(() => { const lede = () => { const r = document.querySelector("#gastos-compras .dia-rotulo"), t = document.querySelector("#gastos-compras .dia-total"); return r && `${r.textContent} · ${t.textContent}`; }; return {
   lede: lede(),
-  nota: document.querySelector(".compras-nota")?.textContent ?? null,
+  notaNoCard: /Movimentos entre contas/.test(document.querySelector("#gastos-compras").innerText), // fechado o ⓘ, a nota não polui o card
   linhas: [...document.querySelectorAll("#gastos-compras .lanc-linha")].map((li) => ({
     valor: li.querySelector(".lanc-valor").textContent,
     // sem detalhe, a linha marca com "Movimento"/"Guardado" no valor ou com o selo "outra moeda" embaixo do subtítulo
@@ -59,12 +62,13 @@ async function cardDoDia(itens) {
   return card;
 }
 
-test("soma: as linhas sem marca somam o total do dia, em centavos; sem a marca a soma diverge; a nota só vem com linha marcada", async () => {
+test("soma: as linhas sem marca somam o total do dia, em centavos; sem a marca a soma diverge; o ⓘ com a nota só vem com linha marcada", async () => {
   const real = await cardDoDia();
   assert.equal(real.lede, "Gasto no dia · R$ 290,00");
   assert.equal(real.linhas.length, 4);
   assert.deepEqual(real.linhas.map((l) => l.marcada), [false, false, true, true]); // o interno e o de outra moeda
   assert.equal(somaNaoMarcadas(real.linhas), centavos(real.lede));
+  assert.equal(real.notaNoCard, false);
   assert.match(real.nota, /^Movimentos entre contas, guardados e valores em outra moeda ficam fora do total e vêm com o rótulo ou o símbolo da moeda\.$/);
 
   // controle negativo: o mesmo dia sem a marca do servidor. A conta passaria a incluir o interno e a outra moeda
@@ -73,7 +77,7 @@ test("soma: as linhas sem marca somam o total do dia, em centavos; sem a marca a
   assert.notEqual(somaNaoMarcadas(semMarca.linhas), centavos(semMarca.lede));
   assert.equal(somaNaoMarcadas(semMarca.linhas), 47000);
 
-  // controle positivo: sem linha marcada não há nota, e a soma continua batendo
+  // controle positivo: sem linha marcada não há ⓘ nem nota, e a soma continua batendo
   const limpo = await cardDoDia((itens) => itens.filter((i) => !i.interno && !i.motivos.length));
   assert.equal(limpo.nota, null);
   assert.equal(somaNaoMarcadas(limpo.linhas), centavos(limpo.lede));
@@ -292,6 +296,7 @@ for (const width of [1440, 390]) {
     await ir("/gastos");
     await celula(page, 7).click();
     await page.locator("#gastos-compras .lanc-linha").first().waitFor();
+    await page.addStyleTag({ content: ".w-info::after { display: none; }" }); // o alvo de 44px do ⓘ passa do botão de propósito
     const m = await page.evaluate(() => {
       const card = document.querySelector("#gastos-compras").getBoundingClientRect();
       return {

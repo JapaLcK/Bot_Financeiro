@@ -14,7 +14,7 @@ afterEach(() => { jest.restoreAllMocks(); });
 
 const PROIBIDOS = ["Tentar novamente", "Carregando dados", "Conferindo disponibilidade do simulador…", "Simulador indisponível no seu plano.", "Dado indisponível neste card."];
 // Um texto que SÓ existe se o conteúdo do bloco foi desenhado (positivo: o card não está vazio).
-const CONTEUDO: Record<string, string> = { contas: "Nubank", hero: "30 dias · 05/11/2026", compromissos: "Fatura Nubank", resumo: "gasto até hoje", categorias: "Alimentação", calendario: "06/10", simulador: "Economia potencial", patrimonio: "Histórico desde 01/08/2026", wealth: "Investimentos do banco", rendimento: "CDB", assinaturas: "Netflix", metas: "Viagem pro Japão", fatura: "Limite", parcelas: "Parcela 3 de 6", renda: "Saídas", piggy: "Alimentação merece atenção", caixinhas: "Viagem", periodo: "Saldo" };
+const CONTEUDO: Record<string, string> = { contas: "Nubank", hero: "30 dias · 05/11/2026", compromissos: "Fatura Nubank", resumo: "gasto até hoje", categorias: "Alimentação", calendario: "06/10", simulador: "Transporte", patrimonio: "Histórico desde 01/08/2026", wealth: "Investimentos do banco", rendimento: "Renda fixa", assinaturas: "Netflix", metas: "Viagem pro Japão", fatura: "Limite", parcelas: "Parcela 3 de 6", renda: "Saídas", piggy: "Alimentação merece atenção", caixinhas: "Viagem", periodo: "Saldo" };
 it("o mapa de conteúdo cobre os 18 cards", () => { expect(CARDS).toHaveLength(18); expect(Object.keys(CONTEUDO).sort()).toEqual([...CARDS].sort()); });
 it.each(CARDS)("%s: o card do chat desenha o bloco, sem ler o provider", async (card) => {
   comBlocos(bloco(card)); await perguntar();
@@ -70,7 +70,7 @@ describe("só leitura no chat; as abas do painel seguem como eram", () => {
   });
   it("simulador no plano free: o chat mostra os sliders (o servidor já aplicou o plano); a aba, 'indisponível'", async () => {
     instalarCards(true); semPlano("free"); comBlocos(bloco("simulador")); await perguntar();
-    expect(within(screen.getByTestId("bloco-simulador")).getByLabelText("Corte em Alimentação")).toBeTruthy();
+    expect(within(screen.getByTestId("bloco-simulador")).getByLabelText("Corte em Mercado")).toBeTruthy();
     expect(screen.queryByText("Simulador indisponível no seu plano.")).toBeNull();
     await ir("/gastos"); await waitFor(() => expect(screen.getByText("Simulador indisponível no seu plano.")).toBeTruthy());
   });
@@ -80,6 +80,17 @@ it("compromissos: o título usa o horizonte do bloco (60), não o do provider (3
   instalarCards(true); comBlocos(bloco("compromissos", { previsao: { ...F["/api/app/previsao"], dias: 60 } })); await perguntar();
   expect(within(screen.getByTestId("bloco-compromissos")).getByText("Próximos 60 dias")).toBeTruthy();
   expect(screen.queryByText("Próximos 30 dias")).toBeNull();
+});
+
+it("simulador: o título é 'Simulador', sem o mês do bloco (a base é a estimativa, não o mês)", async () => {
+  instalarCards(true); comBlocos(bloco("simulador", undefined, "2026-10")); await perguntar();
+  expect(within(screen.getByTestId("bloco-simulador")).getByText("Transporte")).toBeTruthy();
+  expect(screen.queryByText(/Simulador · /)).toBeNull();
+});
+
+it("simulador: bloco só com `detalhes` (servidor antigo) mostra 'Dado indisponível', sem quebrar", async () => {
+  instalarCards(true); comBlocos(bloco("simulador", { detalhes: F["/api/app/mes-detalhes"] })); await perguntar();
+  expect(within(screen.getByTestId("bloco-simulador")).getByText("Dado indisponível neste card.")).toBeTruthy();
 });
 
 it("sem bloco, o chip com assunto não monta card (o card legado do assunto saiu)", async () => {

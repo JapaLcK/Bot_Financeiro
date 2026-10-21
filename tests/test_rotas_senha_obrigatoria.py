@@ -121,12 +121,14 @@ TABELA = {
     ("GET", "/api/v2/assinaturas"): (B, "usuario_atual"),
     ("GET", "/api/v2/contas-a-pagar"): (B, "usuario_atual"),
     ("GET", "/api/v2/caixinhas"): (B, "usuario_atual"),
+    ("GET", "/api/v2/patrimonio"): (B, "usuario_atual"),
     ("POST", "/api/v2/assinaturas/marca"): (B, "usuario_atual"),
     ("GET", "/api/v2/perfil"): (B, "usuario_atual"), ("PUT", "/api/v2/perfil"): (B, "usuario_atual"),
     ("GET", "/api/v2/contas"): (B, "usuario_atual"),
     ("GET", "/api/v2/previsao"): (B, "usuario_atual"),
     ("POST", "/api/v2/previsao/receita"): (B, "usuario_atual"),
     ("POST", "/api/v2/simulador"): (B, "usuario_atual"),
+    ("POST", "/api/v2/simulador/habitos"): (B, "usuario_atual"),
     ("GET", "/api/v2/investido"): (B, "usuario_atual"), ("GET", "/api/v2/bancos"): (B, "usuario_atual"),
     ("GET", "/api/v2/resumo-do-mes"): (B, "usuario_atual"),
     ("GET", "/api/v2/gastos"): (B, "usuario_atual"), ("GET", "/api/v2/gastos/categoria"): (B, "usuario_atual"),
@@ -158,6 +160,7 @@ TABELA = {
     ("GET", "/api/app/previsao"): (B, "usuario_do_app"),
     ("POST", "/api/app/previsao/receita"): (B, "usuario_do_app"),
     ("POST", "/api/app/simulador"): (B, "usuario_do_app"),
+    ("POST", "/api/app/simulador/habitos"): (B, "usuario_do_app"),
     ("GET", "/api/app/investido"): (B, "usuario_do_app"), ("GET", "/api/app/bancos"): (B, "usuario_do_app"),
     ("GET", "/api/app/resumo-do-mes"): (B, "usuario_do_app"),
     ("GET", "/api/app/gastos"): (B, "usuario_do_app"), ("GET", "/api/app/gastos/categoria"): (B, "usuario_do_app"),
@@ -194,7 +197,7 @@ TABELA = {
 _HTML_PUBLICO = (
     "/", "/login", "/cadastro", "/q", "/recuperar-senha", "/suporte/contato", "/privacy",
     "/termos", "/blog", "/whatsapp", "/funcionalidades", "/comandos", "/comandos-app",
-    "/agents", "/como-funciona", "/precos", "/lp", "/oferta", "/vsl", "/continuar-compra", "/assinar", "/suporte",
+    "/agents", "/como-funciona", "/precos", "/lp", "/oferta", "/inicio-antiga", "/vsl", "/continuar-compra", "/assinar", "/suporte",
     "/reset-password", "/redefinir-senha", "/completar-cadastro",
     "/.well-known/apple-app-site-association",
 )
@@ -244,7 +247,8 @@ GET /open-finance/{user_id}/limite
 POST /open-finance/{user_id}/pluggy-item|POST /open-finance/{user_id}/sync|POST /open-finance/{user_id}/refresh
 POST /open-finance/{user_id}/mock-connect|DELETE /open-finance/{user_id}|GET /open-finance/{user_id}/movements
 DELETE /open-finance/{user_id}/connections/{connection_id}
-POST /open-finance/{user_id}/movements/confirm|GET /open-finance/{user_id}/reconciliations
+POST /open-finance/{user_id}/movements/confirm|POST /open-finance/{user_id}/movements/undo
+GET /open-finance/{user_id}/reconciliations
 POST /open-finance/{user_id}/reconciliations/{of_tx_id}/{action}
 GET /open-finance/{user_id}/cash-transfers|POST /open-finance/{user_id}/cash-transfers/{link_id}/{action}
 """

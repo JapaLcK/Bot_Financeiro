@@ -41,3 +41,13 @@ it("controle negativo: o comparador acusa chave a mais, chave a menos e chave de
   expect(divergencias(ERRO_CAMPO, TEXTO_CODIGO, { ...c, inventada: 1 })).toContain("corpo.inventada fora do SimuladorIn");
   expect(divergencias(ERRO_CAMPO, TEXTO_CODIGO, { cenarios: [{ ...c.cenarios[0]!, parcelas_total: 1 }] })).toContain("cenario.parcelas_total fora do CenarioIn");
 });
+
+// Corte de hábito: o corpo do POST e o único código de 422 que a tela trata são os do contrato gerado e da fixture do servidor.
+const habitos = readFileSync(resolve(RAIZ, "app/src/features/painel/simuladorHabitos.tsx"), "utf8");
+const CODIGOS_HABITOS = (v2 as unknown as { simulador: { codigos_422_habitos: string[] } }).simulador.codigos_422_habitos;
+it("simulador de hábito: o corpo (cortes, categoria, percentual) é o do contrato gerado e o código de 422 tratado é o do servidor", () => {
+  expect(tipo("HabitosIn")).toEqual(["cortes"]); expect(tipo("CorteIn")).toEqual(["categoria", "percentual"]);
+  expect(habitos).toContain("{ cortes: lista }"); expect(habitos).toMatch(/\{ categoria: c\.chave, percentual: /);
+  const tratados = [...habitos.matchAll(/"(categoria_\w+)"/g)].map((m) => m[1]!);
+  expect(tratados).toEqual(["categoria_fora_da_estimativa"]); for (const t of tratados) expect(CODIGOS_HABITOS).toContain(t);
+});

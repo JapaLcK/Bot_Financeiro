@@ -23,6 +23,7 @@
   /* 2. Linha com filho que cresce (flex: 1, margem auto): margem entre os filhos. */
   .w-head > * + * { margin-left: 10px; }
   .w-aside > * + * { margin-left: 8px; }
+  .page-head-t > * + * { margin-left: 4px; }
   .nw-parts > * + * { margin-left: 18px; } /* em grid venceria o display: none da consulta de contêiner */
   .lever-name > i { margin-right: 7px; }
   .topbar > * + * { margin-left: 12px; }
@@ -66,7 +67,8 @@
   }
   /* no celular o cabeçalho do bloco principal quebra: título numa linha, controles na outra */
   @media (max-width: 508px) {
-    .w-hero .w-title { flex-basis: 100%; }
+    .w-hero .w-head:not(.w-head-info) .w-title { flex-basis: 100%; } /* com o ⓘ o título não ocupa a linha: o ⓘ fica ao lado dele */
     .w-hero .w-head > * + * { margin-left: 0; margin-top: 10px; }
+    .w-hero .w-head-info > .w-info { margin-left: 10px; margin-top: 0; }
   }
 }

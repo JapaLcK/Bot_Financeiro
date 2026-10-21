@@ -16,7 +16,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
-import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, servir } from "./_painel.mjs";
+import { PAINEL, PROTOTIPO, RAIZ, RESPOSTAS, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 import { regiao, servidorBancos } from "./_bancos.mjs";
 
 const PAGES = ["/", "/previsao", "/gastos", "/assinaturas", "/simulador", "/metas", "/patrimonio", "/lancamentos"];
@@ -91,7 +91,7 @@ async function estavel(page, pendentes) {
 async function measure(width, hash, withFallback, setup, semente = true) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
-  const demo = setup === filtros || setup === textoLongo; // provas de filtros/notas do Ledger demonstrativo
+  const demo = setup === filtros || setup === textoLongo || setup === simular; // provas de filtros/notas do Ledger demonstrativo
   await servir(ctx, demo ? RAIZ : undefined, { perfil: semente ? "padrao" : null });
   await setup?.antes?.(ctx); // rotas próprias da tela (a de Bancos conectados lê /open-finance/…)
   if (demo && semente) await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
@@ -132,6 +132,12 @@ const modal = (page) => page.locator(".picker[open]").waitFor();
 const catalogo = async (page) => { await organizar(page); await page.getByRole("button", { name: "Adicionar bloco" }).click(); await page.locator("#board-catalog").waitFor(); };
 const contasFora = async (page) => { await page.locator(".contas-mais").click(); await page.locator(".contas-mais[aria-expanded=true]").waitFor(); };
 const simular = async (page) => { await page.locator(".presets .chip").first().click(); await page.locator(".sim-facts").waitFor(); };
+// Simulador real: o corte de hábito em #/simulador (a estimativa e o resultado vêm das fixtures)
+const cortar = async (page) => { await page.locator(".lever-habito input").first().press("ArrowRight"); await page.locator(".sim-facts").waitFor(); };
+cortar.antes = async (ctx) => {
+  await ctx.route("**/api/v2/previsao*", (r) => r.fulfill({ json: RESPOSTAS.previsao.pro90_com_estimativa }));
+  await ctx.route("**/api/v2/simulador/habitos", (r) => r.fulfill({ json: RESPOSTAS.simulador.habitos }));
+};
 // mensagem que precisa de reticência em qualquer largura
 const textoLongo = (page) => page.locator(".row-msg").evaluateAll((qs) => qs.forEach((q) => { q.textContent = "pagamento da viagem de formatura dividido com a galera toda do terceirão"; }));
 // Bancos conectados (/conta/bancos): lista, "Disponíveis para conectar" e o "+" do topo, com as conexões e os conectores de _bancos.mjs.
@@ -141,7 +147,7 @@ const CASES = [
   // 320: título que quebra linha e reticência; 1100: bloco estreito que o @container esconde
   ...[1440, 1100, 1024, 390, 320].flatMap((w) => PAGES.map((p) => [w, p])),
   ...[1440, 390, 320].flatMap((w) => [paleta, organizar, filtros].map((f) => [w, "/", f])),
-  ...[1440, 390, 320].map((w) => [w, "/simulador", simular]),
+  ...[1440, 390, 320].flatMap((w) => [simular, cortar].map((f) => [w, "/simulador", f])),
   ...[1440, 390, 320].flatMap((w) => [[w, "/", modal, false], [w, "/", catalogo], [w, "/", contasFora]]),
   ...[1440, 390, 320].map((w) => [w, "/conta/bancos", bancosTela]),
   [390, "/lancamentos", textoLongo],

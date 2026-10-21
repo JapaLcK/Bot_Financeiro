@@ -10,6 +10,7 @@ import { mesAno } from "../lib/metas-textos";
 import { ErroApi, mesAtual, milhaoQuery } from "../lib/v2";
 import { Bloqueio } from "../parts/Bloqueio";
 import { Frame } from "../parts/Frame";
+import { Info } from "../parts/Info";
 import { Selos } from "../parts/Selos";
 import { href } from "../router";
 import { MilhaoGrafico } from "./MilhaoGrafico";
@@ -64,7 +65,6 @@ function Corpo({ d, antigo, busy }: { d: ProgressoMilhao; antigo: ReactNode; bus
         <button type="button" className="btn btn-quiet" disabled={nos} onClick={() => { setAporte(APORTE.padrao); setTaxa(TAXA.padrao); }}>Voltar ao padrão</button>
       </div>
       <MilhaoGrafico pontos={p.pontos} meta={p.meta} inicio={inicio} resumo={resumo} />
-      <p className="faint mi-rodape">Conta de juros compostos com taxa fixa: não é promessa de rendimento. Patrimônio = Carteira, contas, caixinhas e investimentos.</p>
     </div>
   );
 }
@@ -89,7 +89,8 @@ export function MilhaoPainel() {
   );
   return (
     <div className="panel span-12">
-      <Frame id="milhao" title={Number(d?.patrimonio) >= 1e6 ? "Rumo ao próximo milhão" : "Rumo ao primeiro milhão"} real>
+      <Frame id="milhao" title={Number(d?.patrimonio) >= 1e6 ? "Rumo ao próximo milhão" : "Rumo ao primeiro milhão"} real
+        info={d && !d.motivos.includes("sem_banco_conectado") && <Info rotulo="Como esta conta é feita"><p>Conta de juros compostos com taxa fixa: não é promessa de rendimento. Patrimônio = Carteira, contas, caixinhas e investimentos.</p></Info>}>
         {e4 ? <Bloqueio e={e4} convite="O Progresso ao milhão é do Plus e do Pro." o="o progresso ao milhão" />
           : !d ? (q.isError && !q.isFetching
             ? (

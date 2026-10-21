@@ -12,7 +12,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
+import { RESPOSTAS, abrirInfo, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -181,7 +181,10 @@ test("a fixture completa (premissas reais da API) não leva identificador de có
   await preencher(page);
   await page.getByRole("button", { name: "Calcular" }).click();
   await page.locator(SVG).waitFor();
-  const tela = await page.locator("#w-compra-resultado").innerText();
+  const card = await page.locator("#w-compra-resultado").innerText();
+  assert.doesNotMatch(card, /Premissas|Parcelado com juros usa a tabela Price/); // a explicação mora no ⓘ
+  const tela = await (await abrirInfo(page, "#w-compra-resultado")).innerText();
+  assert.match(tela, /Como esta simulação foi feita/);
   assert.match(tela, /Premissas/);
   assert.match(tela, /Parcelado com juros usa a tabela Price/);
   assert.doesNotMatch(tela, SEM_VAZAMENTO);

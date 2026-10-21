@@ -42,7 +42,7 @@ function leituraDe(c: Card): Leitura {
       return { chave: `card-comparacao_meses-${a}-${b}`, titulo: tituloComparacao(c.meses), ler: (signal) => Promise.all(c.meses.map((m) => resumoMesQuery(m).queryFn({ signal }))), contrato: (d) => contratoComparacaoMeses(d, c.meses), desenha: (d) => <CardComparacaoMeses d={d} meses={c.meses} motivos={c.motivos} /> };
     }
     case "orcamentos":
-      return { chave: "card-orcamentos", titulo: "Orçamentos", ler: (signal) => orcamentosCategoriaQuery.queryFn({ signal }), contrato: contratoOrcamentos, desenha: (d) => <CardOrcamentos d={d} />, outroPeriodo: (d) => d.mes !== c.mes };
+      return { chave: "card-orcamentos", titulo: `Orçamentos de ${mesAno(c.mes)}`, ler: (signal) => orcamentosCategoriaQuery.queryFn({ signal }), contrato: contratoOrcamentos, desenha: (d) => <CardOrcamentos d={d} />, outroPeriodo: (d) => d.mes !== c.mes };
     case "contas":
       return { chave: "card-contas", titulo: "Contas a pagar", ler: (signal) => contasAPagarQuery.queryFn({ signal }), contrato: contratoContas, desenha: (d) => <CardContas d={d} />, outroPeriodo: (d) => d.hoje !== c.hoje };
     case "caixinhas":
@@ -53,6 +53,8 @@ function leituraDe(c: Card): Leitura {
     }
   }
 }
+
+export const tituloDe = (c: Card) => leituraDe(c).titulo;
 
 export function CardAgente({ uid, c }: { uid: number; c: Card }) {
   const l = leituraDe(c), qc = useQueryClient();

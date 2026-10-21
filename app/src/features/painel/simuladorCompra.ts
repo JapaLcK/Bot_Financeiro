@@ -23,7 +23,8 @@ export const TEXTO_CODIGO: Record<string, string> = {
   financiado_pequeno_demais: "Parcelas demais para esse valor", nomes_repetidos: "Nomes repetidos", dinheiro_casas: "Até 2 casas",
 };
 export const SEM_PLANO = "Simulador indisponível no seu plano.";
-const GENERICO = "Não deu para calcular. Tente de novo.", CENARIO = "Confira este cenário.";
+export const GENERICO = "Não deu para calcular. Tente de novo.";
+const CENARIO = "Confira este cenário.";
 
 /** Só o `preco` vai sempre; o resto só com valor. Dinheiro em texto exato ("1234.50"), nunca float. Nada de `null` nem chave extra (o servidor é `extra="forbid"`). */
 export function corpoDe(reserva: number, cens: Cen[]) {
