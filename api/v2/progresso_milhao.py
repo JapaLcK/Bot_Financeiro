@@ -27,7 +27,7 @@ def _jogador(uid: int = Depends(usuario_atual)) -> int:
 
 @router.get("/progresso-milhao", response_model=ProgressoMilhao)
 def ler(uid: int = Depends(_jogador)) -> ProgressoMilhao:
-    with get_conn() as conn, conn.cursor() as cur:  # leitura igual à de api/nativo/patrimonio.py
+    with get_conn() as conn, conn.cursor() as cur:  # leitura igual à de api/v2/patrimonio.py
         cur.execute("set transaction isolation level repeatable read, read only")
         p = calcular(cur, uid)
         conn.rollback()
