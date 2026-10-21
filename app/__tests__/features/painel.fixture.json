@@ -181,7 +181,110 @@
         "motivos": []
       }
     ],
-    "motivos": []
+    "motivos": [],
+    "rendimentos": {
+      "saldo": "12500.00",
+      "quantidade": 3,
+      "mes": {
+        "valor": "120.00",
+        "pct": "1.00",
+        "sem_dado": 1
+      },
+      "total": {
+        "valor": "350.00",
+        "pct": "3.00",
+        "sem_dado": 1
+      },
+      "mes_desde": "2026-09-30",
+      "sincronizado_em": "2026-10-06T15:30:00Z",
+      "categorias": [
+        {
+          "tipo": "renda_fixa",
+          "rotulo": "Renda fixa",
+          "saldo": "10000.00",
+          "quantidade": 2,
+          "mes": {
+            "valor": "120.00",
+            "pct": "1.00",
+            "sem_dado": 0
+          },
+          "total": {
+            "valor": "350.00",
+            "pct": "3.00",
+            "sem_dado": 0
+          },
+          "ativos": [
+            {
+              "nome": "CDB",
+              "instituicao": "Nubank",
+              "logo_proprio": null,
+              "saldo": "6000.00",
+              "mes": {
+                "valor": "40.00",
+                "pct": "0.67",
+                "motivo": null
+              },
+              "total": {
+                "valor": "100.00",
+                "pct": "1.69",
+                "motivo": null
+              }
+            },
+            {
+              "nome": "LCI",
+              "instituicao": "Inter",
+              "logo_proprio": null,
+              "saldo": "4000.00",
+              "mes": {
+                "valor": "80.00",
+                "pct": "2.04",
+                "motivo": null
+              },
+              "total": {
+                "valor": "250.00",
+                "pct": "6.67",
+                "motivo": null
+              }
+            }
+          ]
+        },
+        {
+          "tipo": "acoes",
+          "rotulo": "Ações",
+          "saldo": "2500.00",
+          "quantidade": 1,
+          "mes": {
+            "valor": null,
+            "pct": null,
+            "sem_dado": 1
+          },
+          "total": {
+            "valor": null,
+            "pct": null,
+            "sem_dado": 1
+          },
+          "ativos": [
+            {
+              "nome": "PETR4",
+              "instituicao": "XP",
+              "logo_proprio": null,
+              "saldo": "2500.00",
+              "mes": {
+                "valor": null,
+                "pct": null,
+                "motivo": "quantidade_mudou"
+              },
+              "total": {
+                "valor": null,
+                "pct": null,
+                "motivo": "sem_custo"
+              }
+            }
+          ]
+        }
+      ],
+      "motivos": []
+    }
   },
   "/api/app/lancamentos": {
     "mes": "2026-10",
