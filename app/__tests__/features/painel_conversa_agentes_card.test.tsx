@@ -58,6 +58,12 @@ it.each(CASOS)("positivo, %s: lê a rota do tipo, confere o /auth/me DEPOIS e de
   expect(post).toBeGreaterThan(-1); expect(i).toBeGreaterThan(post); expect(ultimo).toBeGreaterThan(i); // o /auth/me depois da leitura
   expect(screen.queryByRole("button", { name: "Tentar de novo" })).toBeNull();
 });
+it("assinaturas com a mesma chave em cadeias diferentes: nenhuma key repetida no React", async () => {
+  const erro = jest.spyOn(console, "error"); rota(R_ASS, v2.assinaturas!.cheia!); comCard({ tipo: "assinaturas" }); await perguntar();
+  await waitFor(() => expect(screen.getAllByText(/Smart Fit/).length).toBeGreaterThan(0));
+  const repetidas = erro.mock.calls.filter((c) => /same key/.test(String(c[0]))); erro.mockRestore();
+  expect(repetidas).toEqual([]);
+});
 it("rode a conversa: '@Detetive quanto rendeu meus investimentos?' -> 'Perguntar ao Faria Limer' -> card Investimentos abaixo da resposta", async () => {
   rota(R_INV, v2.investido!.com_banco!);
   S.chat = (n) => resposta(200, n === 1 ? { reply: "Isso é com o Faria Limer.", context: null, redirects: [{ kind: "faria_limer", name: "Faria Limer", question: "Quanto rendeu meus investimentos?", access: "ready" }] } : { reply: "Você tem R$ 57 mil.", context: null, card: { tipo: "investido" } });
