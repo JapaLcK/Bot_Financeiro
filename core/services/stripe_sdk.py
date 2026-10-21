@@ -29,3 +29,15 @@ def _is_missing_stripe_customer(stripe_mod, exc: Exception) -> bool:
         or "no such customer" in str(exc).lower()
     )
 
+
+def uid_de_metadata(valor) -> int | None:
+    """`metadata.finbot_user_id` de fora -> id de usuário, ou `None` se não for um.
+
+    Só dígitos ASCII canônicos de 1 a 2^63-1 (o `bigint` da coluna). `int()` sozinho
+    aceita `" 12 "`, `"1_000"`, `"+5"`, `"012"` e dígitos árabes: o evento agiria sobre
+    OUTRO usuário. O limite de 19 caracteres evita o `ValueError` do `int()` em lixo gigante.
+    """
+    if not (isinstance(valor, str) and valor.isascii() and valor.isdigit() and len(valor) <= 19):
+        return None
+    n = int(valor)
+    return n if str(n) == valor and 0 < n < 2**63 else None
