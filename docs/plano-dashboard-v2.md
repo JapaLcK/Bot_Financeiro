@@ -813,11 +813,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
 - Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
-- [x] Etapa 0 · [x] 1 · [x] 2 · [ ] 3 · [ ] 4 · [x] 5 · [ ] 6 · [ ] 7
+- [x] Etapa 0 · [x] 1 · [x] 2 · [ ] 3 · [x] 4 · [x] 5 · [ ] 6 · [ ] 7
 
-Situação em 2026-10-13, conferida contra os PRs mergeados (a 5 foi marcada concluída em 2026-10-15). Ficam abertas: a 3, porque
-simulador v2 e estimativa variável não entraram (ver o PR2 da Etapa 3); e a 4, porque falta
-a conferência pós-deploy do PR C (marcá-la concluída é decisão do dono, como foi com a 5).
+Situação em 2026-10-13, conferida contra os PRs mergeados (a 5 foi marcada concluída em 2026-10-15; a 4, em 2026-10-20, depois
+da conferência do dono do PR C no ar). Fica aberta a 3, porque simulador v2 e estimativa
+variável não entraram (ver o PR2 da Etapa 3).
 
 | Etapa | PRs mergeados |
 |---|---|
@@ -835,7 +835,7 @@ a conferência pós-deploy do PR C (marcá-la concluída é decisão do dono, co
   custo mensal das recorrências do banco) e, no A2, o `ritmo` (crescimento atual da fonte em
   R$/mês, medido nas fotos por posição) e o `chega_em`. O contrato, os motivos e os limites
   declarados estão em `docs/CLAUDE.md`, "API v2", parágrafo de `/api/v2/metas`. O PR C
-  (IA, WhatsApp e o chat do `/painel` usarem a mesma regra) está feito; falta só a conferência pós-deploy.
+  (IA, WhatsApp e o chat do `/painel` usarem a mesma regra) está feito e foi conferido pelo dono no ar em 2026-10-20 ("tudo bateu"): a Etapa 4 está concluída.
 - Chat do Piggy (Etapa 7, lado do backend e do app nativo): `POST /ai/chat/stream` com
   parar e 👍👎 (#943), `show_card` com a mesma fonte do app (#946, #947), chips de
   continuação (#949), períodos de até 12 meses e card `periodo` (#957), e o consumo no app
