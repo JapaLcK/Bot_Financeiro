@@ -18,8 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from core.services import cashflow
 from core.services.cashflow_snapshot import carregar, Ocorrencia, centavos, legado
-from core.services.cashflow_contract import FONTE_VARIAVEL, Snapshot
-from core.services.cashflow_forecast import _trajectory
+from core.services.cashflow_contract import FONTE_VARIAVEL, Motivo, Snapshot
+from core.services.cashflow_forecast import trajetoria_com_hoje
+from core.services.veredito import ligado, veredito
 from core.services.previsao_variavel import cortar, ocorrencias
 from utils_text import TETO_ENTRADA
 
@@ -176,20 +177,23 @@ def _decision_events(cen: Cenario, today: date,
     pago_na_compra = na_compra + custos
 
     events: list[Ocorrencia] = []
-    def event(d, label, value, ciclo):
-        return Ocorrencia('cenario', cen.nome, ciclo, d, 'simulacao', label, value, 'saida')
+    def event(d, label, value, ciclo, motivos=()):
+        return Ocorrencia('cenario', cen.nome, ciclo, d, 'simulacao', label, value, 'saida', motivos=motivos)
     if compra <= until:
         if na_compra > 0:
             events.append(event(compra, f"{cen.nome}: {'à vista' if cen.a_vista else 'entrada'}", na_compra, 'compra'))
         if custos > 0:
             events.append(event(compra, f'{cen.nome}: custos únicos', custos, 'custos'))
+    # Datas presumidas (um mês depois da compra): o veredito as trata como dúvida.
     events += [Ocorrencia('cenario', cen.nome, str(k), d, 'simulacao_parcela',
-                         f'{cen.nome}: parcela {k}/{len(valores)}', v, 'saida')
+                         f'{cen.nome}: parcela {k}/{len(valores)}', v, 'saida',
+                         motivos=(Motivo('data_parcela_presumida', 'ambos'),))
                for k, (d, v) in enumerate(zip(datas, valores), start=1) if d <= until]
     if mensal > 0:
         k = 1
         while (d := _add_months(compra, k)) <= until:
-            events.append(event(d, f'{cen.nome}: despesa mensal nova', mensal, f'mensal:{k}'))
+            events.append(event(d, f'{cen.nome}: despesa mensal nova', mensal, f'mensal:{k}',
+                                (Motivo('data_despesa_mensal_presumida', 'ambos'),)))
             k += 1
 
     fora = [v for d, v in zip(datas, valores) if d > until]
@@ -251,9 +255,8 @@ PREMISSAS = (
 
 
 def _curva(snapshot: Snapshot, events: list[Ocorrencia], reserva) -> dict[str, Any]:
-    """O motor puro inicia no dia seguinte à âncora. Ancorar em ontem inclui HOJE como primeiro
-    ponto, sem reler saldo nem mover o fim (hoje + 90 dias): 91 pontos."""
-    return _resumo(_trajectory(snapshot.hoje - timedelta(days=1), snapshot.base, events, DIAS + 1, reserva))
+    """Inclui HOJE como primeiro ponto (`trajetoria_com_hoje`): 91 pontos até hoje + 90 dias."""
+    return _resumo(trajetoria_com_hoje(snapshot.hoje, snapshot.base, events, DIAS, reserva))
 
 
 def simular(snapshot: Snapshot, simulacao: Simulacao) -> dict[str, Any]:
@@ -267,6 +270,7 @@ def simular(snapshot: Snapshot, simulacao: Simulacao) -> dict[str, Any]:
 
     # Compra hoje pode violar a reserva e ser encoberta por um salário amanhã: `_curva` inclui hoje.
     atual = _curva(snapshot, events, reserva)
+    atual["veredito"] = veredito(snapshot, [], reserva, days) if ligado() else None
     cenarios = []
     for cen in simulacao.cenarios:
         extra, contrato = _decision_events(cen, today, until)
@@ -275,6 +279,7 @@ def simular(snapshot: Snapshot, simulacao: Simulacao) -> dict[str, Any]:
                                   if resumo["saldo_final_90"] is not None and atual["saldo_final_90"] is not None else None)
         # Compra datada depois da janela: o saldo de 90 dias é igual ao atual, e sem
         # este marcador a resposta pareceria "não muda nada".
+        resumo["veredito"] = veredito(snapshot, extra, reserva, days) if ligado() else None
         resumo["compra_fora_da_janela"] = contrato["data_compra"] > until.isoformat()
         cenarios.append({"nome": cen.nome, "resumo": resumo, "contrato": contrato})
 
@@ -311,9 +316,9 @@ def simulate(user_id: int, simulacao: Simulacao) -> dict[str, Any]:
     """Saída legada (tool de IA e rota antiga): resumos em float, sem a trajetória diária."""
     today = date.today()
     r = simular(carregar(user_id, today, today + timedelta(days=DIAS)), simulacao)
-    r["atual"].pop("trajetoria")
-    for c in r["cenarios"]:
-        c["resumo"].pop("trajetoria")
+    for resumo in (r["atual"], *(c["resumo"] for c in r["cenarios"])):
+        resumo.pop("trajetoria")
+        resumo.pop("veredito")  # a tool e a rota legada ainda não o leem (PR 3b)
     return legado(r)
 
 
