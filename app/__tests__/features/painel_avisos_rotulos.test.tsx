@@ -37,9 +37,9 @@ it("banco desatualizado vira UM aviso no topo; ressalvas dos cards ficam atrás 
  await waitFor(() => expect(screen.getAllByText(/precisam ser atualizados/)).toHaveLength(1));
  expect(screen.getByText(/Os dados de Nu Pagamentos S\.A\. precisam ser atualizados/)).toBeTruthy();
  expect(screen.getByRole("button", { name: "Ver bancos conectados" })).toBeTruthy();
- expect(screen.queryByText(/partial/)).toBeNull(); expect(screen.queryByText(/Confira se o saldo da carteira/)).toBeNull();
+ expect(screen.queryByText(/partial/)).toBeNull(); expect(screen.queryByText(/Há movimentos aguardando conciliação/)).toBeNull();
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Ver ressalvas" })); await drenar(); });
- expect(screen.getAllByText(/Confira se o saldo da carteira manual está atualizado\./)).toHaveLength(1);
+ expect(screen.getAllByText(/Há movimentos aguardando conciliação\./)).toHaveLength(1); expect(screen.queryByText(/Confira se o saldo da carteira/)).toBeNull(); // a tela do patrimônio não mostra `carteira_nao_confirmada`
  expect(screen.getByRole("button", { name: "Ocultar ressalvas" })).toBeTruthy();
 });
 it("o aviso do banco aparece em cada aba, não só no Resumo", async () => {
