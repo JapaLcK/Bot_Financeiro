@@ -5,6 +5,7 @@ import type { z } from "zod";
 import type * as S from "@/api/schemas/painel";
 import { ErroDeApi } from "@/api/client";
 import { simularHabitos } from "@/services/painel";
+import { selecao } from "@/ui/haptics";
 import { useTema } from "@/ui/tema";
 import { CORES_CATEGORIA } from "@/ui/tokens";
 import { Acao, Curva, RecursoDados, Valor, Vazio } from "./base";
@@ -20,7 +21,7 @@ type Res = z.output<typeof S.simuladorHabitosSchema>;
 const MUDOU = "Seus gastos do dia a dia mudaram. Ajuste de novo.";
 // Só chave própria: uma categoria chamada "constructor" ou "toString" não pode ler o protótipo do objeto.
 const de = (m: Record<string, number>, k: string) => (Object.prototype.hasOwnProperty.call(m, k) ? m[k]! : 0);
-const passo = (v: number) => Math.round(v / 10) * 10; // o slider nativo entrega qualquer número: o passo é 10 e o corpo só leva inteiro
+const passo = (v: number) => Math.min(100, Math.max(0, Math.round(v / 10) * 10)); // o slider nativo entrega qualquer número: o passo é 10 e o corpo só leva inteiro
 const mudouDeCategoria = (e: unknown) => e instanceof ErroDeApi && e.status === 422 && ((e.corpo as { error?: { details?: { type?: unknown }[] } } | null | undefined)?.error?.details ?? []).some((d) => d?.type === "categoria_fora_da_estimativa");
 
 /**
@@ -32,8 +33,9 @@ export function SimuladorHabitos() {
   // O estado mora FORA do `RecursoDados`: a releitura da previsão (422) o desmonta por um instante e a mensagem não pode ir junto.
   const [cortes, setCortes] = useState<Record<string, number>>({}), [res, setRes] = useState<Res | null>(null), [falha, setFalha] = useState<string | null>(null);
   const op = useRef<ReturnType<typeof p.operacao> | null>(null);
+  const arraste = useRef<{ chave: string; v: number } | null>(null); // o passo do arraste em curso: o tique sai a cada passo novo, nunca 2x no mesmo (o render atrasa o estado)
   useEffect(() => () => op.current?.controlador.abort(), []);
-  const limpar = () => { op.current?.controlador.abort(); op.current = null; setCortes({}); setRes(null); };
+  const limpar = () => { op.current?.controlador.abort(); op.current = null; arraste.current = null; setCortes({}); setRes(null); };
   const zerar = () => { limpar(); setFalha(null); };
   // Previsão relida com outra versão (pull-to-refresh, foco, 422): corte e resultado eram da estimativa antiga. Só a falha do 422 fica. No chat o bloco é congelado.
   const versao = useRef<string | null>(null);
@@ -71,7 +73,8 @@ export function SimuladorHabitos() {
           </View>
           <Slider accessibilityLabel={`Corte em ${c.nome}`} style={{ height: 40 }} minimumValue={0} maximumValue={100} step={10} value={corte}
             minimumTrackTintColor={CORES_CATEGORIA[i % CORES_CATEGORIA.length]!} maximumTrackTintColor={cores.surfaceRaised}
-            onValueChange={(v) => setCortes((s) => ({ ...s, [c.chave]: passo(v) }))} onSlidingComplete={(v) => void soltou(categorias, c.chave, passo(v))} />
+            onValueChange={(v) => { if (!Number.isFinite(v)) return; const n = passo(v), antes = arraste.current?.chave === c.chave ? arraste.current.v : corte; if (n !== antes) selecao(); arraste.current = { chave: c.chave, v: n }; setCortes((s) => ({ ...s, [c.chave]: n })); }}
+            onSlidingComplete={(v) => { arraste.current = null; void soltou(categorias, c.chave, passo(v)); }} />
         </View>;
       })}
       {falha ? <Texto variante="rotulo" tom="warning" accessibilityRole="alert">{falha}</Texto> : null}
