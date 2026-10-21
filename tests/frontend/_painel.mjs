@@ -51,12 +51,12 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * `pro_required`. O GET `/investido` responde a fixture de nome `investido` (padrão `com_banco`);
  * no `free`, como o servidor (gate `investments`, Essencial+), o 403 `pro_required`. O GET `/gastos` e o
  * `/gastos/categoria` respondem as fixtures `gastos` e `gastosCategoria` (padrão `padrao`, de um mês só: o
- * `mes` do pedido não as reescreve). O GET `/metas` responde a fixture de nome `metas` (padrão `varios`); os POST `/metas`, `/metas/editar` e
+ * `mes` do pedido não as reescreve). O GET `/patrimonio` responde a fixture `patrimonio` (padrão `continuo`). O GET `/metas` responde a fixture de nome `metas` (padrão `varios`); os POST `/metas`, `/metas/editar` e
  * `/metas/apagar` respondem `{id}` (o teste sobrescreve com `ctx.route` para erro ou para espiar). O `/orcamentos-categoria` (GET e os 2 POST): fixture `orcamentosCategoria` (padrão `padrao`), sem gate de plano. O `/orcamento-domestico` (GET e os 2 POST): fixture `orcamento` (padrão `padrao`) no Plus e no Pro, 403 `pro_required` nos outros.
  * Registrar de novo vale para as próximas requisições (atraso, falha, troca de
  * resposta): no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "em_dia", orcamento = "padrao", milhao = "padrao", orcamentosCategoria = "padrao" } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "em_dia", orcamento = "padrao", milhao = "padrao", orcamentosCategoria = "padrao", patrimonio = "continuo" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
   let atual = perfil;
@@ -88,6 +88,8 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
       const e = RESPOSTAS.erros["403_pro_required"];
       return plano === "plus" || plano === "pro" ? r.fulfill({ json: RESPOSTAS.progresso_milhao[milhao] }) : r.fulfill({ status: e.status, json: e.body });
     }
+    // O patrimônio (sem gate de plano): a fixture `patrimonio` (padrão `continuo`); os demais estados, por `ctx.route` no teste.
+    if (url.pathname === "/api/v2/patrimonio") return r.fulfill({ json: RESPOSTAS.patrimonio[patrimonio] });
     if (url.pathname === "/api/v2/metas" && r.request().method() === "GET") return r.fulfill({ json: RESPOSTAS.metas[metas] });
     if (/^\/api\/v2\/metas(\/editar|\/apagar)?$/.test(url.pathname) && r.request().method() === "POST") return r.fulfill({ json: { id: r.request().postDataJSON().id ?? 99 } });
     // O orçamento doméstico: Plus e Pro leem a fixture `orcamento` (de um mês só: o `mes` do pedido não a reescreve); os outros, 403 `pro_required`. Os 2 POST devolvem a mesma fixture (o teste sobrescreve com `ctx.route` para erro ou para espiar).

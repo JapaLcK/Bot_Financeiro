@@ -168,6 +168,12 @@ export const milhaoQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/progresso-milhao", signal),
   ...vivo,
 };
+// O patrimônio de hoje, as fotos diárias, os trechos sem quebra e a variação (`GET /api/v2/patrimonio`); os dois blocos da tela leem esta chave.
+export const patrimonioQuery = {
+  queryKey: ["patrimonio"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/patrimonio", signal),
+  ...vivo,
+};
 // Os orçamentos por categoria do mês corrente (`GET /api/v2/orcamentos-categoria`, sem `mes`); a escrita devolve a resposta nova e ela entra nesta chave.
 export const orcamentosCategoriaQuery = {
   queryKey: ["orcamentos-categoria"],
