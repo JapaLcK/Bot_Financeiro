@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from statistics import median
 
 from core.services.cashflow_contract import FONTE_VARIAVEL, Ocorrencia, centavos, dinheiro
@@ -58,13 +58,40 @@ def ocorrencias(hoje: date, until: date, mensal: Decimal) -> list[Ocorrencia]:
             for d in (hoje + timedelta(days=i) for i in range(1, (until - hoje).days + 1))]
 
 
-def cortar(est: dict, cortes: dict[str, int]) -> tuple[list[dict], Decimal]:
-    """`([{chave, nome, despesa_mensal, percentual, economia_mensal}], economia total)` das categorias de `est`
-    que estão em `cortes` (`{chave: percentual}`), na ordem da estimativa. A economia é arredondada por
-    categoria (`centavos`), então a soma bate com o total."""
-    linhas = [{**c, 'percentual': cortes[c['chave']],
-               'economia_mensal': centavos(c['despesa_mensal'] * cortes[c['chave']] / 100)}
-              for c in est['categorias'] if c['chave'] in cortes]
+def repartir(est: dict, chaves, valor: Decimal) -> dict[str, Decimal]:
+    """`{chave: parte de valor}`: `valor` dividido entre `chaves` (de `est`) proporcional à `despesa_mensal`, em
+    centavos. A parte nunca passa da despesa da categoria: o resíduo vai para a 1ª, na ordem da estimativa, que
+    ainda tem folga, e a soma fecha exata (`valor` <= soma das despesas). Categoria que ficaria com 0,00 fica fora.
+    ponytail: o resíduo vai ao início da lista, não é espalhado; tem o teto de poucos centavos."""
+    cats = [c for c in est['categorias'] if c['chave'] in chaves]
+    desp = [int(c['despesa_mensal'] * 100) for c in cats]
+    alvo = int(valor * 100)
+    partes = [alvo * d // sum(desp) for d in desp]
+    resto = alvo - sum(partes)
+    for i, d in enumerate(desp):
+        extra = min(resto, d - partes[i])
+        partes[i] += extra
+        resto -= extra
+    return {c['chave']: Decimal(p) / 100 for c, p in zip(cats, partes) if p}
+
+
+def cortar(est: dict, cortes: dict[str, int], valores: dict[str, Decimal] | None = None) -> tuple[list[dict], Decimal]:
+    """`([{chave, nome, despesa_mensal, percentual, economia_mensal, valor_pedido}], economia total)` das categorias
+    de `est` que estão em `cortes` (`{chave: percentual}`) ou em `valores` (`{chave: reais por mês}`, já validados
+    contra a despesa), na ordem da estimativa. Em reais, a economia é o valor pedido e o percentual é o efetivo
+    (arredondado, 0..100); em %, a economia é arredondada por categoria (`centavos`). A soma bate com o total."""
+    valores = valores or {}
+    linhas = []
+    for c in est['categorias']:
+        k = c['chave']
+        if k in valores:
+            eco = centavos(valores[k])  # 2 casas, como o resto do dinheiro do contrato
+            pct = min(100, max(0, int((eco * 100 / c['despesa_mensal']).quantize(1, ROUND_HALF_UP))))
+        elif k in cortes:
+            pct, eco = cortes[k], centavos(c['despesa_mensal'] * cortes[k] / 100)
+        else:
+            continue
+        linhas.append({**c, 'percentual': pct, 'economia_mensal': eco, 'valor_pedido': eco if k in valores else None})
     return linhas, sum((l['economia_mensal'] for l in linhas), Decimal(0))
 
 

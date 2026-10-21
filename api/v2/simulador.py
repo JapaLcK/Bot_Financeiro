@@ -214,6 +214,7 @@ class CorteOut(BaseModel):
     despesa_mensal: Decimal
     percentual: int
     economia_mensal: Decimal
+    valor_pedido: Decimal | None  # só o corte pedido em reais pelo chat; o POST nunca
 
 
 class ResumoComCorte(ResumoAtual):
@@ -254,7 +255,12 @@ def simulador_habitos(corpo: HabitosIn, uid: int = Depends(_assinante)):
     for i, k in enumerate(chaves):
         if k not in conhecidas:
             return _422(FORA_DA_ESTIMATIVA, ["body", "cortes", i, "categoria"])
-    r = simular_corte(snap, {c.categoria: c.percentual for c in corpo.cortes})
+    return habitos_da_snapshot(snap, {c.categoria: c.percentual for c in corpo.cortes})
+
+
+def habitos_da_snapshot(snap, cortes: dict[str, int], valores: dict | None = None) -> SimuladorHabitos:
+    """A resposta do corte sobre UMA snapshot: o POST e o card do chat (`cards_corte.corte`) saem daqui."""
+    r = simular_corte(snap, cortes, valores)
     return SimuladorHabitos(
         hoje=r["today"], calculado_em=r["calculado_em"], valido_ate=r["valido_ate"], dias=DIAS,
         estado=r["estado"], motivos=_motivos(r["motivos"]), premissas=[*snap.premissas, *PREMISSAS_HABITOS_V2],

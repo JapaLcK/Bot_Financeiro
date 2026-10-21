@@ -1,6 +1,7 @@
 import { Contas } from "./contasResumo";
 import { ResumoMes } from "./resumoMes";
 import { Categorias, Calendario } from "./gastos";
+import { CardCorte } from "./simuladorCorte";
 import { SimuladorHabitos } from "./simuladorHabitos";
 import { Previsao, Compromissos } from "./futuro";
 import { Caixinhas, Metas, Patrimonio, Distribuicao, Rendimento } from "./patrimonio";
@@ -25,5 +26,6 @@ export function WidgetConteudo({ id }: { id: CardChat }) { const p = usePainel()
  if (id === "comparacao") return <CardComparacao />;
  if (id === "ultimos_lancamentos" || id === "sem_categoria") return <CardLancamentos id={id} />;
  if (id === "categorias" && bloco) return <CardGastos />; // card do chat; o painel segue com `Categorias`
+ if (id === "simulador" && bloco?.recursos.simulador_habitos) return <CardCorte r={bloco.recursos.simulador_habitos} />; // corte pedido no chat: só o resultado
  if (id === "simulador" && !bloco) { const plano = p.dados.plano; if (!plano || plano.fase === "carregando") return <Vazio texto="Conferindo disponibilidade do simulador…" />; if (!planoPro(p.dados)) return <Vazio texto={SEM_PLANO} />; }
  const Componente = VIEWS[id]; return <Componente />; }

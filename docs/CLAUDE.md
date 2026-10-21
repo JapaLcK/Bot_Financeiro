@@ -607,7 +607,13 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `simulador` do chat: o bloco ganha o recurso `previsao` (90 dias) ao lado do `detalhes` do mês (build antigo ignora);
   a visão do modelo é `{mes, gasto_do_dia_a_dia: null | {despesa_mensal, categorias[{nome, despesa_mensal}]}}` (a chave é
   `despesa_mensal` porque o `ai_guard` só aceita número sob chave monetária) e o Piggy fala do gasto ESTIMADO, nunca do
-  mês (sem marcador de capacidade: decisão do dono, 20/10/2026). Telas (PR 3b): web `SimuladorHabitos.tsx` (bloco do
+  mês (sem marcador de capacidade: decisão do dono, 20/10/2026). Com `cortes` no `show_card` (`cards_corte.py`: até 10 itens
+  `{categoria | todas, percentual | valor}`; `valor` em R$/mês; o servidor resolve o nome contra a estimativa DA MESMA snapshot
+  da conta, `casar_categoria`), o bloco ganha o recurso `simulador_habitos` (o corpo do POST, via `habitos_da_snapshot`; o
+  `valor_pedido` do corte em R$ é o único campo que o POST nunca preenche) e a visão do modelo vira `{corte: {...}}`
+  (`resumo_corte`); o app desenha só o resultado (`simuladorCorte.tsx`), sem slider. Erros do pedido não marcam falha no turno
+  (`PedidoInvalido`: `corte_invalido`, `categoria_fora_da_estimativa` com a lista de nomes, `categorias_repetidas`,
+  `valor_acima_da_estimativa`, `cortes_so_no_simulador`); estimativa nula é `indisponivel`. Telas (PR 3b): web `SimuladorHabitos.tsx` (bloco do
   Resumo com as `MAX_NO_RESUMO` maiores categorias (`SimuladorHabitos.tsx`) e `#/simulador` com todas; só Pro; o POST é uma query cuja chave é o corpo, no
   evento nativo `change`) e app `simuladorHabitos.tsx` (aba Gastos e card do chat; `onSlidingComplete`); o protótipo
   (DEMO) mantém o exemplo antigo.

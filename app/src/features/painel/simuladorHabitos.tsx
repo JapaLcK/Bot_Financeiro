@@ -8,13 +8,12 @@ import { simularHabitos } from "@/services/painel";
 import { selecao } from "@/ui/haptics";
 import { useTema } from "@/ui/tema";
 import { CORES_CATEGORIA } from "@/ui/tokens";
-import { Acao, Curva, RecursoDados, Valor, Vazio } from "./base";
+import { Acao, RecursoDados, Valor, Vazio } from "./base";
 import { useBloco } from "./blocoContexto";
 import { usePainel } from "./provider";
 import { codigoDe } from "./metasEscrita";
 import { GENERICO, SEM_PLANO } from "./simuladorCompra";
-import { Marca } from "./simuladorResultado";
-import { usePrivacidade } from "./privacidade";
+import { ResultadoCorte } from "./simuladorCorte";
 import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 
 type Res = z.output<typeof S.simuladorHabitosSchema>;
@@ -29,7 +28,7 @@ const mudouDeCategoria = (e: unknown) => e instanceof ErroDeApi && e.status === 
  * (só cálculo) e a tela mostra o que o servidor devolveu: nenhuma conta de dinheiro aqui. Slider nativo (UISlider): ajustável no VoiceOver.
  */
 export function SimuladorHabitos() {
-  const p = usePainel(), bloco = useBloco(), { cores } = useTema(), { ampliado } = useTipografiaPainel(), { oculto } = usePrivacidade();
+  const p = usePainel(), bloco = useBloco(), { cores } = useTema(), { ampliado } = useTipografiaPainel();
   // O estado mora FORA do `RecursoDados`: a releitura da previsão (422) o desmonta por um instante e a mensagem não pode ir junto.
   const [cortes, setCortes] = useState<Record<string, number>>({}), [res, setRes] = useState<Res | null>(null), [falha, setFalha] = useState<string | null>(null);
   const op = useRef<ReturnType<typeof p.operacao> | null>(null);
@@ -78,14 +77,7 @@ export function SimuladorHabitos() {
         </View>;
       })}
       {falha ? <Texto variante="rotulo" tom="warning" accessibilityRole="alert">{falha}</Texto> : null}
-      {res && !falha ? <>
-        <Texto variante="legenda" tom="inkMuted">Sobra por mês</Texto>
-        <Valor valor={res.economia_mensal} tipo="entrada" destaque />
-        {res.estado === "indisponivel" ? null : <>
-          <Curva valores={res.com_corte.trajetoria.map((x) => x.saldo)} outra={res.atual.trajetoria.map((x) => x.saldo)} />
-          {oculto ? null : <View style={{ flexDirection: "row", gap: 16 }}><Marca nome="Com corte" /><Marca nome="Sem corte" tracejada /></View>}
-        </>}
-      </> : null}
+      {res && !falha ? <ResultadoCorte res={res} /> : null}
       {res || Object.values(cortes).some((v) => v > 0) ? <Acao rotulo="Zerar simulação" onPress={zerar} /> : null}
     </View>;
   }}</RecursoDados>;

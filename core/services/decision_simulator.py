@@ -291,11 +291,11 @@ def simular(snapshot: Snapshot, simulacao: Simulacao) -> dict[str, Any]:
     }
 
 
-def simular_corte(snapshot: Snapshot, cortes: dict[str, int]) -> dict[str, Any]:
-    """Corta `cortes` (`{chave da categoria: % 0..100}`, todas na estimativa) a partir de amanhã e compara com a
+def simular_corte(snapshot: Snapshot, cortes: dict[str, int], valores: dict | None = None) -> dict[str, Any]:
+    """Corta `cortes` (`{chave da categoria: % 0..100}`, todas na estimativa; `valores` = `{chave: reais por mês}`) a partir de amanhã e compara com a
     previsão atual, sobre UMA snapshot. Só a fonte `FONTE_VARIAVEL` troca; o resto das ocorrências é o mesmo."""
     est = snapshot.estimativa_variavel
-    por_categoria, economia = cortar(est, cortes)
+    por_categoria, economia = cortar(est, cortes, valores)
     novo = est["despesa_mensal"] - economia
     fixos = [e for e in snapshot.ocorrencias if e.fonte != FONTE_VARIAVEL]
     atual = _curva(snapshot, snapshot.ocorrencias, 0)
