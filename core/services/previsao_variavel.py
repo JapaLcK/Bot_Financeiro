@@ -58,6 +58,16 @@ def ocorrencias(hoje: date, until: date, mensal: Decimal) -> list[Ocorrencia]:
             for d in (hoje + timedelta(days=i) for i in range(1, (until - hoje).days + 1))]
 
 
+def cortar(est: dict, cortes: dict[str, int]) -> tuple[list[dict], Decimal]:
+    """`([{chave, nome, despesa_mensal, percentual, economia_mensal}], economia total)` das categorias de `est`
+    que estão em `cortes` (`{chave: percentual}`), na ordem da estimativa. A economia é arredondada por
+    categoria (`centavos`), então a soma bate com o total."""
+    linhas = [{**c, 'percentual': cortes[c['chave']],
+               'economia_mensal': centavos(c['despesa_mensal'] * cortes[c['chave']] / 100)}
+              for c in est['categorias'] if c['chave'] in cortes]
+    return linhas, sum((l['economia_mensal'] for l in linhas), Decimal(0))
+
+
 def _inicio_do_historico(cur, uid: int) -> date | None:
     cur.execute("""select least(
         (select min(coalesce(posted_at, (criado_em at time zone %s)::date)) from launches where user_id = %s),

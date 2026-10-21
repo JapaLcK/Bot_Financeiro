@@ -17,7 +17,7 @@ type Sim = z.output<typeof S.simuladorSchema>;
 /** Duas curvas só se desenham juntas quando têm os mesmos dias, sem buraco: senão o traço compararia datas diferentes (ou um saldo que não existe). */
 const desenhavel = (a: Sim["atual"]["trajetoria"], b: Sim["atual"]["trajetoria"]) => a.length > 0 && a.length === b.length && a.every((p, i) => p.data === b[i]!.data && p.saldo !== null && b[i]!.saldo !== null);
 
-function Marca({ tracejada, nome }: { tracejada?: boolean; nome: string }) {
+export function Marca({ tracejada, nome }: { tracejada?: boolean; nome: string }) {
   const { cores } = useTema();
   return <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}><Svg width={20} height={4} accessible={false}><Line x1={0} y1={2} x2={20} y2={2} stroke={tracejada ? cores.inkMuted : cores.brand} strokeWidth={tracejada ? 2 : 3} strokeDasharray={tracejada ? "6 4" : undefined} /></Svg><Texto variante="legenda" tom="inkMuted">{nome}</Texto></View>;
 }

@@ -379,7 +379,7 @@ for (const [nome, width] of [["desktop", 1280], ["mobile", 390]]) {
       const c = document.querySelector("#avisos-topo section.pilha").getBoundingClientRect();
       const h = document.querySelector("#w-previsao").getBoundingClientRect();
       const sec = document.querySelector("#w-previsao-receitas-respondidas").getBoundingClientRect();
-      const fim = Math.max(...["#w-previsao-qualidade", "#w-previsao-compromissos"].map((q) => document.querySelector(q)?.getBoundingClientRect().bottom ?? 0));
+      const fim = Math.max(...["#w-previsao-gastos", "#w-previsao-compromissos"].map((q) => document.querySelector(q)?.getBoundingClientRect().bottom ?? 0));
       const fora = (raiz, caixa) => [...document.querySelectorAll(`${raiz} button`)].map((b) => b.getBoundingClientRect()).filter((b) => b.left < caixa.left || b.right > caixa.right).length;
       return { larg: [document.documentElement.scrollWidth, innerWidth], caixaAcima: c.bottom <= h.top, secaoDepois: sec.top >= fim, caixa: [c.left, c.right],
         fora: fora("#avisos-topo section.pilha", c) + fora("#w-previsao-receitas-respondidas", sec) };

@@ -7,6 +7,7 @@ import { dayMonth, isoDay, money, money0, monthYear } from "../lib/format.js";
 import { ErroApi, apiPost, assinaturasQuery } from "../lib/v2";
 import { conectarBanco } from "../router";
 import { Frame } from "../parts/Frame";
+import { Info } from "../parts/Info";
 
 // Estados comuns ao card e à página, com texto fixo: a `message` do servidor não vai à tela.
 // Tudo ignorado devolve também o `data`: a página ainda mostra a seção das ignoradas.
@@ -217,12 +218,11 @@ export function SubscriptionList() {
   return (
     <>
       <div className="panel span-12">
-        <Frame id="assinaturas-servicos" title="Serviços" real>
+        <Frame id="assinaturas-servicos" title="Serviços" real info={<Info rotulo="O que entra no total"><p>Só os serviços ativos entram no total.</p></Info>}>
           <dl className="detail-facts">
             <div><dt>Por mês</dt><dd className="num">{money(Number(total_mensal))}</dd></div>
             <div><dt>Por ano</dt><dd className="num">{money0(Number(total_anual))}</dd></div>
           </dl>
-          <p className="w-lede">Só os serviços ativos entram no total.</p>
           {avisoBloco}
           {servicos.length > 0 && (
             <ul className="subs">

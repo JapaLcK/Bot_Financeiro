@@ -20,10 +20,11 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
+import { PAINEL, PROTOTIPO, RAIZ, RESPOSTAS, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
 const HERO = '[data-widget-id="hero"] [role=radio]';
-const NUM = '[data-widget-id="simulador"] input[type=number]';
+const NUM = '[data-widget-id="simulador"] input[type=number]'; // só no protótipo: o campo "Novo gasto fixo"
+const RANGE = '[data-widget-id="simulador"] .lever-habito:first-child input[type=range]'; // no /painel real: o corte de hábito (a previsão com a estimativa)
 
 let browser;
 before(async () => {
@@ -32,9 +33,11 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir({ semInert = false, organizar = false, agora = null } = {}) {
+async function abrir({ semInert = false, organizar = false, agora = null, demo = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
-  await servir(ctx);
+  await servir(ctx, demo ? RAIZ : undefined);
+  // sem `dias` é a previsão do Resumo e do simulador; com `dias`, a do horizonte escolhido segue a de sempre
+  if (!demo) await ctx.route("**/api/v2/previsao*", (r) => (new URL(r.request().url()).searchParams.has("dias") ? r.fallback() : r.fulfill({ json: RESPOSTAS.previsao.pro90_com_estimativa })));
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
   await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
@@ -45,7 +48,7 @@ async function abrir({ semInert = false, organizar = false, agora = null } = {})
     delete HTMLElement.prototype.inert;
   });
   if (agora) await page.clock.install({ time: agora });
-  await page.goto(`${PAINEL}#/`);
+  await page.goto(`${demo ? PROTOTIPO : PAINEL}#/`);
   await page.locator(HERO).first().waitFor();
   if (organizar) {
     await page.getByRole("button", { name: "Organizar" }).click();
@@ -78,7 +81,16 @@ async function tabs(page, nome) {
 }
 const internos = (seq) => seq.filter((s) => s.startsWith("INTERNO"));
 const horizonte = (page) => page.locator(`${HERO}[aria-checked=true]`).textContent();
-const numero = (page) => page.locator(NUM).inputValue();
+const numero = (page, sel = NUM) => page.locator(sel).inputValue();
+
+test("positivo: fora do Organizar a seta muda o corte (real)", async () => {
+  const { ctx, page } = await abrir();
+  await focar(page, RANGE);
+  await page.keyboard.press("ArrowRight");
+  const v = await numero(page, RANGE);
+  await ctx.close();
+  assert.equal(v, "10");
+});
 
 test("Organizar: o Tab percorre os itens e nunca entra num controle de widget", async () => {
   const { ctx, page } = await abrir({ organizar: true });
@@ -89,27 +101,38 @@ test("Organizar: o Tab percorre os itens e nunca entra num controle de widget", 
   assert.ok(seq.filter((s) => s.startsWith("remover:")).length >= 9, seq.join(" ")); // e o ✕ de cada um
 });
 
-test("Organizar sem inert (Safari < 15.5): teclas e digitação em controle interno não mudam nada", async () => {
-  const { ctx, page } = await abrir({ organizar: true, semInert: true });
-  assert.equal(await page.locator("[data-widget-id] [inert]").count(), 0); // a simulação pegou
-  // Cada ação medida sozinha: em sequência, seta para um lado e para o outro se anulariam.
-  const acoes = [
-    ...["ArrowRight", "ArrowLeft"].map((k) => [`radio marcado + ${k}`, `${HERO}[aria-checked=true]`, () => page.keyboard.press(k)]),
-    ...["Enter", " "].map((k) => [`radio desmarcado + "${k}"`, `${HERO}[aria-checked=false]`, () => page.keyboard.press(k)]),
-    ["campo + digitação", NUM, () => page.keyboard.type("123")],
-    ["campo + colar/IME (beforeinput sem keydown)", NUM, () => page.keyboard.insertText("77")],
-  ];
-  const mudou = [];
-  for (const [nome, sel, agir] of acoes) {
-    const antes = [await horizonte(page), await numero(page)];
-    await focar(page, sel);
-    await agir();
-    await page.waitForTimeout(100); // o Seg troca e refoca num requestAnimationFrame
-    if (String([await horizonte(page), await numero(page)]) !== String(antes)) mudou.push(nome);
-  }
-  await ctx.close();
-  assert.deepEqual(mudou, []);
-});
+// real: radio do horizonte e o controle de corte (RANGE); protótipo: o campo de texto (NUM). Cada handler (keydown e beforeinput) tem uma sonda.
+const ACOES = {
+  real: () => [
+    ...["ArrowRight", "ArrowLeft"].map((k) => [`radio marcado + ${k}`, `${HERO}[aria-checked=true]`, () => page_.keyboard.press(k)]),
+    ...["Enter", " "].map((k) => [`radio desmarcado + "${k}"`, `${HERO}[aria-checked=false]`, () => page_.keyboard.press(k)]),
+    ["corte + ArrowRight", RANGE, () => page_.keyboard.press("ArrowRight")],
+  ],
+  demo: () => [
+    ["campo + digitação", NUM, () => page_.keyboard.type("123")],
+    ["campo + colar/IME (beforeinput sem keydown)", NUM, () => page_.keyboard.insertText("77")],
+  ],
+};
+let page_;
+for (const cenario of ["real", "demo"]) {
+  test(`Organizar sem inert (Safari < 15.5), ${cenario}: teclas e digitação em controle interno não mudam nada`, async () => {
+    const { ctx, page } = await abrir({ organizar: true, semInert: true, demo: cenario === "demo" });
+    page_ = page;
+    assert.equal(await page.locator("[data-widget-id] [inert]").count(), 0); // a simulação pegou
+    const valor = () => (cenario === "demo" ? numero(page) : numero(page, RANGE));
+    // Cada ação medida sozinha: em sequência, seta para um lado e para o outro se anulariam.
+    const mudou = [];
+    for (const [nome, sel, agir] of ACOES[cenario]()) {
+      const antes = [await horizonte(page), await valor()];
+      await focar(page, sel);
+      await agir();
+      await page.waitForTimeout(100); // o Seg troca e refoca num requestAnimationFrame
+      if (String([await horizonte(page), await valor()]) !== String(antes)) mudou.push(nome);
+    }
+    await ctx.close();
+    assert.deepEqual(mudou, []);
+  });
+}
 
 test("Organizar sem inert: o Tab não entra em controle interno, e no Pronto eles voltam à ordem de Tab", async () => {
   // a paleta lista os 6 últimos meses pelo relógio real; sem fixá-lo "Agosto" some em fev/2027
@@ -131,8 +154,8 @@ test("Organizar sem inert: o Tab não entra em controle interno, e no Pronto ele
   assert.ok(internos(depois).length >= 3, depois.join(" ")); // positivo: os tabindex foram devolvidos
 });
 
-test("positivo: fora do Organizar a seta muda o horizonte e o campo aceita digitação e colagem", async () => {
-  const { ctx, page } = await abrir();
+test("positivo: fora do Organizar a seta muda o horizonte e o campo aceita digitação e colagem (protótipo)", async () => {
+  const { ctx, page } = await abrir({ demo: true });
   const h0 = await horizonte(page), n0 = await numero(page);
   await focar(page, `${HERO}[aria-checked=true]`);
   await page.keyboard.press("ArrowRight");

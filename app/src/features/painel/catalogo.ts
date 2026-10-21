@@ -1,7 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 
 import type { PerfilPainel } from "@/api/schemas/painel";
-export const TITULOS = { contas: "Contas", hero: "Saldo previsto", resumo: "Resumo do mês", categorias: "Para onde vai", calendario: "Dia a dia", simulador: "Simulador", compromissos: "Próximos 30 dias", piggy: "Piggy notou", metas: "Metas", patrimonio: "Patrimônio", fatura: "Fatura do cartão", wealth: "Onde está o dinheiro", renda: "Renda mês a mês", rendimento: "Taxa contratada", parcelas: "Parcelas futuras", assinaturas: "Assinaturas" };
+export const TITULOS = { contas: "Contas", hero: "Saldo previsto", resumo: "Resumo do mês", categorias: "Para onde vai", calendario: "Dia a dia", simulador: "Simulador", compromissos: "Próximos 30 dias", piggy: "Piggy notou", metas: "Metas", patrimonio: "Patrimônio", fatura: "Fatura do cartão", wealth: "Onde está o dinheiro", renda: "Renda mês a mês", rendimento: "Rendimentos", parcelas: "Parcelas futuras", assinaturas: "Assinaturas" };
 export type Widget = keyof typeof TITULOS;
 /** O que a Home oferece e guarda: `metas` tem aba própria e fica só no `TITULOS` (título do bloco e `cardId` do chat). Ordem salva com `metas` perde o id na leitura, como na web (`readLayout`, #961). */
 export const BLOCOS_HOME: Widget[] = (Object.keys(TITULOS) as Widget[]).filter((id) => id !== "metas");

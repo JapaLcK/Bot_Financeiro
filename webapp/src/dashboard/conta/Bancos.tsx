@@ -5,6 +5,7 @@ import { ErroApi, contaQuery, contasQuery } from "../lib/v2";
 import { bancosValidos, disponiveis } from "../lib/bancos";
 import { ICON } from "../lib/brand";
 import { ATUALIZANDO_SOZINHO, FALHA } from "../lib/atualizarBanco";
+import { TituloDaPagina } from "../parts/Info";
 import { useAtualizarBanco } from "../parts/usarAtualizarBanco";
 import { route } from "../router";
 import { ContaTrocada, bancosQuery, comPrazoLeitura, conectoresQuery, conexoesQuery, desconectarBanco, limiteQuery, uidValido, type Conexao } from "./api";
@@ -222,8 +223,7 @@ export function ContaBancos() {
   return (
     <>
       <header className="page-head">
-        <h1 id="page-title" tabIndex={-1}>{route("/conta/bancos").title}</h1>
-        <p className="page-lede">Gerencie suas conexões via Open Finance.</p>
+        <TituloDaPagina titulo={route("/conta/bancos").title} info="Gerencie suas conexões via Open Finance." />
       </header>
       <div className="page-grid">
         {!lista && !semUid && !erro ? <p role="status" className="faint span-12">Carregando…</p>

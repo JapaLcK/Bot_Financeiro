@@ -12,6 +12,7 @@ import { mesDe } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { Bloqueio } from "../parts/Bloqueio";
 import { Frame } from "../parts/Frame";
+import { Info } from "../parts/Info";
 import { GastoFixoForm } from "../parts/GastoFixoForm";
 import { PoteLancamentos } from "../parts/PoteLancamentos";
 import { PotesTabela } from "../parts/PotesTabela";
@@ -41,7 +42,8 @@ function Corpo({ d, mes, busy, antigo, slot }: { d: OrcamentoDomestico; mes: str
     <PotesVisao d={d} />
     <div className="span-5 stack orc-lado">
       <div className="panel">
-        <Frame id="orcamento-renda" className="orc-w" real title={<>Renda do mês <i className="ph ph-info faint" aria-hidden="true" /></>}
+        <Frame id="orcamento-renda" className="orc-w" real title="Renda do mês"
+          info={<Info rotulo="Como os potes são calculados"><p>Os percentuais valem sobre a sua renda. Metas e Liberdade financeira contam o que você guardou; os outros potes, o que você gastou.</p></Info>}
           aside={!DEMO && <button type="button" className="btn btn-ghost orc-editar" disabled={trava} onClick={() => setAberto("renda")}><i className="ph ph-pencil-simple" aria-hidden="true" /> Editar</button>}>
           <p className="orc-renda-num num">{moneyText(d.renda.valor)}</p>
           <div className="orc-origem">
@@ -53,7 +55,6 @@ function Corpo({ d, mes, busy, antigo, slot }: { d: OrcamentoDomestico; mes: str
           </div>
         </Frame>
       </div>
-      <p className="orc-nota"><i className="ph ph-info" aria-hidden="true" /><span>Os percentuais valem sobre a sua renda. Metas e Liberdade financeira contam o que você guardou; os outros potes, o que você gastou.</span></p>
     </div>
     <PotesTabela potes={d.potes} abrir={setPoteAberto} />
     {doModal && <PoteLancamentos p={doModal} mes={mes} guarda={doModal.guardado} fechar={() => setPoteAberto(null)} />}

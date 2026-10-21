@@ -9,7 +9,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
+import { RESPOSTAS, abrirInfo, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -29,7 +29,7 @@ const lede = (page) => page.locator("#w-previsao p.w-lede").last().innerText();
 test("Pro 90 com estimativa: fato mensal, categorias na ordem do servidor e a parte no pior dia", async () => {
   const { ctx, page } = await abrir("pro90_com_estimativa");
   const f = await fatos(page);
-  const cats = await page.locator("#w-previsao-qualidade .cats li").evaluateAll((ls) => ls.map((l) => [l.querySelector(".cat-nome").textContent, l.querySelector(".cat-val").textContent, l.querySelector(".cat-track").getAttribute("aria-hidden"), l.querySelector(".cat-fill").style.transform]));
+  const cats = await page.locator("#w-previsao-gastos .cats li").evaluateAll((ls) => ls.map((l) => [l.querySelector(".cat-nome").textContent, l.querySelector(".cat-val").textContent, l.querySelector(".cat-track").getAttribute("aria-hidden"), l.querySelector(".cat-fill").style.transform]));
   const frase = await lede(page);
   await ctx.close();
   assert.ok(f.includes("Gastos do dia a dia−R$ 330,00/mês"), JSON.stringify(f));
@@ -49,7 +49,7 @@ test("histórico curto, queda só pela estimativa (sem causas): a frase do pior 
 test("Plus: fato e lista, sem pior dia", async () => {
   const { ctx, page } = await abrir("plus30_com_estimativa");
   const f = await fatos(page);
-  const cats = await page.locator("#w-previsao-qualidade .cats .cat-nome").allInnerTexts();
+  const cats = await page.locator("#w-previsao-gastos .cats .cat-nome").allInnerTexts();
   await ctx.close();
   assert.ok(f.includes("Gastos do dia a dia−R$ 100,00/mês"), JSON.stringify(f));
   assert.deepEqual(cats, ["Mercado", "Transporte"]);
@@ -60,12 +60,13 @@ test("sem estimativa (null): nada de 'Gastos do dia a dia'; o motivo antigo segu
   corpo.motivos.push({ codigo: "gastos_variaveis_nao_estimados", direcao_do_erro: "so_melhora" });
   const { ctx, page } = await abrir("pro90", { corpo });
   const t = await page.locator("main").innerText();
-  const [cats, h3] = [await page.locator("#w-previsao-qualidade .cats").count(), await page.locator("#w-previsao-qualidade .prev-h").allInnerTexts()];
+  const [cats, bloco] = [await page.locator("#w-previsao-gastos .cats").count(), await page.locator("#w-previsao-gastos").count()];
+  const motivos = await (await abrirInfo(page, "#w-previsao")).innerText(); // o motivo mora no ⓘ do Saldo previsto
   await ctx.close();
   assert.doesNotMatch(t, /Gastos do dia a dia/);
-  assert.match(t, /gastos do dia a dia fora da conta/);
+  assert.match(motivos, /gastos do dia a dia fora da conta/);
   assert.equal(cats, 0);
-  assert.ok(!h3.includes("Gastos do dia a dia"));
+  assert.equal(bloco, 0);
 });
 
 test("estimativa com valor malformado: o fato diz 'indisponível', a página não quebra", async () => {
@@ -76,7 +77,7 @@ test("estimativa com valor malformado: o fato diz 'indisponível', a página nã
   const f = await fatos(page);
   const r = await page.evaluate(() => ({
     x: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-    escalas: [...document.querySelectorAll("#w-previsao-qualidade .cat-fill")].map((e) => e.style.transform),
+    escalas: [...document.querySelectorAll("#w-previsao-gastos .cat-fill")].map((e) => e.style.transform),
   }));
   await ctx.close();
   assert.ok(f.includes("Gastos do dia a diaindisponível"), JSON.stringify(f));
