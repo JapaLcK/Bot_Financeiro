@@ -97,6 +97,15 @@ export const metasV2Schema = z.object({
 export type MetasV2 = z.output<typeof metasV2Schema>;
 /** `/api/app/investido`: só os bancos (a fonte `banco` de uma meta). O resto do recurso o app não lê. */
 export const investidoBancosSchema = z.object({ por_banco: z.array(z.object({ banco: z.string() })) });
+/**
+ * Rotas que o card abaixo da resposta de um agente lê (`features/painel/cardAgente.tsx`; `/api/app/investido`, `contas-a-pagar`, `orcamentos-categoria`, `caixinhas`, mesma forma de `/api/v2`): SÓ o que o card desenha.
+ * Corpo fora disto = erro de contrato (o card diz que não deu para carregar; nunca meio número). Fixtures: `tests/frontend/api_v2_respostas.json`.
+ */
+const pctTexto = z.string().regex(/^-?\d+(\.\d+)?$/);
+export const investidoSchema = z.object({ total: dinheiro.nullable(), por_tipo: z.array(z.object({ tipo: z.string(), rotulo: z.string(), valor: dinheiro.nullable(), motivos })), motivos });
+export const contasAPagarSchema = z.object({ hoje: z.string(), pendentes: z.number().int(), vencidas: z.number().int(), total_estimado: dinheiro, tem_variavel: z.boolean(), contas: z.array(z.object({ id: z.number().int(), nome: texto, dias: z.number().int().nullable(), valor: dinheiro.nullable(), variavel: z.boolean(), vencida: z.boolean() })) });
+export const orcamentosCategoriaSchema = z.object({ mes: z.string(), total: z.object({ gasto: dinheiro, teto: dinheiro }), orcamentos: z.array(z.object({ categoria: z.string(), icone: z.string(), status: z.string(), gasto: dinheiro, teto: dinheiro, restante: dinheiro, usado_pct: pctTexto })) });
+export const caixinhasV2Schema = z.object({ total: dinheiro, caixinhas: z.array(z.object({ id: z.number().int(), nome: z.string(), saldo: dinheiro, meta: dinheiro.nullable(), progresso_pct: pctTexto.nullable(), atingida: z.boolean().nullable() })) });
 /** A resposta das três escritas de `/api/app/metas*`: o id. */
 export const metaGravadaSchema = z.object({ id: z.number().int() });
 /** `GET /api/app/progresso-milhao` (`api/v2/progresso_milhao.py`): só o patrimônio de hoje; a conta de juros é do app (`milhao.ts`). Fora de `schemasRecurso`: a tela lê sozinha. */

@@ -12,6 +12,7 @@ import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 import { CORES_CATEGORIA, espaco, raio, texto as escalas } from "@/ui/tokens";
 import { Screen } from "@/ui/componentes/Screen";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
+import type { CardAgente } from "@/api/schemas/agentes";
 import type { CardChat } from "@/api/schemas/painel";
 import { TITULOS, type Widget } from "./catalogo";
 import { useBloco } from "./blocoContexto";
@@ -71,7 +72,7 @@ export const useCardAberto = () => useContext(ContextoAberto);
  * (scrub cancelado por rolagem não solta `onPress`, mas o aviso não fica preso). Toque sem scrub, curto ou lento, navega.
  * `hero` (`detalhes`) usa o mesmo molde, mas o toque chama `detalhes` (abre a folha) em vez de navegar; botões e chips de dentro tomam o próprio toque. O card do chat não leva `ir`: nada nele abre outra tela. `titulo` substitui o do catálogo (aba com mês, card `periodo`).
  */
-export function Bloco({ id, titulo: tituloDado, children, abrir, ir, acao, detalhes }: { id: CardChat; titulo?: string; children: ReactNode; abrir?: () => void; detalhes?: () => void; ir?: { destino: string; rota: Href }; acao?: ReactNode }) {
+export function Bloco({ id, titulo: tituloDado, children, abrir, ir, acao, detalhes }: { id: CardChat | CardAgente["tipo"]; titulo?: string; children: ReactNode; abrir?: () => void; detalhes?: () => void; ir?: { destino: string; rota: Href }; acao?: ReactNode }) {
   const dias = diasDoProvider(usePainel().dados), titulo = tituloDado ?? tituloWidget(id as Widget, dias); const [pronto, avisar] = useState(false), expansivel = !!detalhes && pronto; const { navegar } = useNavegacaoPainel(); const segurou = useRef(false), zerar = () => { segurou.current = false; };
   const aoIr = () => { if (!ir) return; if (segurou.current) { segurou.current = false; return; } navegar(ir.rota); };
   const cabecalho = <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 }}><Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto>{expansivel && <Icone nome="CaretRight" tamanho={20} tom="inkMuted" />}</View>;
@@ -104,9 +105,11 @@ export function temMotivoBanco(v: unknown): boolean {
  if (!v || typeof v !== "object") return false;
  return Object.entries(v).some(([k, x]) => (k === "motivos" && Array.isArray(x) && x.some((m) => MOTIVOS_BANCO.has(typeof m === "string" ? m : m?.codigo))) || temMotivoBanco(x));
 }
+/** O card do agente no chat não tem o aviso do topo (`TelaPainel` só existe nas abas): ali o estado do banco fica nas ressalvas do próprio card. */
+export const AvisoDeBancoNoCard = createContext(false);
 export function Avisos({ motivos }: { motivos: string[] }) {
- const [aberto, setAberto] = useState(false);
- const mensagens = [...new Set(motivos.filter((m) => !MOTIVOS_BANCO.has(m)).map((m) => MOTIVOS[m] ?? "Há informações incompletas ou a conferir neste recurso."))];
+ const [aberto, setAberto] = useState(false); const noCard = useContext(AvisoDeBancoNoCard);
+ const mensagens = [...new Set(motivos.filter((m) => noCard || !MOTIVOS_BANCO.has(m)).map((m) => MOTIVOS[m] ?? "Há informações incompletas ou a conferir neste recurso."))];
  if (!mensagens.length) return null;
  return <View style={{ gap: 4 }}><Pressable accessibilityRole="button" accessibilityLabel={aberto ? "Ocultar ressalvas" : "Ver ressalvas"} accessibilityState={{ expanded: aberto }} onPress={() => setAberto((a) => !a)} style={{ minWidth: 44, minHeight: 44, alignSelf: "flex-start", justifyContent: "center" }}><Icone nome="Info" tamanho={20} tom="inkMuted" /></Pressable>{aberto && <Texto variante="legenda" tom="inkMuted">{mensagens.join(" ")}</Texto>}</View>;
 }

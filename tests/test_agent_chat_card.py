@@ -250,10 +250,12 @@ def test_card_do_resumo_leva_os_avisos_do_agente_nao_os_da_rota(gate, monkeypatc
 
 
 def test_padrao_do_mes_no_cliente_e_o_da_rota():
-    """§0.7: o TS não importa Python; a cópia de lib/agentes.ts tem de ser a mesma regex."""
+    """§0.7: o TS não importa Python; as cópias de lib/agentes.ts e do app (schemas/agentes.ts) têm de ser a mesma regex."""
     from api.v2.resumo_mes import PADRAO_MES
     ts = (Path(__file__).parent.parent / "webapp/src/dashboard/lib/agentes.ts").read_text(encoding="utf-8")
     assert re.search(r"export const MES = /(.+?)/;", ts).group(1) == PADRAO_MES
+    app = (Path(__file__).parent.parent / "app/src/api/schemas/agentes.ts").read_text(encoding="utf-8")  # a cópia do app (card dos agentes no chat)
+    assert re.search(r"const MES = z\.string\(\)\.regex\(/(.+?)/\);", app).group(1) == PADRAO_MES
 
 
 def test_consulta_de_orcamentos_carimba_o_mes_da_consulta(user_id, monkeypatch):

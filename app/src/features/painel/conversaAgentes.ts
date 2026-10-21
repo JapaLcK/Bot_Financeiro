@@ -3,11 +3,12 @@ import { AccessibilityInfo } from "react-native";
 import { ErroDeApi, RequisicaoSuperada, SessaoExpirada } from "@/api/client";
 import { ativarAgente, conversarComAgente, lerAgentes } from "@/services/agentes";
 import { TEM_ARROBA, acessoDe, agenteDe, energiaDe, mencaoDe, type Acesso, type Agentes } from "./agentes";
+import type { CardAgente } from "@/api/schemas/agentes";
 import { NOVO, type Turno } from "./conversaEstado";
 // O `@Nome` do chat: o turno do agente é um `Turno` com `agente` (ordem, limpeza no fechar e na troca de conta, OCULTA: tudo já coberto). Porta de webapp/src/dashboard/lib/conversation.ts.
 export type Energia = { custo: number; livre: number };
 export type Redirecionamento = { kind: string; name: string; question: string; access: string; needs_data?: boolean };
-export type TurnoAgente = { kind: string; mensagem: string; encaminhada?: { needs_data: boolean }; estado: "enviando" | "pronto" | "erro" | "inativo" | "sem_energia" | "sem_plano"; texto: string; redirects: Redirecionamento[]; repetir: boolean; energia: Energia | null; ativando: boolean; falhaAtivar: boolean };
+export type TurnoAgente = { kind: string; mensagem: string; encaminhada?: { needs_data: boolean }; estado: "enviando" | "pronto" | "erro" | "inativo" | "sem_energia" | "sem_plano"; texto: string; redirects: Redirecionamento[]; card: CardAgente | null; repetir: boolean; energia: Energia | null; ativando: boolean; falhaAtivar: boolean };
 type Deps = { uid: number | null; dono: MutableRefObject<number | null>; ativos: MutableRefObject<Set<AbortController>>; voo: MutableRefObject<AbortController | null>; proximo: MutableRefObject<number>; setTurnos: Dispatch<SetStateAction<Turno[]>>; setRascunho: Dispatch<SetStateAction<string>>; livre: () => boolean; aplicarUso: (u: { used: number; limit: number }) => void; esgotarCota: () => void; falhou: (e: unknown) => void };
 
 const nomeAg = (kind: string) => agenteDe(kind)?.nome ?? "agente";
@@ -56,7 +57,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
   const enviarAgente = async (id: number, kind: string, mensagem: string, energia: Energia | null, encaminhada?: { needs_data: boolean }) => {
     const alvo = dono.current, e0 = epoca.current, c = new AbortController(); ativos.current.add(c);
     const vivo = () => dono.current === alvo && epoca.current === e0;
-    emVoo.current.set(kind, c); atualizar(id, { estado: "enviando", texto: "", redirects: [], repetir: false });
+    emVoo.current.set(kind, c); atualizar(id, { estado: "enviando", texto: "", redirects: [], card: null, repetir: false });
     try {
       const r = await conversarComAgente(alvo!, kind, mensagem, contextos.current.get(kind) ?? null, c, encaminhada);
       if (dono.current !== alvo) return;
@@ -64,7 +65,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
       if (!vivo()) return;
       if (!r.reply.trim()) throw new ErroDeApi(200, "resposta vazia");
       contextos.current.set(kind, r.context);
-      atualizar(id, { estado: "pronto", texto: r.reply, redirects: (r.redirects ?? []).filter((x) => agenteDe(x.kind) && x.access !== "unavailable") });
+      atualizar(id, { estado: "pronto", texto: r.reply, card: r.card ?? null, redirects: (r.redirects ?? []).filter((x) => agenteDe(x.kind) && x.access !== "unavailable") });
       AccessibilityInfo.announceForAccessibility(`${nomeAg(kind)} respondeu`);
     } catch (e) {
       if (!vivo() || e instanceof RequisicaoSuperada) return; // troca de conta ou saída da aba: o turno não é mais desta tela
@@ -91,7 +92,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
   const perguntar = (kind: string, original: string, mensagem: string, acesso: Acesso, energia: Energia | null, encaminhada?: { needs_data: boolean }) => {
     if (voo.current || !livre() || (acesso === "ready" && emVoo.current.has(kind))) return false;
     const id = ++proximo.current;
-    setTurnos((ts) => [...ts, { id, pergunta: original, ...NOVO, agente: { kind, mensagem, encaminhada, estado: "enviando", texto: "", redirects: [], repetir: false, energia, ativando: false, falhaAtivar: false, ...(acesso === "ready" ? {} : estadoSemChat(kind, acesso, energia)) } }]);
+    setTurnos((ts) => [...ts, { id, pergunta: original, ...NOVO, agente: { kind, mensagem, encaminhada, estado: "enviando", texto: "", redirects: [], card: null, repetir: false, energia, ativando: false, falhaAtivar: false, ...(acesso === "ready" ? {} : estadoSemChat(kind, acesso, energia)) } }]);
     if (acesso === "ready") void enviarAgente(id, kind, mensagem, energia, encaminhada);
     return true;
   };
