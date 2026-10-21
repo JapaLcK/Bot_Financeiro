@@ -8,6 +8,7 @@ import { hojeNoFuso } from "../lib/metas-textos";
 import { ErroApi, apiPost, meQuery, usePlan } from "../lib/v2";
 import { CRIAR_SENHA } from "../parts/Entrada";
 import { Frame } from "../parts/Frame";
+import { Info } from "../parts/Info";
 import { MotivosPrevisao } from "../parts/Selos";
 import { ConvitePro, ddmm } from "./Compromissos";
 import { CurvaComparada } from "./CurvaComparada";
@@ -196,14 +197,17 @@ export function SimuladorCompra() {
         </Frame>
       </div>
       <div className="panel span-7">
-        <Frame id="compra-resultado" title="O que muda no seu saldo" real>
+        <Frame id="compra-resultado" title="O que muda no seu saldo" real
+          info={d && <Info rotulo="Como esta simulação foi feita">
+            <p className="w-lede">Projeção condicional de {d.dias} dias, sem apontar vencedor.</p>
+            <MotivosPrevisao motivos={d.motivos} />
+            <h3 className="prev-h">Premissas</h3>
+            <ul className="premissas">{d.premissas.map((t) => <li key={t}>{t}</li>)}</ul>
+          </Info>}>
           {d ? (
             <div className="comp-corpo" aria-busy={m.isPending}>
-              <p className="w-lede">Projeção condicional de {d.dias} dias, sem apontar vencedor. Calculada às {hora(d)}.</p>
-              <MotivosPrevisao motivos={d.motivos} />
+              <p className="w-lede">Calculada às {hora(d)}.</p>
               {d.cenarios.map((c) => <Resultado key={c.nome} d={d} c={c} />)}
-              <h3 className="prev-h">Premissas</h3>
-              <ul className="premissas">{d.premissas.map((t) => <li key={t}>{t}</li>)}</ul>
             </div>
           ) : <p className="w-lede">{m.isPending ? "Calculando…" : "Preencha ao menos nome e preço e toque em Calcular."}</p>}
         </Frame>

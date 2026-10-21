@@ -1,11 +1,12 @@
 /* Páginas: cabeçalho, grade de 12 colunas, painéis e os blocos que só existem nelas. */
 .page-head { display: grid; gap: 6px; padding-top: 8px; }
 .page-head h1 { font-size: 28px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.15; outline: none; }
+.page-head-t { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .page-lede { font-size: 14px; color: var(--ink-2); max-width: 70ch; }
 /* Página com botões à direita do título (pages.tsx, `acoes`); no celular, uma linha própria abaixo do texto. */
 .page-head-acoes { grid-template-columns: minmax(0, 1fr) auto; align-items: end; column-gap: 16px; }
-.page-head-acoes > h1, .page-head-acoes > .page-lede { grid-column: 1; }
-.page-acoes { grid-column: 2; grid-row: 1 / span 2; display: grid; grid-auto-flow: column; gap: 8px; }
+.page-head-acoes > .page-head-t { grid-column: 1; }
+.page-acoes { grid-column: 2; grid-row: 1; display: grid; grid-auto-flow: column; gap: 8px; }
 .page-acoes:empty { display: none; }
 .page-acoes .btn { min-height: 40px; }
 @media (max-width: 760px) {
@@ -184,7 +185,6 @@ a.tool:focus-visible, button.tool:focus-visible { outline: none; box-shadow: var
 .dia-lista-t { margin: 4px 0 0; font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .compras-lista { list-style: none; margin: 0; padding: 0; }
 .compras-lista .lanc-linha:last-child { border-bottom: 0; }
-.compras-nota { font-size: 12.5px; }
 #gastos-compras .selo { white-space: normal; height: auto; min-height: 22px; }
 #gastos-compras .btn { min-height: 44px; align-self: start; }
 .compras-pe { display: grid; grid-auto-flow: column; justify-content: start; column-gap: 20px; }

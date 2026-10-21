@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { RAIZ, RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
+import { RAIZ, RESPOSTAS, abrirInfo, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 import { moneyText } from "../../webapp/src/dashboard/lib/format.js";
 
 let browser;
@@ -93,6 +93,7 @@ test("controle do seletor: o protótipo ainda tem a Faixa provável e o .band", 
 test("Plus: 1 marco, motivos e premissas; convite ao Pro no lugar do gráfico e da lista, sem pedir 60/90", async () => {
   const { ctx, page, erros, pedidos } = await abrir({ plano: "plus", previsao: "plus30_a_conferir" });
   await pronta(page);
+  await abrirInfo(page, "#w-previsao"); // a explicação mora no ⓘ (portal no body, fora do <main>)
   const r = await page.evaluate(() => {
     const m = document.querySelector("main");
     return {
@@ -100,8 +101,9 @@ test("Plus: 1 marco, motivos e premissas; convite ao Pro no lugar do gráfico e 
       svg: m.querySelectorAll("svg[role=img]").length, grupos: m.querySelectorAll(".grupo").length, radios: m.querySelectorAll("[role=radio]").length,
       horizonte: m.querySelector("#w-previsao .w-aside").textContent,
       convites: [...m.querySelectorAll(".convite")].map((c) => [c.querySelector("p").textContent, c.querySelector("a").getAttribute("href")]),
-      motivos: [...m.querySelectorAll("#w-previsao-qualidade .prev-motivos li")].map((li) => li.textContent),
-      premissas: m.querySelectorAll(".premissas li").length, nenhum: m.innerText.includes("Nenhum compromisso"),
+      motivos: [...document.querySelectorAll("dialog.lanc-form .prev-motivos li")].map((li) => li.textContent),
+      premissas: document.querySelectorAll("dialog.lanc-form .premissas li").length, nenhum: m.innerText.includes("Nenhum compromisso"),
+      explicacaoNoCard: /Premissas|Por que é condicional|Saldo de partida:/.test(m.innerText),
     };
   });
   await ctx.close();
@@ -109,7 +111,7 @@ test("Plus: 1 marco, motivos e premissas; convite ao Pro no lugar do gráfico e 
     valor: "R$ 7,33", marcos: 0, svg: 0, grupos: 0, radios: 0, horizonte: "30 dias",
     convites: [["O saldo dia a dia, o menor saldo e os compromissos de cada dia são do Pro.", "/precos"], ["A lista de contas e receitas de cada dia é do Pro.", "/precos"]],
     motivos: ["gastos do dia a dia fora da conta · o real pode ser pior", "pedido pendente na conversa · pode variar para os dois lados"],
-    premissas: 4, nenhum: false,
+    premissas: 4, nenhum: false, explicacaoNoCard: false,
   });
   assert.deepEqual(pedidos, [""]);
   assert.deepEqual(erros, []);
@@ -235,31 +237,36 @@ test("qualidade: estado, motivos em português com a direção, código novo sai
   const novo = structuredClone(RESPOSTAS.previsao.pendencia);
   novo.motivos.push({ codigo: "codigo_novo_x", direcao_do_erro: "ambos" });
   await pronta(page);
+  const estado = await textoDe(page, "#w-previsao .hero-sub"); // o estado só aparece uma vez: no hero-sub, não repetido no ⓘ
+  await abrirInfo(page, "#w-previsao"); // aberto, segue aberto durante o refetch abaixo
   const r = await page.evaluate(() => {
-    const q = document.querySelector("#w-previsao-qualidade");
-    return [q.querySelector(".prev-base .selo").textContent, [...q.querySelectorAll(".prev-motivos li")].map((li) => li.textContent), q.querySelectorAll(".premissas li").length];
+    const q = document.querySelector("dialog.lanc-form");
+    return [[...q.querySelectorAll(".prev-motivos li")].map((li) => li.textContent), q.querySelectorAll(".premissas li").length, q.querySelectorAll(".prev-base .selo").length];
   });
   await servirPrevisao(ctx, novo);
   await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange"))); // o focusManager do TanStack ouve na window
-  await page.waitForFunction(() => document.querySelector("#w-previsao-qualidade")?.innerText.includes("codigo_novo_x"));
-  const cru = await page.evaluate(() => [...document.querySelectorAll("#w-previsao-qualidade .prev-motivos li")].map((li) => li.textContent));
+  await page.waitForFunction(() => document.querySelector("dialog.lanc-form")?.innerText.includes("codigo_novo_x"));
+  const cru = await page.evaluate(() => [...document.querySelectorAll("dialog.lanc-form .prev-motivos li")].map((li) => li.textContent));
   await ctx.close();
-  assert.deepEqual(r, ["A conferir", [
+  assert.match(estado, /A conferir/);
+  assert.deepEqual(r, [[
     "gastos do dia a dia fora da conta · o real pode ser pior", "receita não garantida · o real pode ser pior",
     "pagamento do boleto a conferir · o real pode ser melhor", "pode já estar na fatura · o real pode ser pior",
-    "pagamento da fatura a conferir · o real pode ser melhor"], 4]);
+    "pagamento da fatura a conferir · o real pode ser melhor"], 4, r[2]]);
+  assert.equal(r[2], 0, "o selo do estado não se repete no ⓘ");
   assert.deepEqual(cru, ["pedido pendente na conversa · pode variar para os dois lados", "codigo_novo_x · pode variar para os dois lados"]);
 });
 
 test("direção do erro fora da tabela ('constructor') sai crua, nunca a função herdada de Object", async () => {
   const { ctx, page } = await abrir({ previsao: "real_diario" });
   await pronta(page);
+  await abrirInfo(page, "#w-previsao");
   const ruim = structuredClone(RESPOSTAS.previsao.pendencia);
   ruim.motivos = [{ codigo: "codigo_novo_x", direcao_do_erro: "constructor" }];
   await servirPrevisao(ctx, ruim);
   await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
-  await page.waitForFunction(() => document.querySelector("#w-previsao-qualidade")?.innerText.includes("codigo_novo_x"));
-  const li = await page.locator("#w-previsao-qualidade .prev-motivos li").allTextContents();
+  await page.waitForFunction(() => document.querySelector("dialog.lanc-form")?.innerText.includes("codigo_novo_x"));
+  const li = await page.locator("dialog.lanc-form .prev-motivos li").allTextContents();
   await ctx.close();
   assert.deepEqual(li, ["codigo_novo_x · constructor"]);
 });
@@ -274,8 +281,9 @@ test("paridade: todo `_motivo(s, '…')` do motor (cashflow_snapshot.py e previs
   const { ctx, page } = await abrir();
   await servirPrevisao(ctx, corpo);
   await page.reload();
-  await page.locator("#w-previsao-qualidade .prev-motivos").waitFor();
-  const rotulos = await page.locator("#w-previsao-qualidade .prev-motivos b").allTextContents();
+  await pronta(page);
+  await abrirInfo(page, "#w-previsao");
+  const rotulos = await page.locator("dialog.lanc-form .prev-motivos b").allTextContents();
   await ctx.close();
   assert.equal(rotulos.length, codigos.length);
   assert.deepEqual(rotulos.filter((t) => codigos.includes(t)), []);

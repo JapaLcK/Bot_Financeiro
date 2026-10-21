@@ -27,6 +27,7 @@ import { GastosCompras } from "./widgets/GastosCompras";
 import { GastosDetalhe } from "./widgets/GastosDetalhe";
 import { Goals } from "./widgets/Goals";
 import { GoalsTimeline } from "./widgets/GoalsTimeline";
+import { TituloDaPagina } from "./parts/Info";
 import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
@@ -45,12 +46,13 @@ import { Wealth } from "./widgets/Wealth";
 
 // Cada página: título, uma linha do que ela responde e os blocos em grade de 12.
 // `acoes`: o lugar (à direita do título, abaixo do texto no celular) onde a página põe os botões dela.
-function Page({ path, lede, acoes, children }: { path: Path; lede: ReactNode; acoes?: ReactNode; children: ReactNode }) {
+// A linha de subtítulo saiu da tela: `lede` abre no ⓘ ao lado do título. `estado` é aviso de estado da tela (fica à vista).
+function Page({ path, lede, estado, acoes, children }: { path: Path; lede?: ReactNode; estado?: ReactNode; acoes?: ReactNode; children: ReactNode }) {
   return (
     <>
       <header className={`page-head${acoes ? " page-head-acoes" : ""}`}>
-        <h1 id="page-title" tabIndex={-1}>{route(path).title}</h1>
-        <p className="page-lede">{lede}</p>
+        <TituloDaPagina titulo={route(path).title} info={lede} />
+        {estado && <p className="page-lede">{estado}</p>}
         {acoes}
       </header>
       <DicaDaTela path={path} />
@@ -64,8 +66,7 @@ function Home({ s }: { s: DashState }) {
   return (
     <>
       <header className="page-head">
-        <h1 id="page-title" tabIndex={-1}>Resumo de {monthName(keyDate(mesDe(s)))}</h1>
-        <p className="page-lede">O mês inteiro num lugar. A seta de cada bloco abre a página dele.</p>
+        <TituloDaPagina titulo={<>Resumo de {monthName(keyDate(mesDe(s)))}</>} info="O mês inteiro num lugar. A seta de cada bloco abre a página dele." />
       </header>
       <Board s={s} />
     </>
@@ -259,7 +260,7 @@ function Milhao() {
 
 function Agentes() {
   // Com o freio ligado o /agents responde 404: a tela não pede nada e só avisa (link antigo ou digitado).
-  if (!useAgentesLigados()) return <Page path="/agentes" lede="Os agentes estão indisponíveis no momento.">{null}</Page>;
+  if (!useAgentesLigados()) return <Page path="/agentes" estado="Os agentes estão indisponíveis no momento.">{null}</Page>;
   return (
     <Page path="/agentes" lede="Sete Piggys, cada um cuidando de uma parte do seu dinheiro. Ative os que fazem sentido para o seu momento.">
       <AgentesPainel />

@@ -12,5 +12,4 @@
 .mi-chart { height: 260px; flex: none; }
 .mi-eixo { fill: var(--ink-2); font-weight: 600; }
 .mi-meta { stroke: var(--ink-3); }
-.mi-rodape { font-size: 12px; }
 @media (max-width: 600px) { .mi-titulo { font-size: 22px; } }

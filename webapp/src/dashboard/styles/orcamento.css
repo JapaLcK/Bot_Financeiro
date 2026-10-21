@@ -42,8 +42,6 @@
 .orc-origem > span:nth-child(2) { display: grid; gap: 2px; font-size: 13.5px; }
 .orc-origem b { font-weight: 550; }
 .orc-origem small { font-size: 12.5px; }
-.orc-nota { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; margin: 0; padding: 16px 18px; border-radius: var(--r-panel); background: var(--pink-wash); box-shadow: inset 0 0 0 1px rgba(255, 45, 142, 0.18); font-size: 13px; line-height: 1.5; color: var(--ink-2); }
-.orc-nota > i { margin-top: 1px; font-size: 18px; color: var(--pink-ink); }
 
 /* Potes: tabela no desktop, cards no celular. O botão do nome é o alvo do teclado; o clique na linha toda vale o mesmo. */
 .orc-rola { min-width: 0; overflow-x: auto; } /* valor grande alarga a tabela: ela rola no painel, nunca a página */
@@ -76,7 +74,7 @@
 .orc-card-val b { font-size: 14.5px; font-weight: 600; }
 @media (max-width: 760px) {
   .orc-lado { order: -1; }
-  .orc-nota, .orc-tabela { display: none; }
+  .orc-tabela { display: none; }
   .orc-cards { display: block; }
   .orc-visao { grid-template-columns: 132px minmax(0, 1fr); column-gap: 14px; }
   .orc-donut { width: 132px; }
