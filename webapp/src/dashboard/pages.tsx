@@ -31,6 +31,7 @@ import { TituloDaPagina } from "./parts/Info";
 import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
+import { ComposicaoReal, PatrimonioReal } from "./widgets/Patrimonio";
 import { MetasPainel } from "./widgets/Metas";
 import { AgentesPainel } from "./widgets/Agentes";
 import { MilhaoPainel } from "./widgets/ProgressoMilhao";
@@ -191,9 +192,9 @@ function GoalsPage({ s }: { s: DashState }) {
 
 function Wealthy() {
   return (
-    <Page path="/patrimonio" lede="Tudo o que é seu somado: conta, caixinhas e investimentos, nos últimos 12 meses.">
-      <Panel span={7}><NetWorth title="Últimos 12 meses" /></Panel>
-      <Panel span={5}><Wealth /></Panel>
+    <Page path="/patrimonio" lede={DEMO ? "Tudo o que é seu somado: conta, caixinhas e investimentos, nos últimos 12 meses." : "Tudo o que é seu somado: Carteira, contas, caixinhas e investimentos, dia a dia."}>
+      <Panel span={7}>{DEMO ? <NetWorth title="Últimos 12 meses" /> : <PatrimonioReal title="Evolução" />}</Panel>
+      <Panel span={5}>{DEMO ? <Wealth /> : <ComposicaoReal />}</Panel>
     </Page>
   );
 }

@@ -1,10 +1,10 @@
 {
   "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Gastos, Guia, Investido, Metas, Comparacao, Bancos, OrcamentoDomestico, OrcamentosCategoria, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
   "me": {
-    "free": { "plan_tier": "free", "agents_ui_enabled": true },
-    "essencial": { "plan_tier": "essencial", "agents_ui_enabled": true },
-    "plus": { "plan_tier": "plus", "agents_ui_enabled": true },
-    "pro": { "plan_tier": "pro", "agents_ui_enabled": true }
+    "free": { "plan_tier": "free", "agents_ui_enabled": true, "chat_ia": false },
+    "essencial": { "plan_tier": "essencial", "agents_ui_enabled": true, "chat_ia": false },
+    "plus": { "plan_tier": "plus", "agents_ui_enabled": true, "chat_ia": false },
+    "pro": { "plan_tier": "pro", "agents_ui_enabled": true, "chat_ia": false }
   },
   "assinaturas": {
     "cheia": {
@@ -8057,14 +8057,16 @@
           "nome": "mercado",
           "despesa_mensal": "600.00",
           "percentual": 50,
-          "economia_mensal": "300.00"
+          "economia_mensal": "300.00",
+          "valor_pedido": null
         },
         {
           "chave": "lazer",
           "nome": "lazer",
           "despesa_mensal": "300.00",
           "percentual": 10,
-          "economia_mensal": "30.00"
+          "economia_mensal": "30.00",
+          "valor_pedido": null
         }
       ],
       "atual": {
@@ -8864,6 +8866,13 @@
         },
         "dias_abaixo_da_reserva": 0,
         "primeiro_dia_abaixo": null,
+        "veredito": {
+          "estado": "sem_risco_identificado",
+          "data": null,
+          "valor": null,
+          "bloqueios": [],
+          "premissa": null
+        },
         "trajetoria": [
           {
             "data": "2026-10-06",
@@ -9242,6 +9251,13 @@
             },
             "dias_abaixo_da_reserva": 0,
             "primeiro_dia_abaixo": null,
+            "veredito": {
+              "estado": "sem_risco_identificado",
+              "data": null,
+              "valor": null,
+              "bloqueios": [],
+              "premissa": null
+            },
             "trajetoria": [
               {
                 "data": "2026-10-06",

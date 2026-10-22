@@ -116,7 +116,7 @@ def test_cookie_dashboard_token_200(monkeypatch, user_id):
     libera(monkeypatch, user_id)
     r = get_com_cookie(sessao(user_id)["dashboard"])
     assert r.status_code == 200, r.text
-    assert r.json() == {"plan_tier": "plus", "agents_ui_enabled": True}
+    assert r.json() == {"plan_tier": "plus", "agents_ui_enabled": True, "chat_ia": False}
 
 
 def test_bearer_access_200(monkeypatch, user_id):
@@ -124,7 +124,7 @@ def test_bearer_access_200(monkeypatch, user_id):
     libera(monkeypatch, user_id)
     r = get_com_bearer(sessao(user_id)["access"])
     assert r.status_code == 200, r.text
-    assert r.json() == {"plan_tier": "pro", "agents_ui_enabled": True}
+    assert r.json() == {"plan_tier": "pro", "agents_ui_enabled": True, "chat_ia": False}
 
 
 def test_carencia_200_com_tier_free(monkeypatch, user_id):
@@ -132,7 +132,7 @@ def test_carencia_200_com_tier_free(monkeypatch, user_id):
     libera(monkeypatch, user_id)
     r = get_com_cookie(sessao(user_id)["dashboard"])
     assert r.status_code == 200, r.text
-    assert r.json() == {"plan_tier": "free", "agents_ui_enabled": True}
+    assert r.json() == {"plan_tier": "free", "agents_ui_enabled": True, "chat_ia": False}
 
 
 def test_liberado_por_email_em_caixa_diferente_200(monkeypatch, user_id):
@@ -190,7 +190,7 @@ def test_freio_dos_agentes_desliga_quem_nao_esta_na_allowlist(monkeypatch, user_
     monkeypatch.setenv("AGENTS_BETA_EMAILS", "")
     monkeypatch.setenv("AGENTS_BETA_USER_IDS", "")
     r = get_com_cookie(sessao(user_id)["dashboard"])
-    assert (r.status_code, r.json()) == (200, {"plan_tier": "plus", "agents_ui_enabled": False})
+    assert (r.status_code, r.json()) == (200, {"plan_tier": "plus", "agents_ui_enabled": False, "chat_ia": False})
 
 
 def test_freio_dos_agentes_mantem_a_allowlist(monkeypatch, user_id):
@@ -200,4 +200,4 @@ def test_freio_dos_agentes_mantem_a_allowlist(monkeypatch, user_id):
     monkeypatch.setenv("AGENTS_BETA_EMAILS", "")
     monkeypatch.setenv("AGENTS_BETA_USER_IDS", str(user_id))
     r = get_com_cookie(sessao(user_id)["dashboard"])
-    assert (r.status_code, r.json()) == (200, {"plan_tier": "plus", "agents_ui_enabled": True})
+    assert (r.status_code, r.json()) == (200, {"plan_tier": "plus", "agents_ui_enabled": True, "chat_ia": False})

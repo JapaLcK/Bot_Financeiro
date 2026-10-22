@@ -4,7 +4,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from core.services.cashflow_contract import (Motivo, Ocorrencia, Snapshot, centavos, dinheiro, legado, somar,
-                                             premissa_com_estimativa, PREMISSA_SEM_ESTIMATIVA)
+                                             premissa_com_estimativa, PREMISSA_SEM_ESTIMATIVA,
+                                             JANELA_CONFERENCIA_DIAS)
 
 
 # Enumeração dos escritores do registro db.pending e tools de confirmação da IA.
@@ -57,7 +58,7 @@ def _datas(s, r, income, until):
     frequency = r.get('frequency')
     start = _data(r.get('start_date'))
     if start is not None and start > until:
-        return []  # início comprovadamente fora da janela prevalece sobre legado desconhecido.
+        return [], []  # início comprovadamente fora da janela prevalece sobre legado desconhecido.
     day = r.get('pay_day' if income else 'due_day')
     month = r.get('pay_month' if income else 'due_month')
     valid = (frequency in (('monthly', 'annual') if income else
@@ -68,11 +69,15 @@ def _datas(s, r, income, until):
         valid = valid and isinstance(month, int) and 1 <= month <= 12
     if not valid:
         _motivo(s, 'calendario_recorrente_desconhecido', 'ambos', r['id'])
-        return [None]
+        return [None], []
     if start < s.hoje:
         _motivo(s, 'realizacao_passada_desconhecida', 'ambos', r['id'])
-    return _recurring_occurrence_dates(day, frequency, month, start,
-                                       s.hoje - timedelta(days=1), until)
+    inicio = s.hoje - timedelta(days=JANELA_CONFERENCIA_DIAS)
+    if start < inicio:
+        s.conferencia_desde = inicio
+    janela = _recurring_occurrence_dates(day, frequency, month, start, inicio - timedelta(days=1),
+                                         s.hoje - timedelta(days=1))
+    return _recurring_occurrence_dates(day, frequency, month, start, s.hoje - timedelta(days=1), until), janela
 
 
 def ler(cur, user_id: int, today: date, until: date, now: datetime,
@@ -160,7 +165,18 @@ def ler(cur, user_id: int, today: date, until: date, now: datetime,
         for r in rows:
             if not r['is_active']:
                 continue
-            for d in _datas(s, r, income, until):
+            futuras, janela = _datas(s, r, income, until)
+            for d in janela:  # só o veredito lê: sem motivo novo, `qualidade()` e a paridade dos motivos não mudam
+                valor = dinheiro(r.get('amount'))
+                if (valor is None or valor <= 0 or not income and (r.get('payment_type') == 'credit_card'
+                                                                    or (r['id'], d) in by_cycle)):
+                    continue
+                s.conferencia.append(Ocorrencia('receita_recorrente' if income else 'gasto_recorrente',
+                    r['id'], d.isoformat(), d, 'receita' if income else 'gasto_fixo', r['name'], valor,
+                    'entrada' if income else 'saida', realizacao='a_conferir',
+                    motivos=(Motivo('valor_recorrente_estimado', 'ambos', r['id']),)
+                    if not income and r.get('variable_amount') else ()))
+            for d in futuras:
                 b = by_cycle.get((r['id'], d)) if not income else None
                 if b:
                     continue  # a instância do ciclo prevalece, inclusive no valor/qualidade.

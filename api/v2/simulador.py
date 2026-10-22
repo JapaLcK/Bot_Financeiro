@@ -104,7 +104,34 @@ class ResumoAtual(BaseModel):
     trajetoria: list[PontoSimulador]
 
 
-class ResumoCenario(ResumoAtual):
+EstadoVeredito = Literal["risco_identificado", "dados_insuficientes", "dados_desatualizados",
+                         "sem_risco_identificado", "cabe_nas_premissas"]  # "cabe" não tem caminho que o produza (PR 5)
+
+
+class ItemBloqueio(BaseModel):
+    nome: str  # texto do usuário (nome do fixo/boleto) ou rótulo do cenário: o cliente escapa
+    data: str | None
+
+
+class Bloqueio(BaseModel):
+    codigo: str  # str, não Literal: código novo não pode quebrar cliente
+    texto: str  # `core/services/veredito.TEXTO`, fonte única
+    itens: list[ItemBloqueio]
+
+
+class Veredito(BaseModel):
+    estado: EstadoVeredito
+    data: str | None  # só em risco_identificado: o pior dia no pior caso
+    valor: Decimal | None  # saldo nesse dia
+    bloqueios: list[Bloqueio]  # vazio salvo nos dois dados_*
+    premissa: str | None
+
+
+class ResumoCompra(ResumoAtual):
+    veredito: Veredito | None  # None = desligado por SIMULADOR_VEREDITO_ENABLED
+
+
+class ResumoCenario(ResumoCompra):
     delta_vs_atual: Decimal | None
     compra_fora_da_janela: bool
 
@@ -150,7 +177,7 @@ class Simulador(BaseModel):
     orientacao: Literal["abster"]
     base: BasePrevisao
     reserva_minima: Decimal
-    atual: ResumoAtual
+    atual: ResumoCompra
     cenarios: list[CenarioOut]
 
 
@@ -214,6 +241,7 @@ class CorteOut(BaseModel):
     despesa_mensal: Decimal
     percentual: int
     economia_mensal: Decimal
+    valor_pedido: Decimal | None  # só o corte pedido em reais pelo chat; o POST nunca
 
 
 class ResumoComCorte(ResumoAtual):
@@ -254,7 +282,12 @@ def simulador_habitos(corpo: HabitosIn, uid: int = Depends(_assinante)):
     for i, k in enumerate(chaves):
         if k not in conhecidas:
             return _422(FORA_DA_ESTIMATIVA, ["body", "cortes", i, "categoria"])
-    r = simular_corte(snap, {c.categoria: c.percentual for c in corpo.cortes})
+    return habitos_da_snapshot(snap, {c.categoria: c.percentual for c in corpo.cortes})
+
+
+def habitos_da_snapshot(snap, cortes: dict[str, int], valores: dict | None = None) -> SimuladorHabitos:
+    """A resposta do corte sobre UMA snapshot: o POST e o card do chat (`cards_corte.corte`) saem daqui."""
+    r = simular_corte(snap, cortes, valores)
     return SimuladorHabitos(
         hoje=r["today"], calculado_em=r["calculado_em"], valido_ate=r["valido_ate"], dias=DIAS,
         estado=r["estado"], motivos=_motivos(r["motivos"]), premissas=[*snap.premissas, *PREMISSAS_HABITOS_V2],

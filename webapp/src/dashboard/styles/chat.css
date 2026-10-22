@@ -28,6 +28,19 @@ body {
 .msg-pre { white-space: pre-line; } /* a resposta do agente é texto, com as quebras de linha dele */
 .msg-acoes { display: grid; justify-items: start; gap: 8px; }
 .msg-acoes .btn { min-height: 44px; height: auto; white-space: normal; text-align: left; }
+/* 👍👎 e motivos da última resposta da IA (parts/PiggyIa.tsx). Alvo de toque de 44 px em toda largura (o .icon-btn tem 32, o .chip 28); o -10px puxa o ícone para a borda do texto (como no app). */
+.msg-avaliar { display: flex; margin-left: -10px; }
+.msg-avaliar .icon-btn { width: 44px; height: 44px; font-size: 20px; }
+.msg-avaliar .icon-btn[aria-pressed="true"] { background: var(--pink-wash); color: var(--pink-ink); }
+.msg-motivos { display: flex; flex-wrap: wrap; gap: 8px; }
+.msg-motivos .chip { min-height: 44px; padding: 0 14px; font-size: 13px; }
+@media (hover: hover) and (pointer: fine) { /* o hover global (controls.css) apagaria o selecionado */
+  .msg-avaliar .icon-btn[aria-pressed="true"]:hover, .msg-motivos .chip[aria-pressed="true"]:hover { background: var(--pink-wash); color: var(--pink-ink); }
+}
+.msg-comentario { display: grid; justify-items: start; gap: 8px; max-width: 68ch; }
+.msg-comentario textarea { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 0; border-radius: 12px; background: var(--plane-2); font: inherit; font-size: 15px; line-height: 1.45; resize: vertical; caret-color: var(--pink); }
+.msg-comentario .btn { min-height: 44px; }
+.msg-comentario .btn:disabled { opacity: 0.35; cursor: default; }
 .mencao { color: var(--pink-ink); }
 .msg-by { display: grid; grid-auto-flow: column; justify-content: start; align-items: center; column-gap: 8px; font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
 
@@ -150,3 +163,12 @@ body[data-mencoes] .chat-follow { visibility: hidden; }
 @keyframes carga-brilho { to { background-position: 0 0; } }
 @keyframes rv-entra { from { opacity: 0; filter: blur(4px); transform: translateY(4px); } }
 @keyframes rv-acoes { from { opacity: 0; visibility: hidden; } } /* hidden: sem foco nem clique enquanto invisíveis; visível assim que o fade começa */
+
+/* A resposta do Piggy quando o chat vai à IA (parts/PiggyIa.tsx, parts/TextoPiggy.tsx). Grid e não flex gap (Safari 14). */
+.msg-ia { display: grid; gap: 10px; }
+.msg-ia p { white-space: pre-line; } /* as quebras de linha de dentro do parágrafo são do servidor */
+.msg-ia ul { display: grid; gap: 4px; padding-left: 20px; list-style: disc; }
+.msg-bloco, .msg-nota, .chat-uso { font-size: 13px; color: var(--ink-3); }
+.chat-uso { margin-top: 12px; }
+.chat-uso a { color: var(--pink-ink); text-decoration: underline; text-underline-offset: 2px; font-weight: 600; }
+.askbar-stop { display: inline-block; vertical-align: middle; width: 12px; height: 12px; border-radius: 2px; background: currentColor; }

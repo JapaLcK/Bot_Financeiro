@@ -50,10 +50,34 @@ export class ErroApi extends Error {
   }
 }
 
+// As rotas antigas ficam fora da /api/v2 (o `ai` é o chat com a IA).
+export const urlDe = (path: string) => (/^\/(auth|settings|open-finance|billing|agents|ai)\//.test(path) ? "" : "/api/v2") + path;
+
+/** O erro de uma resposta que não deu certo (ou 2xx sem corpo), o mesmo para `chamar` e para o stream (lib/sse.ts). */
+export function erroDe(r: Response, body: unknown) {
+  const erro = (body as Partial<ErroV2> | undefined)?.error;
+  if (!r.ok && erro && typeof erro.code === "string") {
+    return new ErroApi(r.status, erro.code, erro.details);
+  }
+  const d = (body as { detail?: unknown } | undefined)?.detail;
+  const sessao = r.status === 401 && !!r.headers.get("WWW-Authenticate");
+  return new ErroApi(r.status, `http_${r.status}`, undefined, !r.ok && typeof d === "string" && !sessao ? d : undefined, body);
+}
+
+/** O `detail` objeto das rotas antigas (`{error, message, retryable}`); vazio se não for. */
+export const detalheDe = (e: unknown): { error?: string; message?: string; retryable?: boolean } => {
+  const d = (e instanceof ErroApi ? (e.corpo as { detail?: unknown } | undefined)?.detail : undefined);
+  return d && typeof d === "object" ? d : {};
+};
+/** Conta sem senha: o corpo real das rotas fora da `/api/v2` é `{"detail":{"error":"password_required"}}`; `code` cobre o envelope v2. */
+export const semSenha = (e: unknown) => e instanceof ErroApi && (e.code === "password_required" || detalheDe(e).error === "password_required");
+/** Sessão/CSRF: 401 e 403 sem `error` de objeto (o CSRF `{"detail": "Token CSRF…"}` e o "Acesso negado" da troca de conta em outra aba). Repetir não adianta. */
+export const sessaoDe = (e: unknown) => e instanceof ErroApi && (e.status === 401 || (e.status === 403 && !detalheDe(e).error));
+
 export async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   let r: Response;
   try {
-    r = await fetch((/^\/(auth|settings|open-finance|billing|agents)\//.test(path) ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
+    r = await fetch(urlDe(path), { credentials: "same-origin", ...init });
   } catch (e) {
     if (init.signal?.aborted) throw e;
     throw new ErroApi(0, "network");
@@ -62,13 +86,7 @@ export async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   // Corpo cortado pelo sinal numa resposta 2xx é prazo, não resposta vazia (par da linha do `fetch`); o 4xx/5xx cortado mantém o status.
   try { body = await r.json(); } catch (e) { if (r.ok && init.signal?.aborted) throw e; body = undefined; }
   if (r.ok && body !== undefined) return body as T;
-  const erro = (body as Partial<ErroV2> | undefined)?.error;
-  if (!r.ok && erro && typeof erro.code === "string") {
-    throw new ErroApi(r.status, erro.code, erro.details);
-  }
-  const d = (body as { detail?: unknown } | undefined)?.detail;
-  const sessao = r.status === 401 && !!r.headers.get("WWW-Authenticate");
-  throw new ErroApi(r.status, `http_${r.status}`, undefined, !r.ok && typeof d === "string" && !sessao ? d : undefined, body);
+  throw erroDe(r, body);
 }
 
 type Query<P> = P extends keyof QueryGet ? QueryGet[P] : never;
@@ -168,6 +186,12 @@ export const milhaoQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/progresso-milhao", signal),
   ...vivo,
 };
+// O patrimônio de hoje, as fotos diárias, os trechos sem quebra e a variação (`GET /api/v2/patrimonio`); os dois blocos da tela leem esta chave.
+export const patrimonioQuery = {
+  queryKey: ["patrimonio"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/patrimonio", signal),
+  ...vivo,
+};
 // Os orçamentos por categoria do mês corrente (`GET /api/v2/orcamentos-categoria`, sem `mes`); a escrita devolve a resposta nova e ela entra nesta chave.
 export const orcamentosCategoriaQuery = {
   queryKey: ["orcamentos-categoria"],
@@ -190,10 +214,6 @@ export const guiaQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/guia", signal),
   ...vivo,
 };
-// A conversa com o Piggy ainda responde com dado de exemplo (lib/topics.tsx), menos o assunto
-// `investido` e `metas` (resposta pronta do servidor, selo por mensagem em parts/PiggyChat.tsx): decide
-// o `data-dado` da barra de conversa. Vira true quando a conversa usar a API.
-export const CHAT_REAL = false;
 // O total investido nos bancos conectados (`GET /api/v2/investido`), o assunto real do chat.
 // Só a bolha consulta (a cópia do role=status não: parts/InvestidoResposta.tsx). Montar de
 // novo só relê depois de erro (a pergunta repetida tenta outra vez) ou de aviso do SSE com a
@@ -236,6 +256,8 @@ export const comparacaoQuery = (mes: string) => queryOptions({
 export const usePlan = () => useQuery(meQuery).data!.plan_tier;
 /** Freio de emergência dos agentes (`AGENTS_UI_ENABLED=0`): ausente (protótipo, resposta antiga) = ligado, como no /auth/me do dashboard antigo. */
 export const useAgentesLigados = () => useQuery(meQuery).data?.agents_ui_enabled !== false;
+/** O freio do chat com a IA (`PAINEL_CHAT_IA_USER_IDS`): ligado SÓ com `chat_ia: true`; ausente (protótipo, resposta antiga) = desligado. Com ele a conversa do Piggy vai ao servidor (lib/conversaIa.ts); sem ele é a de exemplo. */
+export const useChatIa = () => useQuery(meQuery).data?.chat_ia === true;
 
 export const categoriasQuery = {
   queryKey: ["categorias"],

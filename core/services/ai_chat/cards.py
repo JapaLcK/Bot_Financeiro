@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from . import streaming
 from ._context import CARDS_DO_APP, CARDS_DO_TURNO, FALHAS_DE_CARD_DO_TURNO, metas_do_turno
-from .cards_resumos import _RESUMOS
+from .cards_resumos import _RESUMOS, resumo_corte
 
 logger = logging.getLogger(__name__)
 
@@ -180,13 +180,17 @@ def registro() -> dict[str, Card]:
         gate_previsao(uid)  # o card lê a previsão (a base do corte de hábito)
 
     def le_simulador(uid, a):
-        """O mês (builds antigos do app desenham só ele) + a previsão de 90 dias para o app novo. A visão do
-        modelo é a estimativa do gasto do dia a dia (a mesma que o card desenha), não o mês."""
+        """O mês (builds antigos do app desenham só ele) + a previsão de 90 dias para o app novo. Com `cortes`, mais o
+        `simulador_habitos` (o corpo do POST do corte). A visão do modelo é o corte ou a estimativa do dia a dia, não o mês."""
+        from .cards_corte import corte  # fora do topo: importa `cards`
+        h = corte(uid, a["cortes"]) if a.get("cortes") else None  # antes da previsão: nome que não casa não lê mais nada
         p = previsao(dias="90", uid=uid)
-        return [(m, r | {"previsao": p}) for m, r in _mes(uid, a, detalhes=mes_detalhes)]
+        return [(m, r | {"previsao": p} | ({"simulador_habitos": h} if h else {})) for m, r in _mes(uid, a, detalhes=mes_detalhes)]
 
     def visao_simulador(r):
         # `despesa_mensal` (e não `mensal`): o ai_guard só aceita como evidência número sob chave monetária
+        if "simulador_habitos" in r:  # corte pedido: o resultado dele, não a estimativa
+            return {"corte": resumo_corte(r["simulador_habitos"])}
         est = r["previsao"]["estimativa_variavel"]
         return {"gasto_do_dia_a_dia": est and {"despesa_mensal": est["despesa_mensal"], "categorias": [
             {"nome": str(c["nome"])[:60], "despesa_mensal": c["despesa_mensal"]} for c in est["categorias"]]}}
