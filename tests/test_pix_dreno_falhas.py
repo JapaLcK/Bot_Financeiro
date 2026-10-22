@@ -17,7 +17,8 @@ estão no relato do PR:
   * ignore o retorno de `send_pix_paid_email` →
     `test_email_recusado_nao_registra_o_efeito` vermelho (efeito registrado e
     evento fechado, e-mail nunca reenviado);
-  * não chame `alertar_valor` → `test_valor_menor_que_o_combinado_alerta` vermelho;
+  * troque `conferir_valor` por `return True` → `test_valor_menor_que_o_combinado_nao_concede` vermelho
+    (o grupo completo está em `tests/test_pix_valor_parcial.py`);
   * devolva `{}` sempre em `_janela_adiada` →
     `test_periodo_do_stripe_que_renovou_adia_o_acesso` vermelho, com o ano Pix
     começando dentro de um mês que o cartão já cobrou.
@@ -241,22 +242,22 @@ def test_periodo_reconfirmado_mais_CEDO_nao_antecipa_a_janela(
 
 # ── 4. o valor liquidado (P2, `pix_drain.py:147`) ────────────────────────────
 
-def test_valor_menor_que_o_combinado_alerta(user_id, externo):
-    """O `value` que a minimização guarda existe para ser conferido, e ninguém
-    o lia. Divergência só nasce de edição no painel do provedor — o QR dinâmico
-    carrega o valor, então o pagador não escolhe quanto paga.
-
-    **Alerta e concede**: recusar acesso a quem pagou o desconto que NÓS demos
-    é o erro irreversível (§7). A decisão está em `alertar_valor`.
+def test_valor_menor_que_o_combinado_nao_concede(user_id, externo):
+    """#1228: pagamento parcial NÃO libera o plano. O `value` que a minimização
+    guarda é CONFERIDO por `pix_valor.conferir_valor`: menor que o devido, a
+    cobrança segue `pending`, o operador é alertado e o evento fecha sem acesso.
+    (Antes: alertava e concedia — comportamento revertido pelo dono.)
     """
     conta(user_id, "free", None)
     cobranca = nova_cobranca(user_id)
 
-    entregar("PAYMENT_RECEIVED", cobranca, valor=1.0)
+    event_id = entregar("PAYMENT_RECEIVED", cobranca, valor=1.0)
 
-    assert any("valor diferente do combinado" in m for m in externo["alerta"]), \
+    assert any("pagamento parcial retido" in m for m in externo["alerta"]), \
         externo["alerta"]
-    assert _pix(user_id), "o alerta virou recusa — não é o que o §7 manda"
+    assert not _pix(user_id), "pagamento parcial concedeu o plano"
+    assert ler(cobranca["id"])["status"] == "pending"
+    assert evento(event_id)["processed_at"] is not None
 
 
 # ── 5. o e-mail recusado (P2, efeitos `:205`) ────────────────────────────────

@@ -103,31 +103,6 @@ def alertar_stripe_desistido(cobranca) -> None:
     )
 
 
-def alertar_valor(cobranca, valor) -> None:
-    """Valor liquidado ≠ total do snapshot (plano + cadernos, `total_cents`) —
-    **alerta, e NÃO barra**.
-
-    Barrar era a outra saída possível, e ela é pior aqui: o QR dinâmico carrega
-    o valor, então o pagador não escolhe quanto paga. Divergência só nasce de
-    edição no painel do Asaas — um desconto que NÓS demos —, e recusar acesso a
-    quem pagou o que combinamos é o erro irreversível (§7 do plano).
-
-    `value` ausente ou não numérico sai calado: o corpo minimizado o traz
-    sempre, e inventar alerta sobre campo que não veio é ruído.
-    """
-    try:
-        recebido = int(round(float(valor) * 100))
-    except (TypeError, ValueError):
-        return
-    combinado = total_cents(cobranca)
-    if recebido != combinado:
-        admin_notify.notify_pix_alerta(
-            f"⚠️ **Pix: valor diferente do combinado** cobrança `{cobranca['id']}`"
-            f" — recebido R$ {recebido / 100:.2f} contra R$ {combinado / 100:.2f}."
-            " O acesso FOI concedido; confira a cobrança no painel do Asaas."
-        )
-
-
 def _acumulado_estornado(payment_id: str) -> str:
     from core.services.asaas import buscar_pagamento
 

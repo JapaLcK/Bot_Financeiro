@@ -61,10 +61,10 @@ from core.services.pix_drain_effects import (
     EXECUTORES,
     alertar,
     alertar_stripe_desistido,
-    alertar_valor,
     janela_de_acesso,
 )
 from core.services.pix_pago_sem_qr import avisar as avisar_pago_sem_qr
+from core.services.pix_valor import conferir_valor
 from db.pix_charges import (
     buscar_por_asaas_payment_id,
     buscar_por_external_reference,
@@ -203,9 +203,8 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
                 "acesso NÃO concedido, confira no painel do Asaas."
             )
             return None
-        # O `value` que a minimização guarda existe para ser CONFERIDO, e até
-        # aqui nada o lia. Alerta, e segue — o porquê está em `alertar_valor`.
-        alertar_valor(cobranca, pagamento.get("value"))
+        if not conferir_valor(cobranca, origens, pagamento.get("value"), payment_id, event_id):
+            return None  # parcial/ilegível: alerta 1x e FECHA o evento, sem conceder (#1228)
 
     if destino and origens:
         # A linha NOVA substitui a lida: os efeitos leem `access_*`, que só existem
