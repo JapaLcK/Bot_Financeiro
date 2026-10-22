@@ -12,7 +12,13 @@ checa e escreve precisa fazer os dois sob o MESMO mutex do usuário, `bank_movem
 `accounts`, sempre o primeiro lock). Invariantes: I1 não é interna; I2 valor/data = projeção (declarado
 sem par, extrato com par); I3 uma sombra por transação; I4 par automático único nos dois sentidos; I5
 `delta_conta` 0, Carteira intocada; I6 tudo filtrado por `user_id`; I7 escolha explícita, troca ou desfazer
-=> `manual_only`; o reconcile nunca liga fluxo `manual_only` (ele segue em `claims`); aporte nunca recebe a flag.
+=> `manual_only`; o reconcile nunca liga fluxo `manual_only` (ele segue em `claims`); aporte nunca recebe a flag;
+I8 "foi em dinheiro" convertido mexe no saldo uma vez (três camadas se cobrem: o mutex do usuário, a releitura
+de `efeitos` depois do `for update` da linha da declaração e o CAS do `delete ... returning`; quem perde a
+corrida não aplica delta; I5 é quebrado DE PROPÓSITO, uma vez); I10 um lançamento da Carteira resolve no
+máximo uma declaração (o marcador `efeitos.foi_em_dinheiro`, por CAS, também no convertido); I11 selecionar
+preserva o contexto da declaração na Carteira (`efeitos.foi_em_dinheiro.declaracao`) sem alterar os campos dela.
+(I9 fica reservado para o lembrete do A2c.)
   criar (`add_launch_and_update_balance`)  I1 recusa argumento; I5; I6   mutex = o `update accounts`, e o
                                            reconcile na mesma transação (cursor externo é recusado)
   editar categoria / lote                  I1 recusa categoria interna   SEM mutex, de propósito: a
@@ -32,6 +38,8 @@ sem par, extrato com par); I3 uma sombra por transação; I4 par automático ún
                                            CAS no par visto; sombra do antigo e bind do novo na mesma transação
   desfazer (`undo_bank_movement`)          I2, I3, I6, I7   mutex -> `_locked_tx`; CAS no par visto
   desfazer fusão vizinha (`_desfaz`)       só FUSED_STATUSES; não alcança `bank_movement_confirmed`   mutex
+  foi em dinheiro (`bank_dinheiro`)        I5 (só converter), I6, I8, I10, I11   mutex -> `for update` de C ->
+                                           CAS do marcador / `delete ... returning` -> `accounts`
   merge de contas / reset / exclusão       I6 (a declaração muda de dono ou cai junto)   locks próprios de
                                            `users.py`/`privacy.py`, fora desta tabela
 Célula check-then-write SEM mutex que sobra: nenhuma sobre propriedade mutável (as duas "SEM mutex" acima
@@ -63,6 +71,13 @@ DECLARADA_SQL = """(tipo in ('despesa', 'receita') and exists (
 CASADA_SQL = f"""({DECLARADA_SQL} and exists (
         select 1 from bank_movement_declarations d where d.launch_id = launches.id
            and d.user_id = launches.user_id and d.matched_transaction_id is not null))"""
+
+
+# "É Carteira" (manual com `delta_conta` numérico e diferente de 0), sobre `launches` SEM alias. Uma só fonte:
+# o estado `carteira` da v2 (`db/lancamentos.py`) e o candidato do "foi em dinheiro" (`db/bank_dinheiro.py`).
+CARTEIRA_SQL = """(coalesce(source, 'manual') = 'manual'
+        and jsonb_typeof(efeitos -> 'delta_conta') = 'number'
+        and (efeitos ->> 'delta_conta')::numeric <> 0)"""
 
 
 def e_fluxo(declaration: dict) -> bool:

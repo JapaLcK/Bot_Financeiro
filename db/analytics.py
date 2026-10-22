@@ -776,7 +776,9 @@ def list_history(
                  -- — usada pelo front pra oferecer "Desfazer" no detalhe.
                  fused.of_tx_id AS reconciliation_of_tx_id,
                  -- despesa/receita "pelo banco": o detalhe oferece a conferência (ADR 0006)
-                 {DECLARADA_SQL} AS bank_declaration
+                 {DECLARADA_SQL} AS bank_declaration,
+                 -- contexto da declaração que o "foi em dinheiro" associou a este lançamento (só leitura)
+                 efeitos -> 'foi_em_dinheiro' -> 'declaracao' AS cash_declaration
           FROM launches
           -- Antes: subquery correlacionada por linha de launches, com
           -- Seq Scan de open_finance_transactions em cada uma (O(launches ×
@@ -840,7 +842,8 @@ def list_history(
                     JOIN open_finance_connections conn ON conn.id = a.connection_id
                    WHERE a.id = c.open_finance_account_id LIMIT 1) AS bank_name,
                  NULL AS reconciliation_status,
-                 NULL::bigint AS reconciliation_of_tx_id, false AS bank_declaration
+                 NULL::bigint AS reconciliation_of_tx_id, false AS bank_declaration,
+                 NULL::jsonb AS cash_declaration
           FROM credit_transactions ct
           LEFT JOIN credit_cards c ON c.id = ct.card_id AND c.user_id = ct.user_id
           JOIN credit_bills b ON b.id = ct.bill_id
@@ -873,7 +876,7 @@ def list_history(
                 f"""
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em,
                        installments_total, installment_no,
-                       origin, bank_name, reconciliation_status, reconciliation_of_tx_id, bank_declaration
+                       origin, bank_name, reconciliation_status, reconciliation_of_tx_id, bank_declaration, cash_declaration
                 FROM ({union_sql}) merged
                 ORDER BY criado_em DESC, id ASC
                 LIMIT %s OFFSET %s
@@ -902,6 +905,7 @@ def list_history(
             # id da transação OF do outro lado, só enquanto fundida (None fora disso).
             "reconciliation_of_tx_id": r["reconciliation_of_tx_id"],
             "bank_declaration": bool(r["bank_declaration"]),
+            "cash_declaration": r["cash_declaration"],  # {alvo, valor, nota, declarada_em...} ou None
         }
         for r in rows
     ]

@@ -43,6 +43,12 @@ def decl(dia, valor=50.0, alvo="mercado", tipo="despesa"):
     return (f"decl {alvo}", tipo, valor, dia, "manual", "0.0", None)
 
 
+def carteira(dia, valor=50.0, alvo="mercado", tipo="despesa"):
+    """Lançamento da Carteira (`delta_conta` assinado, origem carteira): o #40 do "foi em dinheiro" ou a
+    declaração depois de convertida (sem linha de declaração, o rótulo deixa de ser `decl`)."""
+    return (f"manual {alvo}", tipo, valor, dia, "manual", str(-valor if tipo == "despesa" else valor), "carteira")
+
+
 def sombra(ptid, valor, dia, tipo="despesa"):
     return (f"sombra {ptid}", tipo, valor, dia, "open_finance", "0", None)
 
@@ -103,3 +109,16 @@ def retrato(uid, mes=None):
         "C": float(saldo["balance"]) if saldo else None,
         "saiu": saiu,
     }
+
+
+def marcadores(uid):
+    """`{rótulo: efeitos['foi_em_dinheiro']}` dos lançamentos marcados, SEM a hora de `associada_em` (só
+    afirma que é uma data ISO). Rótulos repetidos (dois "manual mercado") se perdem: use alvos diferentes."""
+    nomes = _rotulos(uid)
+    marcados = {}
+    for r in q("select id, efeitos->'foi_em_dinheiro' m from launches where user_id=%s and efeitos ? 'foi_em_dinheiro'",
+               (uid,), fetch=True):
+        m = dict(r["m"])
+        datetime.fromisoformat(m.pop("associada_em"))
+        marcados[nomes[r["id"]]] = m
+    return marcados

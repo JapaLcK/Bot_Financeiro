@@ -43,7 +43,7 @@ from datetime import date, datetime
 from utils_date import _tz
 
 from .analytics import clausula_busca, termos_busca
-from .bank_declaracoes import CASADA_SQL, DECLARADA_SQL
+from .bank_declaracoes import CARTEIRA_SQL, CASADA_SQL, DECLARADA_SQL
 from .connection import CAT_VAZIA_LABEL, LAUNCH_HAS_TIME_SQL, TIPO_CANON_SQL, cat_key_sql, cat_norm_sql
 from .open_finance import ACTIONABLE_PENDING_SQL, actionable_pending_params
 from .open_finance_cash import VINCULADO_SQL
@@ -88,9 +88,7 @@ PAGA_CONTA_SQL = ("((efeitos -> 'bill_id') is not null or exists (select 1 from 
 # Estado de cada linha, sobre `launches` SEM alias (dentro do FROM dela; a CTE `pendentes`
 # precisa estar no ar). "Carteira" = manual com `delta_conta` ≠ 0; manual com delta 0 não é.
 _ESTADO_SQL = f"""
-      coalesce(source, 'manual') = 'manual'
-        and jsonb_typeof(efeitos -> 'delta_conta') = 'number'
-        and (efeitos ->> 'delta_conta')::numeric <> 0 as carteira,
+      {CARTEIRA_SQL} as carteira,
       origem is not null as marcada,
       {VINCULADO_SQL} as especie,
       {PAGA_CONTA_SQL} as paga_conta,
