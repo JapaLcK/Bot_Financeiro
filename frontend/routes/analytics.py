@@ -13,9 +13,12 @@ import asyncio
 
 from fastapi import APIRouter, Query, Request
 
+from core.observability import get_logger
 from frontend.routes import shared
 
 router = APIRouter()
+logger = get_logger(__name__)
+FORA_DO_HISTORICO = "Sem comparação: o período anterior está fora do histórico do seu plano."
 
 
 @router.get("/analytics/{user_id}/kpis")
@@ -26,16 +29,38 @@ async def analytics_kpis_route(
     from_: str | None = Query(None, alias="from"),
     to: str | None = None,
 ):
-    """KPIs do período: receita, despesa, líquido, taxa de poupança + comparativo
-    com período anterior. Default = últimos 6 meses."""
+    """KPIs do período: receita, despesa, líquido, taxa de poupança. Default = últimos 6 meses.
+
+    Plus+ recebe `delta_pct` (income/expense), `delta_escolha` e `delta_meses` (o N usado) da regra única de comparação
+    (`comparar_mes` com N meses, P1-B: os N meses até o corrente, inteiros, contra os N antes deles; a mesma
+    janela dos totais desta rota; cartão pela fatura). O gate vem antes da leitura do anterior; o Essencial não recebe nem lê.
+    Janela livre (`from` E `to`, a regra de `resolve_window`) fica sem delta: a regra só existe para meses
+    terminando no corrente. Falha da comparação não derruba os KPIs: o delta sai nulo."""
     shared.authorize_dashboard_access(request, user_id)
     from db import compute_kpis
     fd, td = shared.resolve_analytics_window(months, from_, to)
-    result = await asyncio.to_thread(compute_kpis, user_id, fd, td)
+    result = await asyncio.to_thread(compute_kpis, user_id, fd, td, False)
     from core.services.plan_service import plan_gate_ok
     if not await asyncio.to_thread(plan_gate_ok, user_id, "financial_comparison"):
-        result.pop("prev", None)
-        result.pop("delta_pct", None)
+        return {"ok": True, "kpis": result}
+    pct = {"income": None, "expense": None}
+    result["delta_pct"], result["delta_escolha"], result["delta_meses"] = pct, None, None
+    if not (from_ and to):
+        from core.services.comparacao_periodos import comparar_mes
+        from utils_date import now_tz
+        agora = now_tz()
+        n = (td.year * 12 + td.month) - (fd.year * 12 + fd.month)  # os meses de `resolve_window`
+        try:
+            r = await asyncio.to_thread(comparar_mes, user_id, agora.year, agora.month, agora, n)
+        except Exception as exc:  # o delta é extra: os totais saem
+            logger.warning("analytics_kpis: comparação indisponível (%s)", type(exc).__name__)
+            r = None
+        if r is not None:
+            result["delta_meses"] = n  # o rótulo diz "vs os N meses anteriores" com este N, não com o do seletor
+            fora = r["motivo"] == "inicio_do_historico"
+            result["delta_escolha"] = f"{FORA_DO_HISTORICO} {r['escolha']}" if fora else r["escolha"]
+            for chave, linha in (("income", r["receita"]), ("expense", r["despesa"])):
+                pct[chave] = float(linha["pct"]) if linha and linha["pct"] is not None else None
     return {"ok": True, "kpis": result}
 
 

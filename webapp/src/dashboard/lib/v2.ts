@@ -242,6 +242,16 @@ export const gastosCategoriaQuery = (mes: string, categoria: string) => queryOpt
   ...vivo,
 });
 
+// O mês contra o anterior equivalente (`GET /api/v2/comparacao`, Plus+). `gcTime: 0`, como a
+// previsão: dado Plus sem tela olhando sai do cache, e o downgrade não acha número velho. No
+// protótipo o cache semeado (main.tsx) não pode sumir ao desmontar.
+export const comparacaoQuery = (mes: string) => queryOptions({
+  queryKey: ["comparacao", mes],
+  queryFn: ({ signal }) => apiGet("/comparacao", signal, { mes }),
+  ...vivo,
+  gcTime: DEMO ? Infinity : 0,
+});
+
 // Só dentro da árvore que o portão (parts/Entrada.tsx) libera: lá o /me já chegou.
 export const usePlan = () => useQuery(meQuery).data!.plan_tier;
 /** Freio de emergência dos agentes (`AGENTS_UI_ENABLED=0`): ausente (protótipo, resposta antiga) = ligado, como no /auth/me do dashboard antigo. */

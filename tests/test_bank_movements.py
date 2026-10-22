@@ -255,6 +255,7 @@ def test_vinculo_manual_antigo_nao_e_roubado(user_id):
 def test_api_confere_com_csrf_e_isolamento(user_id):
     import frontend.finance_bot_websocket_custom as dashboard
     from fastapi.testclient import TestClient
+    from _apoio_auth_app import csrf
     promote_to_pro(user_id)
     cid, source = _bank(user_id)
     lid = _deposit(user_id, source)
@@ -263,13 +264,12 @@ def test_api_confere_com_csrf_e_isolamento(user_id):
     assert client.get(f"/open-finance/{user_id}/movements").status_code in (401,403)
     client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, "movements@test.com"))
     client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME, dashboard.make_dashboard_token(user_id, hours=1))
-    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "movement-test")
+    headers = csrf(client)
     response = client.get(f"/open-finance/{user_id}/movements")
     assert response.status_code == 200, response.text
     txid = response.json()["movements"][0]["candidates"][0]["id"]
     body = {"launch_id":lid,"transaction_id":txid}
     assert client.post(f"/open-finance/{user_id}/movements/confirm", json=body).status_code == 403
-    headers = {dashboard.CSRF_HEADER_NAME: "movement-test"}
     assert client.post(f"/open-finance/{user_id+1}/movements/confirm", json=body, headers=headers).status_code in (401,403)
     result = client.post(f"/open-finance/{user_id}/movements/confirm", json=body, headers=headers)
     assert result.status_code == 200, result.text
