@@ -5,6 +5,7 @@ import { SIMBOLO } from "@/ui/stickers";
 import { useTema } from "@/ui/tema";
 import { TextoPainel as Texto } from "./tipografia";
 import { Acao } from "./base";
+import { CardAgente } from "./cardAgente";
 import { agenteDe, mencoes } from "./agentes";
 import { AVATAR } from "./avatares";
 import { cotaCheia, useConversa, type Turno } from "./conversaEstado";
@@ -33,6 +34,7 @@ export function FalaAgente({ turno: t }: { turno: Turno }) {
     {a.estado === "enviando"
       ? <View style={{ alignSelf: "flex-start" }}><ActivityIndicator size="small" accessibilityLabel={`${nome} está respondendo`} /></View>
       : <Texto tom={a.estado === "erro" ? "warning" : "ink"}>{a.texto}</Texto>}
+    {a.estado === "pronto" && a.card && <CardAgente card={a.card} />}
     {a.estado === "inativo" && <>
       <Acao rotulo={a.ativando ? "Ativando…" : "Ativar e responder"} desativado={a.ativando || trava} onPress={() => void ag.ativarEResponder(t)} />
       {a.falhaAtivar && <Texto tom="warning" accessibilityRole="alert">Não foi possível ativar o agente. Tente novamente.</Texto>}
