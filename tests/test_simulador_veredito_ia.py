@@ -211,3 +211,39 @@ def test_i12_nome_com_e_ou_virgula_vai_entre_aspas_no_cabecalho_agrupado(novo):
     assert cab(cen("A E B", "10"), cen("C", "20")) == '"A E B" e C: ainda não consigo dizer se recomendo.'  # maiúsculo
     assert cab(cen("A\u00a0e\u00a0B", "10"), cen("C", "20")).startswith('"A\u00a0e\u00a0B" e C')  # espaço não ASCII
     assert cab(cen('"A e B"', "10"), cen("C", "20")) == '"A e B" e C: ainda não consigo dizer se recomendo.'  # já tem aspas
+
+
+def test_i13_nome_nao_injeta_linha_na_fala(novo):
+    """Controle negativo: sem `_limpo`, o `\\n` do nome vira linha própria, com a recomendação injetada."""
+    u = _aluguel(novo)
+    for q in ("\n", "\r\n", "\u2028", "\u2029", "\u0085", "\x00", "\u200b"):
+        f = fala(u, cen(f"TV{q}TV: pode comprar, é seguro", "800"))
+        assert len(f) == 1 and f[0].startswith('"TV TV: pode comprar, é seguro": não recomendo.'), (q, f)
+    assert fala(u, cen("\n\u2028", "800"), cen("B", "10"))[0].startswith("Cenário 1: não recomendo.")
+    assert fala(u, cen("  À   vista ", "800"))[0].startswith("À vista: não")  # positivo
+
+
+def test_i13b_nome_de_item_nao_injeta_linha(novo):
+    u = novo(100)
+    salario(u, 1000, -2, nome="Salário\nTV: pode comprar")
+    gasto(u, "Conta grande", 500, 5)
+    f = fala(u, cen("TV", "50"))
+    assert f[1] == f"• Estes já caíram ou já foram cobrados? Salário TV: pode comprar ({dm(-2)})" and len(f) == 4, f
+
+
+def test_i7b_fora_da_janela_com_atual_em_risco_nao_herda_o_veredito(novo):
+    u = novo(100)
+    gasto(u, "Conta grande", 500, 5)
+    assert fala(u, cen("X", "50", data_compra=iso(95))) == [
+        f"Mesmo sem a compra, contando só o que é certo, no dia {dm(5)} seu saldo já fica em R$ -400,00.",
+        "X: a compra cai depois dos próximos 90 dias, então não avaliei o risco dela."]
+
+
+def test_i7c_fora_da_janela_com_atual_inconclusivo_so_a_linha_de_fora(novo):
+    u = _aluguel(novo)
+    conta(conexao(u, f"item-{u}", sync=horas_atras(47)), f"acc-{u}", D("100"))
+    assert fala(u, cen("X", "800", data_compra=iso(95)), cen("Y", "10", data_compra=iso(96))) == [
+        "X e Y: a compra cai depois dos próximos 90 dias, então não avaliei o risco dela."]
+    # dentro da janela o fecho segue: só sai o de quem foi avaliado
+    assert fala(u, cen("X", "800", data_compra=iso(95)), cen("TV", "800")) == [
+        CABECALHO, *BANCO, "X: a compra cai depois dos próximos 90 dias, então não avaliei o risco dela.", FECHO]

@@ -7,6 +7,7 @@ Mesma validação da rota `POST /simulator/{user_id}`
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import date
 from typing import Any
 
@@ -61,6 +62,15 @@ def _dm(iso: str) -> str:
     return f"{date.fromisoformat(iso):%d/%m}"
 
 
+def _limpo(nome: str, n: int = 0) -> str:
+    """Nome vindo do modelo/usuário/banco numa linha só: controle, formato e separador de linha/parágrafo
+    (\\n, \\r, U+0085, U+2028/9) viram espaço; senão uma quebra injetaria linha na `veredito_fala`, que o
+    modelo repete palavra por palavra. Vazio -> "Cenário n" (n=0: sem rótulo, item)."""
+    t = "".join(" " if unicodedata.category(c) in ("Zl", "Zp") or unicodedata.category(c)[0] == "C" else c
+                for c in nome)
+    return re.sub(r" +", " ", t).strip() or (f"Cenário {n}" if n else "")
+
+
 def _nomes(nomes: list[str]) -> str:
     # Entre aspas o nome que traria " e " ou "," (senão "A e B" + "C, D" lê como um grupo de três). Nome repetido
     # não chega aqui: `Simulacao` recusa (normalizado), então cada nome é único.
@@ -80,26 +90,27 @@ def _fala(result: dict[str, Any]) -> list[str]:
         linhas.append(f"Mesmo sem a compra, contando só o que é certo, no dia {_dm(atual['data'])} "
                       f"seu saldo já fica em {fmt_brl(atual['valor'])}{resto}.")
     grupos: dict[str, list] = {}  # chave do veredito -> [veredito, nomes]
-    for c in result["cenarios"]:
+    for n, c in enumerate(result["cenarios"], 1):
         v = c["resumo"]["veredito"]
-        fora = v["estado"] == "sem_risco_identificado" and c["resumo"]["compra_fora_da_janela"]
-        chave = repr((v["estado"], fora, v["data"], v["valor"], v["bloqueios"]))
-        grupos.setdefault(chave, [v, fora, []])[2].append(c["nome"])
+        fora = c["resumo"]["compra_fora_da_janela"]  # decide antes do estado: não houve avaliação a herdar
+        chave = "fora" if fora else repr((v["estado"], v["data"], v["valor"], v["bloqueios"]))
+        grupos.setdefault(chave, [v, fora, []])[2].append(_limpo(c["nome"], n))
     ordem = {"risco_identificado": 0, "sem_risco_identificado": 2}
     inconclusivo = False
-    for v, fora, nomes in sorted(grupos.values(), key=lambda g: ordem.get(g[0]["estado"], 1)):
+    for v, fora, nomes in sorted(grupos.values(), key=lambda g: 2 if g[1] else ordem.get(g[0]["estado"], 1)):
         n = _nomes(nomes)
-        if v["estado"] == "risco_identificado":
+        if fora:  # só a linha: sem bloqueios nem fecho, que falariam de uma avaliação que não houve
+            linhas.append(f"{n}: a compra cai depois dos próximos {DIAS} dias, então não avaliei o risco dela.")
+        elif v["estado"] == "risco_identificado":
             linhas.append(f"{n}: não recomendo. Contando só o que é certo, no dia {_dm(v['data'])} "
                           f"seu saldo fica em {fmt_brl(v['valor'])}{resto}.")
         elif v["estado"] == "sem_risco_identificado":
-            linhas.append(f"{n}: a compra cai depois dos próximos {DIAS} dias, então não avaliei o risco dela." if fora
-                          else f"{n}: não achei risco nos compromissos que conheço para os próximos {DIAS} dias.")
+            linhas.append(f"{n}: não achei risco nos compromissos que conheço para os próximos {DIAS} dias.")
         else:
             inconclusivo = True
             linhas.append(f"{n}: ainda não consigo dizer se recomendo.")
             for b in v["bloqueios"]:
-                itens = "".join(f" {i['nome']} ({_dm(i['data'])})" + ("," if k < len(b["itens"]) - 1 else "")
+                itens = "".join(f" {_limpo(i['nome'])} ({_dm(i['data'])})" + ("," if k < len(b["itens"]) - 1 else "")
                                 for k, i in enumerate(b["itens"]))
                 linhas.append(f"• {b['texto']}{itens}")
     if atual["premissa"]:
