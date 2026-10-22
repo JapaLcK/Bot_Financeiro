@@ -99,8 +99,7 @@ saiu para routers em `frontend/routes/`, registrados com `include_router`:
 do Pro: 1 a 3 cenários (à vista, parcelado, financiado pela tabela Price) comparados
 com o atual sobre a mesma leitura da previsão de saldo, 90 dias + resumo do contrato.
 O pior dia e a reserva incluem hoje após a compra e os 90 dias seguintes (91 datas);
-o saldo final continua sendo o do dia 90. A tool avisa antes dos números se os
-bancos conectados estiverem excluídos ou o saldo consolidado não for confirmado.
+o saldo final continua sendo o do dia 90. A tool abre pela `veredito_fala`; o `aviso_saldo` (antes dos números) vem de `_aviso_saldo` em `core/services/ai_chat/tools/simulator.py`: com o veredito ligado ele omite o ramo "motivos a conferir", que a fala já carrega; com a chave desligada, sai como antes do 3b (com o ramo de motivos).
 Preço, entrada, custos, despesa mensal nova e reserva aceitam no máximo duas casas
 decimais; frações de centavo são recusadas na validação comum da API e da tool.
 Taxas percentuais mantêm precisão livre, inclusive valores muito pequenos (na rota legada e na tool; a v2 aceita juros com no máximo 4 casas, ver "API v2").
@@ -612,7 +611,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   é `cashflow.pior_caso_do_risco` (sem a estimativa nem as saídas duvidosas); se o risco só existe contando as dúvidas, o estado é
   inconclusivo e os `bloqueios[].itens` listam o que perguntar. Se só a estimativa do dia a dia (com as dúvidas a favor) leva abaixo do limite, é
   `dados_insuficientes` com `gasto_do_dia_a_dia_estimado` (nunca `risco_identificado`), junto com as perguntas das dúvidas que decidem, se houver; a receita fixa prevista conta como certa. Janela de conferência (`JANELA_CONFERENCIA_DIAS`,
-  `Snapshot.conferencia`, fora de `qualidade()`). Chave `SIMULADOR_VEREDITO_ENABLED` (padrão ligada, lida uma vez por pedido, `veredito.ligado`): desligada, `veredito` sai `null`. A tool `simulate_purchase` (3b) e as telas (3c) ainda não o leem. **Com banco conectado o veredito é sempre
+  `Snapshot.conferencia`, fora de `qualidade()`). Chave `SIMULADOR_VEREDITO_ENABLED` (padrão ligada, lida uma vez por pedido, `veredito.ligado`): desligada, `veredito` sai `null`. A tool `simulate_purchase` (3b) o lê e entrega `veredito_fala` (linhas prontas montadas no servidor; o prompt manda o Piggy repeti-las, nos três canais). a rota legada `POST /simulator/{user_id}` segue sem ele; as telas (3c) ainda não o leem. **Divergência declarada:** `check_cashflow`/`project()` não usam o veredito nem a janela de conferência, e se abstêm onde o simulador diria "não recomendo" (só para o lado conservador, nunca dizem "cabe"). **Com banco conectado o veredito é sempre
   inconclusivo** (`cobertura_bancaria_nao_comprovada`, até os PRs 4a a 4d). Não grava nada. A tela é `#/simulador/compra`
   (`widgets/SimuladorCompra.tsx`, fora do protótipo e do menu lateral; entra pela ferramenta "Vale a pena
   comprar?"). O `atual` inclui a estimativa do dia a dia (mediana, ver Previsão); em aberto: o corte de hábito real

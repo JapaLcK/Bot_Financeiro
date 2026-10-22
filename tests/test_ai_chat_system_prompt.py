@@ -187,3 +187,18 @@ def test_aviso_de_dado_velho_e_card_de_entrada_no_prompt():
     assert "resumo (entrou e saiu" not in ADENDO_CARDS and "NÃO mostra o que entrou" in ADENDO_CARDS
     assert "ÚNICO card que mostra o que entrou" in ADENDO_CARDS and "contando os dois (março estando em outubro = 8)" in ADENDO_CARDS and "`por_mes` do resultado do `show_card` renda" in ADENDO_CARDS
     assert "se `motivos` não estiver vazio diga" in SYSTEM_PROMPT  # a linha de investimentos do WhatsApp segue como era
+
+
+EXCECAO_VEREDITO = "a `veredito_fala` do `simulate_purchase` vai inteira, inclusive o que ela diz de banco"
+
+
+def test_prompt_manda_repetir_a_veredito_fala_e_a_excecao_do_app_vale_so_no_app():
+    """PR 3b: a linha do `simulate_purchase` manda repetir a fala do servidor sem suavizar; a exceção à REGRA DO APP
+    (o banco desatualizado vai inteiro, porque não há card dessa resposta) vive só nos prompts COM emissor."""
+    linha = next(l for l in SYSTEM_PROMPT.splitlines() if "→ `simulate_purchase`" in l)
+    for trecho in ("`veredito_fala`", "NUNCA calcule, suavize, omita nem contradiga", "não diga que cabe", "até 15 linhas"):
+        assert trecho in linha, trecho
+    com_excecao = [ADENDO_CARDS, ADENDO_CARDS_METAS, prompt_do_usuario(False, True), prompt_do_usuario(True, True)]
+    sem = [prompt_do_usuario(False, False), prompt_do_usuario(True, False)]
+    assert all(EXCECAO_VEREDITO in t for t in com_excecao) and not any(EXCECAO_VEREDITO in t for t in sem)
+    assert "única exceção" not in SYSTEM_PROMPT and "a `veredito_fala` nunca é cortada" in linha  # as duas exceções de 15 linhas
