@@ -20,7 +20,7 @@ from decimal import Decimal
 from core.services.cashflow_contract import somar
 
 from .open_finance import PENDING_RECONCILIATION_SQL, actionable_pending_params, merged_wallet_delta
-from .open_finance_state import _TERMINAL
+from .open_finance_state import _TERMINAL, logos_da_conexao
 from .patrimonio import (BANCO_VELHO, CONTAS_BANCO_SQL, desatualizada, finito, fora_do_sync,
                          ler_conexoes, sem_saldo, ultima_geracao)
 
@@ -62,7 +62,9 @@ def listar(cur, user_id: int, *, agora: datetime | None = None) -> dict:
     cur.execute(CONTAS_BANCO_SQL, (user_id,))
     for r in cur.fetchall():
         c = por_id[r["connection_id"]]
+        proprio, url = logos_da_conexao(c)
         conta = {"id": r["id"], "instituicao": c["institution_name"], "nome": r["name"],
+                 "logo_proprio": proprio, "logo_url": url,
                  "moeda": r["currency"], "conexao": estados[str(c["id"])],
                  "sincronizado_em": c["last_sync_at"],
                  # Só para `db/metas.py` e `db/bancos.py`: o response_model de `api/v2/contas.py` os descarta.

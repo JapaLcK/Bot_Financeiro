@@ -51,19 +51,25 @@ export const usePerguntando = () => useSyncExternalStore((f) => { subs.add(f); r
 
 /** Envia a pergunta e abre a conversa. Sem `topic`, o Piggy responde com os atalhos. A pergunta entra depois de conferir a conta:
  * se a sessão virou outra noutra aba, a conversa anterior some ANTES e a pergunta nova fica (Codex no #1157). Sem conseguir
- * conferir, entra assim mesmo: o PiggyChat não mostra a conversa sem conta conferida. */
-export function ask(q: { text: string; topic?: TopicId | null; cat?: string | null; key?: string }) {
+ * conferir, entra assim mesmo: o PiggyChat não mostra a conversa sem conta conferida. `dono`: o pedido de um card da IA só vale para a conta do card. */
+export function ask(q: { text: string; topic?: TopicId | null; cat?: string | null; key?: string; dono?: number }) {
   if (perguntando) return false; // falso = a pergunta não entrou (o texto fica na barra)
   if (chatIa() && iaBloqueada()) { go("/piggy"); return false; } // um turno por vez, e sem cota não há o que enviar
   perguntando = true;
   const antes = dono;
-  const conferindo = conferirConta().catch(() => {});
+  let conferiu = true;
+  const conferindo = conferirConta().catch(() => { conferiu = false; });
   subs.forEach((f) => f());
   go("/piggy"); // já: com a conta lenta, o chat mostra que a pergunta está a caminho
   void conferindo.then(async () => {
+    // Pedido que sai de um card (`dono` = a conta do card): só entra se a conferência leu o perfil e a sessão é a do card; senão nada entra nem sai.
+    // A conferência acabou de ler o perfil (`contaDaSessao` já apagou a conversa da conta anterior); a pergunta digitada não tem `dono` e segue como sempre.
+    if (q.dono !== undefined && (!conferiu || dono !== q.dono)) { perguntando = false; notifica(); return; }
     // Ligado, TUDO vai à IA: texto livre, chip, faixa do Piggy; `topic`, `key` e os assuntos reais ficam de fora. O freio é lido DEPOIS da
     // conferência: se a conta mudou, o do cache era da anterior e mandaria a conta nova à IA sem ela estar na lista.
     const ia = chatIa() && (dono !== antes || velho()) ? await reler().catch(() => false) : chatIa(); // desligado no cache: o lado seguro, sem esperar o /me
+    // A releitura do /me é um 2º `await`: a sessão pode ter virado outra conta nele (o foco leu o perfil e `contaDaSessao` limpou a conversa), e o pedido do card é da conta do card.
+    if (q.dono !== undefined && dono !== q.dono) { perguntando = false; notifica(); return; }
     perguntando = false;
     if (ia) return perguntarIa(q.text);
     const topic = q.topic ?? (investido(q.text) ? "investido" : metas(q.text) ? "metas" : null);
@@ -79,7 +85,7 @@ export function ask(q: { text: string; topic?: TopicId | null; cat?: string | nu
 function perguntarIa(texto: string) {
   const bolha = ++seq, resp = ++seq;
   msgs = [...msgs, { id: bolha, role: "user", text: texto },
-    { id: resp, role: "piggy", ia: true, real: true, estado: "enviando", text: PREPARANDO, passos: [], parcial: "", blocos: [] }];
+    { id: resp, role: "piggy", ia: true, real: true, uid: dono, estado: "enviando", text: PREPARANDO, passos: [], parcial: "", blocos: [] }]; // `uid`: o dono dos cards da resposta (as ações deles conferem a conta)
   notifica();
   if (dono == null) { patch(resp, { estado: "erro", text: SESSAO }); return; }
   void enviarIa(texto, (p) => { if (naConversa(resp)) patch(resp, p); });

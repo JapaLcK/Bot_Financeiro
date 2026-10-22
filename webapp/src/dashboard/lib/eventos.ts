@@ -1,9 +1,13 @@
 // Avisos ao vivo da /api/v2/eventos (SSE). Qualquer aviso (e cada conexão aberta, que
-// pode ter perdido avisos enquanto caída) invalida TODAS as consultas: o `recurso` do
+// pode ter perdido avisos enquanto caída) invalida TODAS as consultas, menos as `meta: { foto: true }`: o `recurso` do
 // aviso é ignorado de propósito. Só monta depois do portão (parts/Entrada.tsx).
 import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InvalidateQueryFilters } from "@tanstack/react-query";
 import { meQuery } from "./v2";
+
+// A lista que um card da IA abre (parts/cardIa/LancamentosDoCard.tsx) é uma foto do momento em que foi aberta, como o card: o aviso não a relê
+// (refaria um GET por página e uma leitura de perfil por GET, e o perfil tem teto de 60/min). Quem relê tudo, passa isto ao `invalidateQueries`.
+export const todasMenosFotos: InvalidateQueryFilters = { predicate: (q) => q.meta?.foto !== true };
 
 export function useEventosV2() {
   const qc = useQueryClient();
@@ -17,8 +21,8 @@ export function useEventosV2() {
     const abrir = () => {
       const es = new EventSource("/api/v2/eventos");
       fonte = es;
-      es.onopen = () => { espera = 1000; qc.invalidateQueries(); };
-      es.onmessage = () => { qc.invalidateQueries(); };
+      es.onopen = () => { espera = 1000; qc.invalidateQueries(todasMenosFotos); };
+      es.onmessage = () => { qc.invalidateQueries(todasMenosFotos); };
       es.onerror = async () => {
         // CONNECTING: queda de rede ou fim do stream, o navegador reconecta sozinho.
         // CLOSED: o servidor recusou (401, 429…) e o EventSource desistiu.

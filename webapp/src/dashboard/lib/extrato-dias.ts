@@ -5,7 +5,7 @@ import { decimal, isoDay, longDate, moneyText, weekday } from "./format.js";
 export const ATALHOS = [["", "", "Tudo"], ["entrada", "", "Entradas"], ["saida", "", "Saídas"], ["", "cartao", "Cartão"]] as const;
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
-const existe = (d: string) => ISO.test(d) && new Date(`${d}T12:00:00Z`).toISOString().slice(0, 10) === d; // "2026-02-30" passa na regex e não existe
+export const existe = (d: string) => ISO.test(d) && new Date(`${d}T12:00:00Z`).toISOString().slice(0, 10) === d; // "2026-02-30" passa na regex e não existe
 // "Hoje · 19/10", "Ontem · 18/10", "Sex · 17/10" (outro ano: "/aa", menos em Hoje/Ontem, como no app). `hoje` é o dia de São Paulo (hojeNoFuso), nunca o do aparelho.
 export function rotuloDia(dia: string, hoje: string): string {
   if (!existe(dia) || !ISO.test(hoje)) return longDate(isoDay(dia));

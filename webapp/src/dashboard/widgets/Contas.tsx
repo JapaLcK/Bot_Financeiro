@@ -10,8 +10,8 @@ import { Frame } from "../parts/Frame";
 import { Selos, type Motivo } from "../parts/Selos";
 
 // Só texto decimal finito é número ("1234.56", "-5", "1E+2"); null, "", "NaN", "Infinity" e o resto viram "—".
-const valor = (s: string | null) => (typeof s === "string" && /^-?\d+(\.\d+)?(e[+-]?\d+)?$/i.test(s) && Number.isFinite(Number(s)) ? Number(s) : null);
-const saldoOu = (s: string | null, moeda: string) => { const n = valor(s); return n === null ? "—" : moneyIn(n, moeda); };
+export const valor = (s: string | null) => (typeof s === "string" && /^-?\d+(\.\d+)?(e[+-]?\d+)?$/i.test(s) && Number.isFinite(Number(s)) ? Number(s) : null);
+export const saldoOu = (s: string | null, moeda: string) => { const n = valor(s); return n === null ? "—" : moneyIn(n, moeda); };
 
 function Linha({ nome, saldo, moeda, motivos }: { nome: string; saldo: string | null; moeda: string; motivos: Motivo[] }) {
   return (

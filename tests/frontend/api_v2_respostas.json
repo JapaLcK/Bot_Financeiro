@@ -49,13 +49,13 @@
       "fora_do_total": 3,
       "carteira": { "saldo": "100.00", "motivos": ["carteira_nao_confirmada", "conciliacao_pendente", "movimentos_pendentes", "especie_incompleta"] },
       "contas": [
-        { "id": 1, "instituicao": "Nubank", "nome": "Conta", "saldo": "1000.00", "moeda": "BRL", "no_total": true, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": [] },
-        { "id": 2, "instituicao": "Itaú", "nome": "Conta corrente", "saldo": "200.00", "moeda": "BRL", "no_total": true, "conexao": "error_recoverable", "sincronizado_em": "2026-09-28T09:30:00Z", "motivos": ["banco_desatualizado"] },
-        { "id": 3, "instituicao": "Nubank", "nome": "Conta antiga", "saldo": "50.00", "moeda": "BRL", "no_total": true, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["conta_fora_do_ultimo_sync"] },
-        { "id": 4, "instituicao": "Inter", "nome": null, "saldo": "10.00", "moeda": "BRL", "no_total": true, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["moeda_presumida"] },
-        { "id": 5, "instituicao": "Wise", "nome": "Conta em dólar", "saldo": "30.00", "moeda": "USD", "no_total": false, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["outra_moeda"] },
-        { "id": 6, "instituicao": "Bradesco", "nome": "Conta", "saldo": null, "moeda": "BRL", "no_total": false, "conexao": "paused", "sincronizado_em": null, "motivos": ["conexao_pausada"] },
-        { "id": 7, "instituicao": null, "nome": "Conta", "saldo": null, "moeda": "BRL", "no_total": false, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["saldo_ausente"] }
+        { "id": 1, "instituicao": "Nubank", "nome": "Conta", "logo_proprio": "/brand/bancos/18236120.png", "logo_url": null, "saldo": "1000.00", "moeda": "BRL", "no_total": true, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": [] },
+        { "id": 2, "instituicao": "Itaú", "nome": "Conta corrente", "logo_proprio": "/brand/bancos/60701190.png", "logo_url": null, "saldo": "200.00", "moeda": "BRL", "no_total": true, "conexao": "error_recoverable", "sincronizado_em": "2026-09-28T09:30:00Z", "motivos": ["banco_desatualizado"] },
+        { "id": 3, "instituicao": "Nubank", "nome": "Conta antiga", "logo_proprio": "/brand/bancos/18236120.png", "logo_url": null, "saldo": "50.00", "moeda": "BRL", "no_total": true, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["conta_fora_do_ultimo_sync"] },
+        { "id": 4, "instituicao": "Inter", "nome": null, "logo_proprio": "/brand/bancos/00416968.png", "logo_url": null, "saldo": "10.00", "moeda": "BRL", "no_total": true, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["moeda_presumida"] },
+        { "id": 5, "instituicao": "Wise", "nome": "Conta em dólar", "logo_proprio": null, "logo_url": "https://cdn.pluggy.ai/assets/connector-icons/9999.svg", "saldo": "30.00", "moeda": "USD", "no_total": false, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["outra_moeda"] },
+        { "id": 6, "instituicao": "Bradesco", "nome": "Conta", "logo_proprio": "/brand/bancos/60746948.png", "logo_url": null, "saldo": null, "moeda": "BRL", "no_total": false, "conexao": "paused", "sincronizado_em": null, "motivos": ["conexao_pausada"] },
+        { "id": 7, "instituicao": null, "nome": "Conta", "logo_proprio": null, "logo_url": null, "saldo": null, "moeda": "BRL", "no_total": false, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["saldo_ausente"] }
       ]
     }
   },
