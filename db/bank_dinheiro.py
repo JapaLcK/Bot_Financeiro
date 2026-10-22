@@ -45,12 +45,16 @@ def candidatos_carteira(cur, user_id, declarations):
         (user_id, [abs(_money(d["amount"])) for d in pendentes],
          datetime.combine(min(dias) - w, time.min, tzinfo=_tz()),
          datetime.combine(max(dias) + w + timedelta(days=1), time.min, tzinfo=_tz())))
-    lancamentos = [dict(r, dia=launch_day(r["criado_em"])) for r in cur.fetchall()]
+    por_dia = {}  # uma vez por requisição: cada declaração olha só (seus centavos, os 7 dias da janela), não a lista toda
+    for r in cur.fetchall():
+        c = dict(r, dia=launch_day(r["criado_em"]))
+        por_dia.setdefault((_money(c["valor"]), c["dia"]), []).append(c)
     saida = {}
     for d in pendentes:  # a autoridade é esta: centavos, tipo e dia (o SQL só estreita)
-        certos = [c for c in lancamentos if c["tipo"] == d["tipo"] and _money(c["valor"]) == abs(_money(d["amount"]))
-                  and abs((c["dia"] - _dia(d)).days) <= RECON_DATE_WINDOW]
-        certos.sort(key=lambda c: (not tem_evidencia(d, {"description": c["alvo"]}), abs((c["dia"] - _dia(d)).days), c["id"]))
+        centavos, base = abs(_money(d["amount"])), _dia(d)
+        certos = [c for k in range(-RECON_DATE_WINDOW, RECON_DATE_WINDOW + 1)
+                  for c in por_dia.get((centavos, base + timedelta(days=k)), ()) if c["tipo"] == d["tipo"]]
+        certos.sort(key=lambda c: (not tem_evidencia(d, {"description": c["alvo"]}), abs((c["dia"] - base).days), c["id"]))
         saida[d["launch_id"]] = [{"id": c["id"], "name": c["alvo"], "category": c["categoria"],
                                   "amount": float(c["valor"]), "date": c["dia"].isoformat()}
                                  for c in certos[:MAX_CANDIDATOS]]
