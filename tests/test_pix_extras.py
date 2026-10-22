@@ -12,9 +12,11 @@ Controles negativos (rodados — ver o relato do PR):
   · tirar `ebook` de `EFEITOS_DE_COMPRA`                  → D1 vermelho;
   · `alertar_valor` comparando com `amount_cents`          → V1 vermelho;
   · `conferir_entrega` sem as checagens de estorno         → J2/J3 vermelhos;
-  · `cobranca_do_dono` sem `user_id` no where              → J5 vermelho.
+  · `cobranca_do_dono` sem `user_id` no where              → J5 vermelho;
+  · `RECEIVED_IN_CASH` fora de `_PAGO` (#820)              → J7 vermelho.
   Positivos: D2 (sem cadernos o grant sai e nada é gravado), J1 (entrega), V1
-  (o plano sozinho ainda alerta).
+  (o plano sozinho ainda alerta), J7b (baixa manual com `refunds` ainda estorna)
+  e J4 (`STATUS_NOVO` segue sem entregar: o conserto não aceita qualquer status).
 """
 from __future__ import annotations
 
@@ -263,6 +265,24 @@ def test_j4_falha_do_asaas_nao_envia_nem_fecha(user_id, externo, mundo, asaas_fa
     asaas_falso["resposta"] = resposta
     entregar_pendentes()
     assert {r["resultado"] for r in _pendencias(user_id).values()} == {None}
+    assert _emails(mundo, user_id) == []
+
+
+def test_j7_baixa_manual_entrega_os_dois_sem_tocar_no_stripe(user_id, externo, mundo, asaas_falso):
+    """#820: `receiveInCash` devolve `RECEIVED_IN_CASH` no GET; o dreno já deu o plano."""
+    _paga(user_id)
+    asaas_falso["resposta"] = {"status": "RECEIVED_IN_CASH", "refunds": None}
+    entregar_pendentes()
+    assert {r["resultado"] for r in _pendencias(user_id).values()} == {"enviado"}
+    assert len(_emails(mundo, user_id)) == 2 and mundo.chamadas == [] and mundo.consultas == []
+
+
+def test_j7b_baixa_manual_com_estorno_fecha_estornado(user_id, externo, mundo, asaas_falso):
+    """POSITIVO do J7: aceitar `RECEIVED_IN_CASH` não pula a checagem de `refunds`."""
+    _paga(user_id)
+    asaas_falso["resposta"] = {"status": "RECEIVED_IN_CASH", "refunds": [{"value": 10.0}]}
+    entregar_pendentes()
+    assert {r["resultado"] for r in _pendencias(user_id).values()} == {"estornado"}
     assert _emails(mundo, user_id) == []
 
 

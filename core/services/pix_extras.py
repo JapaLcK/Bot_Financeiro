@@ -11,7 +11,9 @@ from __future__ import annotations
 # Status do `GET /v3/payments/{id}` do Asaas. Os de estorno/contestação seguram a
 # entrega para sempre (D2/D3, a mesma régua do cartão); contestação e estorno em
 # andamento não mudam o status local (ROTEAMENTO do dreno), por isso a consulta.
-_PAGO = {"RECEIVED", "CONFIRMED"}
+# `RECEIVED_IN_CASH` é a baixa manual (`receiveInCash`): o dreno já concede o acesso
+# com o mesmo `PAYMENT_RECEIVED`, então os cadernos saem junto (#820).
+_PAGO = {"RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"}
 _ESTORNO = {"REFUNDED", "REFUND_REQUESTED", "REFUND_IN_PROGRESS", "CHARGEBACK_REQUESTED",
             "CHARGEBACK_DISPUTE", "AWAITING_CHARGEBACK_REVERSAL"}
 _ESTORNO_LOCAL = {"refunded", "refunded_partial", "chargeback"}
