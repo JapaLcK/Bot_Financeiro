@@ -11,33 +11,29 @@ fresca a cada refresh.
 - Custo baixo (1 chamada quando o user abre Análises)
 - Dismiss fica no localStorage do client (TTL 24h)
 
-Convenção de retorno:
-  {
-    "type":          "budget_warning" | "category_spike" |
-                     "recurring_increase" | "salary_burn_fast" |
-                     "goal_behind",
-    "severity":      "info" | "warning" | "critical",
-    "title":         "Alimentação tá apertando",  # curto, anti-fricção
-    "message":       "97% do orçamento de maio e faltam 19 dias 😅",
-    "action_label":  "Ajustar" | None,
-    "action_view":   "budgets" | "recurring" | "goals" | None,
-    "icon":          "🍔" | "⚠️" | "🐷" ...,
-    "key":           "budget:alimentação"  # estável p/ dismiss no client
-  }
+Cada detector devolve itens do contrato v1 (`core/services/insights_contrato.py`):
+os campos legados (`key`, `title`, `message`, `severity`, `action_*`, `icon`) e a
+`explicacao` com período, fonte, referência e números calculados aqui.
 
 Tom: amigo, sem julgar, anti-fricção. Mascote: Piggy 🐷.
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from typing import Any
 
-from utils_text import fmt_brl
+from core.services.insights_contrato import (
+    dinheiro, diferenca, montar_item, navegar, nome, periodo_dia, periodo_mes, sujeito,
+)
+from utils_text import fmt_brl, merchant_key
 
 from .budgets import get_budgets_status_for_month
-from .connection import TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, get_conn
+from .connection import TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, cat_key, get_conn
 from .recurring import list_recurring_expenses
 from .users import ensure_user
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -85,10 +81,7 @@ def _detect_budget_warnings(user_id: int) -> list[dict[str, Any]]:
     today = date.today()
     days_left = max(0, _days_in_month(today) - today.day)
 
-    try:
-        status = get_budgets_status_for_month(user_id)
-    except Exception:
-        return []
+    status = get_budgets_status_for_month(user_id)
 
     for b in status.get("budgets", []):
         st = b.get("status")
@@ -111,16 +104,15 @@ def _detect_budget_warnings(user_id: int) -> list[dict[str, Any]]:
             title = f"{cat.capitalize()} tá apertando"
             msg = f"{pct:.0f}% do orçamento de {cat.lower()} e faltam {days_left} dias."
 
-        out.append({
-            "type": "budget_warning",
-            "severity": severity,
-            "title": title,
-            "message": msg,
-            "action_label": "Ajustar",
-            "action_view": "budgets",
-            "icon": emoji,
-            "key": f"budget:{cat.lower()}",
-        })
+        gasto, limite = dinheiro(b.get("spent") or 0), dinheiro(b.get("budget") or 0)
+        out.append(montar_item(
+            "budget_warning", sujeito(cat, cat_key(cat)), periodo_mes(today), title=title, message=msg, severity=severity,
+            icon=emoji, action_label="Ajustar", action_view="budgets",
+            referencia={"estatistica": "orcamento_do_mes", "categoria": nome(cat), "valor": limite},
+            atual={"valor": gasto, "percentual": pct}, diferenca=diferenca(gasto, limite),
+            impacto={"tipo": "excesso" if gasto > limite else "restante", "valor": abs(limite - gasto)},
+            acoes=[navegar(f"Ajustar orçamento de {nome(cat)}", "budgets", orcamento_valor=limite,
+                           gasto_valor=gasto)]))
     return out
 
 
@@ -214,19 +206,17 @@ def _detect_category_spike(user_id: int) -> list[dict[str, Any]]:
         except Exception:
             pass
 
-        out.append({
-            "type": "category_spike",
-            "severity": "warning" if delta_pct < 60 else "critical",
-            "title": f"{cat.capitalize()} subiu {delta_pct:.0f}% no mês",
-            "message": (
-                f"{fmt_brl(current)} contra média de {fmt_brl(avg_prev)} "
-                f"nos 3 meses anteriores. Vale conferir."
-            ),
-            "action_label": "Ver análises",
-            "action_view": "analytics",
-            "icon": emoji,
-            "key": f"spike:{cat}",
-        })
+        out.append(montar_item(
+            "category_spike", sujeito(cat, cat_key(cat)), periodo_mes(today),
+            severity="warning" if delta_pct < 60 else "critical",
+            title=f"{cat.capitalize()} subiu {delta_pct:.0f}% no mês",
+            message=(f"{fmt_brl(current)} contra média de {fmt_brl(avg_prev)} "
+                     f"nos 3 meses anteriores. Vale conferir."),
+            action_label="Ver análises", action_view="analytics", icon=emoji,
+            referencia={"estatistica": "media_meses_com_gasto", "categoria": nome(cat),
+                        "valor": dinheiro(avg_prev), "janela": {"meses": 3}},
+            atual={"valor": dinheiro(current)}, diferenca=diferenca(current, avg_prev),
+            amostra={"suficiente": True, "meses_com_gasto": len(prev_nonzero), "minimo_meses": 2}))
     return out
 
 
@@ -235,10 +225,7 @@ def _detect_recurring_increase(user_id: int) -> list[dict[str, Any]]:
     today = date.today()
     cutoff = today - timedelta(days=60)
     out: list[dict[str, Any]] = []
-    try:
-        recs = list_recurring_expenses(user_id, include_inactive=False)
-    except Exception:
-        return []
+    recs = list_recurring_expenses(user_id, include_inactive=False)
 
     for r in recs:
         if not r.get("last_amount") or not r.get("last_amount_changed_at"):
@@ -258,20 +245,25 @@ def _detect_recurring_increase(user_id: int) -> list[dict[str, Any]]:
         if abs(delta_pct) < 1.0:
             continue
         signal = "subiu" if delta > 0 else "caiu"
-        out.append({
-            "type": "recurring_increase",
-            "severity": "warning" if delta > 0 and abs(delta_pct) >= 10 else "info",
-            "title": f"{r['name']} {signal} {abs(delta_pct):.0f}%",
-            "message": (
+        freq = r.get("frequency") or "monthly"
+        # Impacto e ação (Pro) só onde a conta por ano é exata: mensal x12, anual x1.
+        vezes = {"monthly": 12, "annual": 1}.get(freq)
+        out.append(montar_item(
+            "recurring_increase", r["id"], periodo_dia(changed_at),
+            severity="warning" if delta > 0 and abs(delta_pct) >= 10 else "info",
+            title=f"{r['name']} {signal} {abs(delta_pct):.0f}%",
+            message=(
                 f"De {fmt_brl(old)} pra {fmt_brl(new)} "
                 f"(Δ {'+' if delta >= 0 else '-'}{fmt_brl(abs(delta))}). "
                 f"Reajuste em {changed_at.strftime('%d/%m')}."
             ),
-            "action_label": "Ver gastos fixos",
-            "action_view": "fixed",
-            "icon": "📈" if delta > 0 else "📉",
-            "key": f"recurring:{r['id']}:{changed_at.isoformat()}",
-        })
+            action_label="Ver gastos fixos", action_view="fixed", icon="📈" if delta > 0 else "📉",
+            referencia={"estatistica": "valor_anterior", "recorrente": nome(r["name"]),
+                        "valor": dinheiro(old), "frequencia": freq},
+            atual={"valor": dinheiro(new), "data": changed_at}, diferenca=diferenca(new, old),
+            impacto=vezes and {"por_ano_valor": (dinheiro(new) - dinheiro(old)) * vezes},
+            acoes=vezes and [navegar(f"Revisar {nome(r['name'])}", "fixed",
+                                     custo_por_ano_valor=dinheiro(new) * vezes)]))
     return out
 
 
@@ -385,16 +377,13 @@ def _detect_salary_burn_fast(user_id: int) -> list[dict[str, Any]]:
         f"Já consumiu {expense_pct:.0f}% da sua receita média mensal "
         f"e só {progress:.0f}% do mês passou. Vale dar uma freada."
     )
-    return [{
-        "type": "salary_burn_fast",
-        "severity": severity,
-        "title": title,
-        "message": msg,
-        "action_label": "Ver análises",
-        "action_view": "analytics",
-        "icon": "🔥",
-        "key": f"salary_burn:{today.strftime('%Y-%m')}",
-    }]
+    return [montar_item(
+        "salary_burn_fast", "receita", periodo_mes(today), title=title, message=msg, severity=severity,
+        icon="🔥", action_label="Ver análises", action_view="analytics",
+        referencia={"estatistica": "receita_media_mensal", "valor": dinheiro(expected_income)},
+        atual={"despesa_valor": dinheiro(current_expense), "percentual_da_receita": round(expense_pct, 1),
+               "percentual_do_mes": round(progress, 1)},
+        amostra={"suficiente": True, "meses_com_receita": len(incomes), "minimo_meses": 2})]
 
 
 def _detect_goals_behind(user_id: int) -> list[dict[str, Any]]:
@@ -406,10 +395,7 @@ def _detect_goals_behind(user_id: int) -> list[dict[str, Any]]:
     """
     from .pockets import list_pockets
 
-    try:
-        pockets = list_pockets(user_id)
-    except Exception:
-        return []
+    pockets = list_pockets(user_id)
 
     out: list[dict[str, Any]] = []
     today = date.today()
@@ -428,19 +414,15 @@ def _detect_goals_behind(user_id: int) -> list[dict[str, Any]]:
         days_left = (td - today).days
         if days_left <= 0:
             # Prazo passou, meta não cumprida
-            out.append({
-                "type": "goal_behind",
-                "severity": "critical",
-                "title": f"Meta '{p['name']}' venceu",
-                "message": (
-                    f"Prazo era {td.strftime('%d/%m/%Y')} e ainda faltam "
-                    f"{fmt_brl(tgt - saved)}. Vale rever o prazo."
-                ),
-                "action_label": "Ver metas",
-                "action_view": "pockets",
-                "icon": p.get("emoji") or "🎯",
-                "key": f"goal:{p['id']}:expired",
-            })
+            out.append(montar_item(
+                "goal_behind", f"{p['id']}:vencida", periodo_mes(today), severity="critical",
+                title=f"Meta '{p['name']}' venceu",
+                message=(f"Prazo era {td.strftime('%d/%m/%Y')} e ainda faltam "
+                         f"{fmt_brl(tgt - saved)}. Vale rever o prazo."),
+                action_label="Ver metas", action_view="pockets", icon=p.get("emoji") or "🎯",
+                referencia={"estatistica": "meta_com_prazo", "caixinha": nome(p["name"]),
+                            "meta_valor": dinheiro(tgt), "prazo": td},
+                atual={"saldo_valor": dinheiro(saved), "falta_valor": dinheiro(tgt - saved)}))
             continue
 
         remaining = tgt - saved
@@ -467,19 +449,18 @@ def _detect_goals_behind(user_id: int) -> list[dict[str, Any]]:
         # behind = ritmo < 50% do necessário (consistente com /goals/status)
         if needed > 0 and current_pace < needed * 0.5:
             shortfall_pct = (1.0 - (current_pace / needed)) * 100.0 if needed > 0 else 100.0
-            out.append({
-                "type": "goal_behind",
-                "severity": "warning" if shortfall_pct < 80 else "critical",
-                "title": f"Meta '{p['name']}' atrasada",
-                "message": (
-                    f"Pra bater o prazo precisaria de {fmt_brl(needed)}/mês, "
-                    f"mas o ritmo atual tá em {fmt_brl(max(0, current_pace))}/mês."
-                ),
-                "action_label": "Ver metas",
-                "action_view": "pockets",
-                "icon": p.get("emoji") or "🎯",
-                "key": f"goal:{p['id']}:behind",
-            })
+            out.append(montar_item(
+                "goal_behind", f"{p['id']}:atrasada", periodo_mes(today),
+                severity="warning" if shortfall_pct < 80 else "critical",
+                title=f"Meta '{p['name']}' atrasada",
+                message=(f"Pra bater o prazo precisaria de {fmt_brl(needed)}/mês, "
+                         f"mas o ritmo atual tá em {fmt_brl(max(0, current_pace))}/mês."),
+                action_label="Ver metas", action_view="pockets", icon=p.get("emoji") or "🎯",
+                referencia={"estatistica": "ritmo_mensal_necessario", "caixinha": nome(p["name"]),
+                            "valor": dinheiro(needed), "meta_valor": dinheiro(tgt), "prazo": td},
+                atual={"valor": dinheiro(max(0, current_pace)), "saldo_valor": dinheiro(saved),
+                       "janela": {"dias": 90}},
+                diferenca=diferenca(max(0, current_pace), needed)))
     return out
 
 
@@ -490,37 +471,35 @@ def _detect_goals_behind(user_id: int) -> list[dict[str, Any]]:
 def _detect_of_bill_increase(user_id: int) -> list[dict[str, Any]]:
     """Contas que aumentaram, detectadas via Open Finance (Fase 6) — pega até conta que o
     usuário nem cadastrou como recorrente. Complementa `_detect_recurring_increase`."""
-    try:
-        from db import detect_open_finance_bill_increase
-        flags = detect_open_finance_bill_increase(user_id)
-    except Exception:
-        return []
+    from db import detect_open_finance_bill_increase
+    flags = detect_open_finance_bill_increase(user_id)
     out: list[dict[str, Any]] = []
     for f in flags:
         old = float(f["old"])
         new = float(f["new"])
         pct = float(f["pct"])
-        out.append({
-            "type": "of_bill_increase",
-            "severity": "warning" if pct >= 15 else "info",
-            "title": f"{f['merchant']} subiu {pct:.0f}%",
-            "message": f"De {fmt_brl(old)} pra {fmt_brl(new)} — detectado pelo Open Finance.",
-            "action_label": "Ver na timeline",
-            "action_view": "history",
-            "icon": "📈",
-            "key": f"of_bill_increase:{f['merchant']}:{new:.2f}",
-        })
+        # Chave pelo mês da cobrança: outro valor no mesmo mês é piora (ou melhora) do mesmo fato.
+        out.append(montar_item(
+            "of_bill_increase", sujeito(f["merchant"], merchant_key(f["merchant"])), periodo_dia(f["date"]),
+            chave_periodo=f"{f['date']:%Y-%m}",
+            severity="warning" if pct >= 15 else "info", title=f"{f['merchant']} subiu {pct:.0f}%",
+            message=f"De {fmt_brl(old)} pra {fmt_brl(new)} — detectado pelo Open Finance.",
+            # Sem botão, como em produção (o sanitizador antigo anulava `history`); voltar com ele é do dono.
+            action_label=None, action_view=None, icon="📈",
+            referencia={"estatistica": "media_meses_anteriores", "estabelecimento": nome(f["merchant"]),
+                        "valor": dinheiro(old), "meses": f["meses_anteriores"]},
+            atual={"valor": dinheiro(new), "data": f["date"]}, diferenca=diferenca(f["new"], f["old"])))
     return out
 
 
-def compute_active_insights(user_id: int) -> list[dict[str, Any]]:
-    """Retorna lista de insights ativos do user, ordenada por severidade.
+def compute_active_insights(user_id: int) -> tuple[list[dict[str, Any]], list[str]]:
+    """(insights do user ordenados por severidade, nomes dos detectores que falharam).
 
-    Cada detector falha silenciosamente (try/except) — se um detector
-    quebra, os outros continuam.
+    Detector que quebra não derruba os outros: os itens deles saem, e o nome dele vai em `falhas`.
     """
     ensure_user(user_id)
     out: list[dict[str, Any]] = []
+    falhas: list[str] = []
     for detector in (
         _detect_budget_warnings,
         _detect_recurring_increase,
@@ -531,15 +510,23 @@ def compute_active_insights(user_id: int) -> list[dict[str, Any]]:
     ):
         try:
             out.extend(detector(user_id))
-        except Exception:
-            # Não loga aqui pra evitar barulho — detector individual quebrado
-            # não deve impedir o resto. Em prod o pool sync já loga conexão.
-            continue
+        except Exception as exc:
+            # Detector quebrado não impede o resto, mas entra em `falhas`: quem chama não pode ler a lista
+            # incompleta como "nada a apontar". O log leva só o nome e a classe do erro (sem dado pessoal).
+            logger.warning("insights: %s falhou (%s)", detector.__name__, type(exc).__name__)
+            falhas.append(detector.__name__)
 
     # Ordena por severidade: critical > warning > info
     sev_order = {"critical": 0, "warning": 1, "info": 2}
     out.sort(key=lambda i: sev_order.get(i.get("severity"), 99))
-    return out
+    return out, falhas
 
 
-__all__ = ["compute_active_insights"]
+def motivo_sem_insights(user_id: int) -> str:
+    """Por que a lista saiu vazia: `sem_dados` (nada financeiro) ou `sem_destaques` (há dados, nada a apontar)."""
+    from .users import _tem_dados_financeiros
+    with get_conn() as conn, conn.cursor() as cur:
+        return "sem_destaques" if _tem_dados_financeiros(cur, user_id) else "sem_dados"
+
+
+__all__ = ["compute_active_insights", "motivo_sem_insights"]
