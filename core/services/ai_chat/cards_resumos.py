@@ -25,6 +25,31 @@ def _extremos(linhas) -> dict:
             "menor_mes": um(min(com, key=lambda l: l[2], default=None))}
 
 
+def casar_categoria(itens: list[dict], pedida: str, rotulo: str) -> dict | None:
+    """O item de `itens` cujo `rotulo` é a categoria pedida, ou None. Pela MESMA chave do `get_category_spend`
+    (`cat_key`: caixa e acento, vazio = `CAT_VAZIA_LABEL`); sem ela, pelo `normalize_text` (pontuação fora:
+    "e commerce" = "e-commerce"). Só vale candidato único: ambíguo não casa."""
+    achadas = [c for c in itens if cat_key(c[rotulo]) == cat_key(pedida)]
+    if not achadas and (n := normalize_text(pedida)):  # só texto (emoji e símbolo viram "" e não casam)
+        achadas = [c for c in itens if normalize_text(c[rotulo]) == n]
+    return achadas[0] if len(achadas) == 1 else None
+
+
+def resumo_corte(h: dict) -> dict:
+    """O que o MODELO vê do corte pedido (`SimuladorHabitos` em dict, dinheiro em float): o número só sob chave
+    monetária do `ai_guard` (`total_*`, `despesa_*`, `saldo_*`, `*_valor`). Linha em reais não leva `percentual`.
+    `em_todas`: o corte alcança toda a estimativa, de mais de uma categoria (a soma das categorias cortadas é a despesa mensal)."""
+    f = lambda x: None if x is None else float(x)  # noqa: E731
+    a, c = h["atual"]["saldo_final"], h["com_corte"]["saldo_final"]
+    return {"estado": h["estado"], "em_todas": len(h["cortes"]) > 1 and round(sum(x["despesa_mensal"] for x in h["cortes"]), 2) == round(h["despesa_mensal"], 2), "total_economia_mensal": f(h["economia_mensal"]),
+            "despesa_mensal": f(h["despesa_mensal"]), "saldo_em_90_dias_sem_corte": f(a),
+            "saldo_em_90_dias_com_corte": f(c), "saldo_a_mais_em_90_dias": f(h["com_corte"]["delta_vs_atual"]),
+            "categorias": [{"nome": str(x["nome"])[:60], "despesa_mensal": f(x["despesa_mensal"]),
+                            "economia_valor": f(x["economia_mensal"])}
+                           | ({} if x["valor_pedido"] is not None else {"percentual": x["percentual"]})
+                           for x in h["cortes"]]}
+
+
 def _top3(v: dict, categoria: str | None) -> dict:
     """As 3 maiores categorias (o `montar` as corta para 1 por aba ao comparar meses), o total delas e, se o usuário
     citou uma, o valor dela (`categoria_pedida`). Casa pela MESMA chave do `get_category_spend` (`cat_key`: caixa e
@@ -34,10 +59,7 @@ def _top3(v: dict, categoria: str | None) -> dict:
     cats = v["categorias"]  # o leitor já as ordena por valor, da maior (`db/mes_detalhes.py`)
     out = {**v, "categorias": cats[:3], "categorias_total": len(cats)}
     if categoria:
-        achadas = [c for c in cats if cat_key(c["categoria"]) == cat_key(categoria)]
-        if not achadas and (n := normalize_text(categoria)):  # só texto (emoji e símbolo viram "" e não casam)
-            achadas = [c for c in cats if normalize_text(c["categoria"]) == n]
-        achada = achadas[0] if len(achadas) == 1 else None
+        achada = casar_categoria(cats, categoria, "categoria")
         out["categoria_pedida"] = ({"categoria": achada["categoria"] or CAT_VAZIA_LABEL, "valor": achada["valor"]}
                                    if achada else {"categoria": categoria, "encontrada": False})
     return out

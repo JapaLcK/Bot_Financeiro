@@ -20,7 +20,8 @@ RAIZ = Path(__file__).resolve().parent.parent
 PASTA = RAIZ / "core/services/ai_chat"
 FONTES = [p for p in PASTA.rglob("*.py") if p.name != "system_prompt.py"] + [
     RAIZ / f for f in ("api/nativo/mes_detalhes.py", "db/mes_detalhes.py", "db/resumo_mes.py", "db/accounts.py",
-                       "core/services/cashflow.py", "core/services/comparacao_periodos.py", "db/rendimentos.py")]
+                       "core/services/cashflow.py", "core/services/comparacao_periodos.py", "db/rendimentos.py",
+                       "api/v2/simulador.py")]
 PRODUTORES_DA_REGRA_10 = [PASTA / "tools/launches.py", PASTA / "tools/mostrar_card.py"]
 NOME = re.compile(r"`([a-z_][a-z0-9_]*)`")
 TEXTO = SYSTEM_PROMPT.replace(FORMATO_WHATSAPP, "") + ADENDO_CARDS  # o bloco de formato fala de markdown, não do código
@@ -37,8 +38,16 @@ def _conhecidos(fontes) -> set[str]:
     `error`/`status`/`enum`, o 1º argumento de `_erro(...)`, campos anotados (pydantic), `x["campo"] = ...` e as
     constantes de motivos/IDS. Não é toda string do arquivo: um nome citado por engano não passa por docstring."""
     achados = {*NOMES_DE_TOOL, *cards.IDS}
-    for f in fontes:
-        for n in ast.walk(ast.parse(f.read_text())):
+    arvores = [ast.parse(f.read_text()) for f in fontes]
+    consts = {}  # `A, B = "a", "b"` e `A = "a"`: o código do erro pode vir por constante (PedidoInvalido(FORA_DA_ESTIMATIVA, ...))
+    for a in arvores:
+        for n in ast.walk(a):
+            if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Tuple) and isinstance(n.value, ast.Tuple):
+                consts.update({t.id: _str(v) for t, v in zip(n.targets[0].elts, n.value.elts) if isinstance(t, ast.Name)})
+            elif isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name):
+                consts[n.targets[0].id] = _str(n.value)
+    for a in arvores:
+        for n in ast.walk(a):
             if isinstance(n, ast.Dict):
                 for k, v in zip(n.keys, n.values):
                     if chave := _str(k):
@@ -48,6 +57,8 @@ def _conhecidos(fontes) -> set[str]:
                             achados |= {s for s in map(_str, valores) if s}
             elif isinstance(n, ast.Call) and getattr(n.func, "id", getattr(n.func, "attr", "")).endswith(("_erro", "_falha")) and n.args:
                 achados.add(_str(n.args[1 if getattr(n.func, "id", getattr(n.func, "attr", "")) == "_falha" else 0]))  # `_falha(card, codigo, msg)`
+            elif isinstance(n, ast.Call) and getattr(n.func, "id", "") == "PedidoInvalido" and n.args:
+                achados.add(_str(n.args[0]) or consts.get(getattr(n.args[0], "id", "")))
             elif isinstance(n, ast.Subscript) and isinstance(n.ctx, ast.Store):
                 achados.add(_str(n.slice))
             elif isinstance(n, (ast.Assign, ast.AnnAssign)):
@@ -73,6 +84,9 @@ def test_todo_nome_entre_crases_existe_no_codigo():
     assert _inexistentes(TEXTO, conhecidos) == set()
     # controle negativo embutido: o checador pega um nome que não existe
     assert _inexistentes(TEXTO + " `limitado_a_doze_meses`", conhecidos) == {"limitado_a_doze_meses"}
+    # os códigos do corte (PedidoInvalido, um por literal e outro por constante) contam; um nome que não é código de nada, não
+    assert {"valor_acima_da_estimativa", "categoria_fora_da_estimativa"} <= conhecidos
+    assert _inexistentes(TEXTO + " `nome_que_nao_e_codigo`", conhecidos) == {"nome_que_nao_e_codigo"}
     # controle positivo: os nomes desta rodada estão sendo conferidos, não ignorados
     assert {"limitado_a_12_meses", "historico_desde", "mes_futuro", "percentual"} <= set(NOME.findall(TEXTO))
 
@@ -173,3 +187,18 @@ def test_aviso_de_dado_velho_e_card_de_entrada_no_prompt():
     assert "resumo (entrou e saiu" not in ADENDO_CARDS and "NÃO mostra o que entrou" in ADENDO_CARDS
     assert "ÚNICO card que mostra o que entrou" in ADENDO_CARDS and "contando os dois (março estando em outubro = 8)" in ADENDO_CARDS and "`por_mes` do resultado do `show_card` renda" in ADENDO_CARDS
     assert "se `motivos` não estiver vazio diga" in SYSTEM_PROMPT  # a linha de investimentos do WhatsApp segue como era
+
+
+EXCECAO_VEREDITO = "a `veredito_fala` do `simulate_purchase` vai inteira, inclusive o que ela diz de banco"
+
+
+def test_prompt_manda_repetir_a_veredito_fala_e_a_excecao_do_app_vale_so_no_app():
+    """PR 3b: a linha do `simulate_purchase` manda repetir a fala do servidor sem suavizar; a exceção à REGRA DO APP
+    (o banco desatualizado vai inteiro, porque não há card dessa resposta) vive só nos prompts COM emissor."""
+    linha = next(l for l in SYSTEM_PROMPT.splitlines() if "→ `simulate_purchase`" in l)
+    for trecho in ("`veredito_fala`", "NUNCA calcule, suavize, omita nem contradiga", "não diga que cabe", "até 15 linhas"):
+        assert trecho in linha, trecho
+    com_excecao = [ADENDO_CARDS, ADENDO_CARDS_METAS, prompt_do_usuario(False, True), prompt_do_usuario(True, True)]
+    sem = [prompt_do_usuario(False, False), prompt_do_usuario(True, False)]
+    assert all(EXCECAO_VEREDITO in t for t in com_excecao) and not any(EXCECAO_VEREDITO in t for t in sem)
+    assert "única exceção" not in SYSTEM_PROMPT and "a `veredito_fala` nunca é cortada" in linha  # as duas exceções de 15 linhas

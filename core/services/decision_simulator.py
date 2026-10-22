@@ -297,11 +297,11 @@ def simular(snapshot: Snapshot, simulacao: Simulacao) -> dict[str, Any]:
     }
 
 
-def simular_corte(snapshot: Snapshot, cortes: dict[str, int]) -> dict[str, Any]:
-    """Corta `cortes` (`{chave da categoria: % 0..100}`, todas na estimativa) a partir de amanhã e compara com a
+def simular_corte(snapshot: Snapshot, cortes: dict[str, int], valores: dict | None = None) -> dict[str, Any]:
+    """Corta `cortes` (`{chave da categoria: % 0..100}`, todas na estimativa; `valores` = `{chave: reais por mês}`) a partir de amanhã e compara com a
     previsão atual, sobre UMA snapshot. Só a fonte `FONTE_VARIAVEL` troca; o resto das ocorrências é o mesmo."""
     est = snapshot.estimativa_variavel
-    por_categoria, economia = cortar(est, cortes)
+    por_categoria, economia = cortar(est, cortes, valores)
     novo = est["despesa_mensal"] - economia
     fixos = [e for e in snapshot.ocorrencias if e.fonte != FONTE_VARIAVEL]
     atual = _curva(snapshot, snapshot.ocorrencias, 0)
@@ -313,13 +313,15 @@ def simular_corte(snapshot: Snapshot, cortes: dict[str, int]) -> dict[str, Any]:
             "atual": atual, "com_corte": com, "premissas": list(snapshot.premissas)}
 
 
-def simulate(user_id: int, simulacao: Simulacao) -> dict[str, Any]:
-    """Saída legada (tool de IA e rota antiga): resumos em float, sem a trajetória diária."""
+def simulate(user_id: int, simulacao: Simulacao, *, com_veredito: bool = False) -> dict[str, Any]:
+    """Saída legada (tool de IA e rota antiga): resumos em float, sem a trajetória diária.
+    `com_veredito` (só a tool de IA) mantém o veredito; com a chave desligada ele já vem `None` e sai."""
     today = date.today()
     r = simular(carregar(user_id, today, today + timedelta(days=DIAS)), simulacao)
     for resumo in (r["atual"], *(c["resumo"] for c in r["cenarios"])):
         resumo.pop("trajetoria")
-        resumo.pop("veredito")  # a tool e a rota legada ainda não o leem (PR 3b)
+        if not com_veredito or resumo["veredito"] is None:
+            resumo.pop("veredito")  # a rota legada segue sem ele
     return legado(r)
 
 

@@ -126,6 +126,7 @@ TABELA = {
     ("GET", "/api/v2/perfil"): (B, "usuario_atual"), ("PUT", "/api/v2/perfil"): (B, "usuario_atual"),
     ("GET", "/api/v2/contas"): (B, "usuario_atual"),
     ("GET", "/api/v2/previsao"): (B, "usuario_atual"),
+    ("GET", "/api/v2/comparacao"): (B, "usuario_atual"),
     ("POST", "/api/v2/previsao/receita"): (B, "usuario_atual"),
     ("POST", "/api/v2/simulador"): (B, "usuario_atual"),
     ("POST", "/api/v2/simulador/habitos"): (B, "usuario_atual"),
@@ -158,6 +159,7 @@ TABELA = {
     ("GET", "/api/app/perfil"): (B, "usuario_do_app"), ("PUT", "/api/app/perfil"): (B, "usuario_do_app"),
     ("GET", "/api/app/contas"): (B, "usuario_do_app"),
     ("GET", "/api/app/previsao"): (B, "usuario_do_app"),
+    ("GET", "/api/app/comparacao"): (B, "usuario_do_app"),
     ("POST", "/api/app/previsao/receita"): (B, "usuario_do_app"),
     ("POST", "/api/app/simulador"): (B, "usuario_do_app"),
     ("POST", "/api/app/simulador/habitos"): (B, "usuario_do_app"),
@@ -248,6 +250,7 @@ POST /open-finance/{user_id}/pluggy-item|POST /open-finance/{user_id}/sync|POST 
 POST /open-finance/{user_id}/mock-connect|DELETE /open-finance/{user_id}|GET /open-finance/{user_id}/movements
 DELETE /open-finance/{user_id}/connections/{connection_id}
 POST /open-finance/{user_id}/movements/confirm|POST /open-finance/{user_id}/movements/undo
+POST /open-finance/{user_id}/movements/cash
 GET /open-finance/{user_id}/reconciliations
 POST /open-finance/{user_id}/reconciliations/{of_tx_id}/{action}
 GET /open-finance/{user_id}/cash-transfers|POST /open-finance/{user_id}/cash-transfers/{link_id}/{action}

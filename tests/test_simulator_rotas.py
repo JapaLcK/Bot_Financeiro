@@ -196,6 +196,7 @@ def test_note_da_tool_manda_os_dois_efeitos_e_proibe_apontar_vencedor(cliente):
     out = get_tool("simulate_purchase").execute(1, dict(VALIDO))
     note = out["note"]
     assert "não recomende" in note.lower() and "vencedor" in note.lower()
+    assert "veredito_fala" in note and "nunca diga que cabe" in note.lower()  # 3b
     resumo, contrato = out["cenarios"][0]["resumo"], out["cenarios"][0]["contrato"]
     # Identificador com `_` na note é nome de campo. Os candidatos saem das chaves
     # REAIS do payload, não de uma lista à mão: campo novo citado entra sozinho.
@@ -242,7 +243,9 @@ def test_tool_simula_o_user_da_conversa_e_nunca_um_id_vindo_dos_args(cliente, mo
     # consulta ao consolidado falhou → não dá pra confirmar
     (None, True, True, "Não foi possível confirmar seu saldo consolidado"),
 ])
-def test_tool_avisa_quando_o_saldo_de_partida_nao_e_o_consolidado(cliente, monkeypatch, cb, gate, erro, esperado):
+@pytest.mark.parametrize('ligada', ['1', '0'])
+def test_tool_avisa_quando_o_saldo_de_partida_nao_e_o_consolidado(cliente, monkeypatch, cb, gate, erro, esperado, ligada):
+    monkeypatch.setenv('SIMULADOR_VEREDITO_ENABLED', ligada)
     from datetime import date,datetime,timezone
     from decimal import Decimal
     from core.services.cashflow_snapshot import Snapshot,Motivo
@@ -258,5 +261,15 @@ def test_tool_avisa_quando_o_saldo_de_partida_nao_e_o_consolidado(cliente, monke
     if esperado:
         assert esperado in out["aviso_saldo"], out["aviso_saldo"]
     else:
-        assert "condicionais" in out["aviso_saldo"] and out["balance_source"] == "consolidated"
+        # Chave ligada: a `veredito_fala` já carrega os motivos, então a frase genérica sai. Desligada, é a da main.
+        assert ("condicionais" in out["aviso_saldo"]) == (ligada == "0") and out["balance_source"] == "consolidated"
+        assert (out["aviso_saldo"] == "") == (ligada == "1")
     assert "aviso_saldo" in out["note"]  # a note manda repetir o aviso
+
+
+def test_rota_legada_nao_devolve_veredito_com_a_chave_ligada(cliente, monkeypatch):
+    """O veredito é só da tool de IA (`com_veredito=True`): a rota HTTP segue sem ele, mesmo com a chave ligada."""
+    monkeypatch.setenv("SIMULADOR_VEREDITO_ENABLED", "1")
+    client, _, _ = cliente
+    sim = _post(client, VALIDO).json()["simulacao"]
+    assert "veredito" not in sim["atual"] and all("veredito" not in c["resumo"] for c in sim["cenarios"])

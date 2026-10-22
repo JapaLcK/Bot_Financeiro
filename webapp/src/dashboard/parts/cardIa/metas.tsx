@@ -28,7 +28,7 @@ function LinhaPedido({ icone, rotulo, rotuloAcessivel, texto, uid, children }: {
   const { ocupado, cheia } = useIa(), perguntando = usePerguntando(), fechado = !uidValido(uid) || ocupado || cheia || perguntando;
   return (
     <button type="button" className="pilula pilula-pedido" aria-disabled={fechado} aria-label={rotuloAcessivel} onClick={() => { if (!fechado) ask({ text: texto, dono: uid }); }}>
-      <span className="pilula-topo"><span className="pilula-icone"><i className={`ph ph-${icone}`} aria-hidden="true" /></span><span className="pilula-nome">{rotulo}</span></span>
+      <span className="pilula-topo"><span className="pilula-icone"><i className={`ph ${icone}`} aria-hidden="true" /></span><span className="pilula-nome">{rotulo}</span></span>
       {children}
     </button>
   );
@@ -40,8 +40,8 @@ export function CardMetas({ d, uid }: { d: Metas; uid?: number }) {
   return (
     <>
       <ul className="ci-metas">
-        {semReserva && <li><LinhaPedido icone="piggy-bank" rotulo="Montar reserva" rotuloAcessivel={`Montar reserva de emergência, ${MESES_PADRAO} meses, ainda não criada`} texto={PEDIDO_RESERVA} uid={uid}><Blocos n={MESES_PADRAO} cheios={0} /></LinhaPedido></li>}
-        {ordem.length === 0 && <li><LinhaPedido icone="plus" rotulo="Criar meta" rotuloAcessivel="Criar meta" texto={PEDIDO_META} uid={uid} /></li>}
+        {semReserva && <li><LinhaPedido icone="ph-piggy-bank" rotulo="Montar reserva" rotuloAcessivel={`Montar reserva de emergência, ${MESES_PADRAO} meses, ainda não criada`} texto={PEDIDO_RESERVA} uid={uid}><Blocos n={MESES_PADRAO} cheios={0} /></LinhaPedido></li>}
+        {ordem.length === 0 && <li><LinhaPedido icone="ph-plus" rotulo="Criar meta" rotuloAcessivel="Criar meta" texto={PEDIDO_META} uid={uid} /></li>}
         {vistas.map((m) => <li key={m.id}><MetaPilula m={m} custo={d.custo_mensal} /></li>)}
       </ul>
       {mais}

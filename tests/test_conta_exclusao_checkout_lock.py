@@ -28,6 +28,7 @@ import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.billing_pix as billing_pix
 from core.services import stripe_exclusao
 from frontend.routes.retomada import Comprador, comprador
+from _apoio_auth_app import csrf
 from test_billing_checkout import _CSRF_HEADERS, _auth_user_setup, _patch_stripe, _reset_rate_limiter  # noqa: F401
 from _paywall_gate_helpers import so_whatsapp
 from test_conta_exclusao_stripe import _conta, contas, loja, sql  # noqa: F401
@@ -104,8 +105,7 @@ def test_f_so_whatsapp_sem_auth_accounts_paga_pix(user_id, monkeypatch):
     monkeypatch.setattr(billing_pix, "criar_checkout", lambda *a, **k: chamou.append(1) or {"ok": True})
     client = TestClient(dashboard.app)
     client.get(f"/d/{db.create_dashboard_session(uid, hours=1.0)}?next=/precos", follow_redirects=False)
-    client.cookies.set(dashboard.CSRF_COOKIE_NAME, _CSRF_HEADERS[dashboard.CSRF_HEADER_NAME])
-    r = client.post("/billing/pix/checkout", headers=_CSRF_HEADERS, json={
+    r = client.post("/billing/pix/checkout", headers=csrf(client), json={
         "plan": "plus", "interval": "annual", "cpf_cnpj": "52998224725", "extras": []})
     assert r.status_code == 200, r.text
     assert chamou == [1]

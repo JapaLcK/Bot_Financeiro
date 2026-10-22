@@ -171,6 +171,26 @@
 .contas-mais i { font-size: 13px; transition: transform var(--t-fast) ease; }
 .contas-mais[aria-expanded="true"] i { transform: rotate(90deg); }
 
+/* Comparado ao mês anterior: as peças do "Para onde vai" (.cat-*), em duas linhas para caber na
+   coluna estreita da grade de 4 colunas: nome e valor em cima, o valor de antes e a variação
+   embaixo. O nome quebra em vez de ganhar reticência. No Resumo rola o corpo inteiro (a lista de
+   categorias rolando sozinha ficava quase sem altura na coluna estreita). */
+.cmp-corpo { display: grid; align-content: start; gap: 12px; min-height: 0; }
+.board .cmp-corpo { flex: 1; overflow-y: auto; overscroll-behavior: contain; margin: 0 -8px; padding: 0 8px; } /* as linhas têm margem −8px (.cats) */
+.board .cmp-corpo .cats { overflow: visible; min-height: auto; } /* senão a linha da grade encolhe e a de baixo sobrepõe */
+.cmp-lede { font-size: 11.5px; line-height: 1.4; }
+.cmp-linha {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name val" "antes delta";
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 6px 8px;
+}
+.cmp-linha .cat-name { white-space: normal; overflow: visible; }
+.cmp-linha .cat-nome { overflow: visible; overflow-wrap: anywhere; }
+.cmp-antes { grid-area: antes; min-width: 0; font-size: 11.5px; }
+
 @container (max-height: 230px) {
   .stat-foot { display: none; }
 }

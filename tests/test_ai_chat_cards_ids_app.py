@@ -55,3 +55,10 @@ def test_controle_card_da_tool_novo_no_python_sem_o_app_fica_vermelho(monkeypatc
     monkeypatch.setattr(cards, "DA_TOOL", (*cards.DA_TOOL, "novo_card"))
     app = ids_da_tool_do_app((PAINEL / "api/schemas/painel.ts").read_text(encoding="utf-8"))
     assert set(cards.DA_TOOL) - app == PENDENTE_DA_TOOL | {"novo_card"} != PENDENTE_DA_TOOL
+
+
+def test_recurso_simulador_habitos_do_bloco_esta_no_schema_do_app():
+    """O nome do recurso que `cards.le_simulador` embute (`simulador_habitos`) tem de estar no `schemasBloco` do app:
+    o app descarta chave desconhecida, e o card do chat voltaria aos sliders sem erro nenhum."""
+    ts = (PAINEL / "api/schemas/painel.ts").read_text(encoding="utf-8")
+    assert "simulador_habitos: simuladorHabitosSchema" in ts

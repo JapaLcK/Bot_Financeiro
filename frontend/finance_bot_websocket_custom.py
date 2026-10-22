@@ -131,7 +131,7 @@ from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_venen
 from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
 from core.services.pkce import VERIFIER_PATTERN as _PKCE_VERIFIER_PATTERN
-from core.services.stripe_sdk import _is_missing_stripe_customer, _sg
+from core.services.stripe_sdk import _is_missing_stripe_customer, _sg, uid_de_metadata
 from core.services.pkce import challenge_valido, s256 as pkce_s256
 from core.limite_corpo import LimiteCorpoMiddleware, MAX_OFX_BYTES
 from api.v2 import app as api_v2_app, eventos as api_v2_eventos
@@ -6139,9 +6139,15 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
 
     async def _resolve_user(obj) -> int | None:
         metadata = _g(obj, "metadata", {})
-        uid = _g(metadata, "finbot_user_id")
+        bruto = _g(metadata, "finbot_user_id")
+        uid = uid_de_metadata(bruto)
         if uid:
-            return int(uid)
+            return uid
+        if bruto:  # presente e inválido: vale como ausente; sem o valor cru (pode ser lixo/PII)
+            await log_system_event(
+                "warning", "stripe_metadata_user_invalido",
+                "finbot_user_id invalido na metadata do Stripe; tratado como ausente.",
+                source="billing", details={"event_type": event["type"], "object_id": _g(obj, "id")})
         cid = _g(obj, "customer")
         if cid:
             # `to_thread` em toda leitura/escrita `db.*` deste handler: mesma

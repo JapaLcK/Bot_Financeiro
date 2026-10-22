@@ -17,17 +17,17 @@ def _tx_json(t):
 def list_bank_movements(user_id, launch_id=None):
     """Sem `launch_id`: as declarações sem par (o "A conferir"). Com `launch_id`: só aquela, mesmo casada,
     com o par atual em `match` (a entrada pelo detalhe do Histórico, DP-6); `[]` se não é do usuário."""
+    from .bank_dinheiro import candidatos_carteira
     from .bank_movements import _declarations, _eligible, _free, _transactions
     with get_conn() as conn, conn.cursor() as cur:
         declarations = _declarations(cur, user_id)
         transactions = _transactions(cur, user_id)
+        shown = [d for d in declarations if (not d["matched_transaction_id"] if launch_id is None
+                                             else d["launch_id"] == launch_id)]
+        cash = candidatos_carteira(cur, user_id, shown)  # "foi em dinheiro": os da Carteira, só fluxo sem par
     used = {d["matched_transaction_id"] for d in declarations if d["matched_transaction_id"]}
     by_id = {t["id"]: t for t in transactions}
     dates = [t["transaction_date"] for t in transactions]
-    if launch_id is None:
-        shown = [d for d in declarations if not d["matched_transaction_id"]]
-    else:
-        shown = [d for d in declarations if d["launch_id"] == launch_id]
     result = []
     for d in shown:
         fluxo = e_fluxo(d)
@@ -35,7 +35,7 @@ def list_bank_movements(user_id, launch_id=None):
         result.append({"launch_id": d["launch_id"], "name": d["alvo"], "bank": d["bank_label"],
                        "amount": float(d["amount"]) if d["amount"] is not None else None,
                        "date": d["declared_at"].date().isoformat(), "tipo": d["tipo"], "fluxo": fluxo,
-                       "manual_only": d["manual_only"],
+                       "manual_only": d["manual_only"], "cash": cash.get(d["launch_id"]),
                        # Fluxo tem conta NULL de propósito ("qualquer conta"): isso sozinho não é revisão (D8).
                        "requires_review": d["requires_review"] or d["account_ambiguous"]
                                           or (d["account_id"] is None and not fluxo),
