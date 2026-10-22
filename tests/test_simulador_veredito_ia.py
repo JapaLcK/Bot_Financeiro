@@ -266,3 +266,15 @@ def test_i7c_fora_da_janela_com_atual_inconclusivo_so_a_linha_de_fora(novo):
     # dentro da janela o fecho segue: só sai o de quem foi avaliado
     assert fala(u, cen("X", "800", data_compra=iso(95)), cen("TV", "800")) == [
         CABECALHO, *BANCO, "X: a compra cai depois dos próximos 90 dias, então não avaliei o risco dela.", FECHO]
+
+
+def test_i14_rotulo_unico_depois_das_aspas(novo):
+    f = fala(_aluguel(novo), cen('"A e B"', "800"), cen("A e B", "10"))
+    assert f[0].startswith('"A e B": não recomendo.') and f[1].startswith('"A e B" (2): não achei risco')
+
+
+def test_i15_aviso_generico_fica_so_quando_nenhum_cenario_foi_avaliado(novo):
+    u = _aluguel(novo)
+    r = tool(u, cen("X", "800", data_compra=iso(95)))
+    assert r["motivos"] and "Há dados ou compromissos a conferir" in r["aviso_saldo"]
+    assert tool(u, cen("X", "800", data_compra=iso(95)), cen("TV", "600"))["aviso_saldo"] == ""  # positivo: Q3 vale

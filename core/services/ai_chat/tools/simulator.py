@@ -28,8 +28,10 @@ def _aviso_saldo(result: dict[str, Any]) -> str:
     if result["banks_excluded"]:
         return ("Seus bancos conectados não estão somados nesta simulação: ela usa só o saldo "
                 "da sua Carteira.")
-    # Com o veredito ligado a `veredito_fala` já carrega os motivos; esta frase genérica a suavizaria.
-    if result.get('motivos') and 'veredito' not in result['atual']:
+    # Com o veredito ligado e ao menos um cenário avaliado, a `veredito_fala` já carrega os motivos e esta frase
+    # genérica a suavizaria; com todos fora da janela ela não avalia nada, então a frase fica.
+    avaliado = any(not c["resumo"]["compra_fora_da_janela"] for c in result["cenarios"])
+    if result.get('motivos') and not ('veredito' in result['atual'] and avaliado):
         return 'Há dados ou compromissos a conferir. Os saldos são condicionais e não autorizam uma compra.'
     return ""
 
@@ -72,10 +74,6 @@ def _limpo(nome: str, n: int = 0) -> str:
 
 
 def _nomes(nomes: list[str]) -> str:
-    # Entre aspas o nome que traria " e " ou "," (senão "A e B" + "C, D" lê como um grupo de três). Nome repetido
-    # não chega aqui: `Simulacao` recusa (normalizado), então cada nome é único.
-    nomes = [f'"{n}"' if (re.search(r"\s+e\s+", n, re.I) or "," in n) and not (len(n) > 1 and n[0] == n[-1] == '"') else n
-             for n in nomes]
     return nomes[0] if len(nomes) == 1 else ", ".join(nomes[:-1]) + " e " + nomes[-1]
 
 
@@ -93,6 +91,10 @@ def _fala(result: dict[str, Any]) -> list[str]:
     rotulos: set[str] = set()  # a limpeza pode colapsar nomes distintos ("A\nB" e "A B"): repetido ganha (n)
     for n, c in enumerate(result["cenarios"], 1):
         rotulo = _limpo(c["nome"], n)
+        # Entre aspas o nome que traria " e " ou "," (senão "A e B" + "C, D" lê como um grupo de três). A unicidade
+        # vale sobre o rótulo final, aspas incluídas: `Simulacao` só recusa nome repetido antes de limpar e aspear.
+        if (re.search(r"\s+e\s+", rotulo, re.I) or "," in rotulo) and not (len(rotulo) > 1 and rotulo[0] == rotulo[-1] == '"'):
+            rotulo = f'"{rotulo}"'
         while rotulo in rotulos:
             rotulo += f" ({n})"
         rotulos.add(rotulo)
