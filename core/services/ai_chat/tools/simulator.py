@@ -90,11 +90,16 @@ def _fala(result: dict[str, Any]) -> list[str]:
         linhas.append(f"Mesmo sem a compra, contando só o que é certo, no dia {_dm(atual['data'])} "
                       f"seu saldo já fica em {fmt_brl(atual['valor'])}{resto}.")
     grupos: dict[str, list] = {}  # chave do veredito -> [veredito, nomes]
+    rotulos: set[str] = set()  # a limpeza pode colapsar nomes distintos ("A\nB" e "A B"): repetido ganha (n)
     for n, c in enumerate(result["cenarios"], 1):
+        rotulo = _limpo(c["nome"], n)
+        while rotulo in rotulos:
+            rotulo += f" ({n})"
+        rotulos.add(rotulo)
         v = c["resumo"]["veredito"]
         fora = c["resumo"]["compra_fora_da_janela"]  # decide antes do estado: não houve avaliação a herdar
         chave = "fora" if fora else repr((v["estado"], v["data"], v["valor"], v["bloqueios"]))
-        grupos.setdefault(chave, [v, fora, []])[2].append(_limpo(c["nome"], n))
+        grupos.setdefault(chave, [v, fora, []])[2].append(rotulo)
     ordem = {"risco_identificado": 0, "sem_risco_identificado": 2}
     inconclusivo = False
     vistos: set[str] = set()  # bullets já emitidos: bloqueio comum a dois grupos sai uma vez só

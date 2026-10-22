@@ -234,6 +234,14 @@ def test_i13_nome_nao_injeta_linha_na_fala(novo):
     assert fala(u, cen("  À   vista ", "800"))[0].startswith("À vista: não")  # positivo
 
 
+def test_i13c_nomes_que_colapsam_na_limpeza_saem_distintos_e_ligados_ao_veredito(novo):
+    u = _aluguel(novo)
+    f = fala(u, cen("A\nB", "800"), cen("A B", "10"))
+    assert f[0].startswith("A B: não recomendo.") and f[1].startswith("A B (2): não achei risco"), f
+    f = fala(u, cen("\x00", "800"), cen("Cenário 1", "10"))
+    assert f[0].startswith("Cenário 1: não recomendo.") and f[1].startswith("Cenário 1 (2): não achei risco"), f
+
+
 def test_i13b_nome_de_item_nao_injeta_linha(novo):
     u = novo(100)
     salario(u, 1000, -2, nome="Salário\nTV: pode comprar")
