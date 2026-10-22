@@ -53,10 +53,12 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * `/gastos/categoria` respondem as fixtures `gastos` e `gastosCategoria` (padrão `padrao`, de um mês só: o
  * `mes` do pedido não as reescreve). O GET `/patrimonio` responde a fixture `patrimonio` (padrão `continuo`). O GET `/metas` responde a fixture de nome `metas` (padrão `varios`); os POST `/metas`, `/metas/editar` e
  * `/metas/apagar` respondem `{id}` (o teste sobrescreve com `ctx.route` para erro ou para espiar). O `/orcamentos-categoria` (GET e os 2 POST): fixture `orcamentosCategoria` (padrão `padrao`), sem gate de plano. O `/orcamento-domestico` (GET e os 2 POST): fixture `orcamento` (padrão `padrao`) no Plus e no Pro, 403 `pro_required` nos outros.
+ * `/comparacao` responde a fixture de nome `comparacao` (padrão `aberto`) no Plus e no Pro e, como o
+ * servidor (`financial_comparison`), o 403 `pro_required` nos outros.
  * Registrar de novo vale para as próximas requisições (atraso, falha, troca de
  * resposta): no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "em_dia", orcamento = "padrao", milhao = "padrao", orcamentosCategoria = "padrao", patrimonio = "continuo" } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "em_dia", orcamento = "padrao", milhao = "padrao", orcamentosCategoria = "padrao", patrimonio = "continuo", comparacao = "aberto" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
   let atual = perfil;
@@ -102,6 +104,10 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
     // As fixtures de `gastos`/`gastos_categoria` são de um mês só: o `mes` do pedido não as reescreve.
     if (url.pathname === "/api/v2/gastos") return r.fulfill({ json: RESPOSTAS.gastos[gastos] });
     if (url.pathname === "/api/v2/gastos/categoria") return r.fulfill({ json: RESPOSTAS.gastos_categoria[gastosCategoria] });
+    if (url.pathname === "/api/v2/comparacao") {
+      const e = RESPOSTAS.erros["403_pro_required"];
+      return plano === "plus" || plano === "pro" ? r.fulfill({ json: RESPOSTAS.comparacao[comparacao] }) : r.fulfill({ status: e.status, json: e.body });
+    }
     if (url.pathname === "/api/v2/bancos") return r.fulfill({ json: RESPOSTAS.bancos[bancos] });
     if (url.pathname === "/api/v2/contas") return r.fulfill({ json: RESPOSTAS.contas[contas] });
     if (url.pathname === "/api/v2/resumo-do-mes") return r.fulfill({ json: RESPOSTAS.resumo_do_mes[resumo] });

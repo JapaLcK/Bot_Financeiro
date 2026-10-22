@@ -28,7 +28,7 @@ const P = await import("../../webapp/src/dashboard/lib/profiles.js");
 const { PROFILES, FEATURE_TIER, WIDGET_FEATURE, TIERS, locked, readLayout, saveLayout, readProfile, saveProfile } = P;
 
 // Os blocos que o painel conhece hoje (DEFAULT + EXTRA de parts/Board.tsx).
-const KNOWN = ["hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "metas", "patrimonio", "fatura", "wealth", "renda", "rendimento", "parcelas"];
+const KNOWN = ["hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "metas", "patrimonio", "fatura", "wealth", "renda", "rendimento", "parcelas", "comparacao"];
 const PRESET = ["resumo", "hero", "metas"];
 // Cada caso usa um perfil próprio: o módulo lembra em memória o que ele mesmo escreveu.
 const salvo = (perfil, raw) => store.set(`pigbank.dashboard.layout.v1.${perfil}`, raw);
@@ -93,7 +93,7 @@ test("storage que lança: preset na leitura e tudo segue em memória", () => {
 
 test("locked nos três planos", () => {
   const tabela = Object.fromEntries(TIERS.map((plan) => [plan, KNOWN.filter((id) => locked(id, plan))]));
-  assert.deepEqual(tabela, { essencial: ["hero", "simulador", "piggy"], plus: ["simulador"], pro: [] });
+  assert.deepEqual(tabela, { essencial: ["hero", "simulador", "piggy", "comparacao"], plus: ["simulador"], pro: [] });
   assert.equal(locked("renda", "essencial"), false); // bloco sem recurso pago é de todos
 });
 

@@ -1,5 +1,5 @@
 {
-  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Gastos, Guia, Investido, Metas, Bancos, OrcamentoDomestico, OrcamentosCategoria, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Gastos, Guia, Investido, Metas, Comparacao, Bancos, OrcamentoDomestico, OrcamentosCategoria, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
   "me": {
     "free": { "plan_tier": "free", "agents_ui_enabled": true, "chat_ia": false },
     "essencial": { "plan_tier": "essencial", "agents_ui_enabled": true, "chat_ia": false },
@@ -6788,6 +6788,400 @@
           }
         }
       ]
+    }
+  },
+  "comparacao": {
+    "aberto": {
+      "modo": "mes_aberto",
+      "escolha": "Outubro até agora (o que já está lançado no mês, igual ao Resumo do mês) contra setembro de 2026 inteiro. O mês ainda não acabou: a comparação tende a mostrar gasto menor. Cartão pela fatura (igual ao painel do mês).",
+      "atual": {
+        "inicio": "2026-10-01",
+        "fim": "2026-10-31",
+        "dias": 31
+      },
+      "anterior": {
+        "inicio": "2026-09-01",
+        "fim": "2026-09-30",
+        "dias": 30
+      },
+      "mesmo_tamanho": false,
+      "anterior_encurtado": false,
+      "base": {
+        "regra": "entrou_e_saiu_do_mes",
+        "cartao": "fatura",
+        "origem": "lançamentos + faturas de cartão",
+        "cartao_lancamentos": {
+          "atual": 2,
+          "anterior": 2
+        }
+      },
+      "despesa": {
+        "total_atual": "2012.00",
+        "total_anterior": "3350.00",
+        "total_delta": "-1338.00",
+        "pct": "-39.9",
+        "estado": "variou"
+      },
+      "receita": {
+        "total_atual": "3000.00",
+        "total_anterior": "2500.00",
+        "total_delta": "500.00",
+        "pct": "20.0",
+        "estado": "variou"
+      },
+      "resultado": {
+        "total_atual": "988.00",
+        "total_anterior": "-850.00",
+        "total_delta": "1838.00",
+        "pct": null,
+        "estado": "variou"
+      },
+      "categorias": [
+        {
+          "total_atual": "1747.00",
+          "total_anterior": "2800.00",
+          "total_delta": "-1053.00",
+          "pct": "-37.6",
+          "estado": "variou",
+          "categoria": "Alimentação"
+        },
+        {
+          "total_atual": "0.00",
+          "total_anterior": "200.00",
+          "total_delta": "-200.00",
+          "pct": "-100.0",
+          "estado": "sem_gasto",
+          "categoria": "Lazer"
+        },
+        {
+          "total_atual": "0.00",
+          "total_anterior": "150.00",
+          "total_delta": "-150.00",
+          "pct": "-100.0",
+          "estado": "sem_gasto",
+          "categoria": "Saúde"
+        },
+        {
+          "total_atual": "45.00",
+          "total_anterior": "0.00",
+          "total_delta": "45.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Streaming"
+        },
+        {
+          "total_atual": "20.00",
+          "total_anterior": "0.00",
+          "total_delta": "20.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "sem categoria"
+        },
+        {
+          "total_atual": "200.00",
+          "total_anterior": "200.00",
+          "total_delta": "0.00",
+          "pct": "0.0",
+          "estado": "igual",
+          "categoria": "Transporte"
+        }
+      ],
+      "categorias_omitidas": 0,
+      "motivo": null,
+      "motivos": []
+    },
+    "fechado": {
+      "modo": "mes_fechado",
+      "escolha": "Setembro de 2026 inteiro (30 dias) contra agosto de 2026 inteiro (31 dias). Cartão pela fatura (igual ao painel do mês).",
+      "atual": {
+        "inicio": "2026-09-01",
+        "fim": "2026-09-30",
+        "dias": 30
+      },
+      "anterior": {
+        "inicio": "2026-08-01",
+        "fim": "2026-08-31",
+        "dias": 31
+      },
+      "mesmo_tamanho": false,
+      "anterior_encurtado": false,
+      "base": {
+        "regra": "entrou_e_saiu_do_mes",
+        "cartao": "fatura",
+        "origem": "lançamentos + faturas de cartão",
+        "cartao_lancamentos": {
+          "atual": 2,
+          "anterior": 0
+        }
+      },
+      "despesa": {
+        "total_atual": "3350.00",
+        "total_anterior": "400.00",
+        "total_delta": "2950.00",
+        "pct": "737.5",
+        "estado": "variou"
+      },
+      "receita": {
+        "total_atual": "2500.00",
+        "total_anterior": "1000.00",
+        "total_delta": "1500.00",
+        "pct": "150.0",
+        "estado": "variou"
+      },
+      "resultado": {
+        "total_atual": "-850.00",
+        "total_anterior": "600.00",
+        "total_delta": "-1450.00",
+        "pct": null,
+        "estado": "variou"
+      },
+      "categorias": [
+        {
+          "total_atual": "2800.00",
+          "total_anterior": "0.00",
+          "total_delta": "2800.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Alimentação"
+        },
+        {
+          "total_atual": "200.00",
+          "total_anterior": "0.00",
+          "total_delta": "200.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Lazer"
+        },
+        {
+          "total_atual": "200.00",
+          "total_anterior": "400.00",
+          "total_delta": "-200.00",
+          "pct": "-50.0",
+          "estado": "variou",
+          "categoria": "Transporte"
+        },
+        {
+          "total_atual": "150.00",
+          "total_anterior": "0.00",
+          "total_delta": "150.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Saúde"
+        }
+      ],
+      "categorias_omitidas": 0,
+      "motivo": null,
+      "motivos": []
+    },
+    "historico": {
+      "modo": "mes_fechado",
+      "escolha": "Outubro de 2025 inteiro (31 dias) contra setembro de 2025 inteiro (30 dias).",
+      "atual": {
+        "inicio": "2025-10-01",
+        "fim": "2025-10-31",
+        "dias": 31
+      },
+      "anterior": {
+        "inicio": "2025-09-01",
+        "fim": "2025-09-30",
+        "dias": 30
+      },
+      "mesmo_tamanho": false,
+      "anterior_encurtado": false,
+      "base": {
+        "regra": "entrou_e_saiu_do_mes",
+        "cartao": "fatura",
+        "origem": "lançamentos + faturas de cartão",
+        "cartao_lancamentos": null
+      },
+      "despesa": null,
+      "receita": null,
+      "resultado": null,
+      "categorias": [],
+      "categorias_omitidas": 0,
+      "motivo": "inicio_do_historico",
+      "motivos": []
+    },
+    "sem_base": {
+      "modo": "mes_aberto",
+      "escolha": "Outubro até agora (o que já está lançado no mês, igual ao Resumo do mês) contra setembro de 2026 inteiro. O mês ainda não acabou: a comparação tende a mostrar gasto menor. Cartão pela fatura (igual ao painel do mês). Nenhuma fatura de cartão no mês.",
+      "atual": {
+        "inicio": "2026-10-01",
+        "fim": "2026-10-31",
+        "dias": 31
+      },
+      "anterior": {
+        "inicio": "2026-09-01",
+        "fim": "2026-09-30",
+        "dias": 30
+      },
+      "mesmo_tamanho": false,
+      "anterior_encurtado": false,
+      "base": {
+        "regra": "entrou_e_saiu_do_mes",
+        "cartao": "fatura",
+        "origem": "lançamentos + faturas de cartão",
+        "cartao_lancamentos": {
+          "atual": 0,
+          "anterior": 0
+        }
+      },
+      "despesa": {
+        "total_atual": "80.00",
+        "total_anterior": "0.00",
+        "total_delta": "80.00",
+        "pct": null,
+        "estado": "nova"
+      },
+      "receita": {
+        "total_atual": "0.00",
+        "total_anterior": "0.00",
+        "total_delta": "0.00",
+        "pct": null,
+        "estado": "vazio"
+      },
+      "resultado": {
+        "total_atual": "-80.00",
+        "total_anterior": "0.00",
+        "total_delta": "-80.00",
+        "pct": null,
+        "estado": "variou"
+      },
+      "categorias": [],
+      "categorias_omitidas": 0,
+      "motivo": "sem_base",
+      "motivos": []
+    },
+    "muitas": {
+      "modo": "mes_aberto",
+      "escolha": "Outubro até agora (o que já está lançado no mês, igual ao Resumo do mês) contra setembro de 2026 inteiro. O mês ainda não acabou: a comparação tende a mostrar gasto menor. Cartão pela fatura (igual ao painel do mês). Nenhuma fatura de cartão no mês.",
+      "atual": {
+        "inicio": "2026-10-01",
+        "fim": "2026-10-31",
+        "dias": 31
+      },
+      "anterior": {
+        "inicio": "2026-09-01",
+        "fim": "2026-09-30",
+        "dias": 30
+      },
+      "mesmo_tamanho": false,
+      "anterior_encurtado": false,
+      "base": {
+        "regra": "entrou_e_saiu_do_mes",
+        "cartao": "fatura",
+        "origem": "lançamentos + faturas de cartão",
+        "cartao_lancamentos": {
+          "atual": 0,
+          "anterior": 0
+        }
+      },
+      "despesa": {
+        "total_atual": "186.00",
+        "total_anterior": "1.00",
+        "total_delta": "185.00",
+        "pct": "18500.0",
+        "estado": "variou"
+      },
+      "receita": {
+        "total_atual": "0.00",
+        "total_anterior": "0.00",
+        "total_delta": "0.00",
+        "pct": null,
+        "estado": "vazio"
+      },
+      "resultado": {
+        "total_atual": "-186.00",
+        "total_anterior": "-1.00",
+        "total_delta": "-185.00",
+        "pct": null,
+        "estado": "variou"
+      },
+      "categorias": [
+        {
+          "total_atual": "21.00",
+          "total_anterior": "0.00",
+          "total_delta": "21.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Categoria 11"
+        },
+        {
+          "total_atual": "20.00",
+          "total_anterior": "0.00",
+          "total_delta": "20.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Categoria 10"
+        },
+        {
+          "total_atual": "19.00",
+          "total_anterior": "0.00",
+          "total_delta": "19.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Categoria 09"
+        },
+        {
+          "total_atual": "18.00",
+          "total_anterior": "0.00",
+          "total_delta": "18.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Categoria 08"
+        },
+        {
+          "total_atual": "17.00",
+          "total_anterior": "0.00",
+          "total_delta": "17.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Categoria 07"
+        },
+        {
+          "total_atual": "16.00",
+          "total_anterior": "0.00",
+          "total_delta": "16.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Categoria 06"
+        },
+        {
+          "total_atual": "15.00",
+          "total_anterior": "0.00",
+          "total_delta": "15.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Categoria 05"
+        },
+        {
+          "total_atual": "14.00",
+          "total_anterior": "0.00",
+          "total_delta": "14.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Categoria 04"
+        },
+        {
+          "total_atual": "13.00",
+          "total_anterior": "0.00",
+          "total_delta": "13.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Categoria 03"
+        },
+        {
+          "total_atual": "12.00",
+          "total_anterior": "0.00",
+          "total_delta": "12.00",
+          "pct": null,
+          "estado": "nova",
+          "categoria": "Categoria 02"
+        }
+      ],
+      "categorias_omitidas": 3,
+      "motivo": null,
+      "motivos": []
     }
   },
   "bancos": {
