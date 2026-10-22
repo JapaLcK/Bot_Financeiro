@@ -1607,12 +1607,40 @@ Limites conhecidos: (1) assinatura que morre depois de o
 nascer: o `create-checkout` recusa, mas a tela de status mostra sem plano até o grant sair;
 (3) a reentrega do checkout repete o alerta de estorno.
 
+**Pagamento Pix parcial não libera o plano (#1228).** O dreno (`core/services/pix_valor.py`,
+`conferir_valor`) só concede quando o `value` do webhook cobre `total_cents` da cobrança
+(tolerância zero). Menor, ausente ou ilegível: cobrança segue `pending`, sem grant, cadernos,
+e-mail, GA4 ou CAPI; alerta UMA vez por pagamento (efeito `valor_alertado`) e evento fechado
+(log `pix_pagamento_parcial_retido`, com `pago_cents` e `devido_cents`). Excesso concede,
+alerta e deixa o log `pix_excesso_recebido`. O marcador de dedupe só é gravado quando o canal do
+admin confirma a entrega (senão log `pix_alerta_nao_entregue` e o próximo evento tenta de novo). Plano já concedido antes da regra continua. NÃO VERIFICADO: o que `value` traz em baixa
+manual (`receiveInCash`) e em cobrança editada no painel do Asaas, se o pagador pode digitar o
+valor no QR dinâmico (Passo 0, sandbox), se o `value` do webhook é BRUTO ou LÍQUIDO da tarifa
+(se fosse líquido, toda venda com tarifa > 0 seria retida), se `ADMIN_NOTIFY_WEBHOOK_URL`
+existe e responde 2xx em produção (sem ele o parcial fica só em `system_event_logs`) e o estado de
+`ASAAS_PIX_ANNUAL_ENABLED` (o webhook não olha a flag). Antes de ligar: ver o checklist do PR #1228.
+Runbook do operador (parcial retido):
+1. Localizar (de quem é a linha): `select created_at, user_id, message, details from
+   system_event_logs where event_type = 'pix_pagamento_parcial_retido' order by created_at
+   desc;` (`details` traz `charge_id`, `pago_cents` e `devido_cents`; `user_id` é a conta a
+   atender em /admin).
+2. Escolher UM caminho: autorizar o desconto (grant `source='admin'` pelo painel e entregar os
+   cadernos à mão); pedir o complemento (cobrança da diferença no Asaas; a soma NÃO é
+   automática, conceder à mão); ou devolver o valor no Asaas.
+3. Fechar a linha, senão ela trava a recompra Pix: o MESMO plano devolve o mesmo QR (já
+   pago) e pedir OUTRO plano ou conjunto de cadernos dá 503 `asaas_cancelamento_falhou` na
+   hora (esperado, não medido: o Asaas recusa o `DELETE` de pagamento recebido e a linha fica
+   em `canceling`):
+   `update pix_charges set status = 'canceled', canceled_at = now(), qr_payload_enc = null
+   where id = <id> and status in ('pending', 'canceling');` (confira o `where`: é escrita
+   manual de dinheiro; `tests/test_pix_valor_parcial.py` executa exatamente este SQL).
+
 **Cadernos extras no Pix anual (PR A: receber e entregar; inerte até o checkout
 gravar a foto).** `pix_charges.extras` (`jsonb`, default `[]`, check de array) guarda a
 FOTO dos cadernos escolhidos, `[{price, url, nome, valor_cents}]`, gravada só por
 `criar_cobranca`. `amount_cents` continua sendo SÓ o plano (crédito de upgrade,
 `pix_charges_amount_fecha` e `plan_grants` não mudam); o que o cliente paga é
-`core/services/pix_extras.total_cents` (plano + Σ cadernos), usado no `alertar_valor`,
+`core/services/pix_extras.total_cents` (plano + Σ cadernos), usado em `pix_valor.conferir_valor`,
 no alerta do estorno parcial, no GA4/CAPI e no `total_cents` do poll. O dreno ganhou o
 efeito `ebook` logo depois do `grant`: uma linha em `ebook_entregas` por caderno, com
 `session_id` = `external_reference` (`pix:<id>`) e `ebook_price` = o Price do Stripe;

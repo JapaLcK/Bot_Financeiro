@@ -619,6 +619,8 @@ drenar_evento(event_id):
 
 Sem essa tabela, um estorno mandava `purchase` ao GA4 e `Purchase` à CAPI — receita inventada em cima de dinheiro devolvido.
 
+**Valor pago × devido (#1228, regra do dono 2026-10-21).** `PAYMENT_RECEIVED`/`PAYMENT_CONFIRMED` só leva a `paid` e roda os efeitos de compra quando o `value` do webhook cobre `total_cents(cobranca)` (plano + cadernos, já líquido do crédito de upgrade), com tolerância ZERO. Menor que o devido, ausente ou ilegível (`None`, bool, texto, NaN, inf, negativo, mais de 2 casas): a cobrança **fica no estado em que está** (`pending`), nenhum efeito roda, o operador recebe UM alerta por pagamento (efeito `valor_alertado`) e o evento é FECHADO. Excesso concede e alerta. Não há soma de parciais nem reconhecimento automático de desconto: o operador concede em /admin (runbook em `docs/CLAUDE.md`). Código em `core/services/pix_valor.py`.
+
 **A regra `aplicou == False → efeitos = []` FOI REMOVIDA (P1-A, Codex no #304), e ela contradizia o §3.4 deste mesmo plano.** O §3.4 já dizia: *"o que autoriza parar é o registro do efeito **por pagamento**, nunca a transição de status"*. O §8.2 C dizia o contrário, e o contrário é um ponto de perda de dinheiro:
 
 > a transição commita sozinha, ANTES dos efeitos. Se o processo morre — ou um efeito levanta — depois desse commit, o evento continua pendente na outbox; a retentativa chama a transição de novo, recebe `None` porque a cobrança já é `paid`/`refunded`, e **roda zero efeitos**. Cliente pago sem grant, ou cliente estornado com acesso para sempre.
