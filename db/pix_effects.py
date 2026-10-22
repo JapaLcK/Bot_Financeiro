@@ -27,7 +27,7 @@ from .connection import get_conn
 # portanto reexecuta para sempre.
 EFEITOS = (
     "stripe_cancel", "grant", "ebook", "ga4", "capi", "email", "revoke",
-    "orphan_notified", "valor_alertado",
+    "orphan_notified", "valor_alertado", "valor_concedido_alertado",
 )
 
 

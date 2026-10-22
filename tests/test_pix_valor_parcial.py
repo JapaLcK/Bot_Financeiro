@@ -9,7 +9,8 @@ A. retenção (o conserto): 0,01 / 498,99 / metade / só o plano com cadernos �
 B. caminho legítimo (POSITIVO do conserto): exato, int, com cadernos, crédito de
    upgrade exato e excesso continuam concedendo os 6 efeitos.
 C. valor ilegível: retém + alerta e FECHA o evento (Infinity/1e308 não prendem mais).
-D. dedupe do alerta por pagamento; alerta sai ANTES do marcador.
+D. dedupe do alerta por pagamento e por lado (retido / concedido); alerta sai
+   ANTES do marcador; retido e depois completado (P→E, P→X) avisa o operador.
 E. estados x eventos (tabela da seção 3 do plano).
 F. isolamento por usuário.
 G. funções puras.
@@ -179,7 +180,7 @@ def test_b5_excesso_concede_e_alerta_uma_vez(user_id, externo):
     entregar("PAYMENT_RECEIVED", cob, valor=520.0)
     entregar("PAYMENT_RECEIVED", cob, valor=520.0)  # event_id novo, mesmo pagamento
     _concedida(user_id, cob, externo)
-    assert efeitos(cob["asaas_payment_id"]) == COMPRA | {"valor_alertado"}
+    assert efeitos(cob["asaas_payment_id"]) == COMPRA | {"valor_concedido_alertado"}
     assert len(externo["alerta"]) == 1 and "valor maior" in externo["alerta"][0]
 
 
@@ -280,6 +281,78 @@ def test_d3_alerta_nao_entregue_nao_marca_e_tenta_de_novo(user_id, externo, monk
     assert len(tentativas) == 3, "entrega confirmada não pode repetir"
     assert efeitos(cob["asaas_payment_id"]) == {"valor_alertado"}
     assert ler(cob["id"])["status"] == "pending" and _pix(user_id) == []
+
+
+DOIS_LADOS = COMPRA | {"valor_alertado", "valor_concedido_alertado"}
+RETIDOS = [pytest.param(0.01, id="parcial"), pytest.param("abc", id="ilegivel")]
+
+
+@pytest.mark.parametrize("primeiro", RETIDOS)
+def test_d4_retido_e_depois_excesso_alerta_os_dois_lados(user_id, externo, primeiro):
+    """P/I → X no mesmo `payment.id` (baixa manual desfeita e refeita): o marcador
+    do retido não pode calar o excesso, e o texto diz que o retido caducou."""
+    conta(user_id, "free", None)
+    cob = nova_cobranca(user_id)
+    entregar("PAYMENT_RECEIVED", cob, valor=primeiro)
+    entregar("PAYMENT_RECEIVED", cob, valor=520.0)
+    _concedida(user_id, cob, externo)
+    assert efeitos(cob["asaas_payment_id"]) == DOIS_LADOS
+    assert len(externo["alerta"]) == 2, externo["alerta"]
+    assert "parcial retido" in externo["alerta"][0]
+    assert "valor maior" in externo["alerta"][1]
+    assert "tinha sido retido" in externo["alerta"][1] and "R$ 21.00" in externo["alerta"][1]
+    assert len(_logs("pix_retido_completado", user_id)) == 1
+    assert len(_logs("pix_excesso_recebido", user_id)) == 1
+
+
+@pytest.mark.parametrize("primeiro", RETIDOS)
+def test_d5_retido_e_depois_exato_avisa_para_nao_devolver(user_id, externo, primeiro):
+    """P/I → E: concede o plano; sem este alerta o "devolva o valor" do retido
+    continuaria valendo para quem pagou certo."""
+    conta(user_id, "free", None)
+    cob = nova_cobranca(user_id)
+    entregar("PAYMENT_RECEIVED", cob, valor=primeiro)
+    entregar("PAYMENT_RECEIVED", cob, valor=499.0)
+    _concedida(user_id, cob, externo)
+    assert efeitos(cob["asaas_payment_id"]) == DOIS_LADOS
+    assert len(externo["alerta"]) == 2, externo["alerta"]
+    assert "antes RETIDO foi completado" in externo["alerta"][1]
+    assert "NÃO devolva" in externo["alerta"][1]
+    # rastro durável: o alerta deste lado não é retentado depois de `paid`
+    assert _logs("pix_retido_completado", user_id) == [
+        {"charge_id": cob["id"], "pago_cents": 49900, "devido_cents": 49900}]
+
+
+def test_d6_excesso_nao_repete_o_alerta_quando_a_transicao_e_retentada(
+        user_id, externo, monkeypatch):
+    """O alerta do lado que concede sai ANTES da transição; se ela falha, a
+    retentativa reavalia o valor. É o `valor_concedido_alertado` que a cala."""
+    from psycopg.errors import CheckViolation
+
+    import core.services.pix_drain as drain
+    from core.services.pix_sweeps import drenar_pendentes
+
+    conta(user_id, "free", None)
+    cob = nova_cobranca(user_id)
+    entregar("PAYMENT_RECEIVED", cob, valor=0.01)
+    real, falhas = drain.transicionar, []
+
+    def _quebra_uma_vez(*a, **kw):
+        if not falhas:
+            falhas.append(1)
+            raise CheckViolation("transição falhou uma vez")
+        return real(*a, **kw)
+
+    monkeypatch.setattr(drain, "transicionar", _quebra_uma_vez)
+    ev = entregar("PAYMENT_RECEIVED", cob, valor=520.0)
+    assert evento(ev)["processed_at"] is None and evento(ev)["attempts"] == 1
+    assert ler(cob["id"])["status"] == "pending"
+    _varredura(monkeypatch, ev)
+    assert drenar_pendentes() == 1
+    assert evento(ev)["processed_at"] is not None
+    _concedida(user_id, cob, externo)
+    assert len(externo["alerta"]) == 2, externo["alerta"]
+    assert sum("valor maior" in m for m in externo["alerta"]) == 1
 
 
 # ── E. estados x eventos ─────────────────────────────────────────────────────
@@ -389,22 +462,46 @@ def _sql_do_runbook():
     return re.sub(r"\s+", " ", achado.group(0)).replace("<id>", "%s")
 
 
-def test_i2_consulta_do_runbook_traz_quem_atender(user_id, externo):
-    """Passo 1 do runbook, extraído de `docs/CLAUDE.md`: precisa dizer de QUEM é a linha."""
+def _runbook(uid):
+    """Passo 1 do runbook, extraído de `docs/CLAUDE.md` e executado; só as linhas de `uid`."""
     import pathlib
     import re
 
     doc = (pathlib.Path(__file__).resolve().parent.parent / "docs" / "CLAUDE.md").read_text()
     achado = re.search(r"select created_at, user_id.*?;", doc, re.S)
     assert achado, "consulta do passo 1 sumiu de docs/CLAUDE.md"
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(re.sub(r"\s+", " ", achado.group(0)))
+        return [r for r in cur.fetchall() if r["user_id"] == uid]
+
+
+def test_i2_consulta_do_runbook_traz_quem_atender(user_id, externo):
+    """Precisa dizer de QUEM é a linha e se ela ainda está retida: completado depois
+    pelo MESMO pagamento = NÃO devolver."""
     conta(user_id, "free", None)
     cob = nova_cobranca(user_id)
     entregar("PAYMENT_RECEIVED", cob, valor=0.01)
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(re.sub(r"\s+", " ", achado.group(0)))
-        mine = [r for r in cur.fetchall() if r["user_id"] == user_id]
+    mine = _runbook(user_id)
     assert len(mine) == 1 and mine[0]["details"]["charge_id"] == cob["id"]
-    assert mine[0]["message"]
+    assert mine[0]["message"] and mine[0]["status_agora"] == "pending"
+    assert mine[0]["completado_pelo_mesmo_pagamento"] is False
+    entregar("PAYMENT_RECEIVED", cob, valor=499.0)  # completado no mesmo pagamento
+    assert [(r["status_agora"], r["completado_pelo_mesmo_pagamento"])
+            for r in _runbook(user_id)] == [("paid", True)]
+
+
+def test_i3_cobranca_paga_por_outro_pagamento_nao_poupa_o_retido(user_id, externo):
+    """Parcial em `pay_A`, integral em `pay_C` (casado pelo `externalReference`): a
+    COBRANÇA fica `paid`, mas os R$ 49,90 de `pay_A` seguem no caixa. O runbook não
+    pode mandar "NÃO devolva" para eles."""
+    conta(user_id, "free", None)
+    cob = nova_cobranca(user_id)
+    entregar("PAYMENT_RECEIVED", cob, valor=49.90)
+    entregar("PAYMENT_RECEIVED", cob, payment_id=f"pay_{uuid.uuid4().hex[:12]}", valor=499.0)
+    assert ler(cob["id"])["status"] == "paid"
+    assert [(r["status_agora"], r["completado_pelo_mesmo_pagamento"])
+            for r in _runbook(user_id)] == [("paid", False)]
+    assert not any("completado" in m for m in externo["alerta"])
 
 
 @pytest.mark.parametrize("estado", ["pending", "canceling"])
@@ -514,6 +611,8 @@ def test_h1_webhook_real_e_dreno_pendentes(user_id, externo, monkeypatch):
     assert evento(segundo)["processed_at"] is not None
     _post(499.0)
     _concedida(user_id, cob, externo)
+    assert len(externo["alerta"]) == 2
+    assert "antes RETIDO foi completado" in externo["alerta"][-1]
 
 
 # ── G. funções puras ─────────────────────────────────────────────────────────

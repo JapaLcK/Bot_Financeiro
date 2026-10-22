@@ -308,5 +308,5 @@ def test_efeito_desconhecido_e_recusado():
         registrar_efeito("pay_x", "grantt", _evt())
     assert set(EFEITOS) == {
         "stripe_cancel", "grant", "ebook", "ga4", "capi", "email", "revoke",
-        "orphan_notified", "valor_alertado",
+        "orphan_notified", "valor_alertado", "valor_concedido_alertado",
     }, "a lista de efeitos do §3.4 mudou — o dreno do 1b-B depende dela"
