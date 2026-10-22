@@ -281,7 +281,7 @@ def test_copy_traz_a_data_do_corte_e_nao_promete_trial(monkeypatch):
     # produção por `["essencial"]` reprova (com 8900 os dois coincidiam). Não é
     # valor de produção nem redondo, então literal cravado não coincide por acaso.
     monkeypatch.setitem(pp.PRECOS_ANUAIS_CENTS, "essencial", 30000)
-    proibidos = ("15 dias", "trial", "teste grátis", "teste gratis")
+    proibidos = ("dias grátis", "trial", "teste grátis", "teste gratis")
 
     capturado: dict = {}
 

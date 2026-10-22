@@ -78,7 +78,7 @@ def _corpo_do_downsell(capturado) -> str:  # noqa: F811
     """
     assert es.send_trial_downsell_email("a@b.com")
     partes = [re.sub(r"\s+", " ", parte) for parte in _tudo(capturado)]
-    corpos = [p for p in partes if "chegaram ao fim" in p]
+    corpos = [p for p in partes if "chegou ao fim" in p]
     assert len(corpos) == 1, f"esperava um corpo com a frase do fim do teste: {partes}"
     return corpos[0]
 
@@ -115,7 +115,7 @@ def test_o_downsell_nao_afirma_nem_nega_o_periodo_gratis(capturado):  # noqa: F8
     corpo = _corpo_do_downsell(capturado)
     baixa = corpo.lower()
     for frase in ("já usou o período", "ja usou o periodo",
-                  "você ainda tem 15 dias", "novo período grátis"):
+                  "você ainda tem", "novo período grátis"):
         assert frase not in baixa, f"o downsell afirmou algo sobre o trial: {corpo}"
 
 
