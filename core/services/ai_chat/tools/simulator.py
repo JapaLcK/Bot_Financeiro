@@ -97,6 +97,7 @@ def _fala(result: dict[str, Any]) -> list[str]:
         grupos.setdefault(chave, [v, fora, []])[2].append(_limpo(c["nome"], n))
     ordem = {"risco_identificado": 0, "sem_risco_identificado": 2}
     inconclusivo = False
+    vistos: set[str] = set()  # bullets já emitidos: bloqueio comum a dois grupos sai uma vez só
     for v, fora, nomes in sorted(grupos.values(), key=lambda g: 2 if g[1] else ordem.get(g[0]["estado"], 1)):
         n = _nomes(nomes)
         if fora:  # só a linha: sem bloqueios nem fecho, que falariam de uma avaliação que não houve
@@ -112,7 +113,9 @@ def _fala(result: dict[str, Any]) -> list[str]:
             for b in v["bloqueios"]:
                 itens = "".join(f" {_limpo(i['nome'])} ({_dm(i['data'])})" + ("," if k < len(b["itens"]) - 1 else "")
                                 for k, i in enumerate(b["itens"]))
-                linhas.append(f"• {b['texto']}{itens}")
+                if (bullet := f"• {b['texto']}{itens}") not in vistos:
+                    vistos.add(bullet)
+                    linhas.append(bullet)
     if atual["premissa"]:
         linhas.append(atual["premissa"])
     if inconclusivo:

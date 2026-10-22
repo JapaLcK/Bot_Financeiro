@@ -10,6 +10,7 @@ from decimal import Decimal as D
 from core.services.ai_chat import runner
 from core.services.ai_chat.tools.simulator import NOTA_ANTIGA, NOTA_VEREDITO, _fala
 from tests._patrimonio_helpers import conexao, conta, horas_atras
+from db.bills import create_boleto
 from tests.test_simulador_veredito import (gasto, hoje, iso, novo, salario,  # noqa: F401 (novo = fixture)
                                            timedelta)
 
@@ -128,6 +129,16 @@ def test_i6b_mesmo_veredito_agrupa_e_bloqueio_sai_uma_vez(novo):
     u = _aluguel(novo)
     conta(conexao(u, f"item-{u}", sync=horas_atras(47)), f"acc-{u}", D("100"))
     assert fala(u, cen("A", "10"), cen("B", "20")) == ["A e B: ainda não consigo dizer se recomendo.", *BANCO, FECHO]
+
+
+def test_i6c_bloqueio_comum_a_grupos_diferentes_sai_uma_vez(novo):
+    """À vista depende só do boleto; o parcelado, do boleto + da 1ª parcela presumida: grupos distintos."""
+    u = novo(900)
+    create_boleto(u, "Luz", 800, hoje() + timedelta(days=3))
+    f = fala(u, cen("À vista", "200"), cen("Parcelado", "300", parcelas=3, entrada=100))
+    assert sum(x.startswith("• Estes boletos já foram pagos?") for x in f) == 1, f
+    assert sum(x.startswith("• Quando vence a primeira parcela?") for x in f) == 1, f
+    assert "À vista: ainda não consigo dizer se recomendo." in f and "Parcelado: ainda não consigo dizer se recomendo." in f
 
 
 def test_i7_compra_fora_da_janela(novo):
