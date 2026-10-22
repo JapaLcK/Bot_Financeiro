@@ -1,9 +1,10 @@
 """Comparação de períodos equivalentes (PL-07, Plus/Pro): a regra única de "mês passado".
 
-Quem decide a janela e o delta é este módulo; os consumidores (hoje a tool `compare_periods`
-da IA) só mostram. Dois caminhos, um formato de saída; só a base do cartão muda (`base.cartao`):
+Quem decide a janela e o delta é este módulo; os consumidores (a tool `compare_periods` da IA,
+`GET /api/v2/comparacao` e o KPI das Análises, com `meses=N`) só mostram. Dois caminhos, um formato
+de saída; só a base do cartão muda (`base.cartao`):
 - `mes` (aberto ou fechado): os números do "Entrou/Saiu do mês" (`db/resumo_mes`), cartão pela
-  FATURA; a janela parcial soma as faturas que fecham dentro dela.
+  FATURA.
 - datas informadas: se as DUAS janelas são meses-calendário inteiros (critério `_meses_inteiros` da tool), é o mesmo
   que `mes=`: cartão pela FATURA, mês todo. Senão é período livre, nas DUAS janelas: a regra das outras tools da IA (Q3), as de
   `get_top_categories`/`get_period_summary` (`db.get_top_expense_categories`, `db.get_summary_by_period`),
@@ -13,6 +14,7 @@ da IA) só mostram. Dois caminhos, um formato de saída; só a base do cartão m
 Mês aberto: o mês corrente INTEIRO (o que já está lançado nele, inclusive fatura que fecha e lançamento com data
 futura) contra o anterior inteiro, o mesmo número do `resumo_do_mes`. Mês fechado: mês inteiro × mês inteiro.
 `anterior_encurtado` é sempre False (mantido: é contrato do bloco).
+Com `meses=N` (o KPI das Análises): os N meses até `ano`-`mes`, inteiros, contra os N antes deles.
 """
 from __future__ import annotations
 
@@ -68,21 +70,28 @@ def _janelas(modo: str, escolha: str, atual: dict, anterior: dict, cartao: str =
             "mesmo_tamanho": atual["dias"] == anterior["dias"], "anterior_encurtado": False}
 
 
-def escolher_janelas(hoje: date, ano: int, mes: int) -> dict:
-    """Janelas (inclusivas) do mês `ano`-`mes` contra o anterior. `ValueError` em mês inválido ou futuro."""
-    if not (all(type(v) is int for v in (ano, mes)) and 1 <= mes <= 12 and 2000 <= ano <= 9998):
+def escolher_janelas(hoje: date, ano: int, mes: int, meses: int = 1) -> dict:
+    """Janelas (inclusivas) dos `meses` meses que terminam em `ano`-`mes` contra os `meses` meses antes deles
+    (1 = o mês contra o anterior; mais de 1 = o KPI das Análises). `ValueError` em mês inválido ou futuro."""
+    if not (all(type(v) is int for v in (ano, mes, meses)) and 1 <= mes <= 12 and 2000 <= ano <= 9998 and meses >= 1):
         raise ValueError("mês inválido; use AAAA-MM.")
     idx, idx_hoje = ano * 12 + mes - 1, hoje.year * 12 + hoje.month - 1
     if idx > idx_hoje:
         raise ValueError(f"mês no futuro; o mês corrente é {hoje.year:04d}-{hoje.month:02d}.")
-    ini, fim = _mes(idx)
-    ant_ini, ant_fim = _mes(idx - 1)
+    ini, fim = _mes(idx - meses + 1)[0], _mes(idx)[1]
+    ant_ini, ant_fim = _mes(idx - 2 * meses + 1)[0], _mes(idx - meses)[1]
     a, p = _janela(ini, fim), _janela(ant_ini, ant_fim)
+    um = meses == 1
     if idx < idx_hoje:
         return _janelas("mes_fechado", f"{_nome(ini).capitalize()} inteiro ({a['dias']} dias) contra "
-                        f"{_nome(ant_ini)} inteiro ({p['dias']} dias).", a, p)
+                        f"{_nome(ant_ini)} inteiro ({p['dias']} dias)." if um else
+                        f"{_nome(ini).capitalize()} a {_nome(fim)}, meses inteiros ({a['dias']} dias), contra "
+                        f"{_nome(ant_ini)} a {_nome(ant_fim)} ({p['dias']} dias).", a, p)
     return _janelas("mes_aberto", f"{MESES[mes - 1].capitalize()} até agora (o que já está lançado no mês, igual ao Resumo do mês) "
-                    f"contra {_nome(ant_ini)} inteiro. O mês ainda não acabou: a comparação tende a mostrar gasto menor.", a, p)
+                    f"contra {_nome(ant_ini)} inteiro. O mês ainda não acabou: a comparação tende a mostrar gasto menor." if um else
+                    f"{_nome(ini).capitalize()} a {_nome(fim)}, com {MESES[mes - 1]} até agora (o que já está lançado, igual ao "
+                    f"Resumo do mês), contra {_nome(ant_ini)} a {_nome(ant_fim)}, meses inteiros. O mês ainda não acabou: "
+                    "a comparação tende a mostrar gasto menor.", a, p)
 
 
 def _intervalos(hoje: date, atual: tuple[date, date], anterior: tuple[date, date], por_fatura: bool = False) -> dict:
@@ -183,7 +192,10 @@ def _comparar(user_id: int, j: dict, agora: datetime) -> dict:
     out = {**j, "base": {**{k: base[k] for k in ("regra", "cartao", "origem")}, "cartao_lancamentos": None},
            "despesa": None, "receita": None, "resultado": None,
            "categorias": [], "categorias_omitidas": 0, "motivo": None, "motivos": [], "nota": None, "serie": None}
-    if j["modo"] == "mes_aberto":  # a legenda "dia 17 de 31" do app: `atual.fim` é o fim do mês, não hoje (mesmos nomes do forecast_month_end)
+    # `mes=` com N meses (o KPI): "dia 15 de 92" não diz nada e a série diária de dois anos não tem leitor.
+    um_mes = (j["atual"]["inicio"].year, j["atual"]["inicio"].month) == (j["atual"]["fim"].year, j["atual"]["fim"].month)
+    n_meses = j["modo"] in ("mes_aberto", "mes_fechado") and not um_mes
+    if j["modo"] == "mes_aberto" and not n_meses:  # a legenda "dia 17 de 31" do app: `atual.fim` é o fim do mês, não hoje (mesmos nomes do forecast_month_end)
         out["dias_corridos"], out["dias_no_mes"] = day_tz(agora).day, j["atual"]["dias"]
     corte = history_earliest_date(user_id, agora)
     if corte and corte > min(j["atual"]["inicio"], j["anterior"]["inicio"]):  # o modelo pode trocar A e B
@@ -208,7 +220,7 @@ def _comparar(user_id: int, j: dict, agora: datetime) -> dict:
                     cat_a, cat_p = resumo_mes.categorias(cur, user_id, ia, fa), resumo_mes.categorias(cur, user_id, ip, fp)
             except Exception as exc:
                 logger.warning("comparacao_periodos: categorias indisponíveis (%s)", type(exc).__name__)
-        if not por_compra:  # a série diária das duas janelas; extra como as categorias (savepoint). Período livre: sem linha
+        if not por_compra and not n_meses:  # a série diária das duas janelas; extra como as categorias (savepoint). Período livre: sem linha
             try:
                 with conn.transaction():
                     serie = {lado: _serie(lancamentos.listar(cur, user_id, i, f, limite=None)[0], j[lado], day_tz(agora),
@@ -226,7 +238,7 @@ def _comparar(user_id: int, j: dict, agora: datetime) -> dict:
     out["base"]["cartao_lancamentos"] = {"atual": int(ta["n_cartao"]), "anterior": int(tp["n_cartao"])}
     out["escolha"] += base["escolha"]
     if j["modo"] == "mes_aberto" and not ta["n_cartao"]:
-        out["escolha"] += " Nenhuma fatura de cartão no mês."
+        out["escolha"] += " Nenhuma fatura de cartão no período." if n_meses else " Nenhuma fatura de cartão no mês."
     out["despesa"] = _linha(_dinheiro(ta["saiu"]), _dinheiro(tp["saiu"]))
     out["receita"] = _linha(_dinheiro(ta["entrou"]), _dinheiro(tp["entrou"]))
     (r, dsp) = out["receita"], out["despesa"]
@@ -243,12 +255,13 @@ def _comparar(user_id: int, j: dict, agora: datetime) -> dict:
     return out
 
 
-def comparar_mes(user_id: int, ano: int, mes: int, agora: datetime | None = None) -> dict | None:
-    """O mês `ano`-`mes` contra o anterior equivalente. `None` = o plano não permite (nada foi lido)."""
+def comparar_mes(user_id: int, ano: int, mes: int, agora: datetime | None = None, meses: int = 1) -> dict | None:
+    """O mês `ano`-`mes` (ou os `meses` meses até ele) contra o anterior equivalente. `None` = o plano não
+    permite (nada foi lido)."""
     if not plan_gate_ok(user_id, "financial_comparison"):
         return None
     agora = agora or now_tz()
-    return _comparar(user_id, escolher_janelas(day_tz(agora), ano, mes), agora)
+    return _comparar(user_id, escolher_janelas(day_tz(agora), ano, mes, meses), agora)
 
 
 def comparar_intervalos(user_id: int, atual: tuple[date, date], anterior: tuple[date, date],

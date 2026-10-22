@@ -36,7 +36,16 @@ Essencial que pede "resumo semanal" vê resultado e maior categoria, sem a varia
 A comparação por períodos equivalentes e por categoria (`compare_periods`, PL-07) é Plus+: o
 gate `financial_comparison` é a primeira instrução do serviço e o Essencial recebe `pro_required`
 sem nenhum dado lido. O "mês anterior" do Resumo do mês (`anterior` de `GET /api/v2/resumo-do-mes`:
-dois totais, sem percentual) não muda e segue no Essencial.
+dois totais, sem percentual) não muda e segue no Essencial. Na interface, a mesma regra é Plus+ em
+`GET /api/v2/comparacao` (bloco "Comparado ao mês anterior" da tela v2: o Essencial o vê com cadeado no
+Organizar e ele nunca entra no layout) e no KPI "vs" das Análises do painel antigo (o Essencial não recebe nem lê o
+período anterior).
+
+**Pendência conhecida (decisão do dono, 2026-10-16, D4 do PL-07 PR B):** a política é fechar para Plus+ toda
+variação % que o Essencial ainda vê e unificá-la no serviço de comparação. Hoje o Essencial ainda vê variação em
+dois lugares, ambos sem gate: o "Para onde vai" da tela v2 (`GET /api/v2/gastos`, "x% a mais que no mesmo dia do mês
+anterior", com outra regra de cartão: data da compra) e o "Ritmo de gastos" do app nativo (`/api/app/mes-detalhes`,
+chip de %). A implementação fica para issue/PR próprio, fora do PR B.
 A newsletter de curiosidades genéricas continua separada dos insights pessoais.
 
 O alerta de gasto fora do padrão do Xerife (referência, diferença, amostra e a marcação

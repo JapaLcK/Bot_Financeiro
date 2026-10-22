@@ -29,7 +29,7 @@ export async function viraConta43NoGet(ctx, page, url, corpoB, marca, viraNoN = 
 /** O bundle com a conferência da conta (daConta, `user_id!==uid`) desligada. */
 function bundleSemConferencia() {
   const js = readFileSync(join(FRONTEND, "dashboard-app.js"), "utf8");
-  const desligado = js.replace(/user_id!==(\w+)\)throw new (\w+);return/, "user_id===-1)throw new $2;return");
+  const desligado = js.replace(/user_id!==([\w$]+)\)throw new ([\w$]+);return/, "user_id===-1)throw new $2;return");
   assert.notEqual(desligado, js, "o padrão da conferência não está mais no bundle: ajuste o teste");
   return desligado;
 }

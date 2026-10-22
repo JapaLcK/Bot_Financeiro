@@ -31,6 +31,7 @@ import { Installments } from "../widgets/Installments";
 import { Subscriptions } from "../widgets/Subscriptions";
 import { Contas } from "../widgets/Contas";
 import { PrevisaoCard } from "../widgets/Previsao";
+import { Comparacao } from "../widgets/Comparacao";
 import { Catalog, ProfileSelect } from "./BoardControls";
 import { ProfilePicker } from "./ProfilePicker";
 import { PiggyBand } from "./PiggyBand";
@@ -55,6 +56,7 @@ const EXTRA: WidgetItem[] = [
   { id: "rendimento", size: "wide", label: "Rendimento × CDI" },
   { id: "parcelas", size: "wide", label: "Parcelas futuras" },
   { id: "assinaturas", size: "tall", label: "Assinaturas" },
+  { id: "comparacao", size: "tall", label: "Comparado ao mês anterior" },
 ];
 const ALL = [...DEFAULT, ...EXTRA];
 const KNOWN = ALL.map((w) => w.id);
@@ -66,7 +68,7 @@ const VIEWS: Record<string, (p: { s: DashState }) => ReactNode> = {
   compromissos: Bills, piggy: Piggy, patrimonio: () => (DEMO ? <NetWorth /> : <PatrimonioReal />),
   fatura: Invoice, wealth: () => (DEMO ? <Wealth /> : <ComposicaoReal />),
   renda: () => <Income />, rendimento: () => <Yield />, parcelas: () => <Installments />,
-  assinaturas: () => <Subscriptions />,
+  assinaturas: () => <Subscriptions />, comparacao: Comparacao,
 };
 
 // Página de cada bloco (o Piggy não tem página própria: as ações dele levam às outras).
@@ -75,6 +77,7 @@ const PAGE: Record<string, Path | null> = {
   simulador: "/simulador", compromissos: "/previsao", piggy: null, patrimonio: "/patrimonio",
   fatura: "/previsao", wealth: "/patrimonio",
   renda: "/lancamentos", rendimento: "/patrimonio", parcelas: "/previsao", assinaturas: "/assinaturas",
+  comparacao: null,
 };
 
 const presetOf = (p: string): string[] => PROFILES.find((x) => x.id === p)?.preset ?? DEFAULT.map((w) => w.id);

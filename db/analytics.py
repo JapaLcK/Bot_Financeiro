@@ -122,7 +122,7 @@ def _to_float(v: Any) -> float:
 # KPIs — totais agregados do período + comparativo com período anterior
 # ─────────────────────────────────────────────────────────────────────────────
 
-def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
+def compute_kpis(user_id: int, from_date: date, to_date: date, com_anterior: bool = True) -> dict:
     """
     Retorna {
       from, to,
@@ -134,6 +134,9 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
       largest_expense: { date, valor, alvo,
                          nota, categoria } | None # maior despesa individual
     }
+    `com_anterior=False`: sem `prev`/`delta_pct` e sem ler o período anterior (a rota das
+    Análises tira o delta de `core/services/comparacao_periodos.py`; o anterior daqui, os
+    mesmos N dias corridos antes, fica só para o LLM de insights).
     """
     span_days = (to_date - from_date).days
     prev_from = from_date - timedelta(days=span_days)
@@ -250,8 +253,11 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
         return peak, largest
 
     cur = _totals(from_date, to_date)
-    prev = _totals(prev_from, prev_to)
     peak_day, largest_expense = _highlights(from_date, to_date)
+    if not com_anterior:
+        return {"from": from_date.isoformat(), "to": to_date.isoformat(), **cur,
+                "peak_day": peak_day, "largest_expense": largest_expense}
+    prev = _totals(prev_from, prev_to)
 
     def _pct(a: float, b: float) -> float | None:
         """Variação % de b → a. None se b é 0 (indefinido)."""
