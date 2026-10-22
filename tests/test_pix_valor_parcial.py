@@ -17,7 +17,10 @@ G. funções puras.
 
 CONTROLES NEGATIVOS (Python, não sed; relato do PR): `conferir_valor` →
 `return True` deixa A e C vermelhos; remover o marcador deixa D vermelho; `>=` por
-`>` deixa B vermelho; tolerância 1 deixa o 498,99 de A vermelho.
+`>` deixa B vermelho; tolerância 1 deixa o 498,99 de A vermelho; tirar o `not exists`
+do passo 1 do runbook (docs/CLAUDE.md) deixa d1 e i4 vermelhos; tirar o `charge_id` da
+chave dele deixa i6 vermelho; voltar a coluna `completado_pelo_mesmo_pagamento` para a
+cobrança da linha deixa i6 vermelho.
 """
 from __future__ import annotations
 
@@ -223,6 +226,8 @@ def test_d1_tres_entregas_do_mesmo_parcial_um_alerta(user_id, externo):
     evs = [entregar("PAYMENT_RECEIVED", cob, valor=0.01) for _ in range(3)]
     assert len(set(evs)) == 3 and all(evento(e)["processed_at"] for e in evs)
     _retida(user_id, cob, evs[-1], externo, alertas=1)
+    assert len(_logs("pix_pagamento_parcial_retido", user_id)) == 3  # rastro por entrega
+    assert len(_runbook(user_id)) == 1  # tarefa do operador: uma por pagamento
 
 
 def test_d2_alerta_sai_antes_do_marcador(user_id, externo, monkeypatch):
@@ -502,6 +507,44 @@ def test_i3_cobranca_paga_por_outro_pagamento_nao_poupa_o_retido(user_id, extern
     assert [(r["status_agora"], r["completado_pelo_mesmo_pagamento"])
             for r in _runbook(user_id)] == [("paid", False)]
     assert not any("completado" in m for m in externo["alerta"])
+
+
+def test_i4_runbook_mostra_o_valor_mais_recente_do_mesmo_pagamento(user_id, externo):
+    """Baixa manual refeita com outro valor no MESMO pagamento: uma linha, a mais recente."""
+    conta(user_id, "free", None)
+    cob = nova_cobranca(user_id)
+    entregar("PAYMENT_RECEIVED", cob, valor=100.0)
+    entregar("PAYMENT_RECEIVED", cob, valor=200.0)
+    assert [r["details"]["pago_cents"] for r in _runbook(user_id)] == [20000]
+
+
+def test_i5_dois_pagamentos_parciais_continuam_duas_linhas(user_id, externo):
+    """POSITIVO do dedupe: pagamentos distintos da mesma cobrança não se fundem."""
+    conta(user_id, "free", None)
+    cob = nova_cobranca(user_id)
+    entregar("PAYMENT_RECEIVED", cob, valor=249.50)
+    entregar("PAYMENT_RECEIVED", cob, payment_id=f"pay_{uuid.uuid4().hex[:12]}", valor=249.50)
+    linhas = _runbook(user_id)
+    assert len(linhas) == 2 and len({r["details"]["payment_id"] for r in linhas}) == 2
+
+
+def test_i6_mesmo_pagamento_em_duas_cobrancas_nao_esconde_a_completada(user_id, externo):
+    """`pay_Z` parcial em A (expired) e em B, depois completa A: a linha de A não pode
+    sumir atrás da de B, e a de B também diz completado (o dinheiro virou plano em A)."""
+    conta(user_id, "free", None)
+    a = nova_cobranca(user_id)
+    with get_conn() as conn, conn.cursor() as cur:  # libera a recompra para criar B
+        cur.execute("update pix_charges set status = 'expired' where id = %s", (a["id"],))
+        conn.commit()
+    b = nova_cobranca(user_id)
+    a = ler(a["id"])
+    pz = f"pay_{uuid.uuid4().hex[:12]}"
+    entregar("PAYMENT_RECEIVED", a, payment_id=pz, valor=100.0)
+    entregar("PAYMENT_RECEIVED", b, payment_id=pz, valor=100.0)
+    entregar("PAYMENT_RECEIVED", a, payment_id=pz, valor=499.0)
+    linhas = sorted((r["details"]["charge_id"], r["status_agora"],
+                     r["completado_pelo_mesmo_pagamento"]) for r in _runbook(user_id))
+    assert linhas == sorted([(a["id"], "paid", True), (b["id"], "pending", True)])
 
 
 @pytest.mark.parametrize("estado", ["pending", "canceling"])

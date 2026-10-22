@@ -1649,16 +1649,29 @@ existe e responde 2xx em produção (sem ele o parcial fica só em `system_event
 Runbook do operador (parcial retido):
 1. Localizar (de quem é a linha): `select created_at, user_id, message, details, (select
    c.status from pix_charges c where c.id = (details->>'charge_id')::bigint and c.user_id =
-   system_event_logs.user_id) as status_agora, (select c.status = 'paid' and c.asaas_payment_id
-   = details->>'payment_id' from pix_charges c where c.id = (details->>'charge_id')::bigint and
-   c.user_id = system_event_logs.user_id) as completado_pelo_mesmo_pagamento from
-   system_event_logs where event_type = 'pix_pagamento_parcial_retido' order by created_at
-   desc;` (`details` traz `charge_id`, `payment_id`, `pago_cents` e `devido_cents`; `user_id` é
+   system_event_logs.user_id) as status_agora, exists (select 1 from pix_charges c where
+   c.user_id = system_event_logs.user_id and c.status = 'paid' and c.asaas_payment_id =
+   details->>'payment_id') as completado_pelo_mesmo_pagamento from
+   system_event_logs where event_type = 'pix_pagamento_parcial_retido' and not exists (select 1
+   from system_event_logs o where o.event_type = system_event_logs.event_type and o.user_id =
+   system_event_logs.user_id and o.details->>'payment_id' = system_event_logs.details->>'payment_id'
+   and o.details->>'charge_id' = system_event_logs.details->>'charge_id' and o.id >
+   system_event_logs.id) order by created_at desc;` (`details` traz `charge_id`,
+   `payment_id`, `pago_cents` e `devido_cents`; `user_id` é
    a conta a atender em /admin; `status_agora` é o estado ATUAL da COBRANÇA, e o retido é de um
-   PAGAMENTO: só `completado_pelo_mesmo_pagamento` diz que este dinheiro virou plano).
+   PAGAMENTO: só `completado_pelo_mesmo_pagamento` diz que este dinheiro virou plano (em qualquer
+   cobrança da conta)). Uma linha
+   por pagamento e cobrança: cada entrega ou retentativa do mesmo `payment_id` grava um log, e a
+   consulta mostra só o mais recente; o `pago_cents` dele é o último registrado (pode ser de uma
+   retentativa, ou `ilegivel`) e pode diferir do alerta: o alerta leva o valor do evento em que
+   o canal do admin confirmou a entrega. Confira o valor no painel do Asaas antes de devolver ou
+   cobrar a diferença.
 2. Decidir pela linha:
-   - `completado_pelo_mesmo_pagamento` = `true`: o mesmo pagamento foi completado depois. NÃO
-     devolva; o alerta/log de excesso diz se há diferença a devolver.
+   - `completado_pelo_mesmo_pagamento` = `true` (prevalece sobre `status_agora`): o mesmo
+     pagamento foi completado depois. NÃO devolva; se `status_agora` for `pending`/`canceling`,
+     só feche a linha (passo 3). O alerta/log de excesso diz se há diferença a devolver; o log
+     `pix_excesso_recebido` também pode se repetir numa retentativa: é uma diferença por
+     `payment_id`.
    - `status_agora` em `pending` ou `canceling` (os do passo 3): escolher UM caminho: autorizar
      o desconto (grant `source='admin'` pelo painel e entregar os cadernos à mão); pedir o
      complemento (cobrança da diferença no Asaas; a soma NÃO é automática, conceder à mão); ou
