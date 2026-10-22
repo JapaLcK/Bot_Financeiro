@@ -6,6 +6,8 @@ import { DEMO, ErroApi, apiGet, categoriasQuery, lerContaFresca, meQuery } from 
 import type { Lancamento } from "../../lib/api-v2.gen";
 import { LancamentoLinha } from "../LancamentoLinha";
 import { textos } from "../../lib/bancos";
+import { existe } from "../../lib/extrato-dias";
+import { decimal } from "../../lib/format.js";
 
 // Os lançamentos que um card da IA abre dentro dele (contas agora; categorias e dias no PR 4). Só leitura, de 10 em 10, e a conta é conferida
 // ANTES de cada página (nenhum GET sai com a sessão de outra conta) e DEPOIS (a troca durante a busca não desenha nada). A chave tem o uid por
@@ -15,7 +17,7 @@ type Filtros = { mes: string; conta?: number };
 export const PRAZO_PAGINA_MS = 15_000; // o `comLimite` do app
 const FALHA = "Não deu para carregar os lançamentos.";
 const TEXTOS_DA_LINHA = ["descricao", "categoria", "mensagem", "hora", "instituicao"] as const; // o que o LancamentoLinha desenha como texto: objeto ali derrubaria o card
-const itemOk = (i: unknown) => { const x = i as Partial<Lancamento> | null; return !!x && typeof x.id === "string" && /^\d{4}-\d{2}-\d{2}/.test(x.data ?? "") && (x.tipo === "entrada" || x.tipo === "saida") && typeof x.valor === "string" && typeof x.moeda === "string" && textos(x.motivos) && TEXTOS_DA_LINHA.every((k) => x[k] == null || typeof x[k] === "string"); };
+const itemOk = (i: unknown) => { const x = i as Partial<Lancamento> | null; return !!x && typeof x.id === "string" && typeof x.data === "string" && existe(x.data.slice(0, 10)) && (x.tipo === "entrada" || x.tipo === "saida") && decimal(x.valor) !== null && typeof x.moeda === "string" && textos(x.motivos) && TEXTOS_DA_LINHA.every((k) => x[k] == null || typeof x[k] === "string"); };
 // O prazo cobre a página INTEIRA: as leituras do perfil (antes e depois) não levam sinal, então o corte rejeita por cima delas.
 const cortavel = <T,>(p: Promise<T>, s: AbortSignal) => Promise.race([p, new Promise<never>((_, no) => {
   const corta = () => no(new DOMException("Aborted", "AbortError"));
@@ -30,7 +32,7 @@ export function LancamentosDoCard({ uid, filtros }: { uid: number; filtros: Filt
     queryFn: ({ signal, pageParam }) => comPrazo((s) => cortavel((async () => {
       await antesDaConta(qc, uid);
       const r = await apiGet("/lancamentos", s, { ...filtros, limite: 10, cursor: pageParam });
-      if (!Array.isArray(r?.itens) || !r.itens.every(itemOk)) throw new Error("lançamentos fora do contrato");
+      if (!Array.isArray(r?.itens) || !r.itens.every(itemOk) || !(r.proximo == null || typeof r.proximo === "string")) throw new Error("lançamentos fora do contrato");
       return daConta(uid, s, r);
     })(), s), PRAZO_PAGINA_MS, signal),
     meta: { foto: true },

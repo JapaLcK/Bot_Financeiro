@@ -320,7 +320,7 @@ test("L12b foco: \"Tentar de novo\" pelo teclado que falha DE NOVO devolve o foc
   await a.page.context().close();
 });
 
-for (const [nome, itens] of [["item null", [null]], ["item sem campos", [{ id: "l1" }]], ["data que não é data", [{ ...F.lancamentos.estados.itens[0], data: "lixo" }]], ["motivo que não é texto", [{ ...F.lancamentos.estados.itens[0], motivos: [{ a: 1 }] }]], ["descrição que não é texto", [{ ...F.lancamentos.estados.itens[0], descricao: { a: 1 } }]], ["categoria que não é texto", [{ ...F.lancamentos.estados.itens[0], categoria: { a: 1 } }]]]) {
+for (const [nome, itens] of [["item null", [null]], ["item sem campos", [{ id: "l1" }]], ["data que não é data", [{ ...F.lancamentos.estados.itens[0], data: "lixo" }]], ["motivo que não é texto", [{ ...F.lancamentos.estados.itens[0], motivos: [{ a: 1 }] }]], ["descrição que não é texto", [{ ...F.lancamentos.estados.itens[0], descricao: { a: 1 } }]], ["categoria que não é texto", [{ ...F.lancamentos.estados.itens[0], categoria: { a: 1 } }]], ["valor que não é decimal", [{ ...F.lancamentos.estados.itens[0], valor: "invalid" }]], ["dia que não existe", [{ ...F.lancamentos.estados.itens[0], data: "2026-02-30" }]]]) {
   test(`L13 lançamento malformado (${nome}): o card fica de pé com o erro e "Tentar de novo" (que recupera), em vez de virar o marcador`, async () => {
     const a = await preparar();
     a.t.itens = itens;
