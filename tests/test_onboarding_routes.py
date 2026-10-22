@@ -17,19 +17,12 @@ from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.onboarding as onboarding_routes
+from _apoio_auth_app import csrf as _csrf
 from frontend.routes.shared import FRONTEND_DIR
 
 client = TestClient(dashboard.app)
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
-
-
-def _csrf(c: TestClient) -> dict[str, str]:
-    """Cookie + header de CSRF, como o csrf_middleware exige de todo método
-    não-seguro. Mesma convenção de tests/test_auth_cookie.py."""
-    token = "test-csrf-token"
-    c.cookies.set(dashboard.CSRF_COOKIE_NAME, token)
-    return {dashboard.CSRF_HEADER_NAME: token}
 
 
 # ── Compatibilidade com o app iOS já instalado ───────────────────────────────

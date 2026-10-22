@@ -19,12 +19,12 @@ google-auth==2.57.1
 h11==0.16.0
 h2==4.4.1
 httpcore==1.0.9
-# Transitivos do openai (`httpx2<3,>=2.7.0`); o TestClient da starlette 1.6.0 usa httpx2.
-# O 2.16.0 (IndexedCookieJar) manda primeiro o cookie de dominio menos especifico: o
-# `cookies.set(CSRF_COOKIE_NAME, ...)` sem dominio dos testes perde para o csrf_token do
-# servidor e 21 testes viram 403 (google_web_mfa, onboarding_routes, login_exclusao_vinculo,
-# bank_movements, conta_exclusao_checkout_lock). Para subir: setar com dominio ou apagar o
-# do servidor nesses testes, e subir os dois pinos juntos (httpx2 exige httpcore2 igual).
+# Transitivos do openai==3.8.0 (`httpx2<3,>=2.7.0`); o TestClient da starlette usa httpx2.
+# httpx2==X exige httpcore2==X, entao os dois pinos andam sempre juntos.
+# Os helpers de CSRF dos testes ja nao dependem da ordem dos cookies no header (a 2.16.0
+# a inverteu); tests/test_apoio_auth_app_csrf.py garante isso em qualquer versao.
+# Nao tirar o pin: o arquivo e todo de pins exatos. Subir pelo Dependabot, com os dois
+# pacotes juntos e o CI verde.
 httpcore2==2.15.1
 httpx==0.28.1
 httpx2==2.15.1

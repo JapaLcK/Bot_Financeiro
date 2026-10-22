@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.billing_pix as rotas
+from _apoio_auth_app import csrf
 from _billing_grants_helpers import conta
 from _pix_checkout_helpers import (  # noqa: F401 - fixtures
     PRECO,
@@ -66,14 +67,9 @@ def loja(monkeypatch):
     return estado
 
 
-def _csrf() -> dict[str, str]:
-    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "test-csrf-token")
-    return {dashboard.CSRF_HEADER_NAME: "test-csrf-token"}
-
-
 def _post(uid, monkeypatch, **corpo):
     monkeypatch.setattr(rotas.shared, "resolve_dashboard_user_id", lambda req: uid)
-    return client.post("/billing/pix/checkout", headers=_csrf(),
+    return client.post("/billing/pix/checkout", headers=csrf(client),
                        json={"plan": "pro", "cpf_cnpj": _CPF, **corpo})
 
 
