@@ -183,21 +183,24 @@ def test_c4_congelada_desfaz_e_troca(user_id):
     q("update accounts set balance=1000 where user_id=%s returning 1", (user_id,))
     cid, _ = _bank(user_id)
     c = cliente(user_id)
-    d = declara(user_id, criado_em=em(-50))
-    a, b = t("A", -50, -50, "SUPERMERCADO XYZ"), t("B", -50, -49, "PIX MARIA")
+    # Dias k e k+1, além de FLUXO_CONGELA_DIAS e no MESMO mês: com -50/-49 fixos, uma vez por mês o -49 caía
+    # no dia 1 e o "saiu" do mês da declaração perdia a linha que a troca levou para o mês seguinte.
+    k = -51 if (BASE + timedelta(days=-49)).day == 1 else -50
+    d = declara(user_id, criado_em=em(k))
+    a, b = t("A", -50, k, "SUPERMERCADO XYZ"), t("B", -50, k + 1, "PIX MARIA")
     sincroniza(cid, user_id, a, b)
-    mes = BASE - timedelta(days=50)
+    mes = BASE + timedelta(days=k)
     assert q("select matched_transaction_id from bank_movement_declarations where launch_id=%s", (d,))[
         "matched_transaction_id"] == tid(user_id, "A")
     sincroniza(cid, user_id, a, b)  # agora congelada: o sync não mexe nela
     [m] = c.get(f"/open-finance/{user_id}/movements?launch_id={d}").json()["movements"]
     assert m["match"]["description"] == "SUPERMERCADO XYZ" and [x["description"] for x in m["candidates"]] == ["PIX MARIA"]
     assert confirma(c, user_id, d, "B", troca="A").status_code == 200
-    assert retrato(user_id, mes) == R([decl(-49), sombra("A", 50.0, -50)], [solta("A", -50.0, -50), casada("B", -50.0, -49)],
+    assert retrato(user_id, mes) == R([decl(k + 1), sombra("A", 50.0, k)], [solta("A", -50.0, k), casada("B", -50.0, k + 1)],
                                       [("decl mercado", -50.0, "B", "manual", True, False)], 100.0)
     assert desfaz(c, user_id, d, "B").status_code == 200
-    assert retrato(user_id, mes) == R([decl(-50), sombra("A", 50.0, -50), sombra("B", 50.0, -49)],
-                                      [solta("A", -50.0, -50), solta("B", -50.0, -49)],
+    assert retrato(user_id, mes) == R([decl(k), sombra("A", 50.0, k), sombra("B", 50.0, k + 1)],
+                                      [solta("A", -50.0, k), solta("B", -50.0, k + 1)],
                                       [("decl mercado", -50.0, None, None, True, False)], 150.0)
 
 
