@@ -323,6 +323,19 @@ leem. **Alcance:** conta com banco conectado sempre sai `dados_insuficientes`, p
 emite `cobertura_bancaria_nao_comprovada` (dois sentidos) em toda conta com banco; isso só muda nos
 PRs 4a a 4d, que trocam o motivo estrutural por checagem real.
 
+## Estado da Etapa 1, PR 3b (tool e prompt)
+
+A tool `simulate_purchase` passa `com_veredito=True` a `simulate()` e entrega ao modelo `veredito_fala`: linhas
+prontas, montadas no servidor (`_fala`): o atual já em risco, os cenários em risco, os `dados_*` (com os bloqueios
+uma vez só e a pergunta dos itens), os sem risco (sempre com o horizonte de 90 dias; compra fora da janela diz que
+não avaliou), a premissa e o fecho do inconclusivo. O `veredito` cru continua no payload (o `ai_guard` só aceita
+número sob chave monetária). O prompt manda repeti-las sem recalcular nem dizer que cabe, com até 15 linhas, e
+a exceção à REGRA DO APP vale só para essa fala (não há card dela). Mesma tool e prompt no WhatsApp, no app e no
+/painel. Chave desligada: payload e `note` iguais aos de antes. Decisões do dono (2026-10-21): inconclusivo com
+fecho útil; `check_cashflow` NÃO muda (diverge, só para o lado conservador, e o simulador pode dizer "não
+recomendo" onde ele se abstém); o card do chat é o 3c; com o veredito ligado, o `aviso_saldo` deixa de trazer a frase genérica de motivos a
+conferir (a fala já a carrega). A rota legada segue sem o campo.
+
 ## Fontes no repositório
 `core/services/decision_simulator.py`, `core/services/cashflow.py`,
 `core/services/cashflow_forecast.py`, `core/services/ai_chat/tools/simulator.py`,

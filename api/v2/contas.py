@@ -30,6 +30,8 @@ class Conta(BaseModel):
     id: int
     instituicao: str | None
     nome: str | None
+    logo_proprio: str | None  # `/brand/bancos/<ispb>.png`; vence o `logo_url` (precedência de `pluggy_catalogo`)
+    logo_url: str | None  # CDN da Pluggy (https); os dois None = inicial
     saldo: Decimal | None
     moeda: str
     no_total: bool

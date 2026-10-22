@@ -21,9 +21,9 @@ const pctFalado = (pct: number) => `${(Math.abs(Math.round(pct * 10) / 10)).toFi
 export const tituloComparacao = (d?: RecursosBloco["comparacao"]) => { if (!d) return "Comparação"; const r = rotulosDaComparacao(d); return `Gastos · ${r.atual} × ${r.anterior}`; };
 
 /** Variação com sinal ("+R$ 45,00", "−R$ 800,00"): verde se gastou menos, atenção se gastou mais. Os valores ocultos viram a máscara. */
-function Delta({ centavos, display = false, oculto }: { centavos: number; display?: boolean; oculto: boolean }) {
+export function Delta({ centavos, display = false, oculto, sobeBem = false }: { centavos: number; display?: boolean; oculto: boolean; sobeBem?: boolean }) { // sobeBem: entrada e sobra (subir é verde); o padrão é gasto (subir é atenção)
   const p = partes(Math.abs(centavos)), s = sentido(centavos);
-  return <Texto variante={display ? "display" : "rotulo"} tom={oculto ? "ink" : TOM[s]} numerico style={{ fontFamily: escalas.secao.fontFamily }}>{oculto ? MASCARA_OCULTA : p ? `${s === "menos" ? "−" : s === "mais" ? "+" : ""}R$ ${p.inteiro},${p.centavos}` : "—"}</Texto>;
+  return <Texto variante={display ? "display" : "rotulo"} tom={oculto ? "ink" : sobeBem && s !== "igual" ? (s === "mais" ? "positive" : "warning") : TOM[s]} numerico style={{ fontFamily: escalas.secao.fontFamily }}>{oculto ? MASCARA_OCULTA : p ? `${s === "menos" ? "−" : s === "mais" ? "+" : ""}R$ ${p.inteiro},${p.centavos}` : "—"}</Texto>;
 }
 
 /**

@@ -152,6 +152,19 @@ def logo_url_valida(valor: Any) -> str | None:
     return valor if ok else None
 
 
+def logos_da_conexao(c: dict) -> tuple[str | None, str | None]:
+    """`(logo_proprio, logo_url)` de uma conexão (dict com `provider`, `institution_id` e o `logo_url`
+    cru de `SQL_LOGO_URL`). Sem `logo_url` no `raw` (item/deleted troca o `raw`), o catálogo da Pluggy em
+    memória, pelo id do conector (`institution_id`, nunca pelo nome); só `pluggy`: o id do `mock_pluggy` é de
+    outro mundo. Sem rede: cache frio = None = inicial. O próprio (arquivo do repo) vence o da Pluggy no cliente."""
+    from core.services.pluggy_catalogo import logo_do_conector, logo_proprio
+    pluggy, cid = c.get("provider") == "pluggy", str(c.get("institution_id") or "")
+    url = logo_url_valida(c.get("logo_url"))
+    if url is None and pluggy:
+        url = logo_url_valida(logo_do_conector(cid))
+    return (logo_proprio(cid) if pluggy else None), url
+
+
 # ── A coleta vencida (Onda 5, D1) ────────────────────────────────────────────
 # "Atualizando…" só é honesto enquanto a coleta da autorização atual pode estar
 # em curso. O sync de fundo morre sem deixar rastro quando o processo reinicia

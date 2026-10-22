@@ -21,6 +21,8 @@ export const GENERICO = "Não foi possível obter a resposta agora. Tente novame
 export const PRAZO = "A resposta demorou mais que o esperado. Tente de novo.";
 
 const sse = (...eventos) => eventos.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+/** O evento `bloco` de um card: uma aba por `recursos` (sem mês), como o servidor manda os cards que não são do mês. */
+export const blocoDe = (card, ...recursos) => ({ tipo: "bloco", bloco: { card, abas: recursos.map((r) => ({ mes: null, recursos: r })) } });
 export const fim = (reply, extra = {}) => ({ tipo: "fim", reply, message_id: 7, usage: { used: 3, limit: 100 }, chips: [], ...extra });
 export const evento = sse;
 
