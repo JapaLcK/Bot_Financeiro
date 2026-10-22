@@ -17,9 +17,9 @@ import { RespondidasDoBanco, useFalhaReceita, useListaDaPagina } from "./Receita
 import { TrajectoryChart } from "./TrajectoryChart";
 
 type Dias = 30 | 60 | 90;
-const ESTADO: Record<Previsao["estado"], string> = { condicional: "Previsão condicional", a_conferir: "A conferir", indisponivel: "Indisponível" };
+export const ESTADO: Record<Previsao["estado"], string> = { condicional: "Previsão condicional", a_conferir: "A conferir", indisponivel: "Indisponível" };
 // Mesmo rótulo do app (`GASTOS_DIA_A_DIA` em previsaoMotivos.ts; previsao_motivos_paridade.test.ts compara).
-const GASTOS_DIA_A_DIA = "Gastos do dia a dia";
+export const GASTOS_DIA_A_DIA = "Gastos do dia a dia";
 export const hora = (d: { calculado_em: string }) => d.calculado_em.slice(11, 16); // hora do servidor, no fuso do app
 
 function usePrevisao() {
@@ -66,7 +66,7 @@ function Bloqueio({ e }: { e: ErroApi }) {
   );
 }
 
-function Grafico({ d }: { d: Previsao }) {
+export function Grafico({ d }: { d: Previsao }) {
   const serie = d.ancora ? [{ ...d.ancora, compromissos: [] }, ...(d.trajetoria ?? [])] : [];
   const pts: Point[] = serie.map((p) => ({
     date: isoDay(p.data), value: Number(p.saldo), real: false, events: [], texto: moneyText(p.saldo) ?? undefined,

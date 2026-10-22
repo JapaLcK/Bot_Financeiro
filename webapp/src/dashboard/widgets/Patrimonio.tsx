@@ -42,7 +42,7 @@ function semDado(q: UseQueryResult<Dado>, id: string, title: string, erro: strin
 }
 
 // Componente à parte: o `useSize` observa o div no 1º render, e ele só existe com dado.
-function Grafico({ pts, d }: { pts: Ponto[]; d: Dado }) {
+export function Grafico({ pts, d }: { pts: Ponto[]; d: Dado }) {
   const [box, { width, height }] = useSize<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const total = moneyText(d.total) ?? "—";
@@ -86,16 +86,20 @@ function Grafico({ pts, d }: { pts: Ponto[]; d: Dado }) {
   );
 }
 
+// "+R$ 120,00 desde 03/10" (verde só se positivo), ou undefined; igual ao app: sem trechos, sem variação. O card da IA reusa.
+export function variacaoPatrimonio(d: Dado, className = "w-aside-num") {
+  const v = d.trechos.length ? d.variacao : null;
+  const vt = v && moneyText(v.valor);
+  return vt && v ? <span className={`${className} num${positivo(v.valor) ? " gain" : ""}`}>{positivo(v.valor) ? "+" : ""}{vt} desde {dm(v.desde)}</span> : undefined;
+}
+
 export function PatrimonioReal({ title = "Patrimônio" }: { title?: string }) {
   const q = useQuery(patrimonioQuery);
   const d = q.data;
   if (!d) return semDado(q, "patrimonio", title, "Não deu para carregar o patrimônio.");
   const pts = pontosDe(d);
-  const v = d.trechos.length ? d.variacao : null; // igual ao app: sem trechos, sem variação
-  const vt = v && moneyText(v.valor);
   return (
-    <Frame id="patrimonio" title={title} className="w-nw" real
-      aside={vt && v ? <span className={`w-aside-num num${positivo(v.valor) ? " gain" : ""}`}>{positivo(v.valor) ? "+" : ""}{vt} desde {dm(v.desde)}</span> : undefined}>
+    <Frame id="patrimonio" title={title} className="w-nw" real aside={variacaoPatrimonio(d)}>
       <div className="nw-top"><span className="stat-value num">{moneyText(d.total) ?? "—"}</span></div>
       {pts.length < 2 ? <p className="faint">Ainda sem histórico: a linha aparece a partir do 2º dia.</p> : <Grafico pts={pts} d={d} />}
       <Selos motivos={motivosDaTela(d.motivos, ...d.historico.map((h) => h.motivos))} />
@@ -104,7 +108,7 @@ export function PatrimonioReal({ title = "Patrimônio" }: { title?: string }) {
 }
 
 // Fonte única dos rótulos (iguais aos do app) e das cores: paleta categórica, sem verde (só ganho) e sem rosa.
-const PARTES = [
+export const PARTES = [
   { key: "carteira", label: "Carteira", tone: "#3987e5" },
   { key: "bancos", label: "Contas bancárias", tone: "#2fa0c8" },
   { key: "investimentos_banco", label: "Investimentos do banco", tone: "#9085e9" },
@@ -112,26 +116,36 @@ const PARTES = [
   { key: "investimentos_manuais", label: "Investimentos manuais", tone: "#7a8aa8" },
 ] as const;
 
+// `medida`: texto malformado, zero ou negativo fica fora da barra (nunca NaN); o valor da lista é sempre o texto.
+const vivas = (d: Dado) => PARTES.filter((p) => medida(d.partes[p.key]) > 0);
+export const pctDasPartes = (d: Dado) => {
+  const soma = PARTES.reduce((a, p) => a + medida(d.partes[p.key]), 0);
+  return (s: string) => (soma > 0 && medida(s) > 0 ? `${Math.round((medida(s) / soma) * 100)}%` : "");
+};
+// A barra de "Onde está o dinheiro" (o card da IA reusa); sem parte positiva, nada.
+export function BarraComposicao({ d }: { d: Dado }) {
+  const pct = pctDasPartes(d);
+  return vivas(d).length === 0 ? null : (
+    <div className="comp-bar" role="img" aria-label={vivas(d).map((p) => `${p.label} ${pct(d.partes[p.key])}`).join(", ")}>
+      {vivas(d).map((p) => <span key={p.key} style={{ flexGrow: medida(d.partes[p.key]), background: p.tone }} />)}
+    </div>
+  );
+}
+
 export function ComposicaoReal() {
   const q = useQuery(patrimonioQuery);
   const d = q.data;
   if (!d) return semDado(q, "composicao", "Onde está o dinheiro", "Não deu para carregar a composição.");
-  // `medida`: texto malformado, zero ou negativo fica fora da barra (nunca NaN); o valor da lista é sempre o texto.
-  const soma = PARTES.reduce((a, p) => a + medida(d.partes[p.key]), 0);
-  const pct = (s: string) => (soma > 0 && medida(s) > 0 ? `${Math.round((medida(s) / soma) * 100)}%` : "");
+  const pct = pctDasPartes(d);
   return (
     <Frame id="composicao" title="Onde está o dinheiro" real>
-      {soma > 0 && (
-        <>
-          <div className="comp-bar" role="img" aria-label={PARTES.filter((p) => medida(d.partes[p.key]) > 0).map((p) => `${p.label} ${pct(d.partes[p.key])}`).join(", ")}>
-            {PARTES.filter((p) => medida(d.partes[p.key]) > 0).map((p) => <span key={p.key} style={{ flexGrow: medida(d.partes[p.key]), background: p.tone }} />)}
-          </div>
-          <ul className="legend comp-legend">
-            {PARTES.filter((p) => medida(d.partes[p.key]) > 0).map((p) => (
-              <li key={p.key}><span className="key" style={{ background: p.tone, height: 8, width: 8, borderRadius: 2 }} />{p.label} <b className="num">{pct(d.partes[p.key])}</b></li>
-            ))}
-          </ul>
-        </>
+      <BarraComposicao d={d} />
+      {vivas(d).length > 0 && (
+        <ul className="legend comp-legend">
+          {vivas(d).map((p) => (
+            <li key={p.key}><span className="key" style={{ background: p.tone, height: 8, width: 8, borderRadius: 2 }} />{p.label} <b className="num">{pct(d.partes[p.key])}</b></li>
+          ))}
+        </ul>
       )}
       <ul className="wealth-rows">
         {PARTES.map((p) => (

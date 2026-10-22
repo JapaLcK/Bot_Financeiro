@@ -28,8 +28,8 @@ from tests.test_patrimonio_foto_teto import _cria as _cria_teto
 
 D = Decimal
 CONTAS = "/api/v2/contas"
-CAMPOS = {"id", "instituicao", "nome", "saldo", "moeda", "no_total", "conexao",
-          "sincronizado_em", "motivos"}
+CAMPOS = {"id", "instituicao", "nome", "logo_proprio", "logo_url", "saldo", "moeda", "no_total",
+          "conexao", "sincronizado_em", "motivos"}
 
 
 @pytest.fixture

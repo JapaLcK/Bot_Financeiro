@@ -412,7 +412,7 @@ def test_investido_e_contas_saem_iguais_ao_de_antes_do_por_conexao(uid):
     inv = ok(uid, "/api/v2/investido")
     assert inv == LEGADO["investido"] and set(inv) == {"total", "por_tipo", "por_banco", "motivos"}
     contas = ok(uid, "/api/v2/contas")
-    sem_volateis = [{k: v for k, v in x.items() if k not in ("id", "sincronizado_em")} for x in contas["contas"]]
+    sem_volateis = [{k: v for k, v in x.items() if k not in ("id", "sincronizado_em", "logo_proprio", "logo_url")} for x in contas["contas"]]  # logos: campo novo, tests/test_api_v2_contas_logo.py
     assert sem_volateis == LEGADO["contas"] and all("conexao_id" not in x for x in contas["contas"])
     assert {k: v for k, v in contas.items() if k != "contas"} == LEGADO["contas_topo"]
     assert _get_investment_summary(uid, {}) == LEGADO["tool"]

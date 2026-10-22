@@ -167,7 +167,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/contas` (`api/v2/contas.py`, regra em `db/contas_hoje.py`): o bloco de contas
   do Resumo — `total`, `motivos`, `fora_do_total`, `carteira {saldo, motivos}` e `contas[]`
   (`id`, `instituicao`, `nome`, `saldo`, `moeda`, `no_total`, `conexao` — um estado de
-  `connection_ui_state` —, `sincronizado_em`, `motivos`). Mesmo recorte e mesmos critérios da
+  `connection_ui_state` —, `sincronizado_em`, `motivos`, `logo_proprio`, `logo_url` — o logo
+  da conexão pela mesma regra do Open Finance, `db/open_finance_state.py::logos_da_conexao`;
+  o servidor só confere `https://` no `logo_url`, o host é filtrado no cliente). Mesmo recorte e mesmos critérios da
   foto do patrimônio (`db/patrimonio.py`), num snapshot só (repeatable read, só leitura):
   `total` = `calcular().carteira + calcular().bancos`. Conta desatualizada (sync > 48 h,
   pela metade ou nunca: `banco_desatualizado`) e conta fora do último sync

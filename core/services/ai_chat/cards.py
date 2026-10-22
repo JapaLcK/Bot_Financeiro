@@ -138,6 +138,12 @@ def visao_hero(r: dict) -> dict:
                                  for x in p["receitas_do_banco"] if x["status"] == "confirmada"]}
 
 
+def visao_contas(r: dict) -> dict:
+    """O logo (caminho de arquivo e URL) é só do cliente, que desenha o ladrilho: o modelo não lê URL."""
+    c = r["contas"]
+    return {**c, "contas": [{k: v for k, v in x.items() if k not in ("logo_proprio", "logo_url")} for x in c["contas"]]}
+
+
 def _mes(uid: int, a: dict, **recursos: Callable) -> list[tuple[str | None, dict]]:
     return [(None, {n: f(mes=m, uid=uid) for n, f in recursos.items()}) for m in a["meses"] or [None]]
 
@@ -256,7 +262,7 @@ def registro() -> dict[str, Card]:
     det = lambda *ks: _so("detalhes", *ks)  # noqa: E731
     todo = lambda rec: (lambda r: r[rec])  # noqa: E731
     return {
-        "contas": Card(lambda uid, a: [(None, {"contas": contas(uid=uid)})], todo("contas")),
+        "contas": Card(lambda uid, a: [(None, {"contas": contas(uid=uid)})], visao_contas),
         "hero": Card(prev, visao_hero, gate_prev),
         "compromissos": Card(prev, _so("previsao", "hoje", "dias", "compromissos", "motivos"), gate_prev),
         "resumo": Card(lambda uid, a: _mes(uid, a, resumo=resumo, detalhes=mes_detalhes),

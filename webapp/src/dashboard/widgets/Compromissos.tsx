@@ -53,7 +53,7 @@ function Ocorrencia({ o, hoje }: { o: OcorrenciaPrevisao; hoje: string }) {
   );
 }
 
-function Grupo({ g, hoje }: { g: GrupoCompromissos; hoje: string }) {
+export function Grupo({ g, hoje }: { g: GrupoCompromissos; hoje: string }) {
   const [aberto, setAberto] = useState(false);
   const id = useId();
   const oc = g.ocorrencias;
