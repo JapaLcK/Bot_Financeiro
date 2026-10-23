@@ -20,7 +20,7 @@ export const PREPARANDO = "Preparando a resposta…";
 export const PAROU = "Você parou esta resposta.";
 export const SESSAO = "Sua sessão terminou. Recarregue a página.";
 export const SEM_COTA = "Suas mensagens com o Piggy acabaram por este mês ou não fazem parte do seu plano.";
-export const SEM_CARD = "Este card ainda não aparece aqui.";
+export const SEM_CARD = "Não foi possível mostrar este card.";
 export const GENERICO = "Não foi possível obter a resposta agora. Tente novamente em instantes.";
 export const PRAZO = "A resposta demorou mais que o esperado. Tente de novo.";
 

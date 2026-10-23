@@ -3,18 +3,23 @@ import { SEM_CARD, type BlocoIa } from "../lib/conversaIa";
 import { isoDay, monthShort, monthTitle, monthYear } from "../lib/format.js";
 import { Seg } from "./Seg";
 import { CardAssinaturasIa, contratoAssinaturasBloco } from "./cardIa/assinaturas";
+import { CardCaixinhasLegado, contratoCaixinhasLegado } from "./cardIa/caixinhas";
+import { CardFatura, CardParcelas, contratoFatura, contratoParcelas } from "./cardIa/cartao";
 import { CardContas, contratoContas } from "./cardIa/contas";
 import { CardCalendario, CardCategorias, contratoCalendario, contratoCategorias } from "./cardIa/gastos";
 import { CardMetas, contratoMetas } from "./cardIa/metas";
 import { CardPatrimonio, CardWealth, contratoPatrimonio } from "./cardIa/patrimonio";
+import { CardPiggy, contratoPiggy } from "./cardIa/piggy";
 import { CardCompromissos, CardHero, contratoCompromissos, contratoHero, diasDoBloco } from "./cardIa/previsao";
+import { CardRenda, contratoRenda } from "./cardIa/renda";
+import { CardRendimento, contratoRendimento } from "./cardIa/rendimento";
 import { CardPeriodo, CardResumo, contratoPeriodo, contratoResumo, tituloDoPeriodo } from "./cardIa/resumo";
 import { CardSimulador, contratoSimulador } from "./cardIa/simulador";
 
 // Um card que a IA manda no chat (`bloco` do stream, lib/conversaIa.ts): `card` + 1 a 3 abas `{ mes, recursos }` com o dado lido NA HORA pelo servidor (uma foto).
 // Desenhado do bloco, sem consulta ao servidor (as ações de cada card, como abrir lançamentos ou pedir algo ao chat, conferem a conta: parts/cardIa/). Sem `Frame`
 // e sem o widget do Resumo: tudo inline, sem folha e sem link. Card desconhecido, aba fora do envelope ou recurso fora do contrato = o marcador, sem número.
-// `desenha` recebe o `recursos` JÁ conferido por `contrato`; o tipo fundo é de cada card. Os 6 ids que ainda faltam: tests/test_ai_chat_cards_ids_painel.py.
+// `desenha` recebe o `recursos` JÁ conferido por `contrato`; o tipo fundo é de cada card.
 type Ctx = { uid?: number; mes: string | null };
 type Def = { titulo: (recursos: unknown) => string; semMes?: true; contrato: (recursos: unknown) => boolean; desenha: (recursos: any, c: Ctx) => ReactNode }; // eslint-disable-line @typescript-eslint/no-explicit-any
 // Uma entrada por linha, 2 espaços de recuo: o teste dos ids (§0.7) lê estas chaves. Títulos iguais aos do app (app/src/features/painel/catalogo.ts).
@@ -30,6 +35,12 @@ const CARDS: Record<string, Def> = {
   categorias: { titulo: () => "Para onde vai", contrato: contratoCategorias, desenha: (r, c) => <CardCategorias d={r.detalhes} uid={c.uid} /> },
   calendario: { titulo: () => "Dia a dia", contrato: contratoCalendario, desenha: (r, c) => <CardCalendario d={r.detalhes} uid={c.uid} /> },
   periodo: { titulo: tituloDoPeriodo, contrato: contratoPeriodo, desenha: (r) => <CardPeriodo d={r.periodo} /> },
+  caixinhas: { titulo: () => "Caixinhas", contrato: contratoCaixinhasLegado, desenha: (r) => <CardCaixinhasLegado d={r.caixinhas} /> },
+  fatura: { titulo: () => "Fatura do cartão", contrato: contratoFatura, desenha: (r) => <CardFatura d={r.cartoes} /> },
+  parcelas: { titulo: () => "Parcelas futuras", contrato: contratoParcelas, desenha: (r) => <CardParcelas d={r.parcelas} /> },
+  renda: { titulo: () => "Renda mês a mês", contrato: contratoRenda, desenha: (r) => <CardRenda d={r.renda} /> },
+  piggy: { titulo: () => "Piggy notou", contrato: contratoPiggy, desenha: (r) => <CardPiggy d={r.insights} /> },
+  rendimento: { titulo: () => "Rendimentos", contrato: contratoRendimento, desenha: (r) => <CardRendimento d={r.rendimento} /> },
   simulador: { titulo: () => "Simulador", semMes: true, contrato: contratoSimulador, desenha: (r, c) => <CardSimulador r={r} uid={c.uid} /> }, // o bloco leva `mes`, mas o título do app é só "Simulador"
 };
 

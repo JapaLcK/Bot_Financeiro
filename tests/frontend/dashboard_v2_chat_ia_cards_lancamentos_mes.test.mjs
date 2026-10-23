@@ -5,7 +5,7 @@
 // Controles negativos (desligar o conserto e ver vermelho num caso que estava verde) estão na tabela do relato do PR: sem `antesDaConta` -> L2 de todas; sem `daConta` -> L3.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { RESPOSTAS, encerrar, fixture, iniciar, trocarConta } from "./_chat_ia.mjs";
+import { RESPOSTAS, SEM_CARD, encerrar, fixture, iniciar, trocarConta } from "./_chat_ia.mjs";
 import { FALHA, SESSAO, ate, prepararCard } from "./_chat_ia_lanc.mjs";
 
 before(iniciar);
@@ -172,7 +172,7 @@ for (const c of CONSULTAS) {
     const erro = a.page.locator(".card-ia .ci-erro");
     await erro.waitFor();
     assert.equal(await erro.locator("p").innerText(), FALHA);
-    assert.equal(await a.page.getByText("Este card ainda não aparece aqui.").count(), 0);
+    assert.equal(await a.page.getByText(SEM_CARD).count(), 0);
     a.t.itens = null;
     await erro.getByRole("button", { name: "Tentar de novo" }).click();
     await a.linhas().first().waitFor();

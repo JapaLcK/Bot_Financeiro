@@ -19,5 +19,23 @@ export type Periodo = {
   motivos: string[]; historico_desde: string | null; fora_do_total: number;
 };
 
+// O recurso `rendimento` do card `rendimento` (`api/nativo/rendimento.py`, Pydantic): dinheiro e `pct` em texto. Numa declaração só, com os aninhados inline, para o teste de
+// campos (tests/test_ai_chat_cards_fixtures_painel.py) achar todos.
+export type Rendimento = {
+  tipo: "contratado"; motivos: string[];
+  itens: Array<{ nome: string | null; instituicao: string | null; taxa: string | null; tipo_taxa: string | null; observado_em: string | null; motivos: string[] }>;
+  rendimentos: null | {
+    saldo: string | null; quantidade: number; mes: { valor: string | null; pct: string | null; sem_dado: number }; total: { valor: string | null; pct: string | null; sem_dado: number };
+    mes_desde: string; sincronizado_em: string | null; motivos: string[];
+    categorias: Array<{
+      tipo: string; rotulo: string; saldo: string | null; quantidade: number; mes: { valor: string | null; pct: string | null; sem_dado: number }; total: { valor: string | null; pct: string | null; sem_dado: number };
+      ativos: Array<{
+        nome: string | null; instituicao: string | null; logo_proprio: string | null; saldo: string | null;
+        mes: { valor: string | null; pct: string | null; motivo: string | null }; total: { valor: string | null; pct: string | null; motivo: string | null };
+      }>;
+    }>;
+  };
+};
+
 /** O guarda de objeto dos contratos dos cards (nenhum, lista ou texto passam). */
 export const obj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);

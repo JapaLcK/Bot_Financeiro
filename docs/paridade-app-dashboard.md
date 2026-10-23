@@ -43,8 +43,8 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 | Metas: ler | `GET /metas` | Aba Metas (primeiro build arquivado depois deste merge): `GET /api/app/metas` (a mesma v2), as mesmas pílulas do chat, todas as metas (tocar na pílula abre a folha de edição; a escrita está na linha seguinte); a rota do app não filtra pela chave `dashboard_v2_enabled`: a lista vem vazia só para quem não tem meta ("Nenhuma meta ainda."); builds ≤31 seguem na rota legada | Nenhuma: a mesma fonte | Nenhum | resolvido no PR 1 do app |
 | Metas: criar, editar, apagar | Formulário (`MetaForm.tsx`, `MetaFonte.tsx`); edição manda só o diff; confirmação do apagar no próprio diálogo | Folha nativa (`app/app/(app)/meta.tsx`, `metaForm.tsx`) aberta pelo "+" do cartão, pela pílula e por "Montar reserva", nas mesmas rotas `/api/app/metas*` (todo usuário do app, sem a chave); mesmas regras (`metasEscrita.ts`, presa por teste de paridade); prazo pelo seletor nativo, fonte numa lista expansível, `Alert` nativo para apagar; o chat do Piggy segue criando, editando e apagando (só para quem tem a chave) | Telas e textos próprios de cada plataforma (mínimo de texto no app); no app a conta sem a chave cria meta que o Piggy e o WhatsApp dela não enxergam até a chave abrir (P1-b); o web não tem "Tirar prazo" na criação | Nenhum no recurso; limite P1-b é de servidor | PR 2 do app (aguarda build novo: datetimepicker é nativo) |
 | Patrimônio e "Onde está o dinheiro" | Real (`/api/v2/patrimonio`) | Real (`/api/app/patrimonio`) | A rota existe nos dois namespaces; a web (Etapa 6, PR B) já lê a `/api/v2`; o app passa a usar `trechos` e `variacao` no PR C (`docs/plano-etapa6-patrimonio.md`, seção 3) | App | PR C da Etapa 6 |
-| Rendimento | Exemplo ("Rendimento × CDI") | Real (`/api/app/rendimento`): card Rendimentos com Mês \| Total, estimado pelo saldo; a taxa contratada não aparece mais na tela (no chat segue no texto, via `taxas`). O app instalado só ganha o card com build novo | Idem | Web | a discutir com o dono |
-| Fatura do cartão, parcelas futuras, renda mês a mês, "Piggy notou" | Exemplo | Reais, por rotas legadas com `user_id` no caminho (`/cards`, `/installments`, `/analytics`, `/insights`) | Web sem dado real; app preso a rota legada | Web (e o app, na rota) | a discutir com o dono |
+| Rendimento | Exemplo ("Rendimento × CDI") na home; o chat do /painel já mostra o dado real (card do bloco) | Real (`/api/app/rendimento`): card Rendimentos com Mês \| Total, estimado pelo saldo; a taxa contratada não aparece mais na tela (no chat segue no texto, via `taxas`). O app instalado só ganha o card com build novo | Idem | Web | a discutir com o dono |
+| Fatura do cartão, parcelas futuras, renda mês a mês, "Piggy notou" | Exemplo na home; o chat do /painel já mostra o dado real (card do bloco) | Reais, por rotas legadas com `user_id` no caminho (`/cards`, `/installments`, `/analytics`, `/insights`) | Home web sem dado real (o chat do /painel já tem); app preso a rota legada | Web (e o app, na rota) | a discutir com o dono |
 
 ## Extrato
 
@@ -60,7 +60,7 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
 | Conversa | Atrás do freio `PAINEL_CHAT_IA_USER_IDS` (lista de user_id; ausente = ninguém): ligado, texto em `/ai/chat/stream` (Etapa 7 PR 1); desligado, de exemplo, só `investido` e `metas` reais | Real (`/ai/chat/stream`, feedback, cancelar pendência) | — | Web | a discutir com o dono |
-| Cards no chat | Renderiza cards de exemplo montados no cliente (`lib/topics.tsx`), não os que o servidor manda | Renderiza os cards reais que o servidor manda (período, caixinhas, metas, gastos e os blocos do catálogo) | O web não lê os cards do servidor | Web | a discutir com o dono |
+| Cards no chat | Desenha os cards reais do `show_card` (todos os ids de `cards.IDS`) a partir do bloco, sem consulta; não recebe os da tool (manda `cards: []`). Divergências: rendimento com campo fora do contrato derruba o card inteiro (o app tira só o item) e sem o logo do banco; caixinhas vazia diz "Nenhuma caixinha ainda." (app: "Nenhuma meta ainda."); parcelas é uma linha por compra que abre as parcelas (app: todas as parcelas de todas as compras empilhadas); `card_name` nulo o web aceita e o zod do app recusa; sem o modo "ocultar valores" | Renderiza os cards reais que o servidor manda (período, caixinhas, metas, gastos e os blocos do catálogo) | Parcelas e caixinhas vazia (PR do app em seguida), o resto declarado | App (parcelas) | PR do app: parcelas em uma linha por compra; o resto, a discutir com o dono |
 | Guia do Piggy e dicas | `Guia.tsx`, `Dica.tsx` | Não há | — | App | a discutir com o dono |
 
 ## Conta, segurança e sistema
@@ -114,7 +114,7 @@ Também li `webapp/src/dashboard/{pages.tsx,router.ts,conta/Ponte.tsx,parts/Boar
 
 - Nada foi aberto em aparelho, simulador, navegador nem produção: tudo vem do código.
 - Não comparei campo a campo os fluxos de entrar, criar conta e esqueci a senha.
-- Não comparei o conteúdo de cada card do chat, só que o app os renderiza e o web não.
+- Não comparei o conteúdo de cada card do chat campo a campo: os títulos, as funções copiadas e os textos copiados dos 6 cards legados estão presos ao app por `tests/frontend/card_ia_paridade.test.mjs`, e as divergências estão na linha "Cards no chat".
 - Não comparei a lista de perfis do web com a do app além da home, nem se os presets têm os mesmos blocos.
 - Não verifiquei se as rotas legadas de `/settings` aceitariam a sessão do app.
 - Não verifiquei a qualidade por ocorrência dos compromissos nem o texto dos selos de motivo nos dois lados.

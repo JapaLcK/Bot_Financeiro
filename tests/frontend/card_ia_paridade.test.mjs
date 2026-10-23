@@ -5,6 +5,7 @@
 //   · o `limite` da expansão de lançamentos (parts/cardIa/LancamentosDoCard.tsx × contasResumo.tsx);
 //   · PR 4: a % de cada categoria e a soma exata (parts/cardIa/decimais.ts × app decimal.ts, pela tabela tests/fixtures/percentual_categorias.json que o servidor também
 //     usa) e o título do card `periodo` (parts/cardIa/resumo.tsx × cardPeriodo.tsx, pela tabela do teste do app).
+//   · PR 6 (cards legados): o título de TODA entrada do `CARDS` com título fixo, as 3 funções de `legado.ts` e o `pctTexto` do rendimento (executados contra os do app) e os textos copiados.
 // DIVERGÊNCIA DECLARADA (decisão do dono, 2026-10-21): no card o Nubank é sempre roxo (#820AD1), no app e nas outras telas cai na tinta pela regra de 3:1 do
 // `corDoBanco`. A tabela abaixo afirma as duas coisas: o roxo no painel E a tinta no app (se um lado mudar, o teste avisa). Nenhuma outra cor diverge.
 // Cada comparação falha ALTO se o formato mudar, e os negativos provam que uma palavra, uma lista ou uma regra trocada só de um lado é vista.
@@ -223,4 +224,86 @@ test("o texto de \"sem histórico\" do card `simulador` é o do app, palavra por
 test("negativo: uma palavra trocada no texto de \"sem histórico\", de qualquer lado, aparece como diferença", () => {
   assert.notEqual(vazioWeb(SIM_CARD().replace("para estimar", "para calcular")), vazioApp(SIM_APP()));
   assert.notEqual(vazioWeb(SIM_CARD()), vazioApp(SIM_APP().replace("Ainda sem histórico", "Ainda não há histórico")));
+});
+
+// PR 6: os cards legados (caixinhas, fatura, parcelas, renda, piggy, rendimento) ------------------------------------------------------------------------
+const CARD_IA = () => ler("webapp", "src", "dashboard", "parts", "CardIa.tsx");
+const CATALOGO_APP = () => ler("app", "src", "features", "painel", "catalogo.ts");
+const FALAS_APP = () => ler("app", "src", "features", "painel", "conversaFalas.tsx");
+const LEGADO_WEB = () => ler("webapp", "src", "dashboard", "parts", "cardIa", "legado.ts");
+const REND_WEB = () => ler("webapp", "src", "dashboard", "parts", "cardIa", "rendimento.tsx");
+const REND_APP = () => ler("app", "src", "features", "painel", "cardRendimentos.tsx");
+const WEB_CARDS = ["caixinhas", "cartao", "renda", "piggy", "rendimento"].map((f) => ler("webapp", "src", "dashboard", "parts", "cardIa", `${f}.tsx`)).join("\n");
+const APP_CARDS = () => ["complementos", "patrimonio", "cardRendimentos"].map((f) => ler("app", "src", "features", "painel", `${f}.tsx`)).join("\n");
+
+// Os títulos: cada entrada do `CARDS` com título fixo (`titulo: () => "X"`) é igual ao `TITULOS` do app; `caixinhas` é só do chat, no `tituloCard`. `compromissos` e `periodo` são dinâmicos e ficam de fora.
+const titulosWeb = (f) => Object.fromEntries([...f.matchAll(/^ {2}(\w+): \{ titulo: \(\) => "([^"]+)"/gm)].map((m) => [m[1], m[2]]));
+const titulosApp = (f) => { const m = /export const TITULOS = \{(.*?)\};/.exec(f); assert.ok(m, "catalogo.ts: o TITULOS mudou de formato"); return Object.fromEntries([...m[1].matchAll(/(\w+): "([^"]+)"/g)].map((x) => [x[1], x[2]])); };
+const tituloDeCaixinhas = (f) => { const m = /card === "caixinhas"\) return "([^"]+)"/.exec(f); assert.ok(m, "conversaFalas.tsx: o título das caixinhas mudou de formato"); return m[1]; };
+const titulosForaDoApp = (web, catalogo, falas) => { const a = { ...titulosApp(catalogo), caixinhas: tituloDeCaixinhas(falas) }; return Object.entries(web).filter(([id, t]) => a[id] !== t).map(([id, t]) => `${id}: ${t} × ${a[id]}`); };
+test("o título de cada card do painel com título fixo é o do app (os 18 menos `compromissos` e `periodo`, que são dinâmicos)", () => {
+  assert.deepEqual(titulosForaDoApp(titulosWeb(CARD_IA()), CATALOGO_APP(), FALAS_APP()), []);
+  assert.equal(Object.keys(titulosWeb(CARD_IA())).length, 16, "o teste tem de ver as 16 entradas de título fixo");
+});
+test("negativo: um título trocado de um lado só aparece como diferença", () => {
+  assert.deepEqual(titulosForaDoApp(titulosWeb(CARD_IA().replace('"Parcelas futuras"', '"Parcelas"')), CATALOGO_APP(), FALAS_APP()).length, 1);
+  assert.deepEqual(titulosForaDoApp(titulosWeb(CARD_IA()), CATALOGO_APP().replace('renda: "Renda mês a mês"', 'renda: "Renda"'), FALAS_APP()).length, 1);
+  assert.deepEqual(titulosForaDoApp(titulosWeb(CARD_IA()), CATALOGO_APP(), FALAS_APP().replace('return "Caixinhas"', 'return "Metas do banco"')).length, 1);
+});
+
+// As 3 funções copiadas (`legado.ts` × `catalogo.ts`) e o `pctTexto`, EXECUTADAS nas duas versões contra uma tabela.
+const funcao = (fonte, nome) => { const m = new RegExp(`export function ${nome}[\\s\\S]*?\\n\\}`).exec(fonte); assert.ok(m, `${nome}: o formato mudou`); return new Function(`${stripTypeScriptTypes(semImport(m[0]))}\nreturn ${nome};`)(); };
+const pctFn = (fonte) => { const m = /const pctTexto = [^\n]*/.exec(fonte); assert.ok(m, "pctTexto: o formato mudou"); return new Function(`${stripTypeScriptTypes(semImport(m[0]))}\nreturn pctTexto;`)(); };
+const TABELA_LEGADO = {
+  nomeLegivel: ["ultraviolet-black", "nubank", "Nubank Gold", "a_b-c", "Cartão-X", "", "x-"],
+  indicadorMeta: ["no_target", "achieved", "on_track", "ahead", "behind", "tight", "active", "no_deadline", "inventado", ""],
+  dataPtBr: ["2026-12-22", null, "lixo", "2026-12-22T00:00", "", "2026-1-2"],
+  pctTexto: ["1.2345", "-0.50", "0", "0.00", null, " ", "abc", "+3.1", "10"],
+};
+const diferencasLegado = (legado, catalogo, rendWeb, rendApp) => {
+  const out = [];
+  for (const nome of ["nomeLegivel", "indicadorMeta", "dataPtBr"]) { const [w, a] = [funcao(legado, nome), funcao(catalogo, nome)]; for (const x of TABELA_LEGADO[nome]) if (w(x) !== a(x)) out.push(`${nome}(${JSON.stringify(x)}): ${w(x)} × ${a(x)}`); }
+  const [w, a] = [pctFn(rendWeb), pctFn(rendApp)];
+  for (const x of TABELA_LEGADO.pctTexto) if (w(x) !== a(x)) out.push(`pctTexto(${JSON.stringify(x)}): ${w(x)} × ${a(x)}`);
+  return out;
+};
+test("nomeLegivel, indicadorMeta, dataPtBr e pctTexto do painel dão o mesmo que os do app, em toda a tabela", () => {
+  assert.deepEqual(diferencasLegado(LEGADO_WEB(), CATALOGO_APP(), REND_WEB(), REND_APP()), []);
+  assert.equal(funcao(LEGADO_WEB(), "nomeLegivel")("ultraviolet-black"), "Ultraviolet Black", "positivo: a função faz o que deve, não recusa tudo");
+  assert.equal(pctFn(REND_WEB())("-0.50"), "−0,50%");
+});
+test("negativo: uma regra ou palavra trocada num lado só (nome, rótulo, data, pct) aparece como diferença", () => {
+  assert.ok(diferencasLegado(LEGADO_WEB().replace("[-_]", "[-]"), CATALOGO_APP(), REND_WEB(), REND_APP()).length > 0, "slug só com hífen");
+  assert.ok(diferencasLegado(LEGADO_WEB().replace('tight: "Prazo apertado"', 'tight: "Prazo curto"'), CATALOGO_APP(), REND_WEB(), REND_APP()).length > 0, "palavra do rótulo");
+  assert.ok(diferencasLegado(LEGADO_WEB(), CATALOGO_APP().replace("\\d{4}-\\d{2}-\\d{2}", "\\d{4}-\\d{1,2}-\\d{1,2}"), REND_WEB(), REND_APP()).length > 0, "data mais frouxa no app");
+  assert.ok(diferencasLegado(LEGADO_WEB(), CATALOGO_APP(), REND_WEB().replace('.replace(".", ",")', ""), REND_APP()).length > 0, "pct sem a vírgula no painel");
+  assert.ok(diferencasLegado(LEGADO_WEB(), CATALOGO_APP(), REND_WEB(), REND_APP().replace('v === 0 ? "" :', "")).length > 0, "zero com sinal no app");
+});
+
+// Os textos copiados: cada literal está nos DOIS lados (os vazios, a fatura, os ritmos, as origens da caixinha, o rendimento).
+const LITERAIS = [
+  "Nenhum cartão cadastrado.", "Não há parcelamentos registrados.", "Ainda não há histórico de renda disponível.", "O Piggy ainda não encontrou um destaque para você.", "Não foi possível ler seus rendimentos agora.",
+  "Vencimento dia ", " · fechamento dia ", "Crédito utilizado", "Já pago nesta fatura", "Ritmo mensal atual", "Ritmo mensal necessário", "Caixinha do banco com sincronização indisponível", "Caixinha manual", "Sem prazo definido",
+  "O rendimento do mês aparece quando houver a foto do fechamento do mês anterior.", " ativos sem rendimento informado", "Open Finance sincronizado em", "Estimado pela variação do saldo desde",
+  ", sem contar aportes. Ações, FIIs e fundos: só a variação de preço; dividendos não entram.", "Saldo menos o valor aplicado, como o banco informa. Ações, FIIs e fundos não informam o custo e ficam sem rendimento.",
+  "neste mês", "desde a aplicação", "Não informado", "Parcela ", '"paga"', '"próxima"', '"pendente"',
+  '"Limite"', '"Saídas"', // os rótulos das linhas da fatura e da renda (`Sub nome=` no painel, `Linha titulo=` no app)
+  ["Objetivo · ", 'titulo="Objetivo"'], // o painel junta o rótulo e o prazo numa linha ("Objetivo · 22/12/2026"); o app põe o prazo no detalhe da mesma linha: a palavra é a mesma
+];
+// Um item é o texto que os dois lados têm, ou [o do painel, o do app] quando o desenho muda mas a palavra não.
+const semLiteral = (web, app) => LITERAIS.filter((l) => { const [w, a] = Array.isArray(l) ? l : [l, l]; return !web.includes(w) || !app.includes(a); }).map((l) => (Array.isArray(l) ? l[0] : l));
+test("os textos que o painel copia do app estão nos dois lados, palavra por palavra", () => {
+  assert.deepEqual(semLiteral(WEB_CARDS + LEGADO_WEB(), APP_CARDS()), []);
+});
+test("negativo: uma palavra trocada num texto copiado, de qualquer lado, é vista", () => {
+  assert.deepEqual(semLiteral(WEB_CARDS.replace("Crédito utilizado", "Crédito usado") + LEGADO_WEB(), APP_CARDS()), ["Crédito utilizado"]);
+  assert.deepEqual(semLiteral(WEB_CARDS + LEGADO_WEB(), APP_CARDS().replace("dividendos não entram", "dividendos ficam de fora")), [", sem contar aportes. Ações, FIIs e fundos: só a variação de preço; dividendos não entram."]);
+  assert.deepEqual(semLiteral(WEB_CARDS.replace('nome="Limite"', 'nome="Teto"') + LEGADO_WEB(), APP_CARDS()), ['"Limite"'], "rótulo da fatura");
+  assert.deepEqual(semLiteral(WEB_CARDS.replace('nome="Saídas"', 'nome="Gastos"') + LEGADO_WEB(), APP_CARDS()), ['"Saídas"'], "rótulo da renda");
+  assert.deepEqual(semLiteral(WEB_CARDS.replace("`Objetivo · ", "`Meta · ") + LEGADO_WEB(), APP_CARDS()), ["Objetivo · "], "rótulo da meta (o \"Objetivo alcançado\" do legado.ts não o cobre)");
+  assert.deepEqual(semLiteral(WEB_CARDS + LEGADO_WEB(), APP_CARDS().replace('titulo="Saídas"', 'titulo="Gastos"')), ['"Saídas"'], "o rótulo trocado só no app");
+});
+test("divergência declarada (dono, 2026-10-23): a caixinha vazia é \"Nenhuma caixinha ainda.\" no painel e \"Nenhuma meta ainda.\" no app, até o PR do app alinhar; o teste avisa se um lado mudar", () => {
+  assert.ok(WEB_CARDS.includes("Nenhuma caixinha ainda.") && !WEB_CARDS.includes("Nenhuma meta ainda."));
+  assert.ok(APP_CARDS().includes("Nenhuma meta ainda.") && !APP_CARDS().includes("Nenhuma caixinha ainda."));
 });
