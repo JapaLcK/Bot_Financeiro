@@ -2,7 +2,9 @@
 // dois lados, sem navegador, e EXECUTA as funções copiadas (as linhas saem do .ts, perdem os tipos e rodam), no molde de logo_banco_paridade.test.mjs:
 //   · `segmentosDeContas` e `MOTIVOS_SEM_EFEITO_NO_SALDO` (barra de composição do card `contas`): webapp/src/dashboard/lib/bancos.ts × app/src/features/painel/composicaoContas.ts;
 //   · os dois pedidos ao chat do card `metas` (parts/cardIa/metas.tsx × metasChat.tsx);
-//   · o `limite` da expansão de lançamentos (parts/cardIa/LancamentosDoCard.tsx × contasResumo.tsx).
+//   · o `limite` da expansão de lançamentos (parts/cardIa/LancamentosDoCard.tsx × contasResumo.tsx);
+//   · PR 4: a % de cada categoria e a soma exata (parts/cardIa/decimais.ts × app decimal.ts, pela tabela tests/fixtures/percentual_categorias.json que o servidor também
+//     usa) e o título do card `periodo` (parts/cardIa/resumo.tsx × cardPeriodo.tsx, pela tabela do teste do app).
 // DIVERGÊNCIA DECLARADA (decisão do dono, 2026-10-21): no card o Nubank é sempre roxo (#820AD1), no app e nas outras telas cai na tinta pela regra de 3:1 do
 // `corDoBanco`. A tabela abaixo afirma as duas coisas: o roxo no painel E a tinta no app (se um lado mudar, o teste avisa). Nenhuma outra cor diverge.
 // Cada comparação falha ALTO se o formato mudar, e os negativos provam que uma palavra, uma lista ou uma regra trocada só de um lado é vista.
@@ -12,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
 import { RAIZ } from "./_painel.mjs";
-import { decimal } from "../../webapp/src/dashboard/lib/format.js";
+import { decimal, monthTitle } from "../../webapp/src/dashboard/lib/format.js";
 
 const ler = (...p) => readFileSync(join(RAIZ, ...p), "utf8");
 const WEB = () => ler("webapp", "src", "dashboard", "lib", "bancos.ts");
@@ -126,4 +128,69 @@ test("a expansão de lançamentos pede 10 por página, como a do app", () => {
 });
 test("negativo: outro limite de um lado só é visto", () => {
   assert.notEqual(limite(LANC_WEB().replace("limite: 10", "limite: 50"), /limite: (\d+)/), limite(LANC_APP(), /limite: "(\d+)"/));
+});
+
+// PR 4 ---------------------------------------------------------------------------------------------------------------------------------------------
+const DECIMAIS_WEB = () => ler("webapp", "src", "dashboard", "parts", "cardIa", "decimais.ts");
+const RESUMO_MES_WEB = () => ler("webapp", "src", "dashboard", "parts", "CardResumoMes.tsx");
+const PERIODO_WEB = () => ler("webapp", "src", "dashboard", "parts", "cardIa", "resumo.tsx");
+const PERIODO_APP_TESTE = () => ler("app", "__tests__", "features", "painel_card_periodo.test.tsx");
+const PERCENTUAIS = JSON.parse(ler("tests", "fixtures", "percentual_categorias.json")); // [{ valores, percentuais }]: o % de cada valor no total (a soma), HALF_UP afastando do zero
+
+// `soma` e `pctDe` (decimais.ts) rodam com o `decimal` e o `menos` de verdade (o `menos` sai do CardResumoMes.tsx).
+const decimais = (fonte, resumo = RESUMO_MES_WEB()) => {
+  const menos = new Function("decimal", `const BIG = BigInt;\n${stripTypeScriptTypes(semImport(corta(resumo, "export function menos", "/** Entrou, Saiu e Sobrou do mês", "CardResumoMes.tsx")))}\nreturn menos;`)(decimal);
+  return new Function("decimal", "menos", `${stripTypeScriptTypes(semImport(fonte))}\nreturn { soma, pctDe };`)(decimal, menos);
+};
+const divergenciasDePercentual = (fonte) => {
+  const { soma, pctDe } = decimais(fonte), out = [];
+  for (const { valores, percentuais } of PERCENTUAIS) {
+    const total = soma(valores), doWeb = valores.map((v) => pctDe(v, total));
+    if (doWeb.join() !== percentuais.join()) out.push(`${valores}: ${doWeb} × ${percentuais}`);
+    if (Number(total) !== valores.reduce((a, v) => a + Number(v), 0)) out.push(`soma de ${valores}: ${total}`);
+  }
+  return out;
+};
+test("a % de cada categoria e a soma exata do painel batem com a tabela do servidor e do app (HALF_UP afastando do zero; total 0 dá 0)", () => {
+  assert.deepEqual(divergenciasDePercentual(DECIMAIS_WEB()), []);
+  assert.ok(PERCENTUAIS.length >= 5, "a tabela mudou de forma");
+  assert.deepEqual(PERCENTUAIS.find((c) => c.valores.join() === "995.00,5.00").percentuais, [100, 1], "o caso que separa HALF_UP de truncar");
+});
+test("negativo: arredondar para baixo, esquecer o sinal na soma ou deixar o total 0 estourar são vistos pela tabela", () => {
+  assert.ok(divergenciasDePercentual(DECIMAIS_WEB().replace("(BigInt(2) * an + ad)", "(BigInt(2) * an + ad - BigInt(1))")).length > 0, "HALF_DOWN");
+  assert.ok(divergenciasDePercentual(DECIMAIS_WEB().replace("menos(a, neg(v))", "menos(a, v)")).length > 0, "a soma subtrai");
+  assert.throws(() => divergenciasDePercentual(DECIMAIS_WEB().replace("if (ad === BigInt(0)) return 0;", "")), "total 0 sem a guarda divide por zero");
+});
+
+const TITULOS = () => { const m = /it\.each\((\[\[.*?\]\])\)\("tituloPeriodo/s.exec(PERIODO_APP_TESTE()); assert.ok(m, "o teste do app mudou de formato"); return JSON.parse(m[1]); };
+const tituloPeriodoWeb = (fonte) => new Function("monthTitle", `${stripTypeScriptTypes(corta(fonte, "export function tituloPeriodo", "export const tituloDoPeriodo", "resumo.tsx").replace(/^export /, ""))}\nreturn tituloPeriodo;`)(monthTitle);
+const titulosDiferentes = (fonte) => { const f = tituloPeriodoWeb(fonte); return TITULOS().filter(([a, b, esperado]) => f(a, b) !== esperado).map(([a, b, esperado]) => `${a}..${b}: ${f(a, b)} × ${esperado}`); };
+test("o título do card `periodo` é o do app nos 4 casos da tabela dele (mês só, mesmo ano, anos diferentes, ano inteiro)", () => {
+  assert.equal(TITULOS().length, 4);
+  assert.deepEqual(titulosDiferentes(PERIODO_WEB()), []);
+});
+test("negativo: título de outro formato num lado só aparece como diferença", () => {
+  assert.ok(titulosDiferentes(PERIODO_WEB().replace(".slice(0, 3)", ".slice(0, 4)")).length > 0, "abreviação maior");
+  assert.ok(titulosDiferentes(PERIODO_WEB().replace("mes(fim).toLowerCase()} ${b}`", "mes(fim)} ${b}`")).length > 0, "mês final com maiúscula");
+});
+
+// Os tetos de "quantos aparecem antes do +N": 5 categorias (4 + "Outras") no categorias, 5 no periodo, 7 dias no calendario (o `VISIVEIS`/`MAIS`/`SeteDias` do app).
+const num = (texto, re, rotulo) => { const m = re.exec(texto); assert.ok(m, `${rotulo}: o formato mudou (${re})`); return Number(m[1]); };
+const tetos = (gastos, resumo, app) => ({
+  categorias: [num(gastos, /const VISIVEIS = (\d+);/, "gastos.tsx"), num(app.gastos, /const VISIVEIS = (\d+),/, "cardGastos.tsx")],
+  periodo: [num(resumo, /useMais\(itens, (\d+), \["categoria"/, "resumo.tsx"), num(app.periodo, /const MAIS = (\d+);/, "cardPeriodo.tsx")],
+  dias: [num(gastos, /useMais\(dias, (\d+), \["dia"/, "gastos.tsx"), num(app.dias, /itens\.slice\(0, (\d+)\)/, "base.tsx")],
+});
+const GASTOS_WEB = () => ler("webapp", "src", "dashboard", "parts", "cardIa", "gastos.tsx");
+const APP_TETOS = () => ({ gastos: ler("app", "src", "features", "painel", "cardGastos.tsx"), periodo: ler("app", "src", "features", "painel", "cardPeriodo.tsx"), dias: ler("app", "src", "features", "painel", "base.tsx") });
+test("quantas categorias e dias aparecem antes do \"+N\" são os do app (5, 5 e 7)", () => {
+  for (const [nome, [web, app]] of Object.entries(tetos(GASTOS_WEB(), PERIODO_WEB(), APP_TETOS()))) assert.equal(web, app, nome);
+  assert.deepEqual(Object.values(tetos(GASTOS_WEB(), PERIODO_WEB(), APP_TETOS())).map(([w]) => w), [5, 5, 7]);
+});
+test("negativo: outro teto num lado só é visto", () => {
+  const web = tetos(GASTOS_WEB().replace("const VISIVEIS = 5;", "const VISIVEIS = 6;"), PERIODO_WEB().replace("useMais(itens, 5,", "useMais(itens, 4,"), APP_TETOS());
+  assert.notEqual(web.categorias[0], web.categorias[1]);
+  assert.notEqual(web.periodo[0], web.periodo[1]);
+  const app = APP_TETOS(); app.dias = app.dias.replace("itens.slice(0, 7)", "itens.slice(0, 8)");
+  assert.notEqual(tetos(GASTOS_WEB(), PERIODO_WEB(), app).dias[0], tetos(GASTOS_WEB(), PERIODO_WEB(), app).dias[1]);
 });

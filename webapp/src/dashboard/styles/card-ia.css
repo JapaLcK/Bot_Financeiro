@@ -8,6 +8,7 @@
 .ci-total { display: grid; gap: 4px; }
 .ci-leg, .ci-cap { font-size: 12.5px; color: var(--ink-2); }
 .card-ia .comp-bar { height: 8px; }
+.card-ia .comp-bar > span { min-width: 4px; } /* o design system: cada fatia tem no mínimo 4px */
 .ci-lista { display: grid; margin: 0; padding: 0; list-style: none; }
 .ci-conta { border-top: 1px solid var(--rule); }
 .ci-linha { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto 16px; align-items: center; column-gap: 12px; box-sizing: border-box; width: 100%; min-height: 44px; margin: 0; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; text-align: left; }
@@ -63,6 +64,19 @@
 .ci-metas { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .pilula-pedido { box-sizing: border-box; width: 100%; border: 0; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
 .pilula-pedido[aria-disabled="true"] { opacity: 0.5; cursor: default; }
+/* Resumo, categorias, dias e período (parts/cardIa/gastos.tsx, resumo.tsx): as mesmas peças da linha de conta; a barra é o trilho de 6px (entrou verde, saiu laranja). */
+.ci-cat { grid-template-columns: 8px minmax(0, 1fr) auto auto 16px; }
+.ci-dia { grid-template-columns: 92px minmax(0, 1fr) auto 16px; }
+.ci-fluxo { grid-template-columns: 56px minmax(0, 1fr) auto; }
+.ci-trilhos { display: grid; gap: 4px; min-width: 0; }
+.ci-trilho { display: block; height: 6px; border-radius: 3px; background: var(--plane-3); overflow: hidden; }
+.ci-trilho > i { display: block; height: 100%; border-radius: 3px; transform-origin: left; }
+.ci-valores { display: grid; justify-items: end; font-size: 12.5px; font-weight: 600; }
+.card-ia .stat-value.warn { color: var(--warn); }
+.card-ia .ci-meses { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); grid-template-columns: none; }
+.card-ia .ci-meses .months-bar { height: 80px; }
+.card-ia .months.m6.ci-meses li .months-bar i { opacity: 1; } /* barra cheia: a regra das 6 barras do Resumo as esmaece */
+.card-ia .ci-meses.muitos b { display: none; } /* 7 a 12 barras: o valor não cabe embaixo, fica o texto para leitor de tela */
 @media (prefers-reduced-motion: no-preference) {
   .ci-esq > *, .card-ia-esqueleto { animation: ci-pulso 1.2s ease-in-out infinite alternate; }
 }
