@@ -83,3 +83,13 @@ test("categorias e periodo: % que arredonda a 0 com valor > 0 mostra \"<1%\"; va
   }
   await page.context().close();
 });
+
+// 5. Data de outro ano nos `maiores` do período (parcela antiga, período que vira o ano): leva o ano; a do ano do último mês, não -------------------------------
+test("periodo: maior lançamento de outro ano leva o ano na data; o do ano do período não", async () => {
+  const { page } = await responde([periodoCom([{ ...ok, id: "velha", data: "2025-10-17" }, { ...ok, id: "nova", data: "2026-09-03" }])]);
+  await page.locator(".card-ia .ci-cat[aria-expanded]").first().click();
+  const sub = (id) => page.locator(`.card-ia .lanc-linha[data-id=${id}] .faint`).innerText();
+  assert.match(await sub("velha"), /^17 out 2025\b/);
+  assert.doesNotMatch(await sub("nova"), /2026/);
+  await page.context().close();
+});

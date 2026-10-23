@@ -68,11 +68,12 @@ export function CardResumo({ resumo, detalhes }: { resumo: ResumoDoMes; detalhes
 
 export function CardPeriodo({ d }: { d: Periodo }) {
   const catalogo = useQuery(categoriasQuery).data?.categorias ?? [];
+  const ano = (d.meses[d.meses.length - 1]?.mes ?? "").slice(0, 4); // o do último mês: data de outro ano (período que vira o ano, parcela antiga) leva o ano
   const itens: ItemCat[] = d.categorias.map((c) => {
     const cat = catalogo.find((x) => x.chave === c.categoria);
     return {
       nome: maiuscula(cat?.nome || c.categoria || "Sem categoria"), valor: c.valor, pct: c.percentual, cor: cat?.cor ?? "var(--ink-3)",
-      corpo: c.maiores.length > 0 ? <div className="ci-lanc"><p className="ci-cap">Maiores lançamentos</p><ul className="ci-lanc-lista">{c.maiores.map((l) => <LancamentoLinha key={l.id} item={l} categorias={catalogo} />)}</ul></div> : undefined,
+      corpo: c.maiores.length > 0 ? <div className="ci-lanc"><p className="ci-cap">Maiores lançamentos</p><ul className="ci-lanc-lista">{c.maiores.map((l) => <LancamentoLinha key={l.id} item={l} categorias={catalogo} historico={l.data.slice(0, 4) !== ano} />)}</ul></div> : undefined,
     };
   });
   const [vistos, mais] = useMais(itens, 5, ["categoria", "categorias"]);
