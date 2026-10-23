@@ -16,7 +16,7 @@ const MAX_NO_RESUMO = 5;
 const reais = (s: string | null) => (s === null ? "indisponível" : moneyText(s) ?? "indisponível");
 type Cortes = Record<string, number>;
 
-function Alavanca({ c, valor, mexe, solta }: { c: CategoriaEstimada; valor: number; mexe: (v: number) => void; solta: (v: number) => void }) {
+export function Alavanca({ c, valor, mexe, solta }: { c: CategoriaEstimada; valor: number; mexe: (v: number) => void; solta: (v: number) => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const ultimo = useRef(solta);
   ultimo.current = solta;
@@ -37,7 +37,7 @@ function Alavanca({ c, valor, mexe, solta }: { c: CategoriaEstimada; valor: numb
   );
 }
 
-function Resultado({ d, full }: { d: Resposta; full: boolean }) {
+export function Resultado({ d, full }: { d: Resposta; full: boolean }) {
   const pior = d.com_corte.pior_dia;
   return (
     <>
@@ -57,10 +57,10 @@ function Resultado({ d, full }: { d: Resposta; full: boolean }) {
 }
 
 // Só chave própria: uma categoria chamada "constructor" ou "toString" não pode ler o protótipo do objeto.
-const de = (m: Cortes, k: string) => (Object.prototype.hasOwnProperty.call(m, k) ? m[k] : 0);
+export const de = (m: Cortes, k: string) => (Object.prototype.hasOwnProperty.call(m, k) ? m[k] : 0);
 const PRIMEIRO = <p className="sim-prompt">Arraste um controle para ver quanto sobra por mês.</p>;
-const GENERICO = "Não deu para calcular agora.";
-const MUDOU = "Seus gastos do dia a dia mudaram. Ajuste de novo.";
+export const GENERICO = "Não deu para calcular agora.";
+export const MUDOU = "Seus gastos do dia a dia mudaram. Ajuste de novo.";
 
 export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean }) {
   const pro = usePlan() === "pro";

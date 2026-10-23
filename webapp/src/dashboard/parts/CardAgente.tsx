@@ -1,9 +1,9 @@
-import { useEffect, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ContaTrocada, daConta, uidValido } from "../conta/api";
+import type { ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { daConta, uidValido } from "../conta/api";
 import type { CardAgente as Card } from "../lib/agentes";
 import type { Investido } from "../lib/api-v2.gen";
-import { DEMO, ErroApi, assinaturasQuery, caixinhasQuery, contasAPagarQuery, investidoQuery, lerContaFresca, meQuery, orcamentosCategoriaQuery, resumoMesQuery } from "../lib/v2";
+import { DEMO, ErroApi, assinaturasQuery, caixinhasQuery, contasAPagarQuery, investidoQuery, meQuery, orcamentosCategoriaQuery, resumoMesQuery } from "../lib/v2";
 import { moneyText } from "../lib/format.js";
 import { mesAno } from "../lib/metas-textos";
 import { textos } from "../lib/bancos";
@@ -14,6 +14,7 @@ import { CardInvestido } from "./CardInvestido";
 import { CardOrcamentos, contratoOrcamentos } from "./CardOrcamentos";
 import { CardComparacaoMeses, contratoComparacaoMeses, tituloComparacao } from "./CardComparacaoMeses";
 import { CardResumoMes, contratoResumoMes } from "./CardResumoMes";
+import { useContaTrocada } from "./cardIa/naConta";
 
 // O card abaixo da resposta de um agente (o servidor só diz QUAL: `card.tipo`, e o mês no resumo). Os números vêm da rota v2 do tipo, a mesma
 // regra do que o agente leu. A /api/v2 lê o usuário da SESSÃO, não o `uid`: a resposta só vale depois de conferir que a sessão ainda é a de
@@ -57,15 +58,14 @@ function leituraDe(c: Card): Leitura {
 export const tituloDe = (c: Card) => leituraDe(c).titulo;
 
 export function CardAgente({ uid, c }: { uid: number; c: Card }) {
-  const l = leituraDe(c), qc = useQueryClient();
+  const l = leituraDe(c);
   const q = useQuery({
     queryKey: ["conta", l.chave, uid], // ["conta", assunto, uid]: a chave que main.tsx trata na troca de conta
     queryFn: async ({ signal }) => daConta(uid, signal, await l.ler(signal)),
     staleTime: 0, refetchOnWindowFocus: true, networkMode: "always", retry: meQuery.retry,
     enabled: !DEMO && uidValido(uid),
   });
-  const trocada = q.error instanceof ContaTrocada;
-  useEffect(() => { if (trocada) void lerContaFresca(qc).catch(() => {}); }, [trocada, qc]);
+  const trocada = useContaTrocada(q.error);
   if (DEMO || !uidValido(uid) || trocada) return null;
   const e = q.error;
   if (e instanceof ErroApi && (e.status === 401 || e.status === 403)) return null; // sessão ou plano: o texto já disse o que importa
