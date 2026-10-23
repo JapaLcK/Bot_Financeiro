@@ -195,6 +195,18 @@ test("a página 2 repete uma linha da 1 (a lista é lida ao vivo): ela entra uma
   }
 });
 
+test("compra de outro ano (parcela de 2025 num mês de 2026) leva o ano na data; a do ano do bloco não", async () => {
+  const a = await prep(CONSULTAS[0]);
+  const [x, y] = F.lancamentos.estados.itens;
+  a.t.itens = [{ ...x, id: "velha", data: "2025-10-17" }, { ...y, id: "nova", data: "2026-10-17" }];
+  await a.linha.click();
+  await a.linhas().first().waitFor();
+  const sub = (id) => a.page.locator(`.card-ia .ci-lanc .lanc-linha[data-id=${id}] .faint`).innerText();
+  assert.match(await sub("velha"), /^17 out 2025\b/);
+  assert.doesNotMatch(await sub("nova"), /2026/);
+  await a.page.context().close();
+});
+
 test("o mês da busca é o do bloco (setembro no bloco = mes=2026-09), não o de hoje", async () => {
   const set = { ...D, mes: "2026-09", ate: "2026-09-30", dias: D.dias.map((x) => ({ ...x, dia: x.dia.replace("2026-10", "2026-09") })) };
   for (const [card, filtro] of [["categorias", ".card-ia .ci-cat[aria-expanded]"], ["calendario", ".card-ia .ci-dia[aria-expanded]"]]) {

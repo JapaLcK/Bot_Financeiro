@@ -65,7 +65,7 @@ export function LancamentosDoCard({ uid, filtros }: { uid: number; filtros: Filt
   const de = () => void (q.isFetchNextPageError ? q.fetchNextPage() : q.refetch());
   return (
     <div ref={raiz} className="ci-lanc" aria-busy={q.isFetching}>
-      {itens.length > 0 && <ul className="ci-lanc-lista">{itens.map((i) => <LancamentoLinha key={i.id} item={i} categorias={cats} />)}</ul>}
+      {itens.length > 0 && <ul className="ci-lanc-lista">{itens.map((i) => <LancamentoLinha key={i.id} item={i} categorias={cats} historico={i.data.slice(0, 4) !== filtros.mes.slice(0, 4)} />)}</ul>}
       {q.isPending && (
         <>
           <p className="sr-only" role="status">Carregando lançamentos…</p>
