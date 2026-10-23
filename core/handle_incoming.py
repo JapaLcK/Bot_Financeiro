@@ -953,8 +953,8 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
     # DUAS formas, e o que as separa é `estado is None` — ou seja, se existe
     # linha em `auth_accounts`. A copy única de antes prometia
-    # "15 dias grátis (um teste por número)" para os dois, e era FALSA para o
-    # ex-assinante que já queimou o trial: são 15 dias por telefone NA VIDA.
+    # "N dias grátis (um teste por número)" para os dois, e era FALSA para o
+    # ex-assinante que já queimou o trial: é um trial por telefone NA VIDA.
     if estado is None:
         # População só-WhatsApp: nunca fez cadastro web, nunca viu o dashboard,
         # e o dono decidiu cortá-la SEM aviso prévio — esta mensagem é a ÚNICA

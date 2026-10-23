@@ -228,7 +228,7 @@ def send_plan_change_scheduled_email(to: str, new_plan_name: str, effective_date
 
 
 def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
-    """Fim do trial de 15 dias sem assinatura → downsell pro Essencial.
+    """Fim do trial sem assinatura → downsell pro Essencial.
 
     Parte da escada v2: o teste dá o Plus completo, e este e-mail oferece a
     saída de R$ 9,90 antes do churn. Enviado UMA vez (trial_downsell_sent_at).
@@ -262,7 +262,7 @@ def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
     `tests/test_billing_email_downsell_nao_promete_gratis.py`."""
     base = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
-      <p>Oi! Seus <strong>15 dias de teste do PigBank</strong> chegaram ao fim. 🐷</p>
+      <p>Oi! Seu <strong>período de teste do PigBank</strong> chegou ao fim. 🐷</p>
       <p>Sua conta ficou <strong>sem plano ativo</strong>: seus dados estão todos guardados —
       lançamentos, histórico, tudo —, mas o acesso ao PigBank fica bloqueado até você escolher um
       plano. Não existe mais versão gratuita.</p>
@@ -326,7 +326,7 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
     """Envia e-mail de boas-vindas após o cadastro (web).
 
     A conta recém-criada NÃO entra no bot direto: o gate manda pra /precos
-    (routes/shared.py). Então a ordem aqui é ativar o teste de 15 dias
+    (routes/shared.py). Então a ordem aqui é ativar o teste
     (plan_service.TRIAL_DAYS_DEFAULT, exposto em /billing/plans-config) e só
     depois conectar o WhatsApp — prometer uso imediato era falso.
 
@@ -336,7 +336,7 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
     (a assinatura recebe só o e-mail, e o cadastro por senha nem grava telefone).
     Então a copy NÃO garante quando a primeira cobrança acontece: quem recria a
     conta com um número já usado é cobrado na hora (_billing_checkout_for_user
-    manda trial_days=0). A oferta dos 15 dias aparece como o que o checkout vai
+    manda trial_days=0). A oferta do teste aparece como o que o checkout vai
     confirmar antes de cobrar, nunca como fato consumado.
 
     `link_code` e `dashboard_url` chegam dos chamadores e não são usados: os
@@ -345,16 +345,18 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
     WhatsApp" gera um código novo no clique. A assinatura fica como está —
     mexer nela são 3 chamadores fora do escopo desta mudança.
     """
+    from core.services.plan_service import trial_days_total
+    dias = trial_days_total()
     base = _public_base_url()
 
     content = f"""
       <p>Olá! 👋</p>
       <p>Sua conta no <strong>PigBank</strong> foi criada com sucesso — falta só
-         escolher o plano que você quer testar por <strong>15 dias grátis</strong>.</p>
+         escolher o plano que você quer testar por <strong>{dias} dias grátis</strong>.</p>
       <p><strong>1. Ative o seu teste</strong>: escolha o plano que quer
          experimentar. O checkout mostra o que vai ser cobrado, e quando, antes
          de você confirmar — nada é cobrado sem essa confirmação.</p>
-      <p style="text-align:center"><a class="btn" href="{base}/precos">🐷 Ativar meus 15 dias grátis</a></p>
+      <p style="text-align:center"><a class="btn" href="{base}/precos">🐷 Ativar meus {dias} dias grátis</a></p>
       <p><strong>2. Conecte o seu WhatsApp</strong> — entre no PigBank e toque em
          <strong>Conectar WhatsApp</strong>: a mensagem já abre pronta com o seu
          código, é só enviar.</p>
@@ -371,14 +373,14 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
     html = _base_html("Bem-vindo ao PigBank!", content)
     text = (
         "Bem-vindo ao PigBank!\n\n"
-        "Sua conta foi criada — falta escolher o plano que você quer testar por 15 dias grátis.\n\n"
+        f"Sua conta foi criada — falta escolher o plano que você quer testar por {dias} dias grátis.\n\n"
         f"1) Ative o teste escolhendo um plano: {base}/precos\n"
         "   O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.\n"
         "2) Conecte o seu WhatsApp — entre no PigBank e toque em Conectar WhatsApp: a mensagem já abre pronta com o seu código, é só enviar.\n"
         f"   {base}/login?next=%2Fhome\n\n"
         "Lá você vai poder mandar: gastei 50 mercado, recebi 1000 salário, saldo, ajuda.\n"
     )
-    return send_email(to=to, subject="✅ Bem-vindo ao PigBank — ative seus 15 dias grátis", html_body=html, text_body=text)
+    return send_email(to=to, subject=f"✅ Bem-vindo ao PigBank — ative seus {dias} dias grátis", html_body=html, text_body=text)
 
 
 # ─── Unsubscribe helpers ──────────────────────────────────────────────────────
@@ -1134,7 +1136,7 @@ def send_pro_welcome_email(to: str, plan: str, trial_end_at, dashboard_url: str 
     cta = f'<p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">🐷 Abrir meu dashboard</a></p>'
     content = f"""
       <p>🐷✨ <strong>Tá dentro do {nome}!</strong></p>
-      <p>Sua assinatura começou agora. Os <strong>15 dias grátis</strong> vão até <strong>{trial_end}</strong> —
+      <p>Sua assinatura começou agora. Seu <strong>período grátis</strong> vai até <strong>{trial_end}</strong> —
       só tem cobrança depois disso, e você pode cancelar quando quiser sem ser cobrado.</p>
       <p>Agora você desbloqueou:</p>
       <ul>
@@ -1150,7 +1152,7 @@ def send_pro_welcome_email(to: str, plan: str, trial_end_at, dashboard_url: str 
     html = _base_html(f"Bem-vindo ao {nome}", content)
     text = (
         f"{nome} ativado!\n\n"
-        f"Sua assinatura começou. 15 dias grátis até {trial_end} — só tem cobrança depois.\n\n"
+        f"Sua assinatura começou. Período grátis até {trial_end} — só tem cobrança depois.\n\n"
         f"Abra o dashboard: {dash}/app\n"
         f"Pra cancelar antes: mande 'cancelar plano' no bot ou acesse {dash}/conta"
     )
@@ -1672,8 +1674,8 @@ def send_free_plan_sunset_email(to: str, corte, dashboard_url: str = "",
     consentiu em abrir mão do aviso de que o serviço acaba.
 
     **SEM promessa de trial**, e isso é requisito medido, não estilo: o trial é
-    de 15 dias por TELEFONE, na vida (`db/plans.py::claim_trial_for_user`), e
-    esta lista tem ex-assinante que já o usou. Prometer "teste 15 dias grátis"
+    único por TELEFONE, na vida (`db/plans.py::claim_trial_for_user`), e
+    esta lista tem ex-assinante que já o usou. Prometer "teste grátis"
     a quem não pode mais tê-lo é copy falsa.
 
     **DOIS COORTES, e `cobranca_pendente` é o que os separa.** A população do

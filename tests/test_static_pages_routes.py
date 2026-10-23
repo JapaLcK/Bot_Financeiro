@@ -10,6 +10,7 @@ import re
 from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
+from core.services.plan_service import TRIAL_DAYS_DEFAULT
 from frontend.routes.shared import FRONTEND_DIR, _asset_hash, stamp_asset_versions
 
 client = TestClient(dashboard.app)
@@ -110,7 +111,7 @@ def test_whatsapp_nao_garante_quando_a_primeira_cobranca_vem():
             f"a /whatsapp garante a data da cobrança, que a página não conhece: {garantia!r}"
         )
 
-    assert "15 dias grátis" in html, "a /whatsapp deixou de oferecer o teste"
+    assert f"{TRIAL_DAYS_DEFAULT} dias grátis" in html, "a /whatsapp deixou de oferecer o teste"
     assert "um por número de telefone" in html, (
         "a /whatsapp perdeu a ressalva de que o teste é um por número"
     )

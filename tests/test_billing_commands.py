@@ -12,6 +12,8 @@ Mocka `is_pro`, `db.ai_get_pending_action`, `db.get_auth_user` e
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from core.services import billing_commands as mod
@@ -31,6 +33,7 @@ def patches(monkeypatch):
         # separa (ver `core.services.trial_offer.texto_da_oferta`).
         "trial_motivo": None,
         "trial_eligibility_raises": False,
+        "trial_dias": 7,
     }
 
     def fake_is_pro(user_id):
@@ -51,6 +54,7 @@ def patches(monkeypatch):
     fake_plan_service = types.ModuleType("core.services.plan_service")
     fake_plan_service.is_pro = fake_is_pro
     fake_plan_service.plans_v2_enabled = lambda: state["plans_v2"]
+    fake_plan_service.trial_days_total = lambda: state["trial_dias"]
     monkeypatch.setitem(sys.modules, "core.services.plan_service", fake_plan_service)
 
     import db
@@ -227,7 +231,7 @@ def test_plano_pro_status_trialing_mostra_trial(patches):
         "plan_expires_at": expires,
     }
     out = mod.handle_billing_command(99, "plano", platform="whatsapp")
-    assert "Trial em andamento" in out
+    assert "Período grátis em andamento" in out
     assert "Fim do trial" in out
 
 
@@ -270,13 +274,31 @@ def test_whatsapp_usa_single_asterisk_pra_negrito(patches):
     assert "**PigBank+**" not in out
 
 
+def test_assinar_v2_elegivel_oferece_trial_lendo_o_numero_da_config(patches):
+    patches["plans_v2"] = True
+    patches["trial_dias"] = 9   # != 7: prova que a copy lê `trial_days_total()`
+
+    out = mod.handle_billing_command(99, "assinar plano", platform="whatsapp")
+
+    assert "*9 dias grátis*" in out
+
+
+def test_assinar_v1_oferece_trial_lendo_o_numero_da_config(patches):
+    patches["plans_v2"] = False
+    patches["trial_dias"] = 9   # != 7: prova que a copy lê `trial_days_total()`
+
+    out = mod.handle_billing_command(99, "assinar plano", platform="whatsapp")
+
+    assert "*9 dias grátis*" in out
+
+
 def test_assinar_v2_inelegivel_nao_promete_trial(patches):
     patches["plans_v2"] = True
     patches["trial_motivo"] = "telefone_ja_usou"
 
     out = mod.handle_billing_command(99, "assinar plano", platform="whatsapp")
 
-    assert "15 dias grátis" not in out
+    assert not re.search(r"\d+ dias grátis", out)
     assert "cobrança imediata" in out
 
 
@@ -286,7 +308,7 @@ def test_assinar_v2_com_consulta_indisponivel_delega_confirmacao_ao_checkout(pat
 
     out = mod.handle_billing_command(99, "assinar plano", platform="whatsapp")
 
-    assert "15 dias grátis" not in out
+    assert not re.search(r"\d+ dias grátis", out)
     assert "checkout confirma" in out
 
 

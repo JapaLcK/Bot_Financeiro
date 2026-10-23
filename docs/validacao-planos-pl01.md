@@ -71,7 +71,7 @@ cobrança; resolver o que for deles **antes** de começar.
 | `STRIPE_PRICE_ID_PRO_MENSAL` (Plus mensal; ou o legado `STRIPE_PRICE_ID_PRO`) e `STRIPE_PRICE_ID_ESSENCIAL_MENSAL` | I1; I2, I3 | definidos | botão indisponível, 503; sem o preço do Essencial, o agendamento também não aparece | idem |
 | `STRIPE_WEBHOOK_SECRET` e endpoint `/billing/webhook` em live, assinando `checkout.session.completed`, `checkout.session.expired` (só telemetria do funil), `invoice.paid`, `invoice.payment_succeeded`, `invoice.payment_failed`, `customer.subscription.trial_will_end`, `customer.subscription.deleted` | I1, I4 | definidos e assinados | 400 e o plano não muda, sem aviso na tela | idem |
 | Customer Portal da Stripe (live) | I4 | configuração padrão salva, com cancelamento **no fim do período** | sem configuração, `/conta` dá 500; com cancelamento imediato, o acesso cai na hora | Stripe |
-| `PLANS_TRIAL_DAYS` | I1 | registrar o **valor** (padrão 15). No modo v2 é esta a variável; `PRO_TRIAL_DAYS` só vale no legado | trial de outra duração | `plan_service.trial_days_total()` |
+| `PLANS_TRIAL_DAYS` | I1 | registrar o **valor** (padrão `TRIAL_DAYS_DEFAULT`). No modo v2 é esta a variável; `PRO_TRIAL_DAYS` só vale no legado | trial de outra duração | `plan_service.trial_days_total()` |
 | `ADMIN_DASHBOARD_PASSWORD_HASH` | P6, I0 | definida (produção não aceita senha em texto) | painel admin responde 503 | `core/admin_dashboard.py` |
 
 Registro da conferência (segredo: só "definida / ausente"; o resto, o valor):
@@ -368,7 +368,7 @@ Pedido do G7, no console, logado em S3:
 
 Prova o que o admin não prova: checkout, webhook e troca agendada. Se o
 telefone da conta ainda não usou o período grátis, o checkout abre um **trial
-sem cobrança** com a duração de `PLANS_TRIAL_DAYS` (padrão 15 dias; com os
+sem cobrança** com a duração de `PLANS_TRIAL_DAYS` (padrão `TRIAL_DAYS_DEFAULT`; com os
 planos v2 ligados é esta a variável lida, via `plan_service.trial_days_total()`;
 `PRO_TRIAL_DAYS` só vale no modo legado). O valor de `PLANS_TRIAL_DAYS` vem do P4. Com trial não há cobrança nem
 reembolso, e o I4 cancela dentro dele. Registrar qual dos dois aconteceu.
