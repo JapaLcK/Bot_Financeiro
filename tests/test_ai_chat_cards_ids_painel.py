@@ -12,8 +12,8 @@ import re
 from core.services.ai_chat import cards
 
 FONTE = pathlib.Path(__file__).resolve().parent.parent / "webapp" / "src" / "dashboard" / "parts" / "CardIa.tsx"
-# Os ids que o Python emite e o /painel ainda não desenha (PRs 5 e 6 da Etapa 7): simulador, e os legados. O PR 6 esvazia esta lista.
-PENDENTE_NO_PAINEL = {"simulador", "caixinhas", "fatura", "parcelas", "renda", "piggy", "rendimento"}
+# Os ids que o Python emite e o /painel ainda não desenha (PR 6 da Etapa 7): os legados. O PR 6 esvazia esta lista.
+PENDENTE_NO_PAINEL = {"caixinhas", "fatura", "parcelas", "renda", "piggy", "rendimento"}
 
 
 def ids_do_painel(fonte: str) -> set[str]:
@@ -39,8 +39,8 @@ def test_pendente_so_tem_id_que_o_python_emite_e_o_painel_nao_tem():
     assert PENDENTE_NO_PAINEL <= set(cards.IDS) and not PENDENTE_NO_PAINEL & ids_lidos()
 
 
-def test_a_fonte_tem_as_onze_entradas_dos_prs_3_e_4():
-    assert ids_lidos() == {"contas", "hero", "compromissos", "patrimonio", "wealth", "assinaturas", "metas", "resumo", "categorias", "calendario", "periodo"}
+def test_a_fonte_tem_as_doze_entradas_dos_prs_3_a_5():
+    assert ids_lidos() == {"contas", "hero", "compromissos", "patrimonio", "wealth", "assinaturas", "metas", "resumo", "categorias", "calendario", "periodo", "simulador"}
 
 
 def test_controle_id_novo_no_python_sem_o_painel_fica_vermelho(monkeypatch):

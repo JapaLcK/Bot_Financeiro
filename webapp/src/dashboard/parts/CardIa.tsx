@@ -9,13 +9,14 @@ import { CardMetas, contratoMetas } from "./cardIa/metas";
 import { CardPatrimonio, CardWealth, contratoPatrimonio } from "./cardIa/patrimonio";
 import { CardCompromissos, CardHero, contratoCompromissos, contratoHero, diasDoBloco } from "./cardIa/previsao";
 import { CardPeriodo, CardResumo, contratoPeriodo, contratoResumo, tituloDoPeriodo } from "./cardIa/resumo";
+import { CardSimulador, contratoSimulador } from "./cardIa/simulador";
 
 // Um card que a IA manda no chat (`bloco` do stream, lib/conversaIa.ts): `card` + 1 a 3 abas `{ mes, recursos }` com o dado lido NA HORA pelo servidor (uma foto).
 // Desenhado do bloco, sem consulta ao servidor (as ações de cada card, como abrir lançamentos ou pedir algo ao chat, conferem a conta: parts/cardIa/). Sem `Frame`
 // e sem o widget do Resumo: tudo inline, sem folha e sem link. Card desconhecido, aba fora do envelope ou recurso fora do contrato = o marcador, sem número.
-// `desenha` recebe o `recursos` JÁ conferido por `contrato`; o tipo fundo é de cada card. Os 7 ids que ainda faltam: tests/test_ai_chat_cards_ids_painel.py.
+// `desenha` recebe o `recursos` JÁ conferido por `contrato`; o tipo fundo é de cada card. Os 6 ids que ainda faltam: tests/test_ai_chat_cards_ids_painel.py.
 type Ctx = { uid?: number; mes: string | null };
-type Def = { titulo: (recursos: unknown) => string; contrato: (recursos: unknown) => boolean; desenha: (recursos: any, c: Ctx) => ReactNode }; // eslint-disable-line @typescript-eslint/no-explicit-any
+type Def = { titulo: (recursos: unknown) => string; semMes?: true; contrato: (recursos: unknown) => boolean; desenha: (recursos: any, c: Ctx) => ReactNode }; // eslint-disable-line @typescript-eslint/no-explicit-any
 // Uma entrada por linha, 2 espaços de recuo: o teste dos ids (§0.7) lê estas chaves. Títulos iguais aos do app (app/src/features/painel/catalogo.ts).
 const CARDS: Record<string, Def> = {
   contas: { titulo: () => "Contas", contrato: contratoContas, desenha: (r, c) => <CardContas d={r.contas} {...c} /> },
@@ -29,6 +30,7 @@ const CARDS: Record<string, Def> = {
   categorias: { titulo: () => "Para onde vai", contrato: contratoCategorias, desenha: (r, c) => <CardCategorias d={r.detalhes} uid={c.uid} /> },
   calendario: { titulo: () => "Dia a dia", contrato: contratoCalendario, desenha: (r, c) => <CardCalendario d={r.detalhes} uid={c.uid} /> },
   periodo: { titulo: tituloDoPeriodo, contrato: contratoPeriodo, desenha: (r) => <CardPeriodo d={r.periodo} /> },
+  simulador: { titulo: () => "Simulador", semMes: true, contrato: contratoSimulador, desenha: (r, c) => <CardSimulador r={r} uid={c.uid} /> }, // o bloco leva `mes`, mas o título do app é só "Simulador"
 };
 
 const MES = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -59,7 +61,7 @@ export function CardIa({ bloco, uid }: { bloco: BlocoIa; uid?: number }) {
   return (
     <LimiteCard>
       <section className="panel msg-block card-ia" aria-labelledby={id}>
-        <h2 id={id} className="card-ia-tit">{def.titulo(aba.recursos)}{aba.mes && ` · ${monthTitle(aba.mes)}`}</h2>
+        <h2 id={id} className="card-ia-tit">{def.titulo(aba.recursos)}{aba.mes && !def.semMes && ` · ${monthTitle(aba.mes)}`}</h2>
         {abas.length > 1 && <Seg label="Mês do card" value={String(sel)} onChange={(v) => setSel(Number(v))} options={abas.map((a, i) => ({ value: String(i), label: rotulo(a, i) }))} />}
         <div key={sel} className="ci-corpo">{def.desenha(aba.recursos, { uid, mes: aba.mes })}</div>
       </section>

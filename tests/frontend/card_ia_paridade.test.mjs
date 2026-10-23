@@ -194,3 +194,33 @@ test("negativo: outro teto num lado só é visto", () => {
   const app = APP_TETOS(); app.dias = app.dias.replace("itens.slice(0, 7)", "itens.slice(0, 8)");
   assert.notEqual(tetos(GASTOS_WEB(), PERIODO_WEB(), app).dias[0], tetos(GASTOS_WEB(), PERIODO_WEB(), app).dias[1]);
 });
+
+// PR 5: os dois textos do card `simulador` que o app também diz, palavra por palavra. O `GENERICO` NÃO entra: é o do widget do painel ("Não deu para calcular agora."), diferente do do app, de propósito.
+const texto = (fonte, nome) => { const m = new RegExp(`const ${nome} = "([^"]+)";`).exec(fonte); assert.ok(m, `${nome}: o formato mudou`); return m[1]; };
+const SIM_APP = () => ler("app", "src", "features", "painel", "simuladorHabitos.tsx");
+const COMPRA_APP = () => ler("app", "src", "features", "painel", "simuladorCompra.ts");
+const SIM_WIDGET = () => ler("webapp", "src", "dashboard", "widgets", "SimuladorHabitos.tsx");
+const SIM_CARD = () => ler("webapp", "src", "dashboard", "parts", "cardIa", "simulador.tsx");
+test("o aviso de \"gastos mudaram\" (422) e o de plano do card `simulador` são os do app, palavra por palavra", () => {
+  assert.equal(texto(SIM_WIDGET(), "MUDOU"), texto(SIM_APP(), "MUDOU"));
+  assert.equal(texto(SIM_CARD(), "SEM_PLANO"), texto(COMPRA_APP(), "SEM_PLANO"));
+  assert.equal(texto(SIM_CARD(), "SEM_PLANO"), "Simulador indisponível no seu plano.");
+});
+test("negativo: uma palavra trocada num texto do simulador, de qualquer lado, aparece como diferença", () => {
+  assert.notEqual(texto(SIM_WIDGET().replace("mudaram. Ajuste", "mudaram! Ajuste"), "MUDOU"), texto(SIM_APP(), "MUDOU"));
+  assert.notEqual(texto(SIM_WIDGET(), "MUDOU"), texto(SIM_APP().replace("Ajuste de novo", "Ajuste outra vez"), "MUDOU"));
+  assert.notEqual(texto(SIM_CARD().replace("no seu plano", "no seu pacote"), "SEM_PLANO"), texto(COMPRA_APP(), "SEM_PLANO"));
+  assert.notEqual(texto(SIM_CARD(), "SEM_PLANO"), texto(COMPRA_APP().replace("Simulador indisponível", "Simulador fora"), "SEM_PLANO"));
+});
+
+// O texto de "sem histórico" do card `simulador`: o do app (`<Vazio texto="…" />`), o do painel (`<p className="ci-vazio">…</p>`).
+const vazioApp = (f) => { const m = /<Vazio texto="([^"]+)" \/>/.exec(f); assert.ok(m, "o formato do Vazio do app mudou"); return m[1]; };
+const vazioWeb = (f) => { const m = /<p className="ci-vazio">([^<]+)<\/p>/.exec(f); assert.ok(m, "o formato do ci-vazio do card mudou"); return m[1]; };
+test("o texto de \"sem histórico\" do card `simulador` é o do app, palavra por palavra", () => {
+  assert.equal(vazioWeb(SIM_CARD()), vazioApp(SIM_APP()));
+  assert.equal(vazioWeb(SIM_CARD()), "Ainda sem histórico para estimar.");
+});
+test("negativo: uma palavra trocada no texto de \"sem histórico\", de qualquer lado, aparece como diferença", () => {
+  assert.notEqual(vazioWeb(SIM_CARD().replace("para estimar", "para calcular")), vazioApp(SIM_APP()));
+  assert.notEqual(vazioWeb(SIM_CARD()), vazioApp(SIM_APP().replace("Ainda sem histórico", "Ainda não há histórico")));
+});

@@ -32,7 +32,7 @@ function Dado({ titulo, valor, aviso, filhos }: { titulo: string; valor: string;
     </li>
   );
 }
-const Sub = ({ nome, valor }: { nome: string; valor: string }) => <li className="ci-sub"><span>{nome}</span><span className="num">{valor}</span></li>;
+export const Sub = ({ nome, valor }: { nome: string; valor: string }) => <li className="ci-sub"><span>{nome}</span><span className="num">{valor}</span></li>;
 
 export function CardHero({ d }: { d: Previsao }) {
   const marco = d.marcos.find((m) => m.dias === d.dias) ?? d.marcos[d.marcos.length - 1];
