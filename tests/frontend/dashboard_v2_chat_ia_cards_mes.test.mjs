@@ -170,8 +170,9 @@ test("categorias: 7 categorias viram as 4 maiores e \"Outras\" (a soma exata das
   const cinco = await responde([blocoDoCaso("categorias", { detalhes: { ...D, categorias: D.categorias.slice(0, 5) } })]);
   assert.deepEqual((await linhasDe(cinco.page, ".card-ia .ci-cat")).map((t) => t.split(" ")[0]), ["Alimentação", "Casa", "Mercado", "Transporte", "Lazer"]);
   await cinco.page.context().close();
-  const nenhuma = await responde([blocoDoCaso("categorias", { detalhes: { ...D, categorias: [] } })]);
+  const nenhuma = await responde([blocoDoCaso("categorias", { detalhes: { ...D, categorias: [], motivos: ["inicio_do_historico"] } })]);
   assert.equal(await nenhuma.page.getByText("Nenhum gasto em reais registrado neste período.").count(), 1);
+  assert.equal(await nenhuma.page.locator(".card-ia").getByText("início do histórico").count(), 1, "o vazio leva os avisos");
   await nenhuma.page.context().close();
 });
 
@@ -192,8 +193,9 @@ test("calendario: os dias do mais novo ao mais velho, 7 por vez (\"+N\" abre o r
   assert.deepEqual([await escala("Qui · 01/10", 0), await escala("Qui · 01/10", 1), await escala("Dom · 25/10", 0)], ["scaleX(1)", "scaleX(1)", "scaleX(0)"]);
   assert.match(await escala("Dom · 25/10", 1), /^scaleX\(0\.38/);
   await page.context().close();
-  const vazio = await responde([blocoDoCaso("calendario", { detalhes: { ...D, dias: [] } })]);
+  const vazio = await responde([blocoDoCaso("calendario", { detalhes: { ...D, dias: [], motivos: ["inicio_do_historico"] } })]);
   assert.equal(await vazio.page.getByText("Ainda não há movimentos neste período.").count(), 1);
+  assert.equal(await vazio.page.locator(".card-ia").getByText("início do histórico").count(), 1, "o vazio leva os avisos");
   await vazio.page.context().close();
 });
 

@@ -29,7 +29,7 @@ export const maiuscula = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export function CardCategorias({ d, uid }: { d: MesDetalhes; uid?: number }) {
   const catalogo = useQuery(categoriasQuery).data?.categorias ?? [];
-  if (!d.categorias.length) return <p className="ci-vazio">Nenhum gasto em reais registrado neste período.</p>;
+  if (!d.categorias.length) return <><p className="ci-vazio">Nenhum gasto em reais registrado neste período.</p><Selos motivos={d.motivos} /></>; // o vazio leva os avisos (início do histórico, outra moeda…)
   const total = soma(d.categorias.map((c) => c.valor));
   const todas: ItemCat[] = d.categorias.map((c) => {
     const cat = catalogo.find((x) => x.chave === c.categoria);
@@ -63,7 +63,7 @@ export function CardCalendario({ d, uid }: { d: MesDetalhes; uid?: number }) {
   const maior = (k: "entrou" | "saiu") => Math.max(1, ...dias.map((x) => medida(x[k])));
   const [maxEntrou, maxSaiu] = [maior("entrou"), maior("saiu")];
   const [vistos, mais] = useMais(dias, 7, ["dia", "dias"]);
-  if (!dias.length) return <p className="ci-vazio">Ainda não há movimentos neste período.</p>;
+  if (!dias.length) return <><p className="ci-vazio">Ainda não há movimentos neste período.</p><Selos motivos={d.motivos} /></>;
   const barra = (valor: string, cor: string, maximo: number) => <span className="ci-trilho"><i style={{ background: cor, transform: `scaleX(${medida(valor) / maximo})` }} /></span>;
   return (
     <>
