@@ -2226,7 +2226,7 @@ fictícios de exemplo (`core/services/demo/`), sem ferramentas; o Piggy fala em 
 (contador, carimbos e hash do número por 30 dias): não toca em users / user_identities / launches /
 ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone de conta sem credencial, que ainda produz `precisa_senha`; `vincular CODIGO` ou outro canal) nunca
 entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`, com os mesmos `candidatos_simetricos` e o mesmo `db.google_auth.SEM_CREDENCIAL_SQL`; telefone de conta com senha não conta, o telefone não liga mais); `vincular 123456` segue o fluxo
-normal. Ao fim, o link `/t/{code}` carimba `checkout_at` e manda para `/precos?origem=teste` (destino fixo,
+normal. Da 1ª à 7ª resposta vai o convite "Cria sua conta" e, na 8ª, o FIM; os dois levam o link `/t/{code}`, que carimba `checkout_at` no 1º clique (desde 2026-10-23 pode ser em qualquer resposta, não só no fim: o "clicaram_checkout" do `/admin/funil` não se compara com a série anterior) e manda para `/precos?origem=teste` (destino fixo,
 `Cache-Control: no-store`, `shared_limit`). Interruptor e teto: `DEMO_DAILY_MAX` (padrão 0 = desligado; sessões
 abertas por 24h; `<= 0` desliga, lida a cada chamada). Retenção: 1 teste por número a cada 30 dias e o
 `wa_hash` é zerado após 30 dias (`esquecer_numeros_antigos`, em `table_cleanup`); copy: "o que você
