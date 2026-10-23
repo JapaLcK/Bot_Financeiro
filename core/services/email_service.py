@@ -276,7 +276,6 @@ def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
       <p style="text-align:center;margin-top:24px">
         <a class="btn" href="{base}/precos">Escolher meu plano</a>
       </p>
-      <p class="warn">Preço de fundador: assinando agora, seu valor fica congelado pra sempre.</p>
     """
     return send_email(
         to,
