@@ -320,6 +320,7 @@ def test_resposta_entregue_entra_no_historico_sem_o_aviso_anexado(mundo):
     assert wa_demo.ULTIMA in mundo.textos()[-1]
     _manda(n, "oitava")
     assert _historico_visto(mundo) == ["setima", "resposta 1"], _historico_visto(mundo)
+    assert "/t/" not in json.dumps(conversa._ler(funil.wa_hash(n))), "o link não entra no histórico"
 
 
 def test_conversa_de_A_nao_toca_a_linha_de_B(mundo):

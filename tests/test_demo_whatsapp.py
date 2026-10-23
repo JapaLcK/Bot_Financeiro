@@ -80,7 +80,7 @@ def test_limite_de_oito_mensagens(mundo):
     assert wa_demo.ULTIMA in textos[6], "a 7ª devia avisar que a próxima é a última"
     assert wa_demo.ULTIMA not in textos[5] and wa_demo.ULTIMA not in textos[7]
     assert f"/t/{code}" in textos[7], "a 8ª devia trazer o link final"
-    assert f"/t/{code}" not in textos[6]
+    assert f"/t/{code}" in textos[6], "a 7ª também leva o convite com o link"
     # só a 8ª chamada leva a linha "última resposta" (sem gancho); as 7 primeiras, nunca
     tem_ultima = [any(m["content"] == conversa.ULTIMA_RESPOSTA for m in c) for c in mundo.chamadas]
     assert tem_ultima == [False] * 7 + [True]
@@ -91,6 +91,23 @@ def test_limite_de_oito_mensagens(mundo):
     assert len(mundo.chamadas) == 8, "a 9ª não pode chamar o modelo"
     assert f"/t/{code}" in mundo.textos()[-1]
     assert _sessao(n)["msgs_used"] == 8
+
+
+def test_link_em_toda_resposta_da_1a_a_7a_e_so_o_fim_na_8a(mundo):
+    n = _numero()
+    _abre(n)
+    code = _sessao(n)["code"]
+    convite = wa_demo.CONVITE_CONTA.format(link=wa_demo._link(code))
+    for i in range(8):
+        _manda(n, f"pergunta {i}")
+    textos = mundo.textos()
+    assert textos[0].endswith(convite) and f"/t/{code}" in textos[0]
+    assert wa_demo.ULTIMA not in textos[0] and "Acabaram" not in textos[0]
+    assert textos[6].index(convite) < textos[6].index(wa_demo.ULTIMA)
+    assert textos[6].endswith(wa_demo.ULTIMA)
+    assert all(convite in t for t in textos[:7])
+    assert "Acabaram" in textos[7] and convite not in textos[7]
+    assert textos[7].count("/t/") == 1
 
 
 def test_gatilho_de_novo_reenvia_a_lista_sem_contar(mundo):
