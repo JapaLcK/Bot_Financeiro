@@ -9,15 +9,17 @@ import { textos } from "../../lib/bancos";
 import { existe } from "../../lib/extrato-dias";
 import { decimal } from "../../lib/format.js";
 
-// Os lançamentos que um card da IA abre dentro dele (contas agora; categorias e dias no PR 4). Só leitura, de 10 em 10, e a conta é conferida
+// Os lançamentos que um card da IA abre dentro dele (uma conta, uma categoria do mês ou um dia: o servidor só protege `conta`; `categoria` e `dia` com a sessão
+// de outra conta trazem os lançamentos DELA, então a guarda abaixo é obrigatória para os três). Só leitura, de 10 em 10, e a conta é conferida
 // ANTES de cada página (nenhum GET sai com a sessão de outra conta) e DEPOIS (a troca durante a busca não desenha nada). A chave tem o uid por
 // ÚLTIMO e 3 elementos: é a forma que o main.tsx reconhece como "da conta anterior" e não relê com a sessão nova. `meta.foto`: o aviso do SSE não a relê (lib/eventos.ts).
 // Página com item fora do contrato é erro com "Tentar de novo", nunca lista com linha faltando (é dinheiro) nem card derrubado.
-type Filtros = { mes: string; conta?: number };
+type Filtros = { mes: string; conta?: number; categoria?: string; tipo?: "saida"; dia?: string };
 export const PRAZO_PAGINA_MS = 15_000; // o `comLimite` do app
 const FALHA = "Não deu para carregar os lançamentos.";
 const TEXTOS_DA_LINHA = ["descricao", "categoria", "mensagem", "hora", "instituicao"] as const; // o que o LancamentoLinha desenha como texto: objeto ali derrubaria o card
-const itemOk = (i: unknown) => { const x = i as Partial<Lancamento> | null; return !!x && typeof x.id === "string" && typeof x.data === "string" && existe(x.data.slice(0, 10)) && (x.tipo === "entrada" || x.tipo === "saida") && decimal(x.valor) !== null && typeof x.moeda === "string" && textos(x.motivos) && TEXTOS_DA_LINHA.every((k) => x[k] == null || typeof x[k] === "string"); };
+// `isFinite(Number)`: a linha desenha `Number(valor)`, e "1e999" passa no decimal exato mas vira "−R$ ∞". Também é a régua dos `maiores` do card `periodo` (resumo.tsx).
+export const itemOk = (i: unknown) => { const x = i as Partial<Lancamento> | null; return !!x && typeof x.id === "string" && typeof x.data === "string" && existe(x.data) && (x.tipo === "entrada" || x.tipo === "saida") && decimal(x.valor) !== null && Number.isFinite(Number(x.valor)) && typeof x.moeda === "string" && textos(x.motivos) && TEXTOS_DA_LINHA.every((k) => x[k] == null || typeof x[k] === "string"); };
 // O prazo cobre a página INTEIRA: as leituras do perfil (antes e depois) não levam sinal, então o corte rejeita por cima delas.
 const cortavel = <T,>(p: Promise<T>, s: AbortSignal) => Promise.race([p, new Promise<never>((_, no) => {
   const corta = () => no(new DOMException("Aborted", "AbortError"));

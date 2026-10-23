@@ -1,0 +1,105 @@
+{
+  "mes": "2026-10",
+  "ate": "2026-10-22",
+  "entrou": "7200.00",
+  "saiu": "3010.50",
+  "categorias": [
+    {
+      "categoria": "alimentacao",
+      "valor": "980.50",
+      "quantidade": 12
+    },
+    {
+      "categoria": "casa",
+      "valor": "900.00",
+      "quantidade": 1
+    },
+    {
+      "categoria": "mercado",
+      "valor": "420.00",
+      "quantidade": 6
+    },
+    {
+      "categoria": "transporte",
+      "valor": "300.00",
+      "quantidade": 5
+    },
+    {
+      "categoria": "lazer",
+      "valor": "200.00",
+      "quantidade": 3
+    },
+    {
+      "categoria": "saude",
+      "valor": "110.00",
+      "quantidade": 2
+    },
+    {
+      "categoria": null,
+      "valor": "100.00",
+      "quantidade": 1
+    }
+  ],
+  "origens": {
+    "cartao": "1500.00",
+    "banco": "900.50",
+    "carteira": "510.00",
+    "registro_antigo": "100.00"
+  },
+  "dias": [
+    {
+      "dia": "2025-12-20",
+      "entrou": "0.00",
+      "saiu": "150.00"
+    },
+    {
+      "dia": "2026-10-01",
+      "entrou": "7200.00",
+      "saiu": "900.00"
+    },
+    {
+      "dia": "2026-10-02",
+      "entrou": "0.00",
+      "saiu": "410.00"
+    },
+    {
+      "dia": "2026-10-03",
+      "entrou": "0.00",
+      "saiu": "240.00"
+    },
+    {
+      "dia": "2026-10-04",
+      "entrou": "0.00",
+      "saiu": "300.00"
+    },
+    {
+      "dia": "2026-10-05",
+      "entrou": "0.00",
+      "saiu": "250.50"
+    },
+    {
+      "dia": "2026-10-06",
+      "entrou": "0.00",
+      "saiu": "280.00"
+    },
+    {
+      "dia": "2026-10-08",
+      "entrou": "0.00",
+      "saiu": "130.00"
+    },
+    {
+      "dia": "2026-10-25",
+      "entrou": "0.00",
+      "saiu": "350.00"
+    }
+  ],
+  "guardado": {
+    "aportes": "1200.00",
+    "saques": "0.00",
+    "liquido": "1200.00",
+    "cobertura": "movimentos_registrados"
+  },
+  "motivos": [],
+  "fora_do_total": 0,
+  "criterio_dias": "data_do_lancamento_ou_compra_na_fatura_do_mes"
+}

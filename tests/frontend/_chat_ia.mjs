@@ -5,8 +5,12 @@
 // Não é `*.test.mjs` de propósito: o `node --test tests/frontend/*.test.mjs` não o roda como suíte.
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { RAIZ, RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 export { RESPOSTAS };
+/** Uma fixture de tests/fixtures (o dump do Pydantic que o pytest confere): `ai_chat_recurso_detalhes.json` (o `detalhes` de resumo/categorias/calendario), `ai_chat_bloco_periodo.json`. */
+export const fixture = (nome) => JSON.parse(readFileSync(join(RAIZ, "tests", "fixtures", nome), "utf8"));
 
 let browser;
 export const iniciar = async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); };

@@ -4,14 +4,16 @@ import { isoDay, monthShort, monthTitle, monthYear } from "../lib/format.js";
 import { Seg } from "./Seg";
 import { CardAssinaturasIa, contratoAssinaturasBloco } from "./cardIa/assinaturas";
 import { CardContas, contratoContas } from "./cardIa/contas";
+import { CardCalendario, CardCategorias, contratoCalendario, contratoCategorias } from "./cardIa/gastos";
 import { CardMetas, contratoMetas } from "./cardIa/metas";
 import { CardPatrimonio, CardWealth, contratoPatrimonio } from "./cardIa/patrimonio";
 import { CardCompromissos, CardHero, contratoCompromissos, contratoHero, diasDoBloco } from "./cardIa/previsao";
+import { CardPeriodo, CardResumo, contratoPeriodo, contratoResumo, tituloDoPeriodo } from "./cardIa/resumo";
 
 // Um card que a IA manda no chat (`bloco` do stream, lib/conversaIa.ts): `card` + 1 a 3 abas `{ mes, recursos }` com o dado lido NA HORA pelo servidor (uma foto).
 // Desenhado do bloco, sem consulta ao servidor (as ações de cada card, como abrir lançamentos ou pedir algo ao chat, conferem a conta: parts/cardIa/). Sem `Frame`
 // e sem o widget do Resumo: tudo inline, sem folha e sem link. Card desconhecido, aba fora do envelope ou recurso fora do contrato = o marcador, sem número.
-// `desenha` recebe o `recursos` JÁ conferido por `contrato`; o tipo fundo é de cada card. Os 11 ids que ainda faltam: tests/test_ai_chat_cards_ids_painel.py.
+// `desenha` recebe o `recursos` JÁ conferido por `contrato`; o tipo fundo é de cada card. Os 7 ids que ainda faltam: tests/test_ai_chat_cards_ids_painel.py.
 type Ctx = { uid?: number; mes: string | null };
 type Def = { titulo: (recursos: unknown) => string; contrato: (recursos: unknown) => boolean; desenha: (recursos: any, c: Ctx) => ReactNode }; // eslint-disable-line @typescript-eslint/no-explicit-any
 // Uma entrada por linha, 2 espaços de recuo: o teste dos ids (§0.7) lê estas chaves. Títulos iguais aos do app (app/src/features/painel/catalogo.ts).
@@ -23,6 +25,10 @@ const CARDS: Record<string, Def> = {
   wealth: { titulo: () => "Onde está o dinheiro", contrato: contratoPatrimonio, desenha: (r) => <CardWealth d={r.patrimonio} /> },
   assinaturas: { titulo: () => "Assinaturas", contrato: contratoAssinaturasBloco, desenha: (r) => <CardAssinaturasIa d={r.assinaturas} /> },
   metas: { titulo: () => "Metas", contrato: contratoMetas, desenha: (r, c) => <CardMetas d={r.metas} uid={c.uid} /> },
+  resumo: { titulo: () => "Resumo do mês", contrato: contratoResumo, desenha: (r) => <CardResumo resumo={r.resumo} detalhes={r.detalhes} /> },
+  categorias: { titulo: () => "Para onde vai", contrato: contratoCategorias, desenha: (r, c) => <CardCategorias d={r.detalhes} uid={c.uid} /> },
+  calendario: { titulo: () => "Dia a dia", contrato: contratoCalendario, desenha: (r, c) => <CardCalendario d={r.detalhes} uid={c.uid} /> },
+  periodo: { titulo: tituloDoPeriodo, contrato: contratoPeriodo, desenha: (r) => <CardPeriodo d={r.periodo} /> },
 };
 
 const MES = /^\d{4}-(0[1-9]|1[0-2])$/;
