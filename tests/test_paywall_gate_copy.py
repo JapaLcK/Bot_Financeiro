@@ -45,7 +45,7 @@ def _copy_da_precos_promete_trial() -> str:
     o bot NÃO repete essa frase."""
     html = (pathlib.Path(__file__).resolve().parent.parent
             / "frontend" / "precos.html").read_text(encoding="utf-8")
-    m = re.search(r"15 dias grátis pra testar</strong>\s*\(([^)]+)\)", html)
+    m = re.search(r"\d+ dias grátis pra testar</strong>\s*\(([^)]+)\)", html)
     assert m, "não achei a frase do trial na precos.html"
     return m.group(1)
 
@@ -141,7 +141,7 @@ def test_copy_do_ex_assinante_com_telefone_queimado_nomeia_o_telefone():
         assert _barrado(resposta), resposta
         baixa = resposta.lower()
         assert "telefone já usou" in baixa, resposta
-        assert "15 dias grátis" not in baixa, "prometeu trial a quem já queimou"
+        assert not re.search(r"\d+ dias grátis", baixa), "prometeu trial a quem já queimou"
     finally:
         with get_conn() as conn:
             with conn.cursor() as cur:

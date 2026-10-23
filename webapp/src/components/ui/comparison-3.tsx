@@ -66,7 +66,7 @@ const plans = [
 // decidir e dilui os diferenciais. O trial vem primeiro de propósito — é o
 // redutor de fricção que antes só aparecia nas notas pequenas da página.
 const commons = [
-  "15 dias grátis pra testar · cancele antes e não paga nada",
+  "7 dias grátis pra testar · cancele antes e não paga nada",
   "Registro por texto, áudio e foto de cupom no WhatsApp",
   "Lançamentos ilimitados",
   "Importar extrato (OFX, CSV, PDF)",

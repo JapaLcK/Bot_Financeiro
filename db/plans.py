@@ -1,7 +1,7 @@
 """
 Camada de banco do sistema de planos v2 (escada Grátis/Essencial/Plus/Pro).
 
-Trial de 15 dias do plano escolhido, via Stripe COM CARTÃO (2026-08-06), com
+Trial do plano escolhido, via Stripe COM CARTÃO (2026-08-06), com
 trava de 1 trial por TELEFONE na vida: `plan_trials` é keyed por phone_hash e
 sobrevive à deleção da conta — recriar conta com o mesmo número herda o
 started_at original (trial já queimado). A elegibilidade é checada na criação
@@ -30,7 +30,7 @@ class TrialClaimError(RuntimeError):
 def claim_trial_for_user(user_id: int) -> datetime | None:
     """Ancora o trial do usuário no telefone dele (idempotente).
 
-    Regra fechada: o contador é UM SÓ — 15 dias por telefone, na vida.
+    Regra fechada: o contador é UM SÓ — um trial por telefone, na vida.
     - Telefone nunca usou trial → registra now() em plan_trials e ancora a conta.
     - Telefone JÁ usou trial (nesta ou noutra conta, mesmo deletada) → a conta
       herda o started_at ORIGINAL; se o trial já venceu, days_left = 0.
@@ -134,7 +134,7 @@ def motivo_trial_indisponivel(user_id: int) -> str | None:
 
 
 def is_trial_eligible_for_user(user_id: int) -> bool:
-    """O telefone deste usuário ainda tem direito ao trial de 15 dias?
+    """O telefone deste usuário ainda tem direito ao trial?
 
     Regra: 1 trial por telefone na vida. Usado na criação do checkout pra decidir
     se manda `trial_period_days` ou cobra na hora — ali o booleano basta e a
@@ -151,7 +151,7 @@ def reset_trial_for_user(user_id: int) -> dict | None:
     """Apaga a trava de trial do TELEFONE desta conta e reancora a conta.
 
     Ação de admin (drill-down do painel): devolve a esta conta o direito ao
-    trial de 15 dias. Tudo numa transação só, e o SELECT é `for update`: sem o
+    trial. Tudo numa transação só, e o SELECT é `for update`: sem o
     lock de linha a transação seria READ COMMITTED pura, e uma troca de telefone
     concorrente (frontend/routes/settings.py reescreve phone_hash) commitando
     entre o SELECT e o DELETE faria isto apagar a trava do número ANTIGO e
@@ -169,7 +169,7 @@ def reset_trial_for_user(user_id: int) -> dict | None:
     claim_trial_for_user só grava a âncora quando ela é nula ou mais nova que o
     started_at novo, então uma âncora velha faria o trial seguinte nascer
     vencido (get_trial_status calcula o fim pela data antiga e devolve
-    days_left=0 enquanto a Stripe dá os 15 dias). `trial_downsell_sent_at` vai
+    days_left=0 enquanto a Stripe dá o período grátis). `trial_downsell_sent_at` vai
     no mesmo UPDATE pro funil de downsell poder ser testado de novo.
 
     Não fala com a Stripe: assinatura viva continua onde está (quem recusa esse
