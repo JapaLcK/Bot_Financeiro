@@ -4,7 +4,7 @@ import { fraseSemTotal } from "./InvestidoResposta";
 import { Selos } from "./Selos";
 
 // A cor e o ícone de cada tipo (as chaves são as de db/investido.py::TIPOS). Nada de verde ou âmbar: são de ganho e de aviso.
-const TIPO: Record<string, { icone: string; cor: string }> = {
+export const TIPO: Record<string, { icone: string; cor: string }> = {
   renda_fixa: { icone: "ph ph-bank", cor: "var(--serie-3)" },
   tesouro: { icone: "ph ph-scroll", cor: "var(--serie-1)" },
   acoes: { icone: "ph ph-chart-line-up", cor: "var(--serie-2)" },

@@ -5,7 +5,7 @@
 // Cada grupo foi provado vermelho com uma mutação do código que ele cobre (a tabela está no relato do PR, não aqui).
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { RESPOSTAS, encerrar, iniciar, trocarConta } from "./_chat_ia.mjs";
+import { RESPOSTAS, SEM_CARD, encerrar, iniciar, trocarConta } from "./_chat_ia.mjs";
 import { FALHA, SESSAO, ate, prepararCard } from "./_chat_ia_lanc.mjs";
 
 before(iniciar);
@@ -278,7 +278,7 @@ for (const [nome, itens] of [["item null", [null]], ["item sem campos", [{ id: "
     await erro.waitFor();
     assert.equal(await erro.locator("p").innerText(), FALHA);
     assert.equal(await a.page.locator(".card-ia").count(), 1);
-    assert.equal(await a.page.getByText("Este card ainda não aparece aqui.").count(), 0);
+    assert.equal(await a.page.getByText(SEM_CARD).count(), 0);
     assert.equal(a.t.gets.length, 1, "contrato quebrado não repete");
     a.t.itens = null;
     await erro.getByRole("button", { name: "Tentar de novo" }).click();

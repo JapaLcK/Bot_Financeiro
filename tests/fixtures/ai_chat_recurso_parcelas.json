@@ -1,0 +1,148 @@
+{
+  "ok": true,
+  "installments": [
+    {
+      "group_id": "e7016f02-1afd-49a0-8b6e-f03b2bcf855f",
+      "name": "Sofá",
+      "categoria": "casa",
+      "card_id": 1,
+      "card_name": "Nubank",
+      "card_color": null,
+      "card_flag": null,
+      "card_last4": null,
+      "installments_total": 3,
+      "purchased_at": "2026-08-20",
+      "parcelas": [
+        {
+          "tx_id": 2,
+          "installment_no": 1,
+          "valor": 100.5,
+          "is_paid": false,
+          "is_next": true,
+          "due_date": "2026-11-17",
+          "period_end": "2026-11-10",
+          "bill_id": 1
+        },
+        {
+          "tx_id": 3,
+          "installment_no": 2,
+          "valor": 100.5,
+          "is_paid": false,
+          "is_next": false,
+          "due_date": "2026-12-17",
+          "period_end": "2026-12-10",
+          "bill_id": 2
+        },
+        {
+          "tx_id": 4,
+          "installment_no": 3,
+          "valor": 100.5,
+          "is_paid": false,
+          "is_next": false,
+          "due_date": "2027-01-17",
+          "period_end": "2027-01-10",
+          "bill_id": 3
+        }
+      ],
+      "total": 301.5,
+      "paid_amount": 0,
+      "remaining_amount": 301.5,
+      "n_paid": 0,
+      "n_pending": 3,
+      "next_due_date": "2026-11-17",
+      "valor_parcela": 100.5
+    },
+    {
+      "group_id": "0b1f5f0e-7c1c-4a7e-9a8d-3c1d6a1c0001",
+      "name": "Notebook",
+      "categoria": "casa",
+      "card_id": 1,
+      "card_name": "Nubank",
+      "card_color": null,
+      "card_flag": null,
+      "card_last4": null,
+      "installments_total": 3,
+      "purchased_at": "2026-08-20",
+      "parcelas": [
+        {
+          "tx_id": 5,
+          "installment_no": 1,
+          "valor": 833.33,
+          "is_paid": true,
+          "is_next": false,
+          "due_date": "2026-09-17",
+          "period_end": "2026-09-10",
+          "bill_id": 4
+        },
+        {
+          "tx_id": 6,
+          "installment_no": 2,
+          "valor": 833.33,
+          "is_paid": false,
+          "is_next": true,
+          "due_date": "2026-10-17",
+          "period_end": "2026-10-10",
+          "bill_id": 5
+        },
+        {
+          "tx_id": 7,
+          "installment_no": 3,
+          "valor": 833.34,
+          "is_paid": false,
+          "is_next": false,
+          "due_date": "2026-11-17",
+          "period_end": "2026-11-10",
+          "bill_id": 6
+        }
+      ],
+      "total": 2500.0,
+      "paid_amount": 833.33,
+      "remaining_amount": 1666.67,
+      "n_paid": 1,
+      "n_pending": 2,
+      "next_due_date": "2026-10-17",
+      "valor_parcela": 833.33
+    },
+    {
+      "group_id": "0b1f5f0e-7c1c-4a7e-9a8d-3c1d6a1c0002",
+      "name": "Tênis",
+      "categoria": "casa",
+      "card_id": 1,
+      "card_name": "Inter",
+      "card_color": null,
+      "card_flag": null,
+      "card_last4": null,
+      "installments_total": 2,
+      "purchased_at": "2026-07-05",
+      "parcelas": [
+        {
+          "tx_id": 8,
+          "installment_no": 1,
+          "valor": 150.25,
+          "is_paid": true,
+          "is_next": false,
+          "due_date": "2026-08-17",
+          "period_end": "2026-08-10",
+          "bill_id": 7
+        },
+        {
+          "tx_id": 9,
+          "installment_no": 2,
+          "valor": 150.25,
+          "is_paid": true,
+          "is_next": false,
+          "due_date": "2026-09-17",
+          "period_end": "2026-09-10",
+          "bill_id": 8
+        }
+      ],
+      "total": 300.5,
+      "paid_amount": 300.5,
+      "remaining_amount": 0.0,
+      "n_paid": 2,
+      "n_pending": 0,
+      "next_due_date": null,
+      "valor_parcela": 150.25
+    }
+  ]
+}

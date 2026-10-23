@@ -17,7 +17,7 @@ import { useMais } from "./mais";
 // Os cards `resumo` ("Resumo do mês") e `periodo` (o intervalo, de 1 a 12 meses) do chat: o `recursos` do bloco é `{ resumo: <GET /api/v2/resumo-do-mes>, detalhes: <MesDetalhes> }`
 // e `{ periodo: <Periodo> }`. Só leitura da foto, sem consulta: o `periodo` já traz os maiores lançamentos de cada categoria (tocar abre a lista aqui dentro).
 // Diferença do app: sem a curva acumulada do mês (o bloco não traz o mês anterior para comparar) e sem o esmaecido dos meses antes do histórico (o selo "início do histórico" avisa).
-const MES = /^\d{4}-(0[1-9]|1[0-2])$/;
+export const MES = /^\d{4}-(0[1-9]|1[0-2])$/;
 export const contratoResumo = (r: unknown) => {
   const x = r as { resumo?: ResumoDoMes; detalhes?: MesDetalhes } | null;
   return !!x && obj(x.resumo) && moneyText(x.resumo.entrou) !== null && moneyText(x.resumo.saiu) !== null && textos(x.resumo.motivos) && obj(x.detalhes) && textos(x.detalhes.motivos);

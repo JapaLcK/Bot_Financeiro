@@ -2,12 +2,11 @@
 // troca percebida pelo foco, o modo do corte pedido no chat (sem controle e sem POST), contrato, "Zerar simulação", card sem dono e visual em 1440 e 390.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { RESPOSTAS, encerrar, iniciar, trocarConta } from "./_chat_ia.mjs";
+import { RESPOSTAS, SEM_CARD, encerrar, iniciar, trocarConta } from "./_chat_ia.mjs";
 import { GENERICO, PREV, ate, mover, prepararSim, respostaDe } from "./_chat_ia_sim.mjs";
 
 before(iniciar);
 after(encerrar);
-const SEM_CARD = "Este card ainda não aparece aqui.";
 const CORTE = respostaDe({ cortes: [{ categoria: "mercado", percentual: 30 }, { categoria: "lazer", percentual: 10 }] }); // o que o servidor manda quando a pessoa PEDIU o corte
 
 test("S10 soltar o MESMO valor duas vezes não manda POST: o próximo POST que sai (outro controle) é o 2º, nunca um 2º do mesmo corte", async () => {
