@@ -2,7 +2,7 @@
 
 D. o efeito `ebook` do dreno grava uma pendência por caderno da foto
    (`session_id` = `pix:<id>`), herda D3 e órfão, e é idempotente.
-V. o total (plano + cadernos) é o que `alertar_valor`, GA4/CAPI e o poll usam; o
+V. o total (plano + cadernos) é o que `conferir_valor`, GA4/CAPI e o poll usam; o
    crédito de upgrade continua só sobre o plano.
 J. o job entrega o caderno Pix conferindo a cobrança do dono e o Asaas, ANTES de
    qualquer chamada ao Stripe.
@@ -10,7 +10,7 @@ M. a coluna `extras` e o check (DDL idempotente).
 
 Controles negativos (rodados — ver o relato do PR):
   · tirar `ebook` de `EFEITOS_DE_COMPRA`                  → D1 vermelho;
-  · `alertar_valor` comparando com `amount_cents`          → V1 vermelho;
+  · `conferir_valor` com `devido = amount_cents`           → test_a2/b2 (valor_parcial) e D1 vermelhos;
   · `conferir_entrega` sem as checagens de estorno         → J2/J3 vermelhos;
   · `cobranca_do_dono` sem `user_id` no where              → J5 vermelho;
   · `RECEIVED_IN_CASH` fora de `_PAGO` (#820)              → J7 vermelho.
@@ -168,14 +168,14 @@ def test_e1_email_discrimina_plano_cadernos_e_total(monkeypatch):
 
 # ── V. o total ───────────────────────────────────────────────────────────────
 
-def test_v1_alertar_valor_compara_com_o_total(externo):
-    from core.services.pix_drain_effects import alertar_valor
+def test_v1_valor_pago_e_conferido_contra_o_total(externo):
+    from core.services.pix_extras import total_cents
+    from core.services.pix_valor import centavos_do_valor, valor_pago_cobre_devido
 
     cob = {"id": 1, "amount_cents": 49900, "extras": _EXTRAS}
-    alertar_valor(cob, (49900 + 1990 + 2990) / 100)
-    assert externo["alerta"] == []
-    alertar_valor(cob, 499.00)              # só o plano: faltou dinheiro
-    assert len(externo["alerta"]) == 1
+    assert valor_pago_cobre_devido(centavos_do_valor((49900 + 1990 + 2990) / 100), total_cents(cob))
+    # só o plano: faltou o dinheiro dos cadernos, não concede
+    assert not valor_pago_cobre_devido(centavos_do_valor(499.00), total_cents(cob))
 
 
 def test_v2_credito_de_upgrade_e_o_poll(user_id, externo):

@@ -6,8 +6,10 @@ Controles (CLAUDE.md §3; formato de `docs/controles_declarados.md`; rodados num
 - H3: tirar o `MARCADOR: {"convertida": ...}` do update de `foi_em_dinheiro` -> VERMELHO
   `test_h3_a_convertida_tambem_e_exclusiva`. Positivo: o mesmo teste (a 2ª declaração ainda vê a #40).
 - H4/H6: `carteira_launch_id not in {...}` trocado por `False` -> VERMELHO `test_h4_c_fora_da_lista_recalculada_e_recusada`
-  (todos os casos, menos `ja_marcada_por_outra` e `inexistente`, presos pelo CAS e pelo `for update`); tolerância de R$ 0,05 no `round(valor::numeric, 2) = any` e em `_money(c["valor"]) ==` -> VERMELHO
-  o caso `valor_49_99`; `RECON_DATE_WINDOW + 1` na comparação -> VERMELHO o caso `dia_mais_4`.
+  (todos os casos, menos `ja_marcada_por_outra` e `inexistente`, presos pelo CAS e pelo `for update`); tolerância de R$ 0,05
+  no `round(valor::numeric, 2) = any` E no agrupamento por centavos de `candidatos_carteira` -> VERMELHO o caso
+  `valor_50_01` (cada uma sozinha segue verde: o Python e o SQL se cobrem); janela de `candidatos_carteira` com um dia a
+  mais em cada ponta -> VERMELHO os casos `dia_mais_4` e `dia_menos_4`, com um dia a menos -> VERMELHO `test_h4_c_na_borda_e_aceita`.
   Positivo: `test_h4_c_na_borda_e_aceita` (50,00 a 3 dias) e `test_k1_selecionar_a_40`.
 - K1 receita: `{TIPO_CANON_SQL} in ('despesa', 'receita')` trocado por `tipo in (...)` em `candidatos_carteira` -> VERMELHO
   `test_k1_selecionar_uma_receita[entrada]` (a `[receita]` segue verde); `c["tipo"] == d["tipo"]` trocado por
