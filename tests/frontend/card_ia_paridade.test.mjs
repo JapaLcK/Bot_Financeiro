@@ -305,12 +305,32 @@ test("negativo: uma palavra trocada num texto copiado, de qualquer lado, é vist
   assert.deepEqual(semLiteral(WEB_CARDS.replace("`Objetivo · ", "`Meta · ") + LEGADO_WEB(), APP_CARDS()), ["Objetivo · "], "rótulo da meta (o \"Objetivo alcançado\" do legado.ts não o cobre)");
   assert.deepEqual(semLiteral(WEB_CARDS + LEGADO_WEB(), APP_CARDS().replace('titulo="Saídas"', 'titulo="Gastos"')), ['"Saídas"'], "o rótulo trocado só no app");
 });
-// Parcelas: quantas compras aparecem antes do "+N" (cartao.tsx `useMais(d.installments, 5, …)` × complementos.tsx `COMPRAS_VISIVEIS`).
-const tetoCompras = (web, app) => [num(web, /useMais\(d\.installments, (\d+), \["compra"/, "cartao.tsx"), num(app, /const COMPRAS_VISIVEIS = (\d+);/, "complementos.tsx")];
+// Parcelas: quantas compras aparecem antes do "+N" (cartao.tsx `useMais(abertas, 5, …)` × complementos.tsx `COMPRAS_VISIVEIS`).
+const tetoCompras = (web, app) => [num(web, /useMais\(abertas, (\d+), \["compra"/, "cartao.tsx"), num(app, /const COMPRAS_VISIVEIS = (\d+);/, "complementos.tsx")];
 const CARTAO_WEB = () => ler("webapp", "src", "dashboard", "parts", "cardIa", "cartao.tsx"), COMPLEMENTOS_APP = () => ler("app", "src", "features", "painel", "complementos.tsx");
 test("parcelas: quantas compras aparecem antes do \"+N\" é o mesmo nos dois lados (5); negativo: outro teto num lado só é visto", () => {
   assert.deepEqual(tetoCompras(CARTAO_WEB(), COMPLEMENTOS_APP()), [5, 5]);
   const [w, a] = tetoCompras(CARTAO_WEB(), COMPLEMENTOS_APP().replace("COMPRAS_VISIVEIS = 5;", "COMPRAS_VISIVEIS = 6;")); assert.notEqual(w, a);
+});
+// Parcelas: o "n de N pagas" (`progresso`, executado dos dois lados). N é o total do banco e as parcelas antes da 1ª vista contam como pagas (dono, 2026-10-24).
+const progressoDe = (fonte, rotulo) => new Function(`${stripTypeScriptTypes(semImport(corta(fonte, "export function progresso", "\n}\n", rotulo) + "\n}"))}\nreturn progresso;`)();
+const pc = (no, pago) => ({ installment_no: no, is_paid: pago });
+const PROGRESSO = [
+  [{ installments_total: 12, parcelas: [pc(12, true)] }, { pagas: 12, n: 12, quitada: true }],           // só a última vista (o caso do Open Finance)
+  [{ installments_total: 12, parcelas: [pc(5, false), pc(6, false)] }, { pagas: 4, n: 12, quitada: false }], // as 4 antes da 1ª vista contam como pagas
+  [{ installments_total: 3, parcelas: [pc(1, true), pc(2, false), pc(3, false)] }, { pagas: 1, n: 3, quitada: false }],
+  [{ installments_total: 3, parcelas: [] }, { pagas: 0, n: 3, quitada: false }],
+  [{ installments_total: 0, parcelas: [] }, { pagas: 0, n: 0, quitada: true }],                           // nada a mostrar
+  [{ installments_total: 0, parcelas: [pc(0, true), pc(0, false)] }, { pagas: 1, n: 2, quitada: false }],   // sem total: o que o PigBank viu
+  [{ installments_total: 0, parcelas: [pc(5, false)] }, { pagas: 4, n: 5, quitada: false }],                // sem total e parcela 5 em aberto: não some (Tester)
+  [{ installments_total: 12, parcelas: [pc(13, false)] }, { pagas: 12, n: 13, quitada: false }],            // parcela além do total: N sobe, não some (Tester)
+  [{ installments_total: 2, parcelas: [pc(1, true), pc(1, true), pc(2, false)] }, { pagas: 2, n: 2, quitada: false }], // repetida: a em aberto segura
+];
+test("parcelas: `progresso` dá o mesmo \"n de N pagas\" nos dois lados; negativo: a regra trocada num lado só é vista", () => {
+  const web = progressoDe(CARTAO_WEB(), "cartao.tsx"), app = progressoDe(COMPLEMENTOS_APP(), "complementos.tsx");
+  for (const [g, esperado] of PROGRESSO) { assert.deepEqual(web(g), esperado, JSON.stringify(g)); assert.deepEqual(app(g), esperado, JSON.stringify(g)); }
+  const torto = progressoDe(COMPLEMENTOS_APP().replace("installment_no)) - 1)", "installment_no)) - 0)"), "complementos.tsx");
+  assert.ok(PROGRESSO.some(([g]) => JSON.stringify(torto(g)) !== JSON.stringify(web(g))));
 });
 test("a caixinha vazia não volta a ser \"Nenhuma meta ainda.\" no card do app (o texto da aba Metas mora em metasChat.tsx, fora daqui)", () => {
   assert.ok(!APP_CARDS().includes("Nenhuma meta ainda.") && !WEB_CARDS.includes("Nenhuma meta ainda."));

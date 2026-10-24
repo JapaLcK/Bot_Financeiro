@@ -61,8 +61,8 @@ test("fatura: nome legível e final, a fatura em destaque, vencimento e fechamen
 // parcelas -------------------------------------------------------------------------------------------------------------------------------------------
 test("parcelas: uma linha por compra (nome, cartão, \"n de N pagas\", trilho), sem barras por mês; tocar abre as parcelas ali, uma compra por vez; compra sem cartão e data torta", async () => {
   const a = await um("parcelas", { parcelas: FX.parcelas });
-  assert.deepEqual(await linhasDe(a.page, ".card-ia .ci-compra"), ["Sofá Nubank 0 de 3 pagas", "Notebook Nubank 1 de 3 pagas", "Tênis Inter 2 de 2 pagas"]);
-  assert.deepEqual((await escala(a.page, ".card-ia .ci-trilho > i")).map((t) => t.slice(0, 12)), ["scaleX(0)", "scaleX(0.333", "scaleX(1)"]);
+  assert.deepEqual(await linhasDe(a.page, ".card-ia .ci-compra"), ["Sofá Nubank 0 de 3 pagas", "Notebook Nubank 1 de 3 pagas"], "o Tênis (2 de 2) está quitado e sai do card");
+  assert.deepEqual((await escala(a.page, ".card-ia .ci-trilho > i")).map((t) => t.slice(0, 12)), ["scaleX(0)", "scaleX(0.333"]);
   assert.equal(await a.page.locator(".card-ia .months").count(), 0, "sem MonthBars");
   await a.page.locator(".card-ia .ci-compra").nth(1).click();
   assert.deepEqual(await linhasDe(a.page, ".card-ia .ci-aberta .ci-sub"), ["Parcela 1 de 3 17/09/2026 · paga R$ 833,33", "Parcela 2 de 3 17/10/2026 · próxima R$ 833,33", "Parcela 3 de 3 17/11/2026 · pendente R$ 833,34"]);
@@ -72,13 +72,27 @@ test("parcelas: uma linha por compra (nome, cartão, \"n de N pagas\", trilho), 
   await a.page.context().close();
   const torta = com(FX.parcelas, (c) => { c.installments = [{ ...c.installments[0], card_name: null, parcelas: [{ ...c.installments[0].parcelas[0], due_date: "lixo" }] }]; });
   const b = await um("parcelas", { parcelas: torta });
-  assert.deepEqual(await linhasDe(b.page, ".card-ia .ci-compra"), ["Sofá 0 de 1 pagas"], "sem cartão, sem a linha do cartão");
+  assert.deepEqual(await linhasDe(b.page, ".card-ia .ci-compra"), ["Sofá 0 de 3 pagas"], "sem cartão, sem a linha do cartão; N é o total do banco");
   await b.page.locator(".card-ia .ci-compra").click();
   assert.deepEqual(await linhasDe(b.page, ".card-ia .ci-aberta .ci-sub"), ["Parcela 1 de 3 Data não informada · próxima R$ 100,50"]);
   await b.page.context().close();
   const vazio = await um("parcelas", { parcelas: { ok: true, installments: [] } });
   assert.equal(await vazio.page.locator(".card-ia .ci-vazio").innerText(), "Não há parcelamentos registrados.");
   await vazio.page.context().close();
+});
+test("parcelas: N é o total do banco e as parcelas antes da 1ª vista contam como pagas (Open Finance); só quitadas = o vazio", async () => {
+  const pc = (no, pago) => ({ ...FX.parcelas.installments[0].parcelas[0], tx_id: 100 + no, installment_no: no, is_paid: pago, is_next: !pago });
+  const of = com(FX.parcelas, (c) => { c.installments = [
+    { ...c.installments[0], group_id: "q", name: "Quitada", installments_total: 12, parcelas: [pc(12, true)] },
+    { ...c.installments[0], group_id: "m", name: "No meio", installments_total: 12, parcelas: [pc(5, false), pc(6, false)] },
+  ]; });
+  const a = await um("parcelas", { parcelas: of });
+  assert.deepEqual(await linhasDe(a.page, ".card-ia .ci-compra"), ["No meio Nubank 4 de 12 pagas"]);
+  await a.page.context().close();
+  const so = com(FX.parcelas, (c) => { c.installments = [{ ...c.installments[0], installments_total: 12, parcelas: [pc(12, true)] }]; });
+  const b = await um("parcelas", { parcelas: so });
+  assert.equal(await b.page.locator(".card-ia .ci-vazio").innerText(), "Não há parcelamentos registrados.");
+  await b.page.context().close();
 });
 test("parcelas: 7 compras mostram 5 e \"+2\" abre as outras (\"Mostrar menos\" volta)", async () => {
   const sete = com(FX.parcelas, (c) => { c.installments = Array.from({ length: 7 }, (_, i) => ({ ...c.installments[0], group_id: `g${i}`, name: `Compra ${i + 1}` })); });
