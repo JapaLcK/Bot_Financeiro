@@ -2775,7 +2775,7 @@ def detect_bill_increase(expenses, threshold_pct=Decimal("0.15")) -> list:
             out.append({
                 "merchant": latest["merchant"],
                 "old": avg_prior,
-                "new": lv,
+                "new": lv, "date": latest["date"], "meses_anteriores": len(prior),
                 "pct": (lv - avg_prior) / avg_prior * 100,
             })
     return out
