@@ -14,7 +14,7 @@ afterEach(() => { jest.restoreAllMocks(); });
 
 const PROIBIDOS = ["Tentar novamente", "Carregando dados", "Conferindo disponibilidade do simulador…", "Simulador indisponível no seu plano.", "Dado indisponível neste card."];
 // Um texto que SÓ existe se o conteúdo do bloco foi desenhado (positivo: o card não está vazio).
-const CONTEUDO: Record<string, string> = { contas: "Nubank", hero: "30 dias · 05/11/2026", compromissos: "Fatura Nubank", resumo: "gasto até hoje", categorias: "Alimentação", calendario: "06/10", simulador: "Transporte", patrimonio: "Histórico desde 01/08/2026", wealth: "Investimentos do banco", rendimento: "Renda fixa", assinaturas: "Netflix", metas: "Viagem pro Japão", fatura: "Limite", parcelas: "Parcela 3 de 6", renda: "Saídas", piggy: "Alimentação merece atenção", caixinhas: "Viagem", periodo: "Saldo" };
+const CONTEUDO: Record<string, string> = { contas: "Nubank", hero: "30 dias · 05/11/2026", compromissos: "Fatura Nubank", resumo: "gasto até hoje", categorias: "Alimentação", calendario: "06/10", simulador: "Transporte", patrimonio: "Histórico desde 01/08/2026", wealth: "Investimentos do banco", rendimento: "Renda fixa", assinaturas: "Netflix", metas: "Viagem pro Japão", fatura: "Limite", parcelas: "Nubank · 2 de 3 pagas", renda: "Saídas", piggy: "Alimentação merece atenção", caixinhas: "Viagem", periodo: "Saldo" };
 it("o mapa de conteúdo cobre os 18 cards", () => { expect(CARDS).toHaveLength(18); expect(Object.keys(CONTEUDO).sort()).toEqual([...CARDS].sort()); });
 it.each(CARDS)("%s: o card do chat desenha o bloco, sem ler o provider", async (card) => {
   comBlocos(bloco(card)); await perguntar();

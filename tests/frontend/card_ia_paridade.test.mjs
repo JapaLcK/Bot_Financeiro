@@ -289,6 +289,8 @@ const LITERAIS = [
   "neste mês", "desde a aplicação", "Não informado", "Parcela ", '"paga"', '"próxima"', '"pendente"',
   '"Limite"', '"Saídas"', // os rótulos das linhas da fatura e da renda (`Sub nome=` no painel, `Linha titulo=` no app)
   ["Objetivo · ", 'titulo="Objetivo"'], // o painel junta o rótulo e o prazo numa linha ("Objetivo · 22/12/2026"); o app põe o prazo no detalhe da mesma linha: a palavra é a mesma
+  "Nenhuma caixinha ainda.", // o vazio do card `caixinhas` (dono, 2026-10-23)
+  ["{pagas} de {n} pagas", "${pagas} de ${n} pagas"], // parcelas: uma linha por compra nos dois lados (dono, 2026-10-23)
 ];
 // Um item é o texto que os dois lados têm, ou [o do painel, o do app] quando o desenho muda mas a palavra não.
 const semLiteral = (web, app) => LITERAIS.filter((l) => { const [w, a] = Array.isArray(l) ? l : [l, l]; return !web.includes(w) || !app.includes(a); }).map((l) => (Array.isArray(l) ? l[0] : l));
@@ -303,7 +305,13 @@ test("negativo: uma palavra trocada num texto copiado, de qualquer lado, é vist
   assert.deepEqual(semLiteral(WEB_CARDS.replace("`Objetivo · ", "`Meta · ") + LEGADO_WEB(), APP_CARDS()), ["Objetivo · "], "rótulo da meta (o \"Objetivo alcançado\" do legado.ts não o cobre)");
   assert.deepEqual(semLiteral(WEB_CARDS + LEGADO_WEB(), APP_CARDS().replace('titulo="Saídas"', 'titulo="Gastos"')), ['"Saídas"'], "o rótulo trocado só no app");
 });
-test("divergência declarada (dono, 2026-10-23): a caixinha vazia é \"Nenhuma caixinha ainda.\" no painel e \"Nenhuma meta ainda.\" no app, até o PR do app alinhar; o teste avisa se um lado mudar", () => {
-  assert.ok(WEB_CARDS.includes("Nenhuma caixinha ainda.") && !WEB_CARDS.includes("Nenhuma meta ainda."));
-  assert.ok(APP_CARDS().includes("Nenhuma meta ainda.") && !APP_CARDS().includes("Nenhuma caixinha ainda."));
+// Parcelas: quantas compras aparecem antes do "+N" (cartao.tsx `useMais(d.installments, 5, …)` × complementos.tsx `COMPRAS_VISIVEIS`).
+const tetoCompras = (web, app) => [num(web, /useMais\(d\.installments, (\d+), \["compra"/, "cartao.tsx"), num(app, /const COMPRAS_VISIVEIS = (\d+);/, "complementos.tsx")];
+const CARTAO_WEB = () => ler("webapp", "src", "dashboard", "parts", "cardIa", "cartao.tsx"), COMPLEMENTOS_APP = () => ler("app", "src", "features", "painel", "complementos.tsx");
+test("parcelas: quantas compras aparecem antes do \"+N\" é o mesmo nos dois lados (5); negativo: outro teto num lado só é visto", () => {
+  assert.deepEqual(tetoCompras(CARTAO_WEB(), COMPLEMENTOS_APP()), [5, 5]);
+  const [w, a] = tetoCompras(CARTAO_WEB(), COMPLEMENTOS_APP().replace("COMPRAS_VISIVEIS = 5;", "COMPRAS_VISIVEIS = 6;")); assert.notEqual(w, a);
+});
+test("a caixinha vazia não volta a ser \"Nenhuma meta ainda.\" no card do app (o texto da aba Metas mora em metasChat.tsx, fora daqui)", () => {
+  assert.ok(!APP_CARDS().includes("Nenhuma meta ainda.") && !WEB_CARDS.includes("Nenhuma meta ainda."));
 });
