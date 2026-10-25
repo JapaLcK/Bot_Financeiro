@@ -153,10 +153,17 @@ def test_sem_parcela_em_texto_longo_e_rapido():
 
 def test_fatura_do_whatsapp_mostra_cada_parcela_da_compra_na_mesma_fatura(user_id):
     hoje = today_tz()
-    _cartao(user_id, [_p(f"w{n}", n, 4, hoje) for n in (2, 3, 4)])  # antecipação: 3 parcelas na mesma fatura
+    # antecipação: 3 parcelas na mesma fatura, valores diferentes (a estimativa daria outro número)
+    _cartao(user_id, [_p(f"w{n}", n, 4, hoje, valor=v) for n, v in ((2, 10), (3, 20), (4, 30))])
     assert len(_grupos(user_id)) == 1
     texto = credit.handle(user_id, "fatura")
     assert all(f"{n}/4" in texto for n in (2, 3, 4)), texto
     # o "faltam" de cada bloco conta só as parcelas DEPOIS dele (o resumo é do grupo inteiro)
-    assert "faltam **2** parcela(s) = R$ 100,00" in texto and "faltam **1** parcela(s) = R$ 50,00" in texto, texto
-    assert "R$ 150,00" not in texto.split("Parcelamentos nesta fatura")[1].split("Outras compras")[0], texto
+    assert "faltam **2** parcela(s) = R$ 50,00" in texto and "faltam **1** parcela(s) = R$ 30,00" in texto, texto
+    assert "(estimado)" not in texto and "e mais" not in texto, texto
+
+
+def test_fatura_do_whatsapp_mostra_no_maximo_10_parcelas_e_conta_o_resto(user_id):
+    _cartao(user_id, [_p(f"z{n}", n, 12, today_tz()) for n in range(2, 13)])  # 11 parcelas na mesma fatura
+    texto = credit.handle(user_id, "fatura")
+    assert texto.count("Parcela **") == 10 and "e mais 1 lançamento(s)" in texto, texto

@@ -2721,7 +2721,8 @@ def handle(user_id: int, text: str) -> str | None:
                 lines.append("📦 **Parcelamentos nesta fatura:**")
                 for it in installment_items:
                     gid = str(it["group_id"])
-                    if (gid, it.get("installment_no")) in seen_groups:
+                    # teto de 10 blocos: com a antecipação a mensagem passava de 4096 (o resto vai em "… e mais N")
+                    if (gid, it.get("installment_no")) in seen_groups or len(seen_groups) >= 10:
                         continue
                     seen_groups.add((gid, it.get("installment_no")))
 
