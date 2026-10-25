@@ -2714,16 +2714,16 @@ def handle(user_id: int, text: str) -> str | None:
             refund_items = [it for it in items if it.get("is_refund")]
 
             # ── Parcelamentos ─────────────────────────────────────────────────
-            # Exibe um bloco por group_id (evita repetir se várias parcelas do
-            # mesmo grupo caírem na mesma fatura, o que é raro mas possível)
-            seen_groups: set[str] = set()
+            # Um bloco por PARCELA do grupo: no Open Finance várias parcelas da mesma compra
+            # caem na mesma fatura (antecipação) e cada uma é uma cobrança; só a repetida sai.
+            seen_groups: set[tuple[str, object]] = set()
             if installment_items:
                 lines.append("📦 **Parcelamentos nesta fatura:**")
                 for it in installment_items:
                     gid = str(it["group_id"])
-                    if gid in seen_groups:
+                    if (gid, it.get("installment_no")) in seen_groups:
                         continue
-                    seen_groups.add(gid)
+                    seen_groups.add((gid, it.get("installment_no")))
 
                     inst_no = it.get("installment_no") or "?"
                     inst_total = it.get("installments_total") or "?"
@@ -2745,10 +2745,17 @@ def handle(user_id: int, text: str) -> str | None:
                     # ── Valor restante ────────────────────────────────────────
                     # Usa o DB quando ele tem dados para TODAS as parcelas futuras
                     # (histórico completo). Caso contrário, estima pelo valor desta.
-                    parcelas_futuras_db = max(0, parcelas_restantes_db - 1)
+                    # O resumo é do grupo inteiro: tira desta e das anteriores DESTA fatura
+                    # (no Open Finance várias parcelas da compra caem juntas).
+                    ate_esta = [
+                        x for x in installment_items
+                        if str(x["group_id"]) == gid and isinstance(x.get("installment_no"), int)
+                        and x["installment_no"] <= inst_no_int
+                    ] or [it]
+                    parcelas_futuras_db = max(0, parcelas_restantes_db - len(ate_esta))
                     if parcelas_futuras_db >= proximas_pelo_memo and parcelas_restantes_db > 0:
                         # DB completo — usa os valores reais
-                        valor_restante_final = max(0.0, valor_restante_db - valor_parcela)
+                        valor_restante_final = max(0.0, valor_restante_db - sum(float(x["valor"]) for x in ate_esta))
                         estimado = False
                     else:
                         # Histórico parcial — estima pelo valor desta parcela

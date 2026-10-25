@@ -312,7 +312,7 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
     if uma_por_compra:
         onde = f" where {sem_cat}" if sem_categoria else ""  # o filtro antes da janela: a menor é da que sobrou
         uniao = f"(select x.*, min(x.parcela_n) over (partition by x.group_id, x.dia) as menor from {uniao} x{onde})"
-        filtros.append("(x.group_id is null or x.parcela_n is not distinct from x.menor)")
+        filtros.append("(x.group_id is null or x.origem = 'cartao' or x.parcela_n is not distinct from x.menor)")
     # ponytail: a busca filtra a união já montada, então o estado de toda linha da janela é
     # calculado antes (250 ms com 6000 lançamentos, plano §8); empurrar o filtro de texto para
     # dentro das pernas se pesar.
