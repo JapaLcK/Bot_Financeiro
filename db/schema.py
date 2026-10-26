@@ -1056,6 +1056,10 @@ def init_db():
         """
         alter table bank_movement_declarations add column if not exists manual_only boolean not null default false
         """,
+        # A2c (ADR 0006, I9): lembrete de WhatsApp enviado uma vez por declaração. Nullable, sem default, sem backfill.
+        """
+        alter table bank_movement_declarations add column if not exists lembrete_em timestamptz
+        """,
         # Backfill (DP-8): fluxo já casado à mão antes da coluna. Mesmo predicado de `e_fluxo`/`DECLARADA_SQL`;
         # idempotente (o código novo grava a flag junto com o `manual`, então depois da 1ª vez não acha linha).
         """

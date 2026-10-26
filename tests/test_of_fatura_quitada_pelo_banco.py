@@ -23,7 +23,8 @@ CONTROLES NEGATIVOS (rodados na entrega, ver o relato):
   • where do aparo ampliado para `or total > 0` (toca fatura aberta com pago menor) ->
     aparo_nao_toca_fatura_aberta_com_pago_menor vermelho;
   • fatura com total <= TOL fora de `cobertura` (em vez de parte 0) -> total_zero_entra_com_parte_zero e
-    banco_estorna_tudo_zera_o_pago vermelhos;
+    banco_zera_compra_e_fatura_paga_reabre_com_total_zero vermelhos (banco_estorna_tudo_zera_o_pago fica verde: o aparo
+    também o cura);
   • checagem de sinais misturados tirada de `_soma` -> pagamentos_de_sinais_misturados vermelho;
   • o teto do total tem DUAS guardas (o `least(b.total, ...)` do UPDATE e o aparo logo depois): tirar só uma deixa tudo
     verde; tirando as duas -> estorno_sem_bill_id_o_teto vermelho;
@@ -363,7 +364,9 @@ def test_banco_estorna_tudo_zera_o_pago(uid_pro, rodar):
     c = ("c1", 100, "bill-1", 35)
     rodar(uid_pro, [P0, c], [F0, fat("bill-1", 100, 100)])
     assert pig(uid_pro)[1] == (100, 100, "paid")
-    rodar(uid_pro, [P0, c, ("e1", -100, "bill-1", 34)], [F0, fat("bill-1", 0)])
+    # estorno no MESMO dia da compra (35): o CARTAO fecha no dia 20 e, a 34 dias, o dia(35) caindo no 20 separava as duas
+    # em 2 faturas (100 e -100) em vez de 1 de total 0 — vermelho em 2026-10-25, 11-24, 12-25, 2027-01-24, 02-24.
+    rodar(uid_pro, [P0, c, ("e1", -100, "bill-1", 35)], [F0, fat("bill-1", 0)])
     assert pig(uid_pro)[1] == (0, 0, "open")
 
 
@@ -373,7 +376,7 @@ def test_banco_zera_compra_e_fatura_paga_reabre_com_total_zero(uid_pro, rodar, m
     paid_at nulo, nao ficar zumbi. O aparo sai de cena de proposito (e quem tambem cura o caso): isola o CASE do `_GRAVA_SQL`.
     Positivo: a 100/100 vizinha continua paga."""
     c = ("c1", 100, "bill-1", 35)
-    rodar(uid_pro, [P0, c, ("e1", -100, "bill-1", 34)], [F0, fat("bill-1", 0)])
+    rodar(uid_pro, [P0, c, ("e1", -100, "bill-1", 35)], [F0, fat("bill-1", 0)])  # 35: mesmo dia da compra, ver teste acima
     assert pig(uid_pro) == [(100, 100, "paid"), (0, 0, "open")]
     q("update credit_bills set status='paid', paid_at='2026-01-01' where user_id=%s and total=0", (uid_pro,))
     monkeypatch.setattr(of_card_bills, "APARAR_PAGO_SQL", "select %s, %s")
