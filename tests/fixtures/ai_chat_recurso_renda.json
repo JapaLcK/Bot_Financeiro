@@ -1,0 +1,42 @@
+{
+  "ok": true,
+  "evolution": [
+    {
+      "month": "2026-06",
+      "income": 0.0,
+      "expense": 0.0,
+      "net": 0.0
+    },
+    {
+      "month": "2026-07",
+      "income": 3000.5,
+      "expense": 2100.25,
+      "net": 900.25
+    },
+    {
+      "month": "2026-08",
+      "income": 3000.5,
+      "expense": 2400.75,
+      "net": 599.75
+    },
+    {
+      "month": "2026-09",
+      "income": 3200.0,
+      "expense": 2900.1,
+      "net": 299.9
+    },
+    {
+      "month": "2026-10",
+      "income": 3100.25,
+      "expense": 1800.3,
+      "net": 1299.95
+    },
+    {
+      "month": "2026-11",
+      "income": 0.0,
+      "expense": 0.0,
+      "net": 0.0
+    }
+  ],
+  "months": 6
+}

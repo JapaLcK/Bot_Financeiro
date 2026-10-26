@@ -73,6 +73,7 @@ BOAS_VINDAS = (
 # ULTIMA e FIM vão coladas à resposta do modelo (que já abre com 🐷): sem emoji
 # aqui; quem manda o FIM sozinho põe o 🐷 na frente.
 ULTIMA = "A próxima é a *última pergunta* do teste 😉"
+CONVITE_CONTA = "Quer com os seus números? Cria sua conta: {link}"  # 1ª à 7ª resposta
 FIM = (
     "Acabaram as perguntas do teste! Na conta de verdade os números são os "
     "seus. Pra criar a sua e continuar: {link}\n\n" + _JA_TEM_CONTA
@@ -198,11 +199,13 @@ def _responder(plano: Plano, message: InboundMessage, msg_id: str) -> None:
         funil.devolver_mensagem(plano.code)
         _texto(to, ERROR_MSG)
         return
-    modelo = resposta  # o histórico guarda a do modelo, sem o ULTIMA/FIM
+    modelo = resposta  # o histórico guarda a do modelo, sem convite/ULTIMA/FIM
     if n >= LIMITE_MSGS:
         resposta += "\n\n" + FIM.format(link=_link(plano.code))
-    elif n == LIMITE_MSGS - 1:
-        resposta += "\n\n" + ULTIMA
+    else:
+        resposta += "\n\n" + CONVITE_CONTA.format(link=_link(plano.code))
+        if n == LIMITE_MSGS - 1:
+            resposta += "\n\n" + ULTIMA
     try:
         _texto(to, resposta)
     except Exception:

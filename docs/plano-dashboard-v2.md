@@ -839,8 +839,9 @@ variável não entraram (ver o PR2 da Etapa 3).
 - Chat do Piggy (Etapa 7, lado do backend e do app nativo): `POST /ai/chat/stream` com
   parar e 👍👎 (#943), `show_card` com a mesma fonte do app (#946, #947), chips de
   continuação (#949), períodos de até 12 meses e card `periodo` (#957), e o consumo no app
-  (#927, #953, #956). O `/painel` web ainda não chama `/ai/chat/stream`: a Etapa 7 do web
-  continua inteira.
+  (#927, #953, #956). O `/painel` web chama `/ai/chat/stream` (freio `PAINEL_CHAT_IA_USER_IDS`) e desenha do bloco todos os
+  ids de `cards.IDS` (os da tool, `DA_TOOL`, não): PRs #1226 (stream), #1247 (feedback), #1273 e #1283 (cards), #1285 (simulador) e o dos 6 cards legados (caixinhas, fatura, parcelas,
+  renda, piggy e rendimento). Falta o checklist do freio e a escrita pelo chat web.
 
 ### Etapa 3 — PR2: API v2 da previsão (implementação local, 06/10/2026)
 

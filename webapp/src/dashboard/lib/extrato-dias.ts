@@ -14,8 +14,12 @@ export function rotuloDia(dia: string, hoje: string): string {
   const dm = `${dia.slice(8)}/${dia.slice(5, 7)}`;
   if (dia === hoje) return `Hoje · ${dm}`;
   if (dia === ontem.toISOString().slice(0, 10)) return `Ontem · ${dm}`;
+  return diaCurto(dia, hoje.slice(0, 4));
+}
+/** "Sex · 17/10"; de outro ano que `ano`: "Sex · 17/10/25". */
+export function diaCurto(dia: string, ano: string): string {
   const sem = weekday(isoDay(dia));
-  return `${sem[0].toUpperCase()}${sem.slice(1)} · ${dm}${dia.slice(0, 4) === hoje.slice(0, 4) ? "" : `/${dia.slice(2, 4)}`}`;
+  return `${sem[0].toUpperCase()}${sem.slice(1)} · ${dia.slice(8)}/${dia.slice(5, 7)}${dia.slice(0, 4) === ano ? "" : `/${dia.slice(2, 4)}`}`;
 }
 
 // Soma exata (BigInt) do que conta no total: fora interno, guardado e outra moeda. Nada conta → null (nunca "R$ 0,00").

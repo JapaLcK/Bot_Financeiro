@@ -5459,6 +5459,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
     # A elegibilidade só é consultada ao criar uma sessão nova. Reabrir a mesma
     # URL preserva exatamente as condições que o usuário já viu no checkout.
     from core.services.plan_service import (
+        TRIAL_DAYS_DEFAULT,
         ai_monthly_limit_for_tier,
         plans_v2_enabled,
         trial_days_total,
@@ -5474,7 +5475,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             )
         trial_days = trial_days_total() if eligible else 0
     else:
-        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "15"))
+        trial_days = int(os.getenv("PRO_TRIAL_DAYS", str(TRIAL_DAYS_DEFAULT)))
 
     # Cota mensal da IA do plano comprado. Plus e Pro têm `ai_monthly_messages:
     # None` em plan_limits.py, o que NÃO é ilimitado: cai no teto global

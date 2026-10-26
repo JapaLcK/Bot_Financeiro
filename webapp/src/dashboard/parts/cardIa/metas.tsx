@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Metas } from "../../lib/api-v2.gen";
+import { obj } from "../../lib/ia-cards";
 import { MESES_PADRAO } from "../../lib/metas-textos";
 import { ask, usePerguntando } from "../../lib/conversation";
 import { useIa } from "../../lib/conversaIa";
@@ -16,7 +17,6 @@ export const PEDIDO_RESERVA = "Quero montar minha reserva de emergência";
 export const PEDIDO_META = "Quero criar uma meta";
 const VISIVEIS = 5; // pílulas à mostra, a linha "Montar reserva" incluída
 
-const obj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
 export const contratoMetas = (r: unknown) => {
   const d = (r as { metas?: unknown } | null)?.metas;
   return obj(d) && Array.isArray(d.metas) && obj(d.custo_mensal);

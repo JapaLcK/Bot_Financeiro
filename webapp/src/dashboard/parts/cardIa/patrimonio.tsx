@@ -1,12 +1,12 @@
 import type { Patrimonio } from "../../lib/api-v2.gen";
 import { moneyText } from "../../lib/format.js";
 import { textos } from "../../lib/bancos";
+import { obj } from "../../lib/ia-cards";
 import { BarraComposicao, Grafico, PARTES, motivosDaTela, pctDasPartes, pontosDe, variacaoPatrimonio } from "../../widgets/Patrimonio";
 import { Selos } from "../Selos";
 
 // Os cards `patrimonio` ("Patrimônio") e `wealth` ("Onde está o dinheiro") do chat: o `recursos` do bloco é `{ patrimonio: <GET /api/v2/patrimonio> }`.
 // Desenhados da foto: o total, a variação e a linha são os do servidor; a tabela por dia do gráfico segue só para leitor de tela.
-const obj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
 export const contratoPatrimonio = (r: unknown) => {
   const d = (r as { patrimonio?: Patrimonio } | null)?.patrimonio;
   return obj(d) && moneyText(d.total) !== null && obj(d.partes) && Array.isArray(d.historico) && Array.isArray(d.trechos) && textos(d.motivos);

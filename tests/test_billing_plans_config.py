@@ -26,6 +26,12 @@ def test_plus_available_existe_na_resposta():
     assert isinstance(body["plus_available"], bool)
 
 
+def test_trial_days_sem_env_e_o_padrao(monkeypatch):
+    from core.services.plan_service import TRIAL_DAYS_DEFAULT
+    monkeypatch.delenv("PLANS_TRIAL_DAYS", raising=False)
+    assert client.get("/billing/plans-config").json()["trial_days"] == TRIAL_DAYS_DEFAULT
+
+
 @pytest.mark.parametrize(
     "mensal, legado, esperado",
     [

@@ -1,13 +1,13 @@
 import { useId, useState, type ReactNode } from "react";
 import type { Previsao } from "../../lib/api-v2.gen";
 import { isoDay, longDate, moneyText } from "../../lib/format.js";
+import { obj } from "../../lib/ia-cards";
 import { Grupo, ddmm, saida, valorOc } from "../../widgets/Compromissos";
 import { ESTADO, GASTOS_DIA_A_DIA, Grafico } from "../../widgets/Previsao";
 import { useMais } from "./mais";
 
 // Os cards `hero` ("Saldo previsto") e `compromissos` do chat: o `recursos` do bloco é `{ previsao: <GET /api/v2/previsao> }`. Desenhados da foto,
 // sem consulta. O saldo, o gráfico e os marcos vêm do que o servidor mandou; o menor saldo e o gasto do dia a dia abrem aqui mesmo (nada vai a outra tela).
-const obj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
 const prev = (r: unknown) => (r as { previsao?: unknown } | null)?.previsao;
 export const contratoHero = (r: unknown) => {
   const p = prev(r);
@@ -32,7 +32,7 @@ function Dado({ titulo, valor, aviso, filhos }: { titulo: string; valor: string;
     </li>
   );
 }
-const Sub = ({ nome, valor }: { nome: string; valor: string }) => <li className="ci-sub"><span>{nome}</span><span className="num">{valor}</span></li>;
+export const Sub = ({ nome, valor }: { nome: string; valor: string }) => <li className="ci-sub"><span>{nome}</span><span className="num">{valor}</span></li>;
 
 export function CardHero({ d }: { d: Previsao }) {
   const marco = d.marcos.find((m) => m.dias === d.dias) ?? d.marcos[d.marcos.length - 1];

@@ -1,69 +1,18 @@
 // A ação de LEITURA dos cards da IA no chat do /painel: tocar numa conta do card `contas` abre os lançamentos dela DENTRO do card
 // (webapp: parts/cardIa/LancamentosDoCard.tsx, conta/api.ts `antesDaConta`/`daConta`). Isolamento entre usuários: a conta da sessão é conferida ANTES de
 // cada GET (nenhum sai em nome de outra conta) e DEPOIS (a resposta de uma troca durante a busca não é desenhada). L1 a L7 do plano, mais L8 (foco depois
-// da troca) e L9 (id de conta que não é inteiro positivo). L10 a L14: o aviso do SSE não relê a lista, o prazo cobre as leituras do perfil, o foco, o item malformado e os selos. A rota `/api/v2/lancamentos` é DO TESTE: guarda a URL, segura a resposta quando ele quer e
-// marca as descrições (`DE-A-…`, `DE-B-…`); um MutationObserver grava TODO texto que entra no DOM, para pegar o `DE-B` mesmo que viva um quadro só.
+// da troca) e L9 (id de conta que não é inteiro positivo). L10 a L14: o aviso do SSE não relê a lista, o prazo cobre as leituras do perfil, o foco, o item malformado e os selos. A rota `/api/v2/lancamentos` é DO TESTE (_chat_ia_lanc.mjs). Categoria e dia: dashboard_v2_chat_ia_cards_lancamentos_mes.test.mjs.
 // Cada grupo foi provado vermelho com uma mutação do código que ele cobre (a tabela está no relato do PR, não aqui).
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { RESPOSTAS, abrir, blocoDe, encerrar, enviar, evento, fim, iniciar, trocarConta, ultima } from "./_chat_ia.mjs";
+import { RESPOSTAS, SEM_CARD, encerrar, iniciar, trocarConta } from "./_chat_ia.mjs";
+import { FALHA, SESSAO, ate, prepararCard } from "./_chat_ia_lanc.mjs";
 
 before(iniciar);
 after(encerrar);
 const F = RESPOSTAS;
-const FALHA = "Não deu para carregar os lançamentos.";
-const SESSAO = "Sua sessão terminou. Recarregue a página.";
-const pronto = (page) => page.waitForFunction(() => document.querySelector(".askbar-send")?.getAttribute("aria-label") === "Enviar", null, { timeout: 5000 });
-const ate = async (cond, ms = 6000) => { for (let i = 0; i < ms / 25 && !cond(); i++) await new Promise((r) => setTimeout(r, 25)); assert.ok(cond(), "a condição não chegou a tempo"); };
-const marcada = (u, marca, repete = false) => {
-  const base = u.searchParams.has("cursor") ? F.lancamentos.segunda : F.lancamentos.estados;
-  const itens = repete && u.searchParams.has("cursor") ? [F.lancamentos.estados.itens[0], ...base.itens] : base.itens; // a lista é lida ao vivo: a página 2 repete a última linha da 1
-  return { ...base, mes: u.searchParams.get("mes"), itens: itens.map((i) => ({ ...i, descricao: `${marca}-${i.id}` })) };
-};
-const ERRO500 = { status: 500, json: { error: { code: "internal_error", message: "x" } } };
-
-/** O /painel com o card `contas` na conversa e a rota de lançamentos do teste. `t.modo`: ok | 500 | 403 | 401 | preso (espera `t.soltar(marca)`) | pendurado (nunca responde).
- * `t.perfil = "pendurado"`: o /auth/dashboard-profile nunca responde. `t.itens`: os `itens` malformados que a rota devolve. `opts.sse`: o stream de avisos fica preso até `t.soltaSse()` (e `t.me` conta as leituras do /me). */
-async function preparar(opts = {}, contas = F.contas.todos_os_estados) {
-  const { sse, ...resto } = opts;
-  const c = await abrir(resto);
-  const t = { gets: [], ordem: [], modo: "ok", repete: false, soltar: null, marca: "DE-A", falhas: [], emPagina2: false, perfil: "ok", itens: null, soltaSse: null, me: 0 };
-  if (sse) {
-    await c.ctx.route("**/api/v2/eventos", async (r) => { await new Promise((ok) => { t.soltaSse = ok; }); return r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: 'retry: 600000\ndata: {"recurso":"open_finance"}\n\n' }); });
-    await c.page.reload();
-    await c.page.locator("#askbar-input").waitFor();
-  }
-  c.page.on("request", (r) => { if (new URL(r.url()).pathname === "/api/v2/me") t.me++; });
-  await c.ctx.route("**/auth/dashboard-profile", (r) => { t.ordem.push("perfil"); if (t.perfil === "pendurado") return new Promise(() => {}); return r.fulfill({ json: { user_id: c.conta.uid, display_name: null, email: null, whatsapp_linked: true } }); });
-  await c.ctx.route("**/api/v2/lancamentos*", async (r) => {
-    const u = new URL(r.request().url());
-    t.gets.push(u); t.ordem.push("GET");
-    const pagina2 = u.searchParams.has("cursor");
-    if (t.modo === "pendurado") return new Promise(() => {});
-    if (t.itens) return r.fulfill({ json: { ...F.lancamentos.estados, itens: t.itens } });
-    if (t.modo === "preso" && (!t.emPagina2 || pagina2)) { const marca = await new Promise((ok) => { t.soltar = ok; }); return r.fulfill({ json: marcada(u, marca) }); }
-    if (t.modo === "500") return r.fulfill(ERRO500);
-    if (t.modo === "403") return r.fulfill({ status: 403, json: { error: { code: "forbidden", message: "x" } } });
-    if (t.modo === "401") return r.fulfill({ status: 401, json: { error: { code: "unauthorized", message: "x" } } });
-    return r.fulfill({ json: marcada(u, t.marca, t.repete) });
-  });
-  c.page.on("requestfailed", (r) => { if (r.url().includes("/api/v2/lancamentos")) t.falhas.push(r.failure()?.errorText); });
-  await c.page.evaluate(() => {
-    window.__vistos = [];
-    new MutationObserver((ms) => { for (const m of ms) { for (const n of m.addedNodes) window.__vistos.push(n.textContent); if (m.type === "characterData") window.__vistos.push(m.target.textContent); } })
-      .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
-  });
-  await enviar(c.page, "minhas contas");
-  await c.flux.espera(1);
-  await c.flux.push(0, evento(blocoDe("contas", { contas }), fim("Aqui estão.")));
-  await ultima(c.page).locator(".card-ia").waitFor();
-  await pronto(c.page);
-  const linha = c.page.locator(".card-ia .ci-linha[aria-expanded]").first(); // a 1ª conta do total (id 1, Nubank)
-  const vistos = () => c.page.evaluate(() => window.__vistos.join("\n"));
-  const linhas = () => c.page.locator(".card-ia .ci-lanc .lanc-linha");
-  const cardSumiu = () => c.page.waitForFunction(() => document.querySelectorAll(".card-ia").length === 0 && document.querySelectorAll(".chat > .msg-piggy").length === 0, null, { timeout: 5000 });
-  return { ...c, t, linha, vistos, linhas, cardSumiu };
-}
+// A partir do card `contas`: o mesmo helper dos testes de categoria e dia (_chat_ia_lanc.mjs).
+const preparar = (opts = {}, contas = F.contas.todos_os_estados) => prepararCard(opts, { recursos: { contas } });
 
 test("L1 positivo: abrir a conta lê UMA página (conta, mês, 10, sem guardado), conferindo a conta antes e depois; as linhas ficam DENTRO do card", async () => {
   const { page, t, linha, linhas, erros } = await preparar();
@@ -219,7 +168,7 @@ test("L7b a página 2 repete uma linha da 1: ela entra uma vez só (dedupe por i
   await a.page.context().close();
 });
 
-test("L8 troca de conta percebida pelo foco com a lista aberta: o card some e NENHUM GET novo sai com a sessão de B (a chave é [conta, assunto, uid])", async () => {
+test("L8 troca de conta percebida pelo foco com a lista aberta: o card some e NENHUM GET novo sai com a sessão de B", async () => {
   const { page, t, linha, linhas, conta, cardSumiu } = await preparar();
   await linha.click();
   await linhas().first().waitFor();
@@ -320,7 +269,7 @@ test("L12b foco: \"Tentar de novo\" pelo teclado que falha DE NOVO devolve o foc
   await a.page.context().close();
 });
 
-for (const [nome, itens] of [["item null", [null]], ["item sem campos", [{ id: "l1" }]], ["data que não é data", [{ ...F.lancamentos.estados.itens[0], data: "lixo" }]], ["motivo que não é texto", [{ ...F.lancamentos.estados.itens[0], motivos: [{ a: 1 }] }]], ["descrição que não é texto", [{ ...F.lancamentos.estados.itens[0], descricao: { a: 1 } }]], ["categoria que não é texto", [{ ...F.lancamentos.estados.itens[0], categoria: { a: 1 } }]], ["valor que não é decimal", [{ ...F.lancamentos.estados.itens[0], valor: "invalid" }]], ["dia que não existe", [{ ...F.lancamentos.estados.itens[0], data: "2026-02-30" }]]]) {
+for (const [nome, itens] of [["item null", [null]], ["item sem campos", [{ id: "l1" }]], ["data que não é data", [{ ...F.lancamentos.estados.itens[0], data: "lixo" }]], ["motivo que não é texto", [{ ...F.lancamentos.estados.itens[0], motivos: [{ a: 1 }] }]], ["descrição que não é texto", [{ ...F.lancamentos.estados.itens[0], descricao: { a: 1 } }]], ["categoria que não é texto", [{ ...F.lancamentos.estados.itens[0], categoria: { a: 1 } }]], ["valor que não é decimal", [{ ...F.lancamentos.estados.itens[0], valor: "invalid" }]], ["dia que não existe", [{ ...F.lancamentos.estados.itens[0], data: "2026-02-30" }]], ["data com horário", [{ ...F.lancamentos.estados.itens[0], data: "2026-10-10T12:00:00" }]]]) {
   test(`L13 lançamento malformado (${nome}): o card fica de pé com o erro e "Tentar de novo" (que recupera), em vez de virar o marcador`, async () => {
     const a = await preparar();
     a.t.itens = itens;
@@ -329,7 +278,7 @@ for (const [nome, itens] of [["item null", [null]], ["item sem campos", [{ id: "
     await erro.waitFor();
     assert.equal(await erro.locator("p").innerText(), FALHA);
     assert.equal(await a.page.locator(".card-ia").count(), 1);
-    assert.equal(await a.page.getByText("Este card ainda não aparece aqui.").count(), 0);
+    assert.equal(await a.page.getByText(SEM_CARD).count(), 0);
     assert.equal(a.t.gets.length, 1, "contrato quebrado não repete");
     a.t.itens = null;
     await erro.getByRole("button", { name: "Tentar de novo" }).click();

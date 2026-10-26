@@ -1,0 +1,45 @@
+{
+  "ok": true,
+  "cards": [
+    {
+      "id": 1,
+      "name": "Nubank",
+      "color": null,
+      "flag": null,
+      "last4": "4321",
+      "closing_day": 10,
+      "due_day": 17,
+      "credit_limit": 5000.5,
+      "is_default": false,
+      "open_bill": {
+        "id": 2,
+        "total": 1099.9,
+        "paid_amount": 100.4,
+        "due_amount": 999.5,
+        "period_end": "2026-10-10"
+      },
+      "credit_used": 1354.75,
+      "credit_available": 3645.75
+    },
+    {
+      "id": 2,
+      "name": "ultraviolet-black",
+      "color": null,
+      "flag": null,
+      "last4": null,
+      "closing_day": 5,
+      "due_day": 12,
+      "credit_limit": null,
+      "is_default": false,
+      "open_bill": {
+        "id": null,
+        "total": 0.0,
+        "paid_amount": 0.0,
+        "due_amount": 0.0,
+        "period_end": null
+      },
+      "credit_used": 50.25,
+      "credit_available": null
+    }
+  ]
+}
