@@ -419,7 +419,7 @@ def _detect_goals_behind(user_id: int) -> list[dict[str, Any]]:
                 title=f"Meta '{p['name']}' venceu",
                 message=(f"Prazo era {td.strftime('%d/%m/%Y')} e ainda faltam "
                          f"{fmt_brl(tgt - saved)}. Vale rever o prazo."),
-                action_label="Ver metas", action_view="pockets", icon=p.get("emoji") or "🎯",
+                action_label="Ver metas", action_view="goals", icon=p.get("emoji") or "🎯",
                 referencia={"estatistica": "meta_com_prazo", "caixinha": nome(p["name"]),
                             "meta_valor": dinheiro(tgt), "prazo": td},
                 atual={"saldo_valor": dinheiro(saved), "falta_valor": dinheiro(tgt - saved)}))
@@ -455,7 +455,7 @@ def _detect_goals_behind(user_id: int) -> list[dict[str, Any]]:
                 title=f"Meta '{p['name']}' atrasada",
                 message=(f"Pra bater o prazo precisaria de {fmt_brl(needed)}/mês, "
                          f"mas o ritmo atual tá em {fmt_brl(max(0, current_pace))}/mês."),
-                action_label="Ver metas", action_view="pockets", icon=p.get("emoji") or "🎯",
+                action_label="Ver metas", action_view="goals", icon=p.get("emoji") or "🎯",
                 referencia={"estatistica": "ritmo_mensal_necessario", "caixinha": nome(p["name"]),
                             "valor": dinheiro(needed), "meta_valor": dinheiro(tgt), "prazo": td},
                 atual={"valor": dinheiro(max(0, current_pace)), "saldo_valor": dinheiro(saved),

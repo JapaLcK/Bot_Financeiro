@@ -253,3 +253,23 @@ def test_conversa_plus_ve_o_card_sem_acoes_e_essencial_e_recusado(monkeypatch, l
     assert not [e for e in ev3 if e["tipo"] == "bloco"]
     assert json.loads([x for x in linhas(uid) if x["role"] == "tool"][-1]["content"])["error"] == "pro_required"
     assert llm == []
+
+
+# ── 6. o botão do insight abre uma view que o painel antigo tem ─────────────────
+
+def test_todo_action_view_dos_detectores_e_uma_view_do_painel():
+    """O card "Piggy notou" chama `navigateTo(action_view)` DIRETO (sem `_INSIGHT_VIEW_MAP`): view fora de
+    `DASH_VIEWS` desliga todas e a tela fica vazia. A lista mapeia por `_INSIGHT_VIEW_MAP` (ou passa o valor)."""
+    import ast
+    import re
+    from pathlib import Path
+    raiz = Path(__file__).resolve().parent.parent
+    js = (raiz / "frontend/dashboard.js").read_text()
+    views = set(re.findall(r'"([\w-]+)"', re.search(r"const DASH_VIEWS = \[(.*?)\];", js, re.S).group(1)))
+    mapa = dict(re.findall(r"(\w+):\s*\"([\w-]+)\"", re.search(r"const _INSIGHT_VIEW_MAP = \{(.*?)\};", js, re.S).group(1)))
+    arvore = ast.parse((raiz / "db/insights.py").read_text())
+    emitidas = {k.value.value for k in ast.walk(arvore) if isinstance(k, ast.keyword) and k.arg == "action_view"
+                and isinstance(k.value, ast.Constant) and k.value.value}
+    assert {"budgets", "analytics", "fixed"} < emitidas and {"goals", "budgets"} <= views  # leu de fato
+    assert emitidas <= views, emitidas - views                               # o card
+    assert {mapa.get(v, v) for v in emitidas} <= views                       # a lista
