@@ -12,6 +12,7 @@ from utils_text import valor_valido
 from .connection import get_conn
 from .users import ensure_user
 from .accounts import add_launch_and_update_balance
+from .parcelas_of import nome_grupo
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1562,7 +1563,7 @@ def list_installment_groups_detailed(user_id: int, sort: str = "urgency"):
                 select
                     t.id as tx_id,
                     t.group_id::text as group_id, t.bill_id, t.valor,
-                    t.categoria, t.nota,
+                    t.categoria, t.nota, o.description as desc_banco,
                     t.installment_no, t.installments_total, t.purchased_at,
                     t.card_id, c.name as card_name, c.color as card_color,
                     c.flag as card_flag, c.last4 as card_last4,
@@ -1571,10 +1572,16 @@ def list_installment_groups_detailed(user_id: int, sort: str = "urgency"):
                 from credit_transactions t
                 left join credit_cards c on c.id = t.card_id and c.user_id = t.user_id
                 join credit_bills b on b.id = t.bill_id and b.user_id = t.user_id
+                left join lateral (
+                    select o.description
+                      from open_finance_transactions o
+                      join open_finance_accounts xa on xa.id = o.account_id
+                      join open_finance_connections xc on xc.id = xa.connection_id and xc.user_id = %s
+                     where o.imported_credit_tx_id = t.id order by o.id desc limit 1) o on true
                 where t.user_id = %s and t.group_id is not null and t.is_refund = false
                 order by t.group_id, t.installment_no asc nulls last, b.period_end asc
                 """,
-                (user_id,),
+                (user_id, user_id),
             )
             rows = cur.fetchall()
 
@@ -1584,7 +1591,7 @@ def list_installment_groups_detailed(user_id: int, sort: str = "urgency"):
         if gid not in groups:
             groups[gid] = {
                 "group_id": gid,
-                "name": (r["nota"] or "Parcelamento").strip(),
+                "name": nome_grupo(r["nota"], r["desc_banco"], r["installment_no"], r["installments_total"]),
                 "categoria": r["categoria"],
                 "card_id": int(r["card_id"]),
                 "card_name": r["card_name"],
@@ -2147,7 +2154,9 @@ def list_installment_groups(user_id: int, limit: int = 15):
                        sum(case when b.status = 'open' then t.valor else 0 end) as total_pending,
                        count(case when b.status = 'open' then 1 end) as n_pending,
                        max(t.purchased_at) as last_purchase,
-                       min(t.nota) as nota,
+                       (array_agg(t.nota order by t.installment_no asc nulls last))[1] as nota,
+                       (array_agg(o.description order by t.installment_no asc nulls last))[1] as desc_banco,
+                       (array_agg(t.installment_no order by t.installment_no asc nulls last))[1] as parcela_n,
                        array_remove(
                          array_agg(
                            case when b.status = 'open' then b.period_end end
@@ -2158,16 +2167,25 @@ def list_installment_groups(user_id: int, limit: int = 15):
                 from credit_transactions t
                 left join credit_cards c on c.id = t.card_id and c.user_id = t.user_id
                 join credit_bills b on b.id = t.bill_id and b.user_id = t.user_id
+                left join lateral (
+                    select o.description
+                      from open_finance_transactions o
+                      join open_finance_accounts xa on xa.id = o.account_id
+                      join open_finance_connections xc on xc.id = xa.connection_id and xc.user_id = %s
+                     where o.imported_credit_tx_id = t.id order by o.id desc limit 1) o on true
                 where t.user_id=%s and t.group_id is not null and t.is_refund=false
                 group by t.group_id, c.name, c.closing_day, c.due_day
                 order by max(t.purchased_at) desc
                 limit %s
                 """,
-                (user_id, limit),
+                (user_id, user_id, limit),
             )
             rows = cur.fetchall()
 
     for r in rows:
+        desc_banco, parcela_n = r.pop("desc_banco"), r.pop("parcela_n")
+        if (r["nota"] or "").strip() or desc_banco:  # parcelamento manual sem nota segue sem nome
+            r["nota"] = nome_grupo(r["nota"], desc_banco, parcela_n, r["n_total"])
         period_ends = r.get("pending_period_ends") or []
         # cartão de outro usuário (left join vazio): sem dias do cartão, a data é o fim do período
         r["upcoming_due_dates"] = [
