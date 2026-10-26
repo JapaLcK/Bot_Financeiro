@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import socket
 from typing import Any
 
@@ -56,6 +57,22 @@ _queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=500)
 WA_DAILY_REPORT_DISABLE_ID = "daily_report_disable"
 WA_WEEKLY_REPORT_DISABLE_ID = "weekly_report_disable"
 WA_MONTHLY_REPORT_DISABLE_ID = "monthly_report_disable"
+
+
+# 8+ dígitos, com `+`, espaço ou `-` entre eles: o telefone no `title` da Meta.
+_NUMERO_LONGO = re.compile(r"\+?\d(?:[ +-]*\d){7,}")
+
+
+def _erro_meta(e: dict) -> dict:
+    """`code` e `title` de um erro de `status` da Meta (DP10, #919), com os
+    valores endurecidos: o payload é assinado, mas a forma não é garantida.
+    Redige antes de truncar, para o corte não deixar um pedaço de número."""
+    code, title = e.get("code"), e.get("title")
+    # códigos de erro documentados da Cloud API têm até 6 dígitos (suposição,
+    # não conferida na doc; um code maior vira null: pode ser o número).
+    ok = isinstance(code, int) and not isinstance(code, bool) and abs(code) < 10**7
+    return {"code": code if ok else None,
+            "title": _NUMERO_LONGO.sub("[num]", title)[:120] if isinstance(title, str) else None}
 
 
 def _env_flag(name: str) -> bool:
@@ -320,8 +337,15 @@ async def wa_webhook(request: Request):
                     source="wa_app",
                     details={
                         "status": status.get("status"),
-                        "recipient_id": status.get("recipient_id"),
-                        "errors": status.get("errors"),
+                        "recipient_id": mask_phone(status.get("recipient_id")),
+                        # lista branca (DP10, #919). Pela doc da Meta, `title` e
+                        # `message` são o mesmo texto de catálogo; o número pode vir
+                        # em `error_data.details`, que fica de fora com o resto.
+                        # Não-lista vira [] em vez de TypeError, que o `except`
+                        # engoliria levando junto os status seguintes do POST.
+                        "errors": [_erro_meta(e) for e in (
+                            status["errors"] if isinstance(status["errors"], list) else []
+                        ) if isinstance(e, dict)],
                     },
                 )
     except Exception:

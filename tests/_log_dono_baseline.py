@@ -23,7 +23,6 @@ DIVIDA: dict[tuple[str, str, str], int] = {
     ('adapters/whatsapp/wa_app.py', '_liberar_claim_semanal', 'LOG_MSG_NULL'): 1,
     ('adapters/whatsapp/wa_app.py', '_periodic_report_tick', 'LOG_MSG_NULL'): 1,
     ('adapters/whatsapp/wa_app.py', '_send_periodic_template', 'EVT_COL_RAW'): 1,
-    ('adapters/whatsapp/wa_app.py', 'wa_webhook', 'EVT_PII_NULL'): 1,
     ('adapters/whatsapp/wa_runtime.py', '_ajuda_do_cortado', 'LOG_MSG_NULL'): 1,
     ('adapters/whatsapp/wa_runtime.py', '_autolink_warning_already_sent', 'LOG_MSG_NULL'): 1,
     ('adapters/whatsapp/wa_runtime.py', '_bloqueado_pelo_corte', 'LOG_MSG_NULL'): 1,
