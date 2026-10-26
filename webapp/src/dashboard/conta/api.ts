@@ -2,7 +2,7 @@
 // Dado pessoal: só na memória do React Query, nunca em storage. O contrato é do servidor
 // (frontend/routes/settings.py), então os tipos são escritos aqui, não gerados.
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
-import { DEMO, ErroApi, FUSO, NOME_DO_PLANO, apiGet, chamar, escrever, instante, meQuery } from "../lib/v2";
+import { DEMO, ErroApi, FUSO, NOME_DO_PLANO, apiGet, chamar, escrever, instante, lerContaFresca, meQuery } from "../lib/v2";
 import type { Conector } from "../lib/bancos";
 import { guardarCodigos } from "./Cofre";
 import type { Refresh } from "../lib/atualizarBanco";
@@ -104,6 +104,11 @@ export class ContaTrocada extends Error {}
 export async function daConta<T>(uid: unknown, signal: AbortSignal, r: T): Promise<T> {
   if ((await chamar<{ user_id?: unknown }>("/auth/dashboard-profile", GET(signal))).user_id !== uid) throw new ContaTrocada();
   return r;
+}
+// A conferência ANTES da leitura de um card da IA: a sessão já é de outra conta = nenhum GET sai (o `daConta` cobre a troca DURANTE a busca).
+// `lerContaFresca` relê o perfil, e o cache avisa `contaDaSessao`, que apaga a conversa da conta anterior.
+export async function antesDaConta(qc: QueryClient, uid: number) {
+  if ((await lerContaFresca(qc)).user_id !== uid) throw new ContaTrocada();
 }
 export const bancosQuery = (uid: unknown) => queryOptions({
   queryKey: ["conta", "bancos", uid],

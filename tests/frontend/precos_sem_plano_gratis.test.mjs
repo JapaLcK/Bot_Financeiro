@@ -343,7 +343,7 @@ test("controle positivo: a ilha montou com as seções e os dados nas colunas ce
   assert.equal(dados.comuns.length, 10, `bloco comum com ${dados.comuns.length} itens`);
   assert.ok(dados.comuns.includes("Categorização automática com IA"));
   assert.ok(dados.comuns.includes("Orçamento por categoria"));
-  assert.ok(dados.comuns[0].includes("15 dias grátis"),
+  assert.ok(dados.comuns[0].includes("7 dias grátis"),
     `o trial não abre o bloco comum: "${dados.comuns[0]}"`);
   await page.close();
 });
@@ -359,7 +359,7 @@ test("controle positivo: a ilha montou com as seções e os dados nas colunas ce
 // URL ela mostrava a copy de visitante a quem está travado no gate. As duas
 // "sem gate + COM marcador" são o outro lado: marcador velho (bookmark, link
 // compartilhado) não pode inventar gate pra quem já pagou nem pra visitante.
-const COPY_PADRAO = /^15 dias grátis/;
+const COPY_PADRAO = /^7 dias grátis/;
 const COPY_GATE = /Escolha um plano pra continuar/;
 
 for (const [estado, me] of [
@@ -386,7 +386,7 @@ for (const [estado, me] of [
           assert.ok(!sub.includes(garantia),
             `a copy do gate garante a cobrança (${garantia}): "${sub}"`);
         }
-        assert.ok(sub.includes("15 dias grátis") && sub.includes("checkout"),
+        assert.ok(sub.includes("7 dias grátis") && sub.includes("checkout"),
           `a copy do gate perdeu a oferta ou a deferência ao checkout: "${sub}"`);
       }
       await page.close();
@@ -452,7 +452,7 @@ for (const [tela, viewport, query] of [
       // Não promete NEM nega o período grátis: quem diz é o checkout, que lê a
       // mesma is_trial_eligible_for_user (§0.7). Prometer aqui é a mentira que
       // esta célula existe para consertar.
-      assert.ok(!sub.includes("15 dias grátis"),
+      assert.ok(!/\d+ dias grátis/.test(sub),
         `a copy do corte prometeu o trial a um ex-assinante: "${sub}"`);
       assert.ok(sub.includes("checkout"),
         `a copy do corte perdeu a deferência ao checkout: "${sub}"`);
@@ -478,7 +478,7 @@ for (const [tela, viewport, query] of [
       // A NOTA DOS PLANOS (#plans-note-v2), o SEGUNDO texto que prometia o trial
       // (ver "CONTROLE DECLARADO" mais abaixo).
       const nota = await page.textContent(NOTA);
-      assert.ok(!nota.includes("15 dias grátis"),
+      assert.ok(!/\d+ dias grátis/.test(nota),
         `a nota prometeu o trial a um ex-assinante: "${nota}"`);
       assert.ok(!/\btrial\b/i.test(nota),
         `a nota ainda pressupõe um trial que pode não existir: "${nota}"`);
@@ -610,7 +610,7 @@ test("a nota dos planos continua prometendo o trial a quem não foi cortado", as
     me: { user_id: 42, needs_plan_selection: false, app_access: true },
   });
   const nota = await page.textContent(NOTA);
-  assert.ok(nota.includes("15 dias grátis"),
+  assert.ok(nota.includes("7 dias grátis"),
     `a nota deixou de oferecer o trial a quem pode tê-lo: "${nota}"`);
   await page.close();
 });
@@ -618,6 +618,6 @@ test("a nota dos planos continua prometendo o trial a quem não foi cortado", as
 test("visitante deslogado (sem /auth/me) continua lendo a nota original", async () => {
   // A perna só roda com `me`; deslogado é a maioria da página e não pode mudar.
   const { page } = await abrirPrecos();
-  assert.ok((await page.textContent(NOTA)).includes("15 dias grátis"));
+  assert.ok((await page.textContent(NOTA)).includes("7 dias grátis"));
   await page.close();
 });

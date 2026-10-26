@@ -5,10 +5,11 @@ import { App } from "./App";
 import { Entrada } from "./parts/Entrada";
 import { Cofre } from "./conta/Cofre";
 import { BALANCE_TODAY, MONTHS, netWorth, previousKey, summary } from "./lib/api";
+import { COMPARACAO_EXEMPLO } from "./lib/data.js";
 import { readProfile } from "./lib/profiles.js";
 import { aoConferirConta, aoSaberChatIa, contaDaSessao } from "./lib/conversation";
-import { DEMO, contaQuery, contasQuery, lerContaFresca, escutarLogout, investidoQuery, meQuery, milhaoQuery, orcamentoQuery, orcamentosCategoriaQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
-import type { Assinaturas, Investido, Me, OrcamentoDomestico, OrcamentosCategoria } from "./lib/api-v2.gen";
+import { DEMO, comparacaoQuery, contaQuery, contasQuery, lerContaFresca, escutarLogout, investidoQuery, meQuery, milhaoQuery, orcamentoQuery, orcamentosCategoriaQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import type { Assinaturas, Comparacao, Investido, Me, OrcamentoDomestico, OrcamentosCategoria } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
 declare global { interface Window { PIGBANK_DEMO_PLAN?: unknown } }
@@ -82,6 +83,7 @@ if (DEMO) {
     const anterior = prev && { mes: prev, entrou: txt(summary(prev).income), saiu: txt(summary(prev).expense) };
     const ate = `${mes}-${new Date(Number(mes.slice(0, 4)), Number(mes.slice(5)), 0).getDate()}`;
     qc.setQueryData(resumoMesQuery(mes).queryKey, { mes, ate, entrou: txt(m.income), saiu: txt(m.expense), anterior, motivos: [] });
+    qc.setQueryData<Comparacao>(comparacaoQuery(mes).queryKey, COMPARACAO_EXEMPLO as Comparacao);
     // Potes de exemplo: teto = % da renda do mês; o gasto é uma fração fixa do teto, só para a tela ter o que mostrar.
     const POTES = [["custos_fixos", "Custos fixos", "#7dd3fc", 55, 0.9], ["conforto", "Conforto", "#6ee7b7", 5, 0.5], ["metas", "Metas", "#fde047", 10, 0.6],
       ["prazeres", "Prazeres", "#f0abfc", 10, 1.2], ["liberdade_financeira", "Liberdade financeira", "#93c5fd", 10, 0.8], ["conhecimento", "Conhecimento", "#fdba74", 10, 0.3]] as const;

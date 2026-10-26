@@ -58,7 +58,7 @@ function legenda(m: Meta, custo: CustoMensal, cheios: number, meses: number, bat
   ].filter(Boolean).join(", ");
 }
 
-const Blocos = ({ n, cheios, ok }: { n: number; cheios: number; ok?: boolean }) => (
+export const Blocos = ({ n, cheios, ok }: { n: number; cheios: number; ok?: boolean }) => (
   <span className="blocos" aria-hidden="true">
     {Array.from({ length: n }, (_, i) => <span key={i} className={i < cheios ? (ok ? "cheio ok" : "cheio") : undefined} />)}
   </span>

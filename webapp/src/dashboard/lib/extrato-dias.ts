@@ -5,7 +5,7 @@ import { decimal, isoDay, longDate, moneyText, weekday } from "./format.js";
 export const ATALHOS = [["", "", "Tudo"], ["entrada", "", "Entradas"], ["saida", "", "Saídas"], ["", "cartao", "Cartão"]] as const;
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
-const existe = (d: string) => ISO.test(d) && new Date(`${d}T12:00:00Z`).toISOString().slice(0, 10) === d; // "2026-02-30" passa na regex e não existe
+export const existe = (d: string) => ISO.test(d) && new Date(`${d}T12:00:00Z`).toISOString().slice(0, 10) === d; // "2026-02-30" passa na regex e não existe
 // "Hoje · 19/10", "Ontem · 18/10", "Sex · 17/10" (outro ano: "/aa", menos em Hoje/Ontem, como no app). `hoje` é o dia de São Paulo (hojeNoFuso), nunca o do aparelho.
 export function rotuloDia(dia: string, hoje: string): string {
   if (!existe(dia) || !ISO.test(hoje)) return longDate(isoDay(dia));
@@ -14,8 +14,12 @@ export function rotuloDia(dia: string, hoje: string): string {
   const dm = `${dia.slice(8)}/${dia.slice(5, 7)}`;
   if (dia === hoje) return `Hoje · ${dm}`;
   if (dia === ontem.toISOString().slice(0, 10)) return `Ontem · ${dm}`;
+  return diaCurto(dia, hoje.slice(0, 4));
+}
+/** "Sex · 17/10"; de outro ano que `ano`: "Sex · 17/10/25". */
+export function diaCurto(dia: string, ano: string): string {
   const sem = weekday(isoDay(dia));
-  return `${sem[0].toUpperCase()}${sem.slice(1)} · ${dm}${dia.slice(0, 4) === hoje.slice(0, 4) ? "" : `/${dia.slice(2, 4)}`}`;
+  return `${sem[0].toUpperCase()}${sem.slice(1)} · ${dia.slice(8)}/${dia.slice(5, 7)}${dia.slice(0, 4) === ano ? "" : `/${dia.slice(2, 4)}`}`;
 }
 
 // Soma exata (BigInt) do que conta no total: fora interno, guardado e outra moeda. Nada conta → null (nunca "R$ 0,00").

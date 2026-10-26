@@ -1,5 +1,6 @@
 // Bancos conectados (conta/Bancos.tsx): cor do banco, tom do estado, os bancos disponíveis para conectar e o "quando" da última sincronização.
-import type { Bancos } from "./api-v2.gen";
+import type { Bancos, Contas } from "./api-v2.gen";
+import { decimal } from "./format.js";
 import { FUSO, instante } from "./v2";
 
 // Cópia de `coresBanco` (app/src/ui/tokens.ts): os dois projetos npm não se importam, e
@@ -30,6 +31,26 @@ export function corDoBanco(instituicao: string, indice: number): string {
   const nome = semAcento(instituicao);
   const chave = Object.keys(CORES_BANCO).find((k) => new RegExp(`\\b${k}\\b`).test(nome));
   return corOuTinta(chave && CORES_BANCO[chave], indice);
+}
+// Composição do "Disponível agora" (card `contas` do chat): cópia de `segmentosDeContas` e da lista branca de app/src/features/painel/composicaoContas.ts
+// (dois projetos npm). Motivo que mexe no valor do saldo (banco desatualizado, saldo ausente, conta fora do sync, pausada, moeda presumida, ou um código novo)
+// esconde a barra: número incerto não tem cara de exato. Em decimal exato, só desenha se a soma fechar com o `total`; menos de 2 segmentos não é composição.
+export const MOTIVOS_SEM_EFEITO_NO_SALDO = ["outra_moeda", "carteira_nao_confirmada", "conciliacao_pendente", "movimentos_pendentes", "especie_incompleta"];
+export type Segmento = { chave: "carteira" | number; valor: number; cor: string };
+// Só no card `contas` do chat (decisão do dono, 2026-10-21): o Nubank fica roxo, sem cair para a tinta pela regra de 3:1 do `corDoBanco` (o app e as outras telas seguem com ela).
+// O roxo é só gráfico (barra, ladrilho, ponto), nunca texto.
+export const corDoBancoNoCard = (instituicao: string, indice: number) => (/\bnubank\b/.test(semAcento(instituicao)) ? CORES_BANCO.nubank : corDoBanco(instituicao, indice));
+export function segmentosDeContas(d: Contas): Segmento[] {
+  if (!d.motivos.every((m) => MOTIVOS_SEM_EFEITO_NO_SALDO.includes(m))) return [];
+  const dentro = d.contas.filter((c) => c.moeda === "BRL" && c.no_total && (decimal(c.saldo)?.n ?? BigInt(0)) > BigInt(0));
+  // a carteira é o índice 0 e as contas i + 1, como no app
+  const itens = [...((decimal(d.carteira.saldo)?.n ?? BigInt(0)) > BigInt(0) ? [{ chave: "carteira" as const, saldo: d.carteira.saldo, cor: corDoBancoNoCard("", 0) }] : []),
+    ...dentro.map((c, i) => ({ chave: c.id, saldo: c.saldo, cor: corDoBancoNoCard(c.instituicao ?? "", i + 1) }))].map((x) => ({ ...x, dec: decimal(x.saldo)! }));
+  const total = decimal(d.total);
+  if (!total || itens.length < 2) return [];
+  const esc = Math.max(total.escala, ...itens.map((x) => x.dec.escala)), ate = (x: { n: bigint; escala: number }) => x.n * BigInt(10) ** BigInt(esc - x.escala);
+  if (itens.reduce((a, x) => a + ate(x.dec), BigInt(0)) !== ate(total)) return [];
+  return itens.map((x) => ({ chave: x.chave, valor: Number(x.saldo), cor: x.cor }));
 }
 // A cor do conector (`color` do /connectors: hex sem '#', dado de terceiro que vai para o estilo): só 6 dígitos hex; qualquer outra coisa é a tinta.
 export const corDoConector = (hex: unknown, indice: number) => corOuTinta(typeof hex === "string" && /^[0-9a-fA-F]{6}$/.test(hex) ? `#${hex}` : null, indice);

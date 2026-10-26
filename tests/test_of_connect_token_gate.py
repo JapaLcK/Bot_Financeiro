@@ -11,6 +11,7 @@ Tudo com monkeypatch — sem tocar banco nem rede.
 
 import asyncio
 import importlib
+import re
 
 import pytest
 from fastapi import HTTPException
@@ -73,8 +74,8 @@ class TestConnectTokenGate:
         assert ei.value.status_code == 402
         assert ei.value.detail["code"] == "OF_BANK_LIMIT" and ei.value.detail["limit"] == 0
         msg = ei.value.detail["message"]
-        # O Grátis e os "15 dias de teste" saíram do produto; o texto não pode citá-los.
-        assert "Grátis" not in msg and "15 dias" not in msg
+        # O Grátis e os "N dias de teste" saíram do produto; o texto não pode citá-los.
+        assert "Grátis" not in msg and not re.search(r"\d+ dias", msg)
         return msg
 
     @pytest.mark.parametrize("gate", ["_ensure_of_access_allowed", "_enforce_bank_limit"])

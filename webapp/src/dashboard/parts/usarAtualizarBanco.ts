@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DEMO, ErroApi, contaQuery, meQuery } from "../lib/v2";
+import { todasMenosFotos } from "../lib/eventos";
 import { atualizarBancos, comPrazo, conexoesQuery, lerConexoes, limiteQuery, uidValido } from "../conta/api";
 import { PRAZO_LEITURA_MS, PRAZO_POST_MS, acompanharLista, atualizar, classificar, OCIOSO, type AcaoBanco, type Deps, type EstadoAtualizar } from "../lib/atualizarBanco";
 
@@ -80,7 +81,7 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro, automatico = true 
       enviar: () => comPrazo((s) => atualizarBancos(uidDaRodada, s), PRAZO_POST_MS, ctrl.signal),
       ler: () => comPrazo((s) => lerConexoes(uidDaRodada, s, true), PRAZO_LEITURA_MS, ctrl.signal), // a leitura que nunca volta vira AbortError (transitória): a cadência segue e o teto fecha a rodada
       aoMudar: (maquina) => { if (atual()) { enviando.current = maquina.fase === "enviando"; setEstado({ uid: uidDaRodada, maquina }); } },
-      recarregar: () => { if (atual()) { marco.current = Date.now(); void qc.invalidateQueries(); } }, // o mesmo que um aviso do SSE: o aviso some porque o servidor deixa de mandar o motivo
+      recarregar: () => { if (atual()) { marco.current = Date.now(); void qc.invalidateQueries(todasMenosFotos); } }, // o mesmo que um aviso do SSE (fotos de cards da IA ficam): o aviso some porque o servidor deixa de mandar o motivo
       falhou: (e) => {
         if (!(e instanceof ErroApi)) return;
         if (e.status === 401 || e.status === 402) void qc.refetchQueries({ queryKey: meQuery.queryKey }); // o portão decide (lib/eventos.ts)

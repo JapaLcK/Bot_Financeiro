@@ -2,12 +2,12 @@ import { useEffect, useId, useRef, useState } from "react";
 import { avaliarIa, type Msg } from "../lib/conversation";
 import { ICON } from "../lib/brand";
 import { MOTIVOS, PREPARANDO, TEXTO_MAX, type Motivo } from "../lib/conversaIa";
+import { CardIa, Esqueleto } from "./CardIa";
 import { TextoPiggy } from "./TextoPiggy";
 
 // A resposta do Piggy quando o chat vai à IA (lib/conversaIa.ts): o último passo enquanto pensa, o texto que chega aos poucos, o texto final
-// INTEIRO (nunca cortado nem palavra a palavra: é o que o leitor de tela anuncia), o erro, a parada e a cota. Os cards chegam no PR 3: cada
-// bloco vira um marcador neutro, sem número.
-export const SEM_CARD = "Este card ainda não aparece aqui.";
+// INTEIRO (nunca cortado nem palavra a palavra: é o que o leitor de tela anuncia), o erro, a parada e a cota. Cada bloco vira um card
+// (parts/CardIa.tsx; os que ainda não existem aqui, um marcador neutro sem número).
 
 /** O campo do "Outro": o texto mora aqui, então some com ele ao fechar; falhou = o campo segue aberto com o texto. Corta por code point (o servidor conta assim; um 🐷 vale 2 em UTF-16). */
 function Comentario({ id }: { id: number }) {
@@ -61,7 +61,8 @@ export function PiggyIa({ m, ultimo }: { m: Msg; ultimo: boolean }) {
       {/* Em voo, o anel e o último passo são enfeite (aria-hidden); quem fala com o leitor de tela é o texto sr-only, como na resposta de agente. */}
       {status && <p className="msg-text" data-carga aria-busy="true">{PREPARANDO}</p>}
       {status && <p className="msg-carga" aria-hidden="true"><i className="msg-carga-anel" /><span className="msg-carga-frase">{passo ?? PREPARANDO}</span></p>}
-      {m.blocos?.map((_, i) => <p key={i} className="msg-text msg-bloco">{SEM_CARD}</p>)}
+      {m.blocos?.map((b, i) => <CardIa key={i} bloco={b} uid={m.uid} />)}
+      {voo && m.previa && m.blocos?.[m.blocos.length - 1]?.card !== m.previa && <Esqueleto />}{/* o card que vem aí, sem texto (a regra do app) */}
       <TextoPiggy texto={voo || m.estado === "parou" ? m.parcial ?? "" : texto} />
       {m.estado === "parou" && <p className="msg-text msg-nota">{texto}</p>}
       {ultimo && m.estado === "pronto" && typeof m.messageId === "number" && <Avaliar m={m} />}

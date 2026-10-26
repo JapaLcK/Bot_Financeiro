@@ -142,7 +142,7 @@ export const contaQuery = {
 // aba): espera por ela e lê de novo. Cancelar não serve, quem a esperava receberia o cancelamento. Toda conferência de conta do
 // chat passa por aqui: montagem, foco, pergunta ao Piggy e menção (Codex no #1157).
 export async function lerContaFresca(qc: QueryClient) {
-  if (qc.isFetching({ queryKey: contaQuery.queryKey })) await qc.fetchQuery(contaQuery).catch(() => {});
+  if (qc.isFetching({ queryKey: contaQuery.queryKey, exact: true })) await qc.fetchQuery(contaQuery).catch(() => {}); // `exact`: só a leitura do perfil conta; a query de um card (["conta", assunto, uid]) em voo não é leitura de perfil
   return qc.fetchQuery(contaQuery);
 }
 
@@ -240,6 +240,16 @@ export const gastosCategoriaQuery = (mes: string, categoria: string) => queryOpt
   queryKey: ["gastos", mes, categoria],
   queryFn: ({ signal }) => apiGet("/gastos/categoria", signal, { mes, categoria }),
   ...vivo,
+});
+
+// O mês contra o anterior equivalente (`GET /api/v2/comparacao`, Plus+). `gcTime: 0`, como a
+// previsão: dado Plus sem tela olhando sai do cache, e o downgrade não acha número velho. No
+// protótipo o cache semeado (main.tsx) não pode sumir ao desmontar.
+export const comparacaoQuery = (mes: string) => queryOptions({
+  queryKey: ["comparacao", mes],
+  queryFn: ({ signal }) => apiGet("/comparacao", signal, { mes }),
+  ...vivo,
+  gcTime: DEMO ? Infinity : 0,
 });
 
 // Só dentro da árvore que o portão (parts/Entrada.tsx) libera: lá o /me já chegou.

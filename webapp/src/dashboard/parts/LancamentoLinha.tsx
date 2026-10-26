@@ -23,9 +23,10 @@ export function LancamentoLinha({ item, categorias, abrir, historico = false, se
   const bruto = cat?.nome ?? item.categoria ?? "Sem categoria", nome = bruto.charAt(0).toUpperCase() + bruto.slice(1); // sem par no catálogo: a chave, capitalizada (como o app)
   const ganho = !item.interno && item.tipo === "entrada";
   const sub = [semData ? null : `${dayMonth(isoDay(item.data))}${historico ? ` ${item.data.slice(0, 4)}` : ""}${item.hora ? ` · ${item.hora}` : ""}`, item.guardado ? null : item.instituicao ?? ORIGENS[item.origem], nome].filter(Boolean).join(" · ");
+  // O id só serve ao aria-describedby do botão: sem `abrir`, o mesmo lançamento em dois cards do chat não repete id.
   const miolo = <>
     <b>{item.descricao ?? "Sem descrição"}</b>
-    <span className="faint" id={`lanc-sub-${item.id}`}>{sub}</span>
+    <span className="faint" id={abrir ? `lanc-sub-${item.id}` : undefined}>{sub}</span>
   </>;
   return <li className="lanc-linha" data-id={item.id}>
     <div className="lanc-principal">

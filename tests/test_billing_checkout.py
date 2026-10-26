@@ -208,13 +208,28 @@ def test_checkout_v1_trial_vem_de_pro_trial_days(user_id, monkeypatch):
     assert fake.last_session_kwargs["subscription_data"]["trial_period_days"] == 7
 
 
+def test_checkout_v1_sem_env_o_trial_e_o_padrao(user_id, monkeypatch):
+    """v1 sem PRO_TRIAL_DAYS: o padrão do código (TRIAL_DAYS_DEFAULT) vale."""
+    from core.services.plan_service import TRIAL_DAYS_DEFAULT
+    _, _, client = _auth_user_setup(f"v1sempro-{user_id}")
+    monkeypatch.setenv("PLANS_V2_ENABLED", "0")
+    monkeypatch.delenv("PRO_TRIAL_DAYS", raising=False)
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    fake = _patch_stripe(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert fake.last_session_kwargs["subscription_data"]["trial_period_days"] == TRIAL_DAYS_DEFAULT
+
+
 def test_checkout_annual_uses_annual_price(user_id, monkeypatch):
     _, _, client = _auth_user_setup(f"ann-{user_id}")
     monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_ANUAL", "price_anual_xyz")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO", "")
-    # Trial lido de PRO_TRIAL_DAYS em runtime (default do código = 15). Fixa pra
+    # Trial lido de PRO_TRIAL_DAYS em runtime (default do código = TRIAL_DAYS_DEFAULT). Fixa pra
     # o teste ficar deterministico independente do ambiente.
     monkeypatch.setenv("PRO_TRIAL_DAYS", "7")
     fake = _patch_stripe(monkeypatch)
@@ -517,6 +532,21 @@ def test_checkout_v2_elegivel_manda_trial_de_30(user_id, monkeypatch):
     resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 200, resp.text
     assert fake.last_session_kwargs["subscription_data"]["trial_period_days"] == 30
+
+
+def test_checkout_v2_sem_env_o_trial_e_de_7_dias(user_id, monkeypatch):
+    """Requisito de negócio (2026-10-22): o padrão do trial é 7 dias."""
+    _, _, client = _auth_user_setup(f"v2sete-{user_id}")
+    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
+    monkeypatch.delenv("PLANS_TRIAL_DAYS", raising=False)
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    monkeypatch.setattr("db.plans.is_trial_eligible_for_user", lambda uid: True)
+    fake = _patch_stripe(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert fake.last_session_kwargs["subscription_data"]["trial_period_days"] == 7
 
 
 def test_checkout_v2_inelegivel_cobra_na_hora(user_id, monkeypatch):

@@ -17,9 +17,11 @@ import type { Msg } from "./conversation";
 export interface Uso { used: number; limit: number }
 /** `ocupado`: preparando ou em voo (um turno por vez). `cheia`: a cota acabou (ou o plano não tem IA: o servidor responde igual). */
 export interface EstadoIa { ocupado: boolean; uso: Uso | null; cheia: boolean }
+/** O bloco de um card, cru: só o envelope foi conferido. Quem valida `recursos` é o card (parts/CardIa.tsx). `mes` é null ou AAAA-MM. */
+export interface BlocoIa { card: string; abas: { mes: unknown; recursos: unknown }[] }
 /** Os campos da mensagem do Piggy que vêm da IA (o resto é do `Msg`). */
 export interface CamposIa {
-  ia?: true; passos?: string[]; parcial?: string; blocos?: string[]; messageId?: number | null; chips?: string[];
+  ia?: true; passos?: string[]; parcial?: string; blocos?: BlocoIa[]; previa?: string | null; messageId?: number | null; chips?: string[];
   feedback?: 1 | -1 | null; motivo?: Motivo | null; avaliando?: boolean; avisoAvaliar?: "falha" | "obrigado"; // o 👍👎 (lib/conversation.ts `avaliarIa`)
 }
 
@@ -34,6 +36,7 @@ export const PAROU = "Você parou esta resposta.";
 export const SEM_COTA = "Suas mensagens com o Piggy acabaram por este mês ou não fazem parte do seu plano.";
 const SEM_SENHA = "Crie sua senha para conversar com o Piggy. Depois de criar, volte para o painel novo.";
 export const SESSAO = "Sua sessão terminou. Recarregue a página.";
+export const SEM_CARD = "Não foi possível mostrar este card.";
 const PRAZO = "A resposta demorou mais que o esperado. Tente de novo.";
 const REDE = "A conexão foi interrompida antes de recebermos a resposta.";
 const MUITAS = "Muitas mensagens em pouco tempo. Aguarde um instante antes de tentar novamente.";
@@ -57,20 +60,20 @@ const usoDe = (x: unknown): Uso | null => {
 };
 
 type Evento =
-  | { tipo: "passo"; texto: string } | { tipo: "delta"; texto: string } | { tipo: "reinicio" } | { tipo: "erro" } | { tipo: "bloco"; card: string }
+  | { tipo: "passo"; texto: string; previa: string | null } | { tipo: "delta"; texto: string } | { tipo: "reinicio" } | { tipo: "erro" } | { tipo: "bloco"; bloco: BlocoIa }
   | { tipo: "fim"; reply: string; usage: Uso; messageId: number | null; chips: string[] };
 /** `null` para tipo desconhecido ou forma inválida: o evento é descartado e o stream segue (como no app). */
 export function lerEvento(bruto: unknown): Evento | null {
   if (!bruto || typeof bruto !== "object") return null;
   const o = bruto as Record<string, unknown>;
   switch (o.tipo) {
-    case "passo": return typeof o.texto === "string" ? { tipo: "passo", texto: o.texto } : null;
+    case "passo": return typeof o.texto === "string" ? { tipo: "passo", texto: o.texto, previa: typeof o.previa === "string" ? o.previa : null } : null;
     case "delta": return typeof o.texto === "string" ? { tipo: "delta", texto: o.texto } : null;
     case "reinicio": return { tipo: "reinicio" };
     case "erro": return { tipo: "erro" };
     case "bloco": {
       const b = o.bloco as { card?: unknown; abas?: unknown } | null;
-      return typeof b?.card === "string" && Array.isArray(b.abas) && b.abas.length >= 1 && b.abas.length <= 3 ? { tipo: "bloco", card: b.card } : null;
+      return typeof b?.card === "string" && Array.isArray(b.abas) && b.abas.length >= 1 && b.abas.length <= 3 ? { tipo: "bloco", bloco: { card: b.card, abas: b.abas as BlocoIa["abas"] } } : null;
     }
     case "fim": {
       const usage = usoDe(o.usage), id = o.message_id;
@@ -131,7 +134,7 @@ export async function enviarIa(texto: string, patch: (p: Partial<Msg>) => void) 
   atual = t; muda({ ocupado: true });
   const vivo = () => atual === t && !ctrl.signal.aborted;
   const liberar = () => { clearTimeout(t.timer); if (atual === t) { atual = null; muda({ ocupado: false }); } };
-  const passos: string[] = [], blocos: string[] = [];
+  const passos: string[] = [], blocos: BlocoIa[] = [];
   let parcial = "", fim = false;
   try {
     if (!preparado || sujo) {
@@ -145,8 +148,8 @@ export async function enviarIa(texto: string, patch: (p: Partial<Msg>) => void) 
       if (!vivo()) return; // troca de conta, parada ou prazo: nada mais entra
       const e = lerEvento(bruto);
       if (!e) return;
-      if (e.tipo === "passo") { passos.push(e.texto); patch({ passos: [...passos] }); }
-      else if (e.tipo === "bloco") { blocos.push(e.card); patch({ blocos: [...blocos] }); }
+      if (e.tipo === "passo") { passos.push(e.texto); patch({ passos: [...passos], previa: e.previa }); } // a prévia do último passo (a do app)
+      else if (e.tipo === "bloco") { blocos.push(e.bloco); patch({ blocos: [...blocos] }); }
       else if (e.tipo === "delta") { parcial += e.texto; patch({ parcial }); }
       else if (e.tipo === "reinicio") { parcial = ""; patch({ parcial }); }
       else if (e.tipo === "erro") throw new Error("erro do servidor");

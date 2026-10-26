@@ -12,8 +12,9 @@ Dois mundos atrás do flag PLANS_V2_ENABLED (lido dinâmico, sem redeploy):
     (#274/#354) o tier free NÃO entra no app: has_app_access consulta
     tem_direito_hoje, e o Grátis sobrevive só como ESTADO (fallback após falha
     de cobrança), não como direito de uso. Freio: ACCESS_GATE_ENABLED=0.
-    Trial (2026-08-06): 15 dias do PLANO ESCOLHIDO, via Stripe COM CARTÃO
-    (subscription trialing → cobra no dia 16). Escolheu Pro? 15 dias de Pro.
+    Trial (2026-08-06): período grátis do PLANO ESCOLHIDO (TRIAL_DAYS_DEFAULT), via
+    Stripe COM CARTÃO (subscription trialing → cobra no fim do período). Escolheu
+    Pro? Trial de Pro.
     Nasce no checkout, não no cadastro; 1 por telefone na vida (plan_trials).
     Durante o trial o tier vem da coluna `plan` (assinatura vigente), com os
     limites cheios do plano assinado — cadastro novo sem assinatura = Grátis.
@@ -63,7 +64,7 @@ TIER_TO_STORED_PLAN = {
 }
 
 
-TRIAL_DAYS_DEFAULT = 15
+TRIAL_DAYS_DEFAULT = 7
 
 
 def tier_publico(plan_stored: str) -> str:
@@ -205,7 +206,7 @@ def get_trial_status(user_id: int, user: dict | None = None) -> dict:
     """{"active": bool, "days_left": int, "started_at": datetime|None}.
 
     Fonte: auth_accounts.trial_started_at (ancorado por telefone via
-    db.plans.claim_trial_for_user — 15 dias únicos por phone_hash, na vida;
+    db.plans.claim_trial_for_user — um trial por phone_hash, na vida;
     cartão não zera nem estica)."""
     started = None
     if user is not None and "trial_started_at" in user:

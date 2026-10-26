@@ -47,6 +47,10 @@ def limpa_rate_limits(bucket: str, email: str) -> None:
 
 def csrf(client: TestClient) -> dict[str, str]:
     token = "test-csrf-token"
+    # Um GET anterior planta o cookie do servidor em `testserver.local`; o do teste
+    # fica no domínio "". A ordem dos dois no header é detalhe do jar (a httpx2
+    # 2.16.0 inverteu) e a starlette lê o último, então só pode haver um.
+    client.cookies.delete(dashboard.CSRF_COOKIE_NAME)
     client.cookies.set(dashboard.CSRF_COOKIE_NAME, token)
     return {dashboard.CSRF_HEADER_NAME: token}
 

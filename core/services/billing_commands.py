@@ -130,8 +130,9 @@ def _handle_assinar(user_id: int, platform: str) -> str:
         v2_enabled = False
     # Import local: `trial_offer` importa `_bold` DAQUI; no topo fecharia o ciclo.
     from .trial_offer import texto_da_oferta
+    from core.services.plan_service import trial_days_total
     offer_text = texto_da_oferta(user_id, platform) if v2_enabled else (
-        f"Aqui ó, link pra assinar com {b('15 dias grátis')} "
+        f"Aqui ó, link pra assinar com {b(f'{trial_days_total()} dias grátis')} "
         "(cancela quando quiser, sem cobrança no trial):"
     )
     return (
@@ -218,7 +219,7 @@ def _handle_plano(user_id: int, platform: str) -> str:
                 return billing_copy.COBRANCA_EM_ATRASO.format(cancelar=b("cancelar plano"))
             return billing_copy.SEM_ACESSO.format(assinar=b("assinar plano"))
 
-        # Nota: o trial de 15 dias hoje é uma assinatura Stripe do plano escolhido
+        # Nota: o trial hoje é uma assinatura Stripe do plano escolhido
         # (status trialing) — cai no ramo pago abaixo com status_label "Período
         # grátis em andamento" e "Primeira cobrança" na data. Não há mais o
         # estado "Plus sem assinatura" (trial sem cartão).
@@ -279,7 +280,7 @@ def _handle_plano(user_id: int, platform: str) -> str:
         next_label = "Renovação"
     else:
         status_label = {
-            "trialing": "Trial em andamento (15 dias grátis)",
+            "trialing": "Período grátis em andamento",
             "active": "Ativo",
             "past_due": "Pagamento em atraso",
             "canceled": "Cancelado",

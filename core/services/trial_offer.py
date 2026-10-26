@@ -1,8 +1,8 @@
 """
 core/services/trial_offer.py — a frase de oferta que é VERDADE para uma conta.
 
-UM assunto: o trial é 15 dias por telefone NA VIDA (`plan_trials`), então "com
-15 dias grátis" não é uma frase que se possa escrever para todo mundo. Aqui mora
+UM assunto: o trial é único por telefone NA VIDA (`plan_trials`), então "com
+N dias grátis" não é uma frase que se possa escrever para todo mundo. Aqui mora
 a decisão dos TRÊS estados — elegível / não elegível / não sei — e nada mais.
 
 **Saiu de `core/services/billing_commands.py` quando ganhou o SEGUNDO chamador**,
@@ -26,9 +26,9 @@ def texto_da_oferta(user_id: int, platform: str) -> str:
 
     EXTRAÍDA de `_handle_assinar` (§0.1) quando a mensagem de bloqueio do bot
     (`core.handle_incoming._paywall_gate`) passou a precisar da mesma verdade. A
-    copy de lá prometia "15 dias grátis (um teste por número)" a todo mundo, e
+    copy de lá prometia "N dias grátis (um teste por número)" a todo mundo, e
     ela é FALSA justamente para quem o corte do Grátis manda para cá: o trial é
-    15 dias por telefone NA VIDA (`plan_trials`).
+    único por telefone NA VIDA (`plan_trials`).
 
     **Lê o MOTIVO (`db.plans.motivo_trial_indisponivel`), não o booleano**, e
     isso é o conserto de uma segunda mentira, na direção oposta.
@@ -43,7 +43,7 @@ def texto_da_oferta(user_id: int, platform: str) -> str:
 
     Os três estados, e o do meio é o "não sei":
 
-      • elegível        → promete os 15 dias;
+      • elegível        → promete o período grátis;
       • `telefone_ja_usou` → nomeia o telefone, que é o que de fato aconteceu;
       • `sem_telefone` **ou exceção** → não afirma nem nega, deixa o checkout
         dizer. São coisas diferentes com a MESMA resposta honesta: nos dois
@@ -68,7 +68,8 @@ def texto_da_oferta(user_id: int, platform: str) -> str:
             "Aqui ó, link pra assinar. O checkout confirma seu período grátis ou o "
             "valor da primeira cobrança antes da confirmação:"
         )
+    from core.services.plan_service import trial_days_total
     return (
-        f"Aqui ó, link pra assinar com {b('15 dias grátis')} "
+        f"Aqui ó, link pra assinar com {b(f'{trial_days_total()} dias grátis')} "
         "(cancela quando quiser, sem cobrança no trial):"
     )

@@ -195,7 +195,7 @@ def test_atual_de_cada_fonte_e_o_numero_das_telas_e_nada_do_provedor_sai(uid):
     texto = json.dumps(ler(uid)) + json.dumps(contas)
     assert "acc-SEGREDO" not in texto and "99887" not in texto
     assert set(c) == {"id", "instituicao", "nome", "saldo", "moeda", "no_total", "conexao",
-                      "sincronizado_em", "motivos"}
+                      "sincronizado_em", "motivos", "logo_proprio", "logo_url"}
 
 
 # ── reconexão (grupo) ───────────────────────────────────────────────────────

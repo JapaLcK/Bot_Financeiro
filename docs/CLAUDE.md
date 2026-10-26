@@ -99,8 +99,7 @@ saiu para routers em `frontend/routes/`, registrados com `include_router`:
 do Pro: 1 a 3 cenários (à vista, parcelado, financiado pela tabela Price) comparados
 com o atual sobre a mesma leitura da previsão de saldo, 90 dias + resumo do contrato.
 O pior dia e a reserva incluem hoje após a compra e os 90 dias seguintes (91 datas);
-o saldo final continua sendo o do dia 90. A tool avisa antes dos números se os
-bancos conectados estiverem excluídos ou o saldo consolidado não for confirmado.
+o saldo final continua sendo o do dia 90. A tool abre pela `veredito_fala`; o `aviso_saldo` (antes dos números) vem de `_aviso_saldo` em `core/services/ai_chat/tools/simulator.py`: com o veredito ligado ele omite o ramo "motivos a conferir", que a fala já carrega; com a chave desligada, sai como antes do 3b (com o ramo de motivos).
 Preço, entrada, custos, despesa mensal nova e reserva aceitam no máximo duas casas
 decimais; frações de centavo são recusadas na validação comum da API e da tool.
 Taxas percentuais mantêm precisão livre, inclusive valores muito pequenos (na rota legada e na tool; a v2 aceita juros com no máximo 4 casas, ver "API v2").
@@ -167,7 +166,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/contas` (`api/v2/contas.py`, regra em `db/contas_hoje.py`): o bloco de contas
   do Resumo — `total`, `motivos`, `fora_do_total`, `carteira {saldo, motivos}` e `contas[]`
   (`id`, `instituicao`, `nome`, `saldo`, `moeda`, `no_total`, `conexao` — um estado de
-  `connection_ui_state` —, `sincronizado_em`, `motivos`). Mesmo recorte e mesmos critérios da
+  `connection_ui_state` —, `sincronizado_em`, `motivos`, `logo_proprio`, `logo_url` — o logo
+  da conexão pela mesma regra do Open Finance, `db/open_finance_state.py::logos_da_conexao`;
+  o servidor só confere `https://` no `logo_url`, o host é filtrado no cliente). Mesmo recorte e mesmos critérios da
   foto do patrimônio (`db/patrimonio.py`), num snapshot só (repeatable read, só leitura):
   `total` = `calcular().carteira + calcular().bancos`. Conta desatualizada (sync > 48 h,
   pela metade ou nunca: `banco_desatualizado`) e conta fora do último sync
@@ -217,8 +218,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `card_na_tela: true` (`maiores_gastos`: resumo, sem `expenses`, com `total_dos_itens` (soma só dos itens listados, não o gasto do período), `maior`, `categorias`; `fim_do_mes`:
   o resultado inteiro). Sem emissor (WhatsApp, `/ai/chat`) a saída é byte a byte a de antes. No stream só o 🐷 do começo
   da resposta sai (`streaming.executar`/`completar`); o histórico gravado mantém o 🐷. O texto curto junto do card é só
-  um pedido no prompt (`prompt_do_usuario(app=True)`), sem código que o imponha: quem mede é o staging. Tool de leitura sem card: `tests/test_ai_chat_tool_card.py` (`AUDITORIA`) lista uma a uma. Web: o /painel
-  ainda não chama o stream (Etapa 7 do web).
+  um pedido no prompt (`prompt_do_usuario(app=True)`), sem código que o imponha: quem mede é o staging. Tool de leitura sem card: `tests/test_ai_chat_tool_card.py` (`AUDITORIA`) lista uma a uma. Web: o /painel chama o stream atrás do
+  freio `PAINEL_CHAT_IA_USER_IDS` e desenha do bloco todo id de `cards.IDS` (`webapp/src/dashboard/parts/CardIa.tsx`, presos por `tests/test_ai_chat_cards_ids_painel.py`); manda `cards: []`
+  (`lib/conversaIa.ts`), então não recebe os cards da tool (`DA_TOOL`). Os 5 recursos legados (`caixinhas`, `cartoes`, `parcelas`, `renda`, `insights`) são dict de float, sem Pydantic:
+  as fixtures `tests/fixtures/ai_chat_recurso_*.json` são conferidas contra o bloco real, e o contrato do web confere todo número que o card desenha.
   `comparacao` (onda 2, PR A): o bloco é o resultado de `compare_periods` sem `escolha` e `nota` (`modo`, `atual`/`anterior`, `base`, `despesa`/`receita`/`resultado` em `total_atual`/`total_anterior`/`total_delta`/`pct`/`estado`, até 10 `categorias` por |delta|, `categorias_omitidas`, `motivo`, `motivos`; só no `modo: mes_aberto`, `dias_corridos` (o dia de hoje) e `dias_no_mes`, para a legenda "dia 17 de 31", porque `atual.fim` é o fim do mês; dinheiro em float); o modelo recebe `cards_resumos.resumo_comparacao` (o mesmo resultado, só a 1ª categoria, com `escolha`, `nota` e `card_na_tela`). Sem card: `pro_required`, `error`, `inicio_do_historico` e `sem_base`; dois meses passados seguem a recusa para `categorias`. `serie` (só no card; o modelo e o `ai_guard` nunca a recebem): `{atual, anterior}` com o gasto (DESPESA, sem receita) acumulado por dia, `serie.atual[i]`/`anterior[i]` = dia `inicio + i`, reais em float, do mesmo filtro do `dias[]` do Resumo (`db.lancamentos.listar` sem interno e sem outra moeda). Garantia: a última posição é o `total` da `despesa` do lado, senão `serie: null` (outra moeda, falha da leitura, ou período livre, que lê o cartão pela data da compra e não tem série). Compra de cartão anterior ao período, na fatura dele, cai no dia 1; a compra dentro da janela entra no dia da compra. O lado que contém hoje (o `atual` ou o `anterior`, conforme a ordem em que o modelo pediu) para em hoje e sobe em degrau até um lançamento de data futura, então o app não pode assumir `len == dias_corridos`; o outro lado tem `dias` posições. O app o desenha em `app/src/features/painel/cardComparacao.tsx`: o delta de despesa com sinal, o chip de %, as duas linhas acumuladas sobrepostas (reaproveita `CurvaAcumulada`; o eixo X é o MAIOR dos dois períodos e a série mais curta só acaba antes) e as 3 categorias que mais mudaram, com o ícone vindo do catálogo do usuário (`/api/app/categorias`, o `dados.categorias` do provider), inclusive o da categoria que zerou; `serie: null` desenha o card sem gráfico. O servidor só o emite a quem o declara em `cards`. Fixture: `tests/fixtures/ai_chat_bloco_comparacao.json`.
   `ultimos_lancamentos` e `sem_categoria` (onda 2, PR C2): o bloco é `{itens, motivos}`, sem total, com até 10 itens (o app mostra 5 e um "+5") no formato `Lancamento` de `/api/v2/lancamentos`
   (`mostrar_itens` em `core/services/ai_chat/tools/listas_ia.py`; fixtures `tests/fixtures/ai_chat_bloco_{ultimos_lancamentos,sem_categoria}.json`). O modelo recebe a lista INTEIRA (até `limit`, 50) com `card_na_tela: true`,
@@ -283,9 +286,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   proteção de build que falha depois do claim.
   `scripts/comparar_resumo_mes.py` compara antigo × novo por usuário e mês, só lendo.
   **Comparação de períodos (PL-07, Plus+):** `core/services/comparacao_periodos.py` decide a janela e o
-  delta; a tool `compare_periods` da IA é o único consumidor (o endpoint e a tela v2 são o PR B). Lê a
-  regra única só no caminho `mes=` (`totais` + `categorias` de `db/resumo_mes`, cartão pela FATURA; janela parcial
-  = faturas que fecham dentro dela). Com as 4 datas decide o adaptador, pelo mesmo critério da main (`_meses_inteiros`, depois de `_limita_periodo`):
+  delta; consumidores: a tool `compare_periods` da IA, o `GET /api/v2/comparacao` (bloco "Comparado ao mês
+  anterior" da tela v2, no catálogo do Organizar) e o KPI "vs" das Análises do painel antigo (`meses=N`, abaixo). Lê a
+  regra única só no caminho `mes=` (`totais` + `categorias` de `db/resumo_mes`, cartão pela FATURA). Com as 4 datas decide o adaptador, pelo mesmo critério da main (`_meses_inteiros`, depois de `_limita_periodo`):
   se AS DUAS janelas são meses-calendário inteiros (dia 1 até o último dia; no mês corrente, dia 1 até hoje ou
   depois, e então vale o mês TODO) é a mesma conta de `mes=` e do painel, cartão pela FATURA ("compara abril com
   maio" não diverge do painel); exceção: mês CORRENTE (dia 1 até hoje ou o mês todo) × o mês imediatamente anterior
@@ -299,6 +302,20 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   2026-10-17); a `escolha` avisa que o mês não acabou. `anterior_encurtado` fica sempre False (contrato). Mês fechado = mês inteiro × mês inteiro. Categoria nova tem
   `pct=None`; sem gasto agora, `-100.0`; nunca +100%. O gate `financial_comparison` é a primeira instrução
   do serviço; o `anterior` de `GET /api/v2/resumo-do-mes` não muda (Essencial segue vendo os dois totais).
+  KPI das Análises (`/analytics/{uid}/kpis`, Plus+): `comparar_mes(..., meses=N)`, P1-B também aqui: os N meses até o corrente, inteiros, contra os N antes deles, a mesma janela dos totais da rota
+  (cartão pela fatura; `delta_pct.income/expense` e `delta_escolha`, a frase); `dias_corridos`/`dias_no_mes` e a
+  `serie` só com N=1 (com N meses não saem), e `anterior_encurtado` é sempre False também com N>1; o rótulo é "vs os N
+  meses anteriores" ("vs o mês anterior" com N=1) e, como o período inclui o mês aberto, a queda fica neutra e a alta
+  colorida (gasto âmbar, receita verde; decisão do dono PB-1, a mesma do bloco v2 no mês aberto); gate antes de ler o anterior; `compute_kpis(..., com_anterior=False)` na rota (o `prev`
+  antigo, N dias corridos antes, só vai ao LLM de insights, PL-06); janela livre (`from` E `to`, a regra de
+  `resolve_window`) fica sem delta; falha da comparação também (loga só a classe, os totais saem); no "12 meses" o
+  Plus (o `history_days` dele em `core/services/plan_limits.py` não alcança o anterior) recebe `inicio_do_historico`,
+  vê "—" e o `title` começa pela constante `FORA_DO_HISTORICO` de `frontend/routes/analytics.py`. O rótulo usa
+  `delta_meses`, o N que a rota usou (com o teto de `resolve_window`), e não o do seletor.
+  Cor do bloco v2 ("Comparado ao mês anterior", `widgets/Comparacao.tsx`): no mês aberto a queda fica cinza, a alta de
+  gasto âmbar, a receita subindo verde e caindo cinza, e o Resultado sempre neutro (decisões do dono PB-1 e de
+  2026-10-20); no mês fechado, as cores de sempre (gasto subindo âmbar e caindo verde, receita ao contrário).
+  Follow-up fora do PR B: a PB-2 (legenda "dia N de M" no mês aberto, como o card do app) e a PB-3 (ícone de categoria).
   Saída da tool: dinheiro e `pct` são NÚMERO JSON (o `ai_guard` só lê número como evidência; mesma convenção de
   `_resumo_periodo`) e moram em `total_atual`/`total_anterior`/`total_delta` (o guard só lê número sob chave
   monetária; `atual`/`anterior`/`delta` soltos não contariam). `motivos` + `nota` são os avisos de dado incompleto do
@@ -311,6 +328,11 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   Divergência conhecida: `get_spending_trend` soma o cartão pela data da compra, então a tendência de um mês pode
   diferir da comparação por `mes=` (fatura) na mesma conversa; `get_period_summary` e a comparação por datas
   parciais concordam (as duas, data da compra). No período livre o rótulo da categoria é a grafia de MAIOR total.
+- `GET /api/v2/comparacao?mes=AAAA-MM` (`api/v2/comparacao.py`, regra em `core/services/comparacao_periodos.py`,
+  PL-07): o mês contra o anterior equivalente, a mesma conta da tool `compare_periods`. Plus+ (`financial_comparison`,
+  gate na dependência antes de qualquer leitura; Essencial = 403 `pro_required` sem payload). Só `mes` (sem ele, o
+  corrente; futuro ou fora do serviço = 422). Dinheiro e `pct` são texto, datas ISO; `escolha` é a frase do período e
+  da base do cartão, a mesma do chat. Montado também em `/api/app/comparacao`, sem cliente no app nativo ainda.
 - `GET /api/v2/orcamento-domestico?mes=AAAA-MM`, `POST .../potes` e `POST .../renda` (`api/v2/orcamento_domestico.py`, regra em `db/household_budget.py`, que segue em float; a fronteira converte para `Decimal` de 2 casas e tudo sai como TEXTO): o Orçamento doméstico (6 potes) do `/painel#/orcamento` (cabeçalho com "Gasto fixo" e "Editar percentuais"; "Visão geral do mês" com donut e legenda em Gasto|Orçado, "Renda do mês" com a origem e a tabela "Potes" (cards no celular); clicar na linha abre o modal com os `lancamentos` do pote; sem rodapé de total: o `total.restante_livre` segue na API e o painel não o mostra. **Paleta própria do /painel**: ícone e cor de cada pote vêm de `webapp/src/dashboard/lib/potes.ts` (por `chave`; chave desconhecida cai na `cor` do servidor e no círculo), e NÃO de `BUCKETS`, cuja cor o /app antigo lê e não pode mudar; Metas e Liberdade financeira são potes "guardados": passar do teto não é estouro, texto "Guardado" — a regra é do servidor: `guarda` em `BUCKETS` (`db/household_budget.py`) vira `guardado` no pote, e `total.restante_livre` = Σ restante dos não guardados + Σ max(restante, 0) dos guardados, enquanto `total.restante` segue o líquido; o /painel não exibe nenhum dos dois totais), fora do menu lateral e do Menu do celular (só o card de Ferramentas e o ⌘K). Gate `household_budget` (Plus/Pro): Essencial/Free = 403 `{"error":"pro_required","feature":"household_budget"}` nas 3 rotas, sem gravar. Mês: GET sem `mes` = o corrente no fuso do app, formato errado ou futuro = 422 (`mes_pedido(mes, onde)` de `resumo_mes.py`, `loc` `query` ou `body`); o módulo SEMPRE recebe o mês explícito (sem ele usa o `date.today()` do servidor). Resposta `OrcamentoDomestico` `{mes, renda {valor, origem "calculada"|"informada"}, potes[6 em ordem fixa: chave, nome, cor, pct, teto, gasto, restante (negativo = passou), usado_pct|null, categorias[str] (nomes de exibição das categorias do pote), por_categoria[{categoria, total}], lancamentos[{data AAAA-MM-DD, descricao, categoria, valor, origem "conta"|"cartao"}] (do mês, mais novo primeiro; somam o `gasto`)], total}`; `usado_pct` nulo = teto zero (renda 0, que é válida). `POST /potes` `{mes, potes[{chave, pct "55" ou "33.33"}]}`: chave repetida, pote faltando/desconhecido, pct fora de 0–100 ou soma ≠ 100 (em centésimos) = 422 em `body.potes`, tudo-ou-nada; os % são globais (não por mês). `POST /renda` `{mes, valor: "1234.56"|null}` (`valor` obrigatório e anulável; `null` volta à renda calculada; "0" vale; vírgula e número JSON = 422): o override é por mês. Cada POST devolve o `OrcamentoDomestico` do mês. O 1º GET de quem nunca abriu grava os % padrão (um aviso "tudo" no SSE; as tabelas já estão em `TABELAS_QUE_AVISAM`). Divergências que existem e não foram corrigidas: o "gasto" dos potes NÃO é o "Saiu" do Resumo (inclui aportes, filtra por `date_part(criado_em)` e não exclui outra moeda); a renda calculada soma só `launches` de receita do mês. `/api/app/orcamento-domestico*` existe (o app nativo reaproveita `criar_app`) mas nenhuma tela do app o chama.
 - `GET /api/v2/patrimonio` (`api/v2/patrimonio.py`; também `/api/app/patrimonio`, montada pelo `criar_app`; `api/nativo/patrimonio.py` só reexporta `patrimonio` e `Patrimonio` para o card do chat): o patrimônio de hoje (`db/patrimonio.calcular`), as fotos diárias (`patrimonio_fotos`) e, desde a Etapa 6 (PR A), `trechos[{desde, ate}]` (crescente, nunca vazio, o último termina em hoje) e `variacao{valor, desde, ate}|null`. Datas em texto ISO, dinheiro em centavos (`api.nativo.dinheiro.Dinheiro`). `historico` = as fotos dos últimos 12 meses (`DIAS_MAX`), ou menos se a janela do plano for menor. O `/api/app/patrimonio` ganhou `trechos` e `variacao` e passou a ter o mesmo teto de 12 meses (a rota antiga só cortava pela janela do plano; sem efeito hoje, o histórico começa em 01/10/2026). **Regra da quebra** (`db.patrimonio.quebra(a, b)`, pura, sobre a `base` de dois pontos consecutivos): a linha quebra se mudar `v`, a contagem de contas e posições em outra moeda (`fora.moeda`) ou o conjunto de CONTAS, ou se mudarem as conexões VIVAS (fora `paused`/`removed`) E as posições ao mesmo tempo; base ilegível quebra dos dois lados. Estado não terminal que muda, CDB novo/resgate, e reconexão com os mesmos ids não quebram. Conta BRL nova no mesmo banco quebra (decisão do dono, P1). Pontos da série = fotos com `dia < hoje` + o ponto AO VIVO de hoje (a foto de hoje sai da série, não duplica o dia, mas fica em `historico`); `variacao` = total de hoje menos o do 1º ponto do trecho atual, diferença dos totais exibidos (até 1 centavo da exata); `null` quando o trecho atual tem um ponto só (nunca 0 inventado); zero real sai `"0.00"`. Uma transação `repeatable read, read only`. Limites declarados: reconexão com ids novos quebra a linha mesmo com total igual (comparar por `institution_id` faria o passado mudar quando a conexão é apagada); banco só de investimento cuja 1ª coleta cai depois da foto do dia faz o salto entrar na variação; troca de moeda compensando a contagem, só em posições, não quebra; um buraco de dias sem foto esconde pausa e volta; o estado `paused`/`removed` também pode vir do `status_reason` (`core/services/pluggy_health.py`, `_LABELS`), mas hoje ninguém grava esses valores e o teste liga só `_TERMINAL` → estado; a foto de hoje que quebrou com o hoje ao vivo aparece no trecho [hoje]. Testes: `tests/test_patrimonio_quebra.py` (regra e montagem puras), `tests/test_api_v2_patrimonio.py` (banco real), fixtures em `tests/frontend/api_v2_respostas.json["patrimonio"]`. Tela web (Etapa 6, PR B): `webapp/src/dashboard/widgets/Patrimonio.tsx` (`PatrimonioReal` e `ComposicaoReal`, uma requisição só pela `patrimonioQuery` de `lib/v2.ts`; protótipo/DEMO segue com `NetWorth`/`Wealth`); a linha leva um `M` por trecho (nunca liga trechos; trecho de 1 ponto é círculo), a variação vem do servidor e `null` fica sem número, e `motivosDaTela` tira `carteira_nao_confirmada` (decisão do dono) dos dois blocos. Teste: `tests/frontend/dashboard_v2_patrimonio.test.mjs`.
 - `GET /api/v2/contas-a-pagar` (`api/v2/contas_a_pagar.py`) e `GET /api/v2/caixinhas` (`api/v2/caixinhas.py`): os dados dos cards do Carteiro e do Banqueiro no `/painel`, só LEITURA, e a MESMA regra da consulta do agente (`_get_bills_to_pay(uid, {}, sync=False)` e `_list_pockets(uid, {}, accrue=False)`, de `core/services/ai_chat/tools/`; nenhuma regra reimplementada). Ler NÃO gera instância do próximo ciclo (ao contrário da rota antiga `/recurring-bills`) nem aplica juros: o saldo é o último registrado. Dinheiro sai como TEXTO (float do módulo vira `Decimal` de 2 casas), sem `provider_*_id` nem `raw`. `ContasAPagar` `{hoje, pendentes, vencidas, total_estimado, tem_variavel, contas[id, nome, categoria, vence_em, dias (0 = hoje, negativo = vencida), valor|null (com `variavel`, só a estimativa), variavel, vencida]}` (só as pendentes, até 200, a mais atrasada primeiro); gate `recurring_expenses` (Essencial+, o mesmo do `/recurring-bills`), 403 `pro_required`. `Caixinhas` `{total, caixinhas[id, nome, saldo, meta|null, progresso_pct|null, atingida|null]}` (do maior saldo; progresso limitado a 100); sem gate de plano (o Grátis tem caixinha). Não confundir com `/api/v2/metas` (`db/metas`). Montadas no `criar_app`, então também em `/api/app`; nenhuma tela do app as chama. Testes: `tests/test_api_v2_contas_caixinhas.py`.
@@ -593,7 +615,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   é `cashflow.pior_caso_do_risco` (sem a estimativa nem as saídas duvidosas); se o risco só existe contando as dúvidas, o estado é
   inconclusivo e os `bloqueios[].itens` listam o que perguntar. Se só a estimativa do dia a dia (com as dúvidas a favor) leva abaixo do limite, é
   `dados_insuficientes` com `gasto_do_dia_a_dia_estimado` (nunca `risco_identificado`), junto com as perguntas das dúvidas que decidem, se houver; a receita fixa prevista conta como certa. Janela de conferência (`JANELA_CONFERENCIA_DIAS`,
-  `Snapshot.conferencia`, fora de `qualidade()`). Chave `SIMULADOR_VEREDITO_ENABLED` (padrão ligada, lida uma vez por pedido, `veredito.ligado`): desligada, `veredito` sai `null`. A tool `simulate_purchase` (3b) e as telas (3c) ainda não o leem. **Com banco conectado o veredito é sempre
+  `Snapshot.conferencia`, fora de `qualidade()`). Chave `SIMULADOR_VEREDITO_ENABLED` (padrão ligada, lida uma vez por pedido, `veredito.ligado`): desligada, `veredito` sai `null`. A tool `simulate_purchase` (3b) o lê e entrega `veredito_fala` (linhas prontas montadas no servidor; o prompt manda o Piggy repeti-las, nos três canais). a rota legada `POST /simulator/{user_id}` segue sem ele; as telas (3c) ainda não o leem. **Divergência declarada:** `check_cashflow`/`project()` não usam o veredito nem a janela de conferência, e se abstêm onde o simulador diria "não recomendo" (só para o lado conservador, nunca dizem "cabe"). **Com banco conectado o veredito é sempre
   inconclusivo** (`cobertura_bancaria_nao_comprovada`, até os PRs 4a a 4d). Não grava nada. A tela é `#/simulador/compra`
   (`widgets/SimuladorCompra.tsx`, fora do protótipo e do menu lateral; entra pela ferramenta "Vale a pena
   comprar?"). O `atual` inclui a estimativa do dia a dia (mediana, ver Previsão); em aberto: o corte de hábito real
@@ -1607,12 +1629,74 @@ Limites conhecidos: (1) assinatura que morre depois de o
 nascer: o `create-checkout` recusa, mas a tela de status mostra sem plano até o grant sair;
 (3) a reentrega do checkout repete o alerta de estorno.
 
+**Pagamento Pix parcial não libera o plano (#1228).** O dreno (`core/services/pix_valor.py`,
+`conferir_valor`) só concede quando o `value` do webhook cobre `total_cents` da cobrança
+(tolerância zero). Menor, ausente ou ilegível: cobrança segue `pending`, sem grant, cadernos,
+e-mail, GA4 ou CAPI; um alerta por lado por pagamento (efeito `valor_alertado` para o retido,
+`valor_concedido_alertado` para o excesso e para o retido depois completado — baixa manual desfeita
+e refeita: alerta "antes RETIDO foi completado", NÃO devolver) e evento fechado
+(log `pix_pagamento_parcial_retido`, com `pago_cents`, `devido_cents` e `payment_id`). Excesso
+concede, alerta e deixa o log `pix_excesso_recebido`; retido e depois completado deixa o log
+`pix_retido_completado` (o alerta desse lado não é retentado depois de `paid`), mas só quando o
+alerta de retido foi entregue; senão, só a coluna `completado_pelo_mesmo_pagamento` do runbook
+mostra. Limite conhecido:
+parcial e integral do mesmo pagamento drenados AO MESMO TEMPO (alerta de retido ainda em voo)
+podem conceder sem o alerta "antes RETIDO foi completado", porque o marcador do retido é lido sem
+lock (lock aninhado esgota o pool, #1260); a coluna `completado_pelo_mesmo_pagamento` do runbook
+cobre. O marcador de dedupe só é gravado quando o canal do
+admin confirma a entrega (senão log `pix_alerta_nao_entregue` e o próximo evento tenta de novo). Plano já concedido antes da regra continua. NÃO VERIFICADO: o que `value` traz em baixa
+manual (`receiveInCash`) e em cobrança editada no painel do Asaas, se o pagador pode digitar o
+valor no QR dinâmico (Passo 0, sandbox), se o `value` do webhook é BRUTO ou LÍQUIDO da tarifa
+(se fosse líquido, toda venda com tarifa > 0 seria retida), se `ADMIN_NOTIFY_WEBHOOK_URL`
+existe e responde 2xx em produção (sem ele o parcial fica só em `system_event_logs`) e o estado de
+`ASAAS_PIX_ANNUAL_ENABLED` (o webhook não olha a flag). Antes de ligar: ver o checklist do PR #1228.
+Runbook do operador (parcial retido):
+1. Localizar (de quem é a linha): `select created_at, user_id, message, details, (select
+   c.status from pix_charges c where c.id = (details->>'charge_id')::bigint and c.user_id =
+   system_event_logs.user_id) as status_agora, exists (select 1 from pix_charges c where
+   c.user_id = system_event_logs.user_id and c.status = 'paid' and c.asaas_payment_id =
+   details->>'payment_id') as completado_pelo_mesmo_pagamento from
+   system_event_logs where event_type = 'pix_pagamento_parcial_retido' and not exists (select 1
+   from system_event_logs o where o.event_type = system_event_logs.event_type and o.user_id =
+   system_event_logs.user_id and o.details->>'payment_id' = system_event_logs.details->>'payment_id'
+   and o.details->>'charge_id' = system_event_logs.details->>'charge_id' and o.id >
+   system_event_logs.id) order by created_at desc;` (`details` traz `charge_id`,
+   `payment_id`, `pago_cents` e `devido_cents`; `user_id` é
+   a conta a atender em /admin; `status_agora` é o estado ATUAL da COBRANÇA, e o retido é de um
+   PAGAMENTO: só `completado_pelo_mesmo_pagamento` diz que este dinheiro virou plano (em qualquer
+   cobrança da conta)). Uma linha
+   por pagamento e cobrança: cada entrega ou retentativa do mesmo `payment_id` grava um log, e a
+   consulta mostra só o mais recente; o `pago_cents` dele é o último registrado (pode ser de uma
+   retentativa, ou `ilegivel`) e pode diferir do alerta: o alerta leva o valor do evento em que
+   o canal do admin confirmou a entrega. Confira o valor no painel do Asaas antes de devolver ou
+   cobrar a diferença.
+2. Decidir pela linha:
+   - `completado_pelo_mesmo_pagamento` = `true` (prevalece sobre `status_agora`): o mesmo
+     pagamento foi completado depois. NÃO devolva; se `status_agora` for `pending`/`canceling`,
+     só feche a linha (passo 3). O alerta/log de excesso diz se há diferença a devolver; o log
+     `pix_excesso_recebido` também pode se repetir numa retentativa: é uma diferença por
+     `payment_id`.
+   - `status_agora` em `pending` ou `canceling` (os do passo 3): escolher UM caminho: autorizar
+     o desconto (grant `source='admin'` pelo painel e entregar os cadernos à mão); pedir o
+     complemento (cobrança da diferença no Asaas; a soma NÃO é automática, conceder à mão); ou
+     devolver o valor no Asaas.
+   - Qualquer outro caso (`paid` por OUTRO pagamento, `refunded`, `refunded_partial`,
+     `canceled`, `expired`): conferir o pagamento no painel do Asaas ANTES de devolver, cobrar
+     ou conceder.
+3. Fechar a linha, senão ela trava a recompra Pix: o MESMO plano devolve o mesmo QR (já
+   pago) e pedir OUTRO plano ou conjunto de cadernos dá 503 `asaas_cancelamento_falhou` na
+   hora (esperado, não medido: o Asaas recusa o `DELETE` de pagamento recebido e a linha fica
+   em `canceling`):
+   `update pix_charges set status = 'canceled', canceled_at = now(), qr_payload_enc = null
+   where id = <id> and status in ('pending', 'canceling');` (confira o `where`: é escrita
+   manual de dinheiro; `tests/test_pix_valor_parcial.py` executa exatamente este SQL).
+
 **Cadernos extras no Pix anual (PR A: receber e entregar; inerte até o checkout
 gravar a foto).** `pix_charges.extras` (`jsonb`, default `[]`, check de array) guarda a
 FOTO dos cadernos escolhidos, `[{price, url, nome, valor_cents}]`, gravada só por
 `criar_cobranca`. `amount_cents` continua sendo SÓ o plano (crédito de upgrade,
 `pix_charges_amount_fecha` e `plan_grants` não mudam); o que o cliente paga é
-`core/services/pix_extras.total_cents` (plano + Σ cadernos), usado no `alertar_valor`,
+`core/services/pix_extras.total_cents` (plano + Σ cadernos), usado em `pix_valor.conferir_valor`,
 no alerta do estorno parcial, no GA4/CAPI e no `total_cents` do poll. O dreno ganhou o
 efeito `ebook` logo depois do `grant`: uma linha em `ebook_entregas` por caderno, com
 `session_id` = `external_reference` (`pix:<id>`) e `ebook_price` = o Price do Stripe;
@@ -2144,7 +2228,7 @@ fictícios de exemplo (`core/services/demo/`), sem ferramentas; o Piggy fala em 
 (contador, carimbos e hash do número por 30 dias): não toca em users / user_identities / launches /
 ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone de conta sem credencial, que ainda produz `precisa_senha`; `vincular CODIGO` ou outro canal) nunca
 entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`, com os mesmos `candidatos_simetricos` e o mesmo `db.google_auth.SEM_CREDENCIAL_SQL`; telefone de conta com senha não conta, o telefone não liga mais); `vincular 123456` segue o fluxo
-normal. Ao fim, o link `/t/{code}` carimba `checkout_at` e manda para `/precos?origem=teste` (destino fixo,
+normal. Da 1ª à 7ª resposta vai o convite "Cria sua conta" e, na 8ª, o FIM; os dois levam o link `/t/{code}`, que carimba `checkout_at` no 1º clique (desde 2026-10-23 pode ser em qualquer resposta, não só no fim: o "clicaram_checkout" do `/admin/funil` não se compara com a série anterior) e manda para `/precos?origem=teste` (destino fixo,
 `Cache-Control: no-store`, `shared_limit`). Interruptor e teto: `DEMO_DAILY_MAX` (padrão 0 = desligado; sessões
 abertas por 24h; `<= 0` desliga, lida a cada chamada). Retenção: 1 teste por número a cada 30 dias e o
 `wa_hash` é zerado após 30 dias (`esquecer_numeros_antigos`, em `table_cleanup`); copy: "o que você

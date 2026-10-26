@@ -16,6 +16,7 @@ import itertools
 import secrets
 import uuid
 
+from core.services.pix_extras import total_cents
 from db.connection import get_conn
 from db.pix_charges import criar_cobranca
 from db.pix_charges_saga import attach_pagamento
@@ -46,8 +47,12 @@ def nova_cobranca(user_id: int, **kw) -> dict:
     return linha
 
 
+_TOTAL = object()   # default de `valor`: o que a cobrança deve (plano + cadernos)
+SEM_VALOR = object()  # `valor=SEM_VALOR`: o webhook vem sem a chave `value`
+
+
 def entregar(tipo: str, cobranca: dict, *, payment_id: str | None = None,
-             referencia: str | None = None, valor: float | None = None,
+             referencia: str | None = None, valor=_TOTAL,
              tentativas: int = 0) -> str:
     """Grava o evento na outbox e DRENA — o caminho inteiro, não o handler solto.
 
@@ -70,10 +75,12 @@ def entregar(tipo: str, cobranca: dict, *, payment_id: str | None = None,
             "id": payment_id if payment_id is not None else cobranca["asaas_payment_id"],
             "externalReference": (referencia if referencia is not None
                                   else cobranca["external_reference"]),
-            "value": valor if valor is not None else cobranca["amount_cents"] / 100,
+            "value": total_cents(cobranca) / 100 if valor is _TOTAL else valor,
             "status": tipo.replace("PAYMENT_", ""),
         },
     }
+    if valor is SEM_VALOR:
+        del corpo["payment"]["value"]
     registrar_evento(event_id, tipo, corpo, next(_versao))
     if tentativas:
         with get_conn() as conn, conn.cursor() as cur:
