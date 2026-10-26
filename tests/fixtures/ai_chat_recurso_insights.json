@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "insights": [
+    {
+      "key": "k1",
+      "icon": "🐷",
+      "title": "Mercado subiu",
+      "message": "Você gastou R$ 80,50 a mais em mercado que no mês passado.",
+      "severity": "info",
+      "action_view": null,
+      "action_label": null
+    },
+    {
+      "key": "k2",
+      "icon": "🐷",
+      "title": "Fatura chegando",
+      "message": "A fatura do Nubank vence dia 17.",
+      "severity": "warning",
+      "action_view": "cartoes",
+      "action_label": "Ver fatura"
+    }
+  ]
+}

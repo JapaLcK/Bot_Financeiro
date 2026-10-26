@@ -7,11 +7,11 @@
 <title>Planos · PigBank</title>
 <meta property="og:type" content="website"/>
 <meta property="og:title" content="Planos · PigBank"/>
-<meta property="og:description" content="Planos PigBank: Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 15 dias grátis pra testar o plano que você escolher."/>
+<meta property="og:description" content="Planos PigBank: Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 7 dias grátis pra testar o plano que você escolher."/>
 <meta property="og:url" content="https://pigbankai.com/precos"/>
 <meta property="og:image" content="https://pigbankai.com/brand/landing-piggy-cta.webp?v=1"/>
 
-<meta content="Planos PigBank: Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 15 dias grátis pra testar o plano que você escolher." name="description"/>
+<meta content="Planos PigBank: Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 7 dias grátis pra testar o plano que você escolher." name="description"/>
 <link href="https://pigbankai.com/precos" rel="canonical"/>
 <link href="/favicon.png?v=3" rel="icon" type="image/png"/>
 <link href="/brand/apple-touch-icon.png?v=3" rel="apple-touch-icon"/>
@@ -303,7 +303,7 @@
 <div class="wrap" id="conteudo">
 <section class="section">
 <section aria-labelledby="precos-title" class="lp-plans-intro lp-section-light"><div class="lp-shell lp-plans-intro-grid">
-<div class="lp-plans-intro-copy"><p class="lp-eyebrow">Planos PigBank</p><h1 id="precos-title">Um plano para cada <br/><span class="lp-underline">ritmo de vida.</span></h1><p class="lp-lead">Sua grana organizada no WhatsApp e no painel. Escolha como quer começar.</p><p class="lp-plans-status" id="precos-sub">15 dias grátis pra testar o plano que você escolher. Cancele antes do fim e não paga nada.</p><p class="lp-plans-status" id="testar-piggy">Ainda na dúvida? <a class="lp-text-link" data-teste href="/teste">Testar o Piggy agora</a></p></div>
+<div class="lp-plans-intro-copy"><p class="lp-eyebrow">Planos PigBank</p><h1 id="precos-title">Um plano para cada <br/><span class="lp-underline">ritmo de vida.</span></h1><p class="lp-lead">Sua grana organizada no WhatsApp e no painel. Escolha como quer começar.</p><p class="lp-plans-status" id="precos-sub">7 dias grátis pra testar o plano que você escolher. Cancele antes do fim e não paga nada.</p><p class="lp-plans-status" id="testar-piggy">Ainda na dúvida? <a class="lp-text-link" data-teste href="/teste">Testar o Piggy agora</a></p></div>
 <div class="lp-plans-mascot"><div aria-hidden="true" class="lp-plans-mascot-bubble"></div><img alt="Piggy com óculos escuros, moletom preto e celular" fetchpriority="high" height="1200" src="/brand/landing-piggy-four-digits.webp?v=1" width="800"/></div>
 </div></section>
 <!-- Escada de planos (Essencial/Plus/Pro) — conteúdo ÚNICO
@@ -402,9 +402,8 @@
 
         </div>
 
-        <p class="plans-note"><i aria-hidden="true" class="ph ph-piggy-bank"></i> <strong>Preço de fundador:</strong> assinando agora, seu valor fica congelado pra sempre: enquanto a assinatura estiver ativa, ele nunca sobe.</p>
 </div>
-<p class="plans-note" id="plans-note-v2"><i aria-hidden="true" class="ph ph-confetti"></i> Todo plano vem com <strong>15 dias grátis pra testar</strong> (um teste por número). A primeira cobrança só acontece depois do trial. Cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
+<p class="plans-note" id="plans-note-v2"><i aria-hidden="true" class="ph ph-confetti"></i> Todo plano vem com <strong>7 dias grátis pra testar</strong> (um teste por número). A primeira cobrança só acontece depois do trial. Cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
 <p class="plans-cta"><a href="#comparar">Ver a comparação completa, recurso por recurso <i aria-hidden="true" class="ph ph-caret-right"></i></a></p>
 </section>
 <!-- ══════════════════════════════════════════════════════════════════
@@ -856,7 +855,7 @@ async function cancelChange() {
 }
 
 // Copy do gate de escolha de plano (cadastro novo, checkout abandonado):
-// assinar é OBRIGATÓRIO pra entrar, e a copy padrão ("15 dias grátis pra
+// assinar é OBRIGATÓRIO pra entrar, e a copy padrão ("N dias grátis pra
 // testar") não diz isso. Quem decide é o ESTADO do servidor —
 // needs_plan_selection do /auth/me, a fonte de verdade (§0.7) —, NUNCA o
 // ?escolha=1 da URL: o marcador se perde em três caminhos alcançáveis em
@@ -890,7 +889,7 @@ async function cancelChange() {
   if (!sub) return;
   // DOIS estados de gate, não um. `needs_plan_selection` é o cadastro NOVO que
   // ainda não escolheu; `app_access === false` é quem foi CORTADO no fim do
-  // Grátis — e para ele a copy de cima ("15 dias grátis pra testar") é falsa
+  // Grátis — e para ele a copy de cima ("N dias grátis pra testar") é falsa
   // duas vezes: ele não está escolhendo pela primeira vez, e o trial é um por
   // telefone NA VIDA, então o ex-assinante que já o usou não vai ganhar outro.
   // A ordem importa, e é ela que resolve — NÃO a ausência de sobreposição, que
@@ -901,7 +900,7 @@ async function cancelChange() {
   // conta está sem plano ativo" a quem nunca teve um.
   if (me.needs_plan_selection) {
     sub.textContent =
-      "Escolha um plano pra continuar: 15 dias grátis pra testar (um teste por número). "
+      "Escolha um plano pra continuar: 7 dias grátis pra testar (um teste por número). "
       + "O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.";
     return;
   }
@@ -914,7 +913,7 @@ async function cancelChange() {
       + "Escolha um plano pra voltar a usar: o checkout mostra o que vai ser "
       + "cobrado, e quando, antes de você confirmar.";
     // São DOIS textos na página, não um. O `#plans-note-v2` promete "todo plano
-    // vem com 15 dias grátis pra testar (um teste por número)" — a MESMA
+    // vem com N dias grátis pra testar (um teste por número)" — a MESMA
     // mentira que o `#precos-sub` acima acabou de consertar, três parágrafos
     // abaixo dele. O trial é um por telefone NA VIDA, então para o ex-assinante
     // que já o queimou a frase é falsa; e não dá para trocá-la por "você não

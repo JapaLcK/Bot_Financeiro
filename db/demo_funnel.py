@@ -202,7 +202,7 @@ def marcar_resposta(code: str, n: int) -> None:
 
 
 def marcar_checkout(code: str) -> None:
-    """Clique no link final (/t/{code}); só a 1ª vez grava."""
+    """Clique no link do teste (/t/{code}), de qualquer resposta; só a 1ª vez grava."""
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:

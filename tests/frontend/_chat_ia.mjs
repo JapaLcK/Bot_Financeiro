@@ -5,8 +5,12 @@
 // Não é `*.test.mjs` de propósito: o `node --test tests/frontend/*.test.mjs` não o roda como suíte.
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { RAIZ, RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 export { RESPOSTAS };
+/** Uma fixture de tests/fixtures (o dump do Pydantic que o pytest confere): `ai_chat_recurso_detalhes.json` (o `detalhes` de resumo/categorias/calendario), `ai_chat_bloco_periodo.json`. */
+export const fixture = (nome) => JSON.parse(readFileSync(join(RAIZ, "tests", "fixtures", nome), "utf8"));
 
 let browser;
 export const iniciar = async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); };
@@ -16,7 +20,7 @@ export const PREPARANDO = "Preparando a resposta…";
 export const PAROU = "Você parou esta resposta.";
 export const SESSAO = "Sua sessão terminou. Recarregue a página.";
 export const SEM_COTA = "Suas mensagens com o Piggy acabaram por este mês ou não fazem parte do seu plano.";
-export const SEM_CARD = "Este card ainda não aparece aqui.";
+export const SEM_CARD = "Não foi possível mostrar este card.";
 export const GENERICO = "Não foi possível obter a resposta agora. Tente novamente em instantes.";
 export const PRAZO = "A resposta demorou mais que o esperado. Tente de novo.";
 

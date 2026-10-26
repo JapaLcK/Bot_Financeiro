@@ -17,6 +17,7 @@ o assunto aqui é o texto, e é isso que ele mede.
 from __future__ import annotations
 
 import core.services.email_service as email_service
+from core.services.plan_service import trial_days_total
 
 
 def _capturar(monkeypatch) -> dict:
@@ -42,7 +43,7 @@ def test_boas_vindas_leva_ao_precos_antes_do_whatsapp(monkeypatch):
     for campo in ("html_body", "text_body"):
         corpo = enviado[campo]
         assert f"{base}/precos" in corpo, f"{campo} não leva ao /precos"
-        assert "15 dias grátis" in corpo, f"{campo} não diz que dá pra testar de graça"
+        assert f"{trial_days_total()} dias grátis" in corpo, f"{campo} não diz que dá pra testar de graça"
 
     html = enviado["html_body"]
     assert html.index(f"{base}/precos") < html.index(link_wpp), (

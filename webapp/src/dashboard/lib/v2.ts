@@ -142,7 +142,7 @@ export const contaQuery = {
 // aba): espera por ela e lê de novo. Cancelar não serve, quem a esperava receberia o cancelamento. Toda conferência de conta do
 // chat passa por aqui: montagem, foco, pergunta ao Piggy e menção (Codex no #1157).
 export async function lerContaFresca(qc: QueryClient) {
-  if (qc.isFetching({ queryKey: contaQuery.queryKey })) await qc.fetchQuery(contaQuery).catch(() => {});
+  if (qc.isFetching({ queryKey: contaQuery.queryKey, exact: true })) await qc.fetchQuery(contaQuery).catch(() => {}); // `exact`: só a leitura do perfil conta; a query de um card (["conta", assunto, uid]) em voo não é leitura de perfil
   return qc.fetchQuery(contaQuery);
 }
 
