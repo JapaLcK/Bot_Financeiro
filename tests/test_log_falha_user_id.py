@@ -355,7 +355,7 @@ def _parametros(fn: ast.AST) -> set[str]:
     return nomes | {x.arg for x in (a.vararg, a.kwarg) if x}
 
 
-def _chamadas_sem_user_id(fonte: str, rel: str) -> list[tuple[str, str]]:
+def _chamadas_sem_user_id(fonte: str | bytes, rel: str) -> list[tuple[str, str]]:
     """(arquivo, função) de cada `_log_falha` cujo 2º POSICIONAL não é o
     `ast.Name` `user_id` ligado a um parâmetro da função envolvente.
 
@@ -585,7 +585,7 @@ _NIVEIS_ESPELHADOS = _niveis_espelhados()
 _ALLOWLIST_LOGGER: set[tuple[str, str]] = set()
 
 
-def _loggers_do_recorte(fonte: str, rel: str) -> list[tuple[str, str, int, bool]]:
+def _loggers_do_recorte(fonte: str | bytes, rel: str) -> list[tuple[str, str, int, bool]]:
     """(arquivo, função, linha, tem_extra_user_id) de cada `logger.<nível>` do
     recorte que FALA de `user_id` — seja no formato (`"… user_id=%s …"`) ou
     passando a variável como argumento.

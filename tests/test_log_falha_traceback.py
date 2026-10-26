@@ -39,6 +39,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -52,6 +53,7 @@ import core.system_event_log as system_event_log
 from _system_event_log_helpers import kwargs_com_valor
 from core.handlers import pending as h_pending
 from core.services.ai_chat.tools import get_tool
+from test_max_lines_python import _rastreados
 
 _SEGREDO = 'DETAIL: Key (id)=(42) mercadinho segredo'
 
@@ -144,17 +146,17 @@ def _nome(no: ast.AST) -> str | None:
     return no.attr if isinstance(no, ast.Attribute) else getattr(no, "id", None)
 
 
-def _apelidos(arvore: ast.Module) -> set[str]:
-    """`_log_falha`, os `from … import _log_falha as _lf` E os rebinds por
-    ATRIBUIÇÃO (`_lf = _log_falha`, `log = observability._log_falha`).
+def _apelidos(arvore: ast.Module, alvos=frozenset({"_log_falha"})) -> set[str]:
+    """`_log_falha` (ou os `alvos`), os `from … import _log_falha as _lf` E os
+    rebinds por ATRIBUIÇÃO (`_lf = _log_falha`, `log = observability._log_falha`).
 
     A atribuição é a MESMA CLASSE do apelido de import — colher só o `asname`
     do `ImportFrom` fechava a instância e deixava a irmã aberta. Ponto fixo,
     porque `ast.walk` é BFS e não ordem de código: `a = _log_falha` seguido de
     `b = a` só fecha na segunda passada."""
-    nomes = {"_log_falha"} | {
+    nomes = set(alvos) | {
         a.asname for no in ast.walk(arvore) if isinstance(no, ast.ImportFrom)
-        for a in no.names if a.name == "_log_falha" and a.asname
+        for a in no.names if a.name in alvos and a.asname
     }
     atribuicoes = [
         (alvo.id, no.value) for no in ast.walk(arvore) if isinstance(no, ast.Assign)
@@ -181,7 +183,7 @@ def _e_log_falha(no: ast.Call, apelidos: set[str]) -> bool:
             and _nome(no.args[0]) in apelidos)
 
 
-def _chamadas_com_traceback(fonte: str, rel: str) -> list[tuple[str, str]]:
+def _chamadas_com_traceback(fonte: str | bytes, rel: str) -> list[tuple[str, str]]:
     """(arquivo, função envolvente) de cada `_log_falha(..., com_traceback=…)`
     que NÃO é literal `False`.
 
@@ -229,17 +231,33 @@ def _chamadas_com_traceback(fonte: str, rel: str) -> list[tuple[str, str]]:
 def _varre_repo(extrator=None) -> list[tuple[str, str]]:
     """`extrator(fonte, rel) -> [(arquivo, funcao)]`. Parametrizado para que
     `tests/test_log_falha_user_id.py` reuse ESTA varredura (mesma raiz, mesmos
-    ignorados, mesmo tratamento de `SyntaxError`) em vez de duplicá-la."""
+    ignorados, mesmo tratamento de `SyntaxError`) em vez de duplicá-la.
+
+    Universo = o que o git RASTREIA (`_rastreados`, o mesmo do portão de
+    tamanho), nunca `rglob`: no checkout do dono o `rglob` engolia os worktrees
+    aninhados em `.time-dev/worktrees/` e o `output/`, e a guarda reprovava lá e
+    passava no CI. `fonte` chega em BYTES para o `ast.parse` respeitar o cookie
+    de coding. Arquivo rastreado que não parseia REPROVA com o nome: pulá-lo
+    calado o tirava da varredura (#657)."""
     extrator = extrator or _chamadas_com_traceback
+    try:
+        rastreados = _rastreados(_RAIZ)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(
+            f"a varredura precisa de `git ls-files` em {_RAIZ} (sem git, sem veredito): {exc}"
+        ) from exc
+    assert rastreados, f"git ls-files devolveu 0 arquivos em {_RAIZ}: sem universo, sem veredito"
     achados = []
-    for py in _RAIZ.rglob("*.py"):
-        rel = py.relative_to(_RAIZ)
-        if _IGNORADOS & set(rel.parts):
-            continue
+    for rel in rastreados:
+        py = _RAIZ / rel
+        if _IGNORADOS & set(Path(rel).parts) or not py.exists():
+            continue                        # ausente = deleção não estagiada
+        dados = py.read_bytes()
         try:
-            achados += extrator(py.read_text(encoding="utf-8"), str(rel))
-        except SyntaxError:                                    # pragma: no cover
-            continue
+            ast.parse(dados)    # só o parse no `try`: SyntaxError do extrator é outro erro
+        except SyntaxError as exc:
+            raise AssertionError(f"{rel}: arquivo rastreado que não parseia: {exc}") from exc
+        achados += extrator(dados, rel)
     return achados
 
 
