@@ -508,8 +508,25 @@ jobs:
             exit 1
           fi
 
+      # Sem `--with-deps`, de propósito. O `ubuntu-latest` já traz as libs de sistema
+      # que o Chromium pede (libasound2, libatk, libgbm1…: o apt do `--with-deps`
+      # as reporta "already the newest version"). O que ele instalava de novo eram
+      # 9 pacotes de FONTE (CJK, tailandês, xfonts) e o upgrade de glib, nss e
+      # xvfb: 26 MB pelo espelho `azure.archive.ubuntu.com`, que às vezes entrega
+      # a dezenas de KB/s. Em 2026-10-22 e 2026-10-26 esse apt levou 9,7 e 11,8 min
+      # num shard, e os 15 min do job acabaram com o shard no meio dos testes
+      # (`The operation was canceled`, nenhum teste falhou). O download do Chromium
+      # em si vem do CDN da Playwright e leva ~20 s. Lib de sistema que faltar
+      # quebra o launch com a lista do que falta; FONTE que faltar NÃO quebra: só
+      # troca o fallback de glifos, e um teste de largura pode mudar de medida
+      # (nenhum mede fonte do sistema hoje; as fontes do site vêm de `frontend/`).
+      # Se a imagem do runner mudar, volte a este passo. O `timeout-minutes: 5`
+      # é troca deliberada: um passo lento passa a falhar aqui, com nome, em vez
+      # de gastar o tempo dos testes (o install de 405 s que passou em 2026-10-24
+      # teria falhado).
       - name: Install Playwright + Chromium
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 5
+        run: npx playwright install chromium
 
       # O glob repete o do `test:frontend` do package.json de propósito: o
       # `--test-shard` tem de vir ANTES dos arquivos — depois deles é ignorado em
