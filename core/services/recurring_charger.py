@@ -9,7 +9,9 @@ banner do dashboard mostra "dia de débito no banco"). Não debita nada.
 Logo depois, `notify_autopay_notices_whatsapp_once` manda os avisos NOVOS do dia
 uma vez só pro WhatsApp do dono, numa mensagem de texto livre por usuário, só
 para quem falou com o Piggy nas últimas 23h (`WA_AUTOPAY_NOTICE_ENABLED`; sem
-a env, não faz nada).
+a env, não faz nada). Por último, `notify_declaracoes_whatsapp_once`
+(`core/services/declaracao_lembrete.py`) lembra, uma vez por declaração, da
+despesa/receita "paga pelo banco" sem par há 7 dias (ADR 0006, A2c).
 
 Recorrente só PREVÊ (docs/plano-dashboard-v2.md, Q42): gasto fixo e receita
 recorrente entram na Previsão (`core/services/cashflow.py`) e nunca são lançados
@@ -60,6 +62,13 @@ async def run_recurring_charger_loop():
             raise
         except Exception as exc:
             print(f"[autopay_wa] erro: {type(exc).__name__}", file=sys.stderr)
+        try:
+            from core.services.declaracao_lembrete import notify_declaracoes_whatsapp_once  # importa daqui: ciclo
+            await asyncio.to_thread(notify_declaracoes_whatsapp_once, agora)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[declaracao_wa] erro: {type(exc).__name__}", file=sys.stderr)
         await asyncio.sleep(60 * 60)  # 1 hora entre verificações
 
 

@@ -18,7 +18,7 @@ de `efeitos` depois do `for update` da linha da declaração e o CAS do `delete 
 corrida não aplica delta; I5 é quebrado DE PROPÓSITO, uma vez); I10 um lançamento da Carteira resolve no
 máximo uma declaração (o marcador `efeitos.foi_em_dinheiro`, por CAS, também no convertido); I11 selecionar
 preserva o contexto da declaração na Carteira (`efeitos.foi_em_dinheiro.declaracao`) sem alterar os campos dela.
-(I9 fica reservado para o lembrete do A2c.)
+I9 o lembrete de 7 dias do A2c não muda lançamento, vínculo nem saldo: escreve só `lembrete_em` (`db/bank_lembrete.py`).
   criar (`add_launch_and_update_balance`)  I1 recusa argumento; I5; I6   mutex = o `update accounts`, e o
                                            reconcile na mesma transação (cursor externo é recusado)
   editar categoria / lote                  I1 recusa categoria interna   SEM mutex, de propósito: a
@@ -40,6 +40,8 @@ preserva o contexto da declaração na Carteira (`efeitos.foi_em_dinheiro.declar
   desfazer fusão vizinha (`_desfaz`)       só FUSED_STATUSES; não alcança `bank_movement_confirmed`   mutex
   foi em dinheiro (`bank_dinheiro`)        I5 (só converter), I6, I8, I10, I11   mutex -> `for update` de C ->
                                            CAS do marcador / `delete ... returning` -> `accounts`
+  lembrete de 7 dias (`bank_lembrete`)     I9, I6   mutex -> `update` em lote com CAS (`lembrete_em is null`, sem par); a soltura
+                                           (envio recusado em todos os destinos) também toma o mutex
   merge de contas / reset / exclusão       I6 (a declaração muda de dono ou cai junto)   locks próprios de
                                            `users.py`/`privacy.py`, fora desta tabela
 Célula check-then-write SEM mutex que sobra: nenhuma sobre propriedade mutável (as duas "SEM mutex" acima

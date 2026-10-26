@@ -1054,7 +1054,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (risco existente); o dono decidiu em 2026-10-13 **preservar esse comportamento neste pacote**, e
   qualquer novo bloqueio de arquivo exige decisão separada. Na Q40, a resposta “banco” passará a
   gravar como declaração conferida com o extrato: o PR-B entrega o caminho atrás de uma flag que
-  nasce desligada, e ligá-la é ato operacional separado. A conciliação (PR-A) e o lembrete de 7 dias (PR-A2; “foi em dinheiro” só age por ação e confirmação do usuário, e o PR-A2 inclui “trocar o par” e “desfazer a confirmação”, pela decisão do dono de 2026-10-13) vêm antes (ordem decidida pelo dono; entregues: A2a, A2b-1 com trocar/desfazer e, com o A2b-2, “foi em dinheiro” por `POST /open-finance/{user_id}/movements/cash`, só no /app, `db/bank_dinheiro.py`; falta o lembrete de 7 dias, A2c); o PR-A2 é pré-condição para ligar a flag, por decisão do dono. A Q42
+  nasce desligada, e ligá-la é ato operacional separado. A conciliação (PR-A) e o lembrete de 7 dias (PR-A2; “foi em dinheiro” só age por ação e confirmação do usuário, e o PR-A2 inclui “trocar o par” e “desfazer a confirmação”, pela decisão do dono de 2026-10-13) vêm antes (ordem decidida pelo dono; entregues: A2a, A2b-1 com trocar/desfazer e, com o A2b-2, “foi em dinheiro” por `POST /open-finance/{user_id}/movements/cash`, só no /app, `db/bank_dinheiro.py`; o A2c, lembrete de WhatsApp do 7º dia, está em revisão: `core/services/declaracao_lembrete.py`, passo horário do loop de recorrentes, coluna `bank_movement_declarations.lembrete_em`, ADR 0006); o PR-A2 é pré-condição para ligar a flag, por decisão do dono. A Q42
   não muda.
 - A página é `/painel` (`frontend/painel.html` + o artefato `frontend/dashboard-app.*`,
   de `webapp/src/dashboard`): sessão por `auth_token` ou `dashboard_token`
@@ -2613,7 +2613,7 @@ Limites declarados do painel (pessoa = conta mais antiga do `user_id`; `auth_acc
 ### Tarefas de fundo
 
 Sobem no startup do app quando `RUN_BACKGROUND_TASKS != "0"`: rendimento de
-investimento, Open Finance (abaixo), contas a pagar dos recorrentes, agendadores de
+investimento, Open Finance (abaixo), contas a pagar dos recorrentes (o mesmo loop manda o aviso do autopay e, por último, o lembrete de 7 dias da declaração bancária "a conferir", `core/services/declaracao_lembrete.py`: texto livre, das 9h às 21:59, só para quem falou com o Piggy nas últimas 23h, uma vez por declaração, sem env de liga/desliga), agendadores de
 engajamento e de IA proativa, retenção de eventos de login, poda das tabelas de
 refresh token / challenge de MFA / cadastro Google pendente
 (`core/services/table_cleanup.py`), e a entrega do e-book da `/assinar`
