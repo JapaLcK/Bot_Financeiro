@@ -136,7 +136,7 @@ def compute_kpis(user_id: int, from_date: date, to_date: date, com_anterior: boo
     }
     `com_anterior=False`: sem `prev`/`delta_pct` e sem ler o período anterior (a rota das
     Análises tira o delta de `core/services/comparacao_periodos.py`; o anterior daqui, os
-    mesmos N dias corridos antes, fica só para o LLM de insights).
+    mesmos N dias corridos antes, ficou sem leitor: os padrões de `ai_patterns` só leem os destaques).
     """
     span_days = (to_date - from_date).days
     prev_from = from_date - timedelta(days=span_days)

@@ -2,22 +2,52 @@
   "ok": true,
   "insights": [
     {
-      "key": "k1",
-      "icon": "🐷",
-      "title": "Mercado subiu",
-      "message": "Você gastou R$ 80,50 a mais em mercado que no mês passado.",
-      "severity": "info",
-      "action_view": null,
-      "action_label": null
+      "key": "goal_behind:12:atrasada:2026-10",
+      "type": "goal_behind",
+      "icon": "🎯",
+      "title": "Meta 'Viagem' atrasada",
+      "message": "Pra bater o prazo precisaria de R$ 350,50/mês, mas o ritmo atual tá em R$ 100,50/mês.",
+      "severity": "warning",
+      "action_label": "Ver metas",
+      "action_view": "goals",
+      "explicacao": {
+        "versao": 1,
+        "tipo": "goal_behind",
+        "familia": "meta",
+        "detector": "insights.goal_behind",
+        "calculado_em": "2026-10-12T09:00:00-03:00",
+        "periodo": {"inicio": "2026-10-01", "fim": "2026-10-31", "parcial": true, "rotulo": "outubro de 2026"},
+        "fonte": {"base": "caixinhas", "cartao": null, "origem": "depósitos e saques da caixinha"},
+        "referencia": {"estatistica": "ritmo_mensal_necessario", "caixinha": "Viagem", "valor": 350.5,
+                       "meta_valor": 1000.5, "prazo": "2026-12-25"},
+        "atual": {"valor": 100.5, "saldo_valor": 300.5, "janela": {"dias": 90}},
+        "diferenca": {"valor": -250.5, "percentual": -71.3},
+        "amostra": null
+      }
     },
     {
-      "key": "k2",
-      "icon": "🐷",
-      "title": "Fatura chegando",
-      "message": "A fatura do Nubank vence dia 17.",
+      "key": "budget_warning:alimentacao:2026-10",
+      "type": "budget_warning",
+      "icon": "🍔",
+      "title": "Alimentação tá apertando",
+      "message": "97% do orçamento de alimentação e faltam 19 dias.",
       "severity": "warning",
-      "action_view": "cartoes",
-      "action_label": "Ver fatura"
+      "action_label": "Ajustar",
+      "action_view": "budgets",
+      "explicacao": {
+        "versao": 1,
+        "tipo": "budget_warning",
+        "familia": "desvio",
+        "detector": "insights.budget_warning",
+        "calculado_em": "2026-10-12T09:00:00-03:00",
+        "periodo": {"inicio": "2026-10-01", "fim": "2026-10-31", "parcial": true, "rotulo": "outubro de 2026"},
+        "fonte": {"base": "orcamentos", "cartao": "fatura", "origem": "lançamentos + faturas de cartão"},
+        "referencia": {"estatistica": "orcamento_do_mes", "categoria": "alimentação", "valor": 500.5},
+        "atual": {"valor": 487.5, "percentual": 97.4},
+        "diferenca": {"valor": -13.0, "percentual": -2.6},
+        "amostra": null
+      }
     }
-  ]
+  ],
+  "motivo": null
 }

@@ -26,6 +26,9 @@ trajetória, pior dia ou dados de 60/90 dias. A projeção por data e a tool
 orientam a não extrapolar os horizontes recebidos.
 
 Insights são barrados antes de cache ou geração, inclusive no pré-processamento.
+O Plus recebe a explicação de cada insight (período, fonte, referência) e o link de
+navegação; o Pro recebe também `impacto` e `acoes` (feature `insights_acoes`), calculados em código.
+O cache é um só e o plano vale na leitura: a rota e o card `piggy` do chat passam pela mesma projeção.
 O dashboard Essencial mantém as análises básicas e não solicita os endpoints
 avançados. O resumo semanal é conferido na ativação e em cada envio automático;
 preferência antiga ligada não contorna um downgrade. Desligar continua permitido.

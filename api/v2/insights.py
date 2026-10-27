@@ -1,7 +1,8 @@
 """`GET /api/v2/insights`: as dicas do Piggy (card do Resumo), só LEITURA. A MESMA `generate_ai_insights` da rota legada
-(`force=False`: cache de 6 h por usuário; sem cache gera na hora, no máximo 1 chamada de IA a cada 6 h, também sob pedidos concorrentes: `generate_ai_insights` serializa a geração por
-usuário, por processo; sem rate limit próprio, a /api/v2 não tem limiter). O gate `insights`
-(Plus) roda antes de ler ou gerar."""
+(`force=False`: cache de 6 h por usuário; sem cache gera na hora, com as consultas dos 6 detectores e SEM IA (D12 do PL-06),
+no máximo 1 geração por usuário em voo, também sob pedidos concorrentes: `generate_ai_insights` serializa a geração por
+usuário, por processo; sem rate limit próprio, a /api/v2 não tem limiter). A lista já vem projetada por plano e o modelo
+daqui só leva `title`/`message`. O gate `insights` (Plus) roda antes de ler ou gerar."""
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
