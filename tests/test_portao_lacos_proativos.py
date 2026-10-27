@@ -225,6 +225,7 @@ _LACOS_ESPERADOS = {
     "core/services/piggy_agents.py::run_agent_emails_once",
     "core/services/engagement_scheduler.py::_check_and_send",
     "core/services/payment_reminder.py::check_payment_reminder",
+    "core/services/declaracao_lembrete.py::notify_declaracoes_whatsapp_once",
     "core/services/recurring_charger.py::notify_autopay_notices_whatsapp_once",
     *_ISENTOS_COM_RAZAO,
 }

@@ -4,11 +4,10 @@ import unicodedata
 from decimal import Decimal
 from datetime import datetime, time, timedelta
 from time import monotonic
-from uuid import NAMESPACE_OID, uuid5
 
 from psycopg.types.json import Jsonb
 
-from utils_date import _tz, add_months, billing_period_for_close_day
+from utils_date import _tz, billing_period_for_close_day
 from utils_text import VALOR_MAX, is_internal_category
 
 from .cards import (
@@ -27,6 +26,7 @@ from .of_identity import (
     external_id as of_external_id, existing_import,
 )
 from .open_finance_categories import categoria_pigbank, garantir_no_catalogo
+from .parcelas_of import chave_grupo_of
 from .open_finance_cash import RESERVA_SQL, RESERVADO_SQL
 from .users import ensure_user, ensure_user_tx
 
@@ -2366,27 +2366,8 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
         inst_no, inst_total = extract_installment_info(r["tx_raw"])
         group_id = None
         if inst_total:
-            # Heurística da doc Pluggy: cartão + estabelecimento + nº parcelas + valor total.
-            # Sem o totalAmount, duas compras diferentes iguais (mesmo merchant/parcelas) colidiam.
-            meta = (r["tx_raw"] or {}).get("creditCardMetadata") or {}
-            total_amount = meta.get("totalAmount")
-            # P2: adiciona o MÊS DE ORIGEM estimado (data da parcela menos nº parcela-1) pra separar
-            # compras idênticas feitas em meses distintos — sem quebrar o agrupamento das parcelas de
-            # UMA compra: todas back-calculam pro mesmo mês (parcela 1 em M, parcela 2 em M+1 → M).
-            origin_ym = ""
-            if inst_no and r["transaction_date"] is not None:
-                oy, om = add_months(
-                    r["transaction_date"].year, r["transaction_date"].month, -(int(inst_no) - 1)
-                )
-                origin_ym = f"{oy:04d}-{om:02d}"
-            key = "|".join([
-                str(card_cache[of_acc_id]),
-                (r["description"] or "").strip().lower(),
-                str(inst_total),
-                str(total_amount) if total_amount is not None else "",
-                origin_ym,
-            ])
-            group_id = uuid5(NAMESPACE_OID, key)
+            group_id = chave_grupo_of(card_cache[of_acc_id], r["description"], r["tx_raw"],
+                                      r["transaction_date"], inst_no, inst_total)
         cat = categoria_pigbank(r["category"])
         tx_id, created = add_imported_credit_purchase(
             user_id, card_cache[of_acc_id], r["amount"], cat,
