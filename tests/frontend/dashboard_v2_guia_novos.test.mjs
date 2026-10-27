@@ -8,7 +8,7 @@
 //   · convite de novidades: quem já fez parte do roteiro ouve quantos passos são novos.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PAINEL } from "./_painel.mjs";
+import { PAINEL, RESPOSTAS } from "./_painel.mjs";
 import { FAZER, PASSOS_TODOS, ROTA, abrir, acoes, anelNoAlvo, bora, entendi, esperaTitulo, navegador, tocarAba } from "./_guia.mjs";
 
 navegador();
@@ -157,6 +157,27 @@ test("convite de novidades: quem já fez parte do roteiro ouve quantos passos s�
 // Layout salvo = o Organizar será pulado: não é novidade a oferecer.
 const comLayout = (ctx) => ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.layout.v1.economizar", JSON.stringify(["contas", "resumo"])));
 const semOrganizar = TODOS.filter((i) => i !== "resumo.organizar");
+
+test("layout salvo + o feito:resumo.organizar falha (500): o Organizar não some; volta depois do passo atual, sem festa", async () => {
+  const { ctx, page, s } = await abrir({
+    guia: "oferecer", roteiro: "todos", antes: comLayout,
+    post: (c, n, st) => (c.passo === "resumo.organizar" && st.posts.filter((x) => x.passo === "resumo.organizar").length === 1 ? { status: 500, json: RESPOSTAS.erros["500"].body } : null),
+  });
+  await bora(page);
+  await page.waitForTimeout(800); // o 500 do feito:resumo.organizar já voltou
+  await FAZER["mes.trocado"](page);
+  await esperaTitulo(page, "Do seu jeito"); // sem o rollback o guia pularia para "Pra onde foi o dinheiro"
+  await entendi(page);
+  await anelNoAlvo(page, '[data-guia="painel.organizar"]');
+  await page.locator('[data-guia="painel.organizar"]').click();
+  await page.waitForFunction(() => !document.querySelector(".guia-balao"));
+  await page.waitForTimeout(2200);
+  await page.locator('[data-guia="painel.organizar"]').click(); // Pronto
+  await esperaTitulo(page, "Pra onde foi o dinheiro");
+  const feitas = acoes(s);
+  await ctx.close();
+  assert.deepEqual(feitas, ["visto", "feito:resumo.organizar", "feito:resumo.saiu", "feito:resumo.organizar"]);
+});
 
 test("convite de novidades com layout salvo: conta só o que falta de verdade (Ferramentas = 1 passo)", async () => {
   const { ctx, page, s } = await abrir({ guia: "oferecer", roteiro: "todos", antes: async (c, st) => { feitos(TODOS.filter((i) => !NOVOS.includes(i)), "oferecer")(c, st); await comLayout(c); } });

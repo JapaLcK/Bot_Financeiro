@@ -120,6 +120,8 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     // 409: o passo deixou de valer (o banco sumiu do mês). Não é "tentar de novo": relê e
     // mostra a orientação do motivo.
     onError: (e, c) => {
+      // Falhou o feito do passo pulado: desfaz o pulo otimista: o Organizar volta ao roteiro em vez de sumir.
+      if (c.acao === "feito" && c.passo && c.passo === pulado.current) setVistos((v) => v.filter((x) => x !== c.passo));
       if (c.acao === "feito" && e instanceof ErroApi && e.code === "passo_indisponivel") qc.invalidateQueries({ queryKey: guiaQuery.queryKey });
     },
   });
