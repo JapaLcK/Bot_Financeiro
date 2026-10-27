@@ -2427,13 +2427,14 @@ def _get_or_create_open_bill_cur(cur, user_id: int, card_id: int, ref_date) -> i
 
 
 # Linhas de cartão já importadas e o espelho OF de onde derivam (também lido pelo script
-# `scripts/corrigir_sinal_cartao_of.py`). Parâmetros: (user_id, connection_id, connection_id).
+# `scripts/corrigir_sinal_cartao_of.py` e `reagrupar_parcelas_of.py`). Parâmetros: (user_id, connection_id, connection_id).
 CREDIT_LINKS_SQL = f"""
     select distinct on (ct.id) o.amount, o.transaction_date, o.category, o.description,
            o.provider_transaction_id, a.provider_account_id, c.provider,
            ct.id as ct_id, ct.valor as cur_valor, ct.is_refund as cur_refund,
            ct.categoria as cur_cat, ct.purchased_at as cur_date, ct.bill_id,
-           ct.card_id, ct.categoria_editada as editada
+           ct.card_id, ct.categoria_editada as editada,
+           ct.group_id, ct.source, ct.installment_no, ct.nota, o.id as of_tx_id
     from open_finance_transactions o
     join open_finance_accounts a on a.id = o.account_id
     join open_finance_connections c on c.id = a.connection_id
