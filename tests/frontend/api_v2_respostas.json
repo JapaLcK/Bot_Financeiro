@@ -9829,6 +9829,7 @@
           "name": "Notebook",
           "card_name": "Nubank",
           "installments_total": 3,
+          "manual": true,
           "parcelas": [
             {
               "installment_no": 1,

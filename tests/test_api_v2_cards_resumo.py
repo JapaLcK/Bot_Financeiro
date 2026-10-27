@@ -86,11 +86,16 @@ def test_parcelas_e_a_lista_detalhada_campo_a_campo(a_e_b):
     esperado = list_installment_groups_detailed(a, "urgency")
     assert len(j["installments"]) == len(esperado) == 1
     g, e = j["installments"][0], esperado[0]
-    assert set(g) == {"name", "card_name", "installments_total", "parcelas"} and g["installments_total"] == 3
-    assert (g["name"], g["card_name"]) == (e["name"], e["card_name"])
+    assert set(g) == {"name", "card_name", "installments_total", "manual", "parcelas"} and g["installments_total"] == 3
+    assert (g["name"], g["card_name"], g["manual"]) == (e["name"], e["card_name"], e["manual"]) and g["manual"] is True
     assert g["parcelas"] == [{"installment_no": p["installment_no"], "valor": _txt(p["valor"]), "is_paid": p["is_paid"],
                               "is_next": p["is_next"], "due_date": p["due_date"]} for p in e["parcelas"]]
     assert [p["valor"] for p in g["parcelas"]] == ["100.00"] * 3 and [p["is_next"] for p in g["parcelas"]].count(True) == 1
+    # grupo com uma linha não manual (Open Finance): manual=False, igual ao da lista detalhada
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update credit_transactions set source='open_finance' where id=(select max(id) from credit_transactions where user_id=%s and installments_total=3)", (a,))
+        conn.commit()
+    assert _ok("/parcelas", a)["installments"][0]["manual"] is False is list_installment_groups_detailed(a, "urgency")[0]["manual"]
 
 
 def test_renda_e_a_evolucao_de_6_meses(a_e_b):

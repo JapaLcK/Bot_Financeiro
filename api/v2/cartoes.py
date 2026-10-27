@@ -45,6 +45,7 @@ class Parcelamento(BaseModel):
     name: str
     card_name: str | None
     installments_total: int
+    manual: bool
     parcelas: list[ParcelaDoGrupo]
 
 
@@ -64,7 +65,7 @@ def cartoes(uid: int = Depends(usuario_atual)) -> Cartoes:
 @router.get("/parcelas", response_model=Parcelas)
 def parcelas(uid: int = Depends(usuario_atual)) -> Parcelas:
     return Parcelas(installments=[Parcelamento(
-        name=g["name"], card_name=g["card_name"], installments_total=g["installments_total"],
+        name=g["name"], card_name=g["card_name"], installments_total=g["installments_total"], manual=g["manual"],
         parcelas=[ParcelaDoGrupo(installment_no=p["installment_no"], valor=_d(p["valor"]), is_paid=p["is_paid"],
                           is_next=p["is_next"], due_date=p["due_date"]) for p in g["parcelas"]],
     ) for g in list_installment_groups_detailed(uid, "urgency")])
