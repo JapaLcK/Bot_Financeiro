@@ -2943,20 +2943,20 @@ def _list_active_installments(user_id: int) -> str:
 
     lines = ["📦 **Parcelamentos ativos:**"]
     for r in rows:
-        n_total = int(r.get("n_total") or r.get("n_registered") or 0)
-        n_pending = int(r.get("n_pending") or 0)
-        if n_pending == 0:
+        if r["quitada"]:
             continue
-        n_paid = n_total - n_pending
         total = float(r.get("total") or 0)
         pending = float(r.get("total_pending") or 0)
         nota = (r.get("nota") or "").strip()
         desc = f" — {nota}" if nota else ""
-        progress = f"{n_paid}/{n_total} pagas"
+        progress = f"{r['pagas']}/{r['n_parcelas']} pagas"
         group_code = _group_code(r.get("group_id"))
+        # parcelas vistas não cobrem as N (Open Finance): total/restante seriam só o visto, não se inventa dinheiro
+        dinheiro = (f"💰 Total: {fmt_brl(total)} | Restante: {fmt_brl(pending)} ({progress})"
+                    if r["parcelas_completas"] else f"📊 {progress}")
         lines.append(
             f"• {r.get('card_name', '?')}{desc}\n"
-            f"  💰 Total: {fmt_brl(total)} | Restante: {fmt_brl(pending)} ({progress})\n"
+            f"  {dinheiro}\n"
             f"  🔢 Código: `{group_code}`\n"
             f"  🗑️ Apagar: `apagar {group_code}`"
         )
