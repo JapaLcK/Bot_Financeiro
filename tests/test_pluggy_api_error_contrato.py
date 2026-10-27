@@ -22,8 +22,10 @@ CLASSE CEGA (a guarda lê o NOME, não o valor):
   `motivo = data["message"]`) passa;
 - wrapper com outro nome que recebe a mensagem num parâmetro de nome da lista
   branca (como o próprio `incompleta(motivo)`, que só é coberto porque a guarda
-  conhece o nome dele), apelido de import (`PluggyApiError as E`) e subclasse
-  que monta a mensagem no `super().__init__` passam.
+  conhece o nome dele), apelido de import (`PluggyApiError as E`), reescrita de
+  `exc.args` antes do `raise` (`e.args = (str(data),)`), nova instância pelo
+  tipo (`raise type(e)(str(data))`) e subclasse que monta a mensagem no
+  `super().__init__` passam.
 
 CONTROLES (medidos): `{data}` interpolado no raise de `pluggy_bills.py:41`,
 `incompleta(f"{item}")` e `{body}` no contexto de um `_raise_for_pluggy_response`
