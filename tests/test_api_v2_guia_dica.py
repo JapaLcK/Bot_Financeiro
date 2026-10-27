@@ -16,6 +16,10 @@ from test_api_v2_guia import cliente, ler, linha, post, saiu_em, uid  # noqa: F4
 
 URL = "/api/v2/guia/dica"
 ID = DICAS[0]["id"]
+TODAS = [d["id"] for d in DICAS]
+# Quem tem cada uma: metas e patrimônio, Essencial ou acima; assinaturas e previsão, o Plus; simulador, o Pro.
+ESSENCIAL = ["metas.ritmo", "patrimonio.soma"]
+PLUS = [i for i in TODAS if i != "simulador.corte"]
 
 
 def dica(quem, corpo=None, **params):
@@ -28,15 +32,24 @@ def vistas(g):
 
 
 def test_dois_posts_mantem_o_carimbo_e_o_get_le_vista(uid):
-    assert vistas(ler(uid)) == [(ID, False)]
+    assert vistas(ler(uid)) == [(i, False) for i in PLUS]
     r = dica(uid)
     assert r.status_code == 200, r.text
-    assert vistas(r.json()) == [(ID, True)]
+    assert dict(vistas(r.json()))[ID] is True and sum(v for _, v in vistas(r.json())) == 1
     antes = linha(uid)["dicas"]
     assert list(antes) == [ID]
     assert dica(uid).status_code == 200
     assert linha(uid)["dicas"] == antes
-    assert vistas(ler(uid)) == [(ID, True)]
+    assert dict(vistas(ler(uid)))[ID] is True
+
+
+@pytest.mark.parametrize("id_", TODAS)
+def test_cada_dica_carimba_so_a_sua_e_volta_vista(uid, id_):
+    promote_to_pro(uid, plan="pro_max")  # todas à vista
+    r = dica(uid, {"dica": id_})
+    assert r.status_code == 200, r.text
+    assert vistas(r.json()) == [(i, i == id_) for i in TODAS]
+    assert list(linha(uid)["dicas"]) == [id_]
 
 
 def test_dica_nao_oferece_o_guia(uid):
@@ -66,13 +79,16 @@ def test_sem_csrf_e_403(uid):
     assert linha(uid) is None
 
 
-def test_essencial_nao_recebe_a_dica_de_assinaturas(uid):
-    """Assinaturas é Plus ou Pro: o Essencial não tem a tela, nem a dica. Controle positivo:
-    o Plus (o `uid`, plano `pro` = Plus no v2) recebe, ainda não vista."""
-    assert vistas(ler(uid)) == [(ID, False)]
+def test_dica_segue_o_plano_da_tela(uid):
+    """Cada dica vem com o recurso da tela: o Essencial só metas e patrimônio; o Plus também
+    assinaturas e previsão; o Pro (`pro_max`), o simulador. Controles positivos: cada degrau ganha a sua."""
+    ids = lambda: [i for i, _ in vistas(ler(uid))]
+    assert ids() == PLUS  # o `uid` é o Plus (plano `pro` no v2)
     promote_to_pro(uid, plan="essencial")
-    assert ler(uid)["dicas"] == []
-    assert dica(uid).json()["dicas"] == []  # grava (inofensivo), mas não devolve
+    assert ids() == ESSENCIAL
+    assert [i for i, _ in vistas(dica(uid).json())] == ESSENCIAL  # grava (inofensivo), mas não devolve
+    promote_to_pro(uid, plan="pro_max")
+    assert ids() == TODAS
 
 
 def test_export_lgpd_leva_as_dicas(uid):

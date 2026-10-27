@@ -17,6 +17,7 @@ export const MOTIVO: Record<NonNullable<Passo["motivo"]>, { texto: string; link?
 const EM: Record<string, string> = { Resumo: "no", Gastos: "em", Piggy: "no" };
 export const destino = (el: HTMLElement) => {
   if (el.matches('[data-guia="piggy.pergunta"]')) return "na barra de conversa";
+  if (el.matches('[data-guia="nav.menu"]')) return "em Menu e depois em Ferramentas";
   const nome = el.innerText.trim();
   if (!nome) return `no ícone “${el.title || el.getAttribute("aria-label")}”`;
   return EM[nome] ? `${EM[nome]} ${nome}` : `em “${nome}”`;

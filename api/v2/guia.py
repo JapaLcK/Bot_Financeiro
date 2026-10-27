@@ -1,11 +1,13 @@
 """`GET`/`POST /api/v2/guia`: o guia do /painel (#728), estado em `db/guia.py`.
 
 `PASSOS` é a fonte única do roteiro (falas, âncoras, ações, `dado`): o cliente desenha
-o selo "exemplo" a partir de `dado`. Passo 1 depende do Saiu real (`motivo_resumo`); 2 (categorias,
-dado real) e 3 (Piggy, exemplo) estão sempre disponíveis: o servidor não olha se há categoria. Estado, na ordem:
-`concluido` (todos os passos feitos) > `dispensado` > `em_andamento` (já oferecido, pelo
-convite ou pela Ajuda, ou já fez algum: o cliente não mostra o convite sozinho, só retoma
-pela Ajuda) > `oferecer` (nada feito, nunca oferecido, passo 1 disponível) > `indisponivel`. `motivo` do topo = o do passo 1 quando ele está indisponível, só nos dois
+o selo "exemplo" a partir de `dado`. Passo 1 depende do Saiu real (`motivo_resumo`); os outros (Organizar, categorias, Ferramentas, Piggy)
+estão sempre disponíveis: o servidor não olha se há categoria. Estado, na ordem:
+`concluido` (todos os passos feitos) > `oferecer` (já tinha concluído o roteiro antigo, falta
+passo de agora e o convite das novidades, `guia.NOVOS` em `dicas`, ainda não foi visto) > `dispensado`
+> `em_andamento` (já oferecido, pelo convite ou pela Ajuda, ou já fez algum, ou viu o convite das
+novidades: o cliente não mostra o convite sozinho, só retoma pela Ajuda) > `oferecer` (nada feito,
+nunca oferecido, passo 1 disponível) > `indisponivel`. `motivo` do topo = o do passo 1 quando ele está indisponível, só nos dois
 que podem tê-lo (`em_andamento` e `indisponivel`).
 
 O POST é escrita: o CSRF do monólito vale antes. `feito` sem `passo` = 422 no
@@ -37,29 +39,55 @@ PASSOS = (
      "fala": {"titulo": "O que saiu este mês",
               "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.",
               "texto": "Toca aqui pra comparar com o mês passado."}},
+    {"id": "resumo.organizar", "tela": "resumo", "ancora": "painel.organizar", "acao": "organizar.ligado",
+     "dado": "real", "avanca": "cliente",
+     "fala": {"titulo": "Do seu jeito",
+              "apresenta": "Esse painel é seu: dá pra trocar os blocos de lugar, tirar e pôr outros.",
+              "texto": "Toca em Organizar, mexe no que quiser e toca em Pronto."}},
     {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta",
      "dado": "real", "avanca": "cliente",
      "fala": {"titulo": "Pra onde foi o dinheiro",
               "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês.",
               "texto": "Toca numa categoria pra ver de onde vem o total."}},
+    {"id": "ferramentas.abrir", "tela": "ferramentas", "ancora": "ferramentas.compra", "acao": "ferramenta.aberta",
+     "dado": "real", "avanca": "cliente",
+     "fala": {"titulo": "Ferramentas",
+              "apresenta": "Aqui moram as ferramentas que ajudam a decidir.",
+              "texto": "Abre uma pra ver."}},
     {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou",
      "dado": "exemplo", "avanca": "cliente",
      "fala": {"titulo": "Pergunta pro Piggy",
-              "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; "
+              "apresenta": "Aqui você conversa comigo. A barra de conversa fica embaixo em toda tela: "
+                           "pergunta o que quiser. As respostas ainda são de exemplo; "
                            "a conversa de verdade chega em breve.",
               "texto": "Toca numa pergunta pronta e me vê responder."}},
 )
 IDS = [p["id"] for p in PASSOS]
-# Com o freio do chat da IA ligado (PAINEL_CHAT_IA_USER_IDS) o 3º passo é de verdade: o Piggy responde com a conta do usuário.
-PASSO_PIGGY_REAL = {"dado": "real", "fala": {**next(p for p in PASSOS if p["id"] == "piggy.pergunta")["fala"], "apresenta": "Aqui você conversa comigo e eu respondo com os dados da sua conta."}}
+# Com o freio do chat da IA ligado (PAINEL_CHAT_IA_USER_IDS) o último passo é de verdade: o Piggy responde com a conta do usuário.
+PASSO_PIGGY_REAL = {"dado": "real", "fala": {**next(p for p in PASSOS if p["id"] == "piggy.pergunta")["fala"], "apresenta": "Aqui você conversa comigo. A barra de conversa fica embaixo em toda tela: pergunta o que quiser e eu respondo com os dados da sua conta."}}
 
 DICAS = (
     {"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas",
      "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. "
               "“Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui."},
+    {"id": "previsao.saldo", "tela": "previsao", "titulo": "Como eu prevejo seu saldo",
+     "texto": "Eu parto do seu saldo de hoje e ando dia a dia: somo suas receitas e tiro boletos, faturas, "
+              "gastos fixos e uma estimativa do gasto do dia a dia. É uma estimativa, não uma promessa."},
+    {"id": "metas.ritmo", "tela": "metas", "titulo": "Como eu acompanho suas metas",
+     "texto": "Eu mostro quanto cada meta já tem, quanto falta e se o seu ritmo chega lá. "
+              "O valor vem da conta ou do investimento que você escolher pra ela."},
+    {"id": "patrimonio.soma", "tela": "patrimonio", "titulo": "De onde vem seu patrimônio",
+     "texto": "Eu somo a Carteira, as contas, as caixinhas e os investimentos, e tiro uma foto por dia, no fim da tarde. "
+              "A linha aparece no dia seguinte à primeira foto."},
+    {"id": "simulador.corte", "tela": "simulador", "titulo": "Aqui você só testa",
+     "texto": "Corte um gasto do dia a dia e eu mostro quanto sobra por mês e como fica seu saldo nos próximos "
+              "90 dias. É só simulação: nada muda na sua conta."},
 )
 DICA_IDS = [d["id"] for d in DICAS]
-_RECURSO = {"assinaturas": "subscriptions"}  # a tela → o recurso do plano (api/v2/assinaturas.py)
+# A tela → o recurso do plano, o mesmo do gate do endpoint dela (assinaturas.py, previsao.py, simulador.py).
+# Metas e Patrimônio não têm tier: "generic" (a base da escada) é Essencial ou acima: em carência (tier free) a dica não vem, limite aceito.
+_RECURSO = {"assinaturas": "subscriptions", "previsao": "forecast", "simulador": "simulator",
+            "metas": "generic", "patrimonio": "generic"}
 
 PassoId = Literal[tuple(IDS)]
 DicaId = Literal[tuple(DICA_IDS)]
@@ -75,7 +103,7 @@ class Fala(BaseModel):
 
 class Passo(BaseModel):
     id: PassoId
-    tela: Literal["resumo", "gastos", "piggy"]
+    tela: Literal["resumo", "gastos", "ferramentas", "piggy"]
     ancora: str
     acao: str
     dado: Literal["real", "exemplo"]
@@ -88,7 +116,7 @@ class Passo(BaseModel):
 
 class Dica(BaseModel):
     id: DicaId
-    tela: Literal["assinaturas"]
+    tela: Literal["assinaturas", "previsao", "metas", "patrimonio", "simulador"]
     titulo: str
     texto: str
     vista: bool
@@ -124,8 +152,10 @@ def _disponivel(passo: str, motivo1: str | None) -> bool:
 def _guia(linha: dict | None, motivo1: str | None, uid: int) -> Guia:
     feitos = (linha or {}).get("feitos") or {}
     vistas = (linha or {}).get("dicas") or {}
-    if linha and linha["concluido_em"]:
+    if linha and linha["concluido_em"] and all(i in feitos for i in IDS):
         estado = "concluido"
+    elif linha and linha["concluido_em"]:  # concluiu o roteiro antigo: convite único dos passos novos
+        estado = "em_andamento" if guia.NOVOS in vistas else "oferecer"
     elif linha and linha["dispensado_em"]:
         estado = "dispensado"
     elif feitos or (linha and linha["oferecido_em"]):

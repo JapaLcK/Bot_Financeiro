@@ -109,8 +109,7 @@ def test_list_installments_mostra_grupo_parcelado(user_id):
     g = out["groups"][0]
     assert g["card_name"] == "Nubank"
     assert g["nota"] == "geladeira"
-    assert g["n_total"] == 3
-    assert g["n_pending"] == 3
+    assert (g["pagas"], g["n_parcelas"]) == (0, 3)
     assert g["total"] == 300.0
     assert g["total_pending"] == 300.0
     # 3 parcelas pendentes → 3 datas de vencimento ordenadas

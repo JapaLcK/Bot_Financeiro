@@ -1,5 +1,5 @@
 // GERADO — não edite; rode python scripts/gerar_tipos_api_v2.py; tests/test_api_v2_contrato.py compara.
-export type AcaoGuia = { acao: "visto" | "feito" | "dispensar" | "reabrir"; passo?: "resumo.saiu" | "gastos.categoria" | "piggy.pergunta" | null; ordem?: Ordem | null };
+export type AcaoGuia = { acao: "visto" | "feito" | "dispensar" | "reabrir"; passo?: "resumo.saiu" | "resumo.organizar" | "gastos.categoria" | "ferramentas.abrir" | "piggy.pergunta" | null; ordem?: Ordem | null };
 export type AncoraPrevisao = { data: string; saldo: string | null };
 export type Assinatura = { chave: string; nome: string; categoria: string | null; valor: string; valor_anterior: string | null; reajuste_em: string | null; dia: number; proxima: string; ultima: string; desde: string; meses: number; meio: Meio; status: "ativa" | "possivelmente_cancelada"; marcada: boolean };
 export type Assinaturas = { servicos: Array<Assinatura>; outras: Array<Assinatura>; ignoradas: Array<Assinatura>; total_mensal: string; total_anual: string };
@@ -33,8 +33,8 @@ export type CorteIn = { categoria: string; percentual: number };
 export type CorteOut = { chave: string; nome: string; despesa_mensal: string; percentual: number; economia_mensal: string; valor_pedido: string | null };
 export type CustoMensal = { valor: string | null; recorrencias: number; motivos: Array<"sem_banco_conectado" | "sem_recorrencias" | "recorrencias_banco_nao_lidas" | "plano_sem_custo_mensal" | "recorrencia_valor_invalido"> };
 export type DetalheErro = { loc: Array<string | number>; msg: string; type: string };
-export type Dica = { id: "assinaturas.marcas"; tela: "assinaturas"; titulo: string; texto: string; vista: boolean };
-export type DicaIn = { dica: "assinaturas.marcas" };
+export type Dica = { id: "assinaturas.marcas" | "previsao.saldo" | "metas.ritmo" | "patrimonio.soma" | "simulador.corte"; tela: "assinaturas" | "previsao" | "metas" | "patrimonio" | "simulador"; titulo: string; texto: string; vista: boolean };
+export type DicaIn = { dica: "assinaturas.marcas" | "previsao.saldo" | "metas.ritmo" | "patrimonio.soma" | "simulador.corte" };
 export type Edicao = { id: string; categoria?: string | null; descricao?: string | null; data?: string | null; valor?: string | null };
 export type EdicaoMeta = { id: number; nome?: string; tipo?: "meta" | "reserva"; alvo?: string; meses?: number; data_alvo?: string | null; fonte?: Fonte };
 export type ErroV2 = { error: CorpoErro };
@@ -90,7 +90,7 @@ export type ParcelasForaDoHorizonte = { quantidade: number; valor: string };
 export type ParteBanco = { banco: string; valor: string | null; motivos: Array<"banco_desatualizado" | "saldo_ausente" | "moeda_presumida" | "conta_fora_do_ultimo_sync"> };
 export type ParteTipo = { tipo: "renda_fixa" | "tesouro" | "acoes" | "fii" | "fundos" | "etf" | "outros"; rotulo: string; valor: string | null; motivos: Array<"banco_desatualizado" | "saldo_ausente" | "moeda_presumida" | "conta_fora_do_ultimo_sync"> };
 export type Partes = { carteira: string; bancos: string; investimentos_banco: string; caixinhas: string; investimentos_manuais: string };
-export type Passo = { id: "resumo.saiu" | "gastos.categoria" | "piggy.pergunta"; tela: "resumo" | "gastos" | "piggy"; ancora: string; acao: string; dado: "real" | "exemplo"; fala: Fala; avanca: "cliente"; disponivel: boolean; motivo: "sem_dados" | "sincronizando" | "conexao_com_erro" | null; feito: boolean };
+export type Passo = { id: "resumo.saiu" | "resumo.organizar" | "gastos.categoria" | "ferramentas.abrir" | "piggy.pergunta"; tela: "resumo" | "gastos" | "ferramentas" | "piggy"; ancora: string; acao: string; dado: "real" | "exemplo"; fala: Fala; avanca: "cliente"; disponivel: boolean; motivo: "sem_dados" | "sincronizando" | "conexao_com_erro" | null; feito: boolean };
 export type Patrimonio = { total: string; partes: Partes; motivos: Array<string>; historico: Array<Foto>; historico_desde: string | null; trechos: Array<Trecho>; variacao: Variacao | null };
 export type Perfil = { perfil: "economizar" | "investir" | "controlar" | "dividas" | "autonomo" | "padrao" | null };
 export type PeriodoPrevisao = { inicio: string; fim: string };
