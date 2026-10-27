@@ -2,7 +2,7 @@
 // série começa amanhã; dinheiro é o texto da API (moneyText) e Number() só desenha o SVG.
 // 4xx nunca mostra dado guardado; rede/5xx com dado mostra o antigo, com aviso.
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { EstimativaVariavel, Previsao } from "../lib/api-v2.gen";
 import { dayMonth, isoDay, longDate, medida, moneyText } from "../lib/format.js";
 import type { Point } from "../lib/types";
@@ -28,14 +28,20 @@ function usePrevisao() {
   const q = useQuery(previsaoQuery(dias));
   // Os horizontes da última resposta boa: o Seg não some enquanto o novo carrega.
   const permitidos = useRef<number[]>([]);
+  // Quantas leituras a chave padrão tinha quando o 4xx de horizonte nos mandou a ela: o Resumo a mantém viva (gcTime 0 só a apaga sem observador), então pode ter dado ANTIGO.
+  // Contagem, não relógio: dois instantes iguais (relógio parado no teste) não separam o velho do novo.
+  const qc = useQueryClient();
+  const lidas = () => qc.getQueryState(previsaoQuery(null).queryKey)?.dataUpdateCount ?? 0;
+  const resetEm = useRef(0);
   const e4 = q.error instanceof ErroApi && q.error.status >= 400 && q.error.status < 500 ? q.error : null;
   // Horizonte fora do plano (ex.: downgrade com 90 dias): volta ao padrão, que recarrega.
   if (e4?.code === "forecast_horizon_not_allowed" && dias !== null) {
+    resetEm.current = lidas();
     setDias(null);
     setAviso("Esse horizonte não está no seu plano.");
   }
   // A guarda do horizonte: a resposta de outro pedido nunca passa pela deste.
-  const d = !e4 && q.data && (dias === null || q.data.dias === dias) ? q.data : undefined;
+  const d = !e4 && q.data && (dias === null ? lidas() > resetEm.current : q.data.dias === dias) ? q.data : undefined;
   if (e4) permitidos.current = [];
   if (d) permitidos.current = d.dias_permitidos;
   // A pilha do topo mostra as pendentes desta lista (a do card do Resumo e a da página dividem o contexto: nunca há as duas na tela); sai de cena junto com o card/página.
