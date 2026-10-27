@@ -230,6 +230,7 @@ PATCH /installments/{user_id}/{group_id}|GET /bills/{user_id}|GET /bills/{user_i
 POST /bills/{user_id}/{bill_id}/pay|GET /analytics/{user_id}/kpis|GET /analytics/{user_id}/evolution
 GET /analytics/{user_id}/categories|GET /analytics/{user_id}/weekday-pattern
 GET /analytics/{user_id}/top-merchants|GET /insights/{user_id}/current|GET /analytics/{user_id}/patterns
+PUT /insights/{user_id}/estado
 GET /agents/{user_id}|POST /agents/{user_id}/{kind}/activate|POST /agents/{user_id}/{kind}/pause
 POST /agents/{user_id}/{kind}/email|GET /agents/{user_id}/feed|POST /agents/{user_id}/feed/seen
 POST /agents/{user_id}/{kind}/chat|PUT /agents/{user_id}/xerife/lancamentos/{launch_id}/esperado

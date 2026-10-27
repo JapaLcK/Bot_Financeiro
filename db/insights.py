@@ -2,14 +2,9 @@
 db/insights.py — Insights proativos do Piggy (Sprint 7).
 
 Detecção de padrões/anomalias relevantes pro user, calculada ON-DEMAND
-(sem cron, sem tabela). O frontend chama o endpoint e recebe a lista
-fresca a cada refresh.
-
-**Por que on-demand:**
-- Zero migration / zero schema novo
-- Insights sempre frescos (sem alerta velho)
-- Custo baixo (1 chamada quando o user abre Análises)
-- Dismiss fica no localStorage do client (TTL 24h)
+(sem cron). O frontend chama o endpoint e recebe a lista fresca a cada refresh.
+O "dispensado"/"útil" persistido mora em `insight_estado` (`db/insight_estado.py`);
+o X do painel antigo segue no localStorage (TTL 24h) até o PR C do PL-06.
 
 Cada detector devolve itens do contrato v1 (`core/services/insights_contrato.py`):
 os campos legados (`key`, `title`, `message`, `severity`, `action_*`, `icon`) e a
@@ -24,7 +19,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from core.services.insights_contrato import (
-    dinheiro, diferenca, montar_item, navegar, nome, periodo_dia, periodo_mes, sujeito,
+    GRAVIDADE, dinheiro, diferenca, montar_item, navegar, nome, periodo_dia, periodo_mes, sujeito,
 )
 from utils_text import fmt_brl, merchant_key
 
@@ -516,9 +511,7 @@ def compute_active_insights(user_id: int) -> tuple[list[dict[str, Any]], list[st
             logger.warning("insights: %s falhou (%s)", detector.__name__, type(exc).__name__)
             falhas.append(detector.__name__)
 
-    # Ordena por severidade: critical > warning > info
-    sev_order = {"critical": 0, "warning": 1, "info": 2}
-    out.sort(key=lambda i: sev_order.get(i.get("severity"), 99))
+    out.sort(key=lambda i: -GRAVIDADE.get(i.get("severity"), -99))  # critical > warning > info; desconhecida no fim
     return out, falhas
 
 

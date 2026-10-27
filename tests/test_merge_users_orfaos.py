@@ -68,6 +68,8 @@ def _semeia_origem(o):
     set_pending_action(o, "add_launch", {"v": 1}, "da origem")
     _sql("insert into ai_fallback_log(user_id, question) values (%s, 'x')", (o,))
     _sql("insert into ai_proactive_cache(user_id, kind, payload) values (%s, 'k', '{}')", (o,))
+    _sql("insert into insight_estado(user_id, chave, tipo, severidade, dispensado_em, dispensado_severidade)"
+         " values (%s, 'budget_warning:mercado:2026-09', 'budget_warning', 'warning', now(), 'warning')", (o,))
     _sql("insert into system_event_logs(level, event_type, message, user_id) values ('info','t','m',%s)", (o,))
     _sql("insert into audit_events(user_id, event) values (%s, 'da_origem')", (o,))
     _sql("insert into pii_access_log(purpose, actor, subject_user_id, field)"
@@ -106,6 +108,7 @@ def test_origem_some_e_numero_reciclado_nao_ve_a_conversa_anterior(user_id):
 
     assert _junta(fone, user_id) is None
     assert _sobra(origem) == {}, "a origem ficou com dado"
+    assert _n("insight_estado where user_id = %s", (user_id,)) == 0, "D7 do PL-06: o estado da origem é apagado"
     assert _sql("select tool_name from ai_pending_actions where user_id = %s",
                 (user_id,))[0]["tool_name"] == "add_launch", "sem colisão, a pendência da IA vem junto"
     delete_user_data(user_id)
@@ -144,7 +147,7 @@ _A_MOVER = (*((t, "user_id") for t in (*_MOVIDAS, *(t for t, _ in _DESTINO_VENCE
 # O que a semeadura põe na origem e NÃO chega como a mesma linha: apagado pela
 # decisão do dono (#635); `accounts`, somado ao saldo do destino; `user_identities`,
 # que chega mas o `bind_identity` recifra (`external_id_enc` com nonce novo).
-_NAO_CHEGA = {"ai_proactive_cache", "agents", "agent_events", "push_tokens", "checkout_funnel_events",
+_NAO_CHEGA = {"ai_proactive_cache", "insight_estado", "agents", "agent_events", "push_tokens", "checkout_funnel_events",
               "accounts", "user_identities",
               # apagada de propósito (dono, 2026-09-26, #635); decidir mover quando a
               # Fase 2 expuser espaços. O teste abaixo afirma que ela não chega.

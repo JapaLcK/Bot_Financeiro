@@ -10,10 +10,14 @@ widget pode buscar só seu dado.
 """
 
 import asyncio
+from decimal import Decimal
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from core.observability import get_logger
+from core.pg_text import recusa_veneno
+from core.services.insights_contrato import CHAVE_MAX, GRAVIDADE
 from frontend.routes import shared
 
 router = APIRouter()
@@ -145,8 +149,9 @@ async def insights_current_route(request: Request, user_id: int):
 
     Contrato v1 (`core/services/insights_contrato.py`): os fatos e o texto vêm dos
     detectores (`compute_active_insights`); até 6 itens por severidade, cache 6h por
-    user. `impacto`/`acoes` só no Pro (`insights_acoes`). Lista vazia traz `motivo`
-    (`sem_dados`/`sem_destaques`), ou nulo se um detector falhou.
+    user. `impacto`/`acoes` só no Pro (`insights_acoes`). O dispensado que não piorou
+    (`PUT .../estado`) sai antes do corte em 6. Lista vazia traz `motivo`
+    (`sem_dados`/`sem_destaques`/`dispensados`), ou nulo se um detector falhou.
 
     Segurança: cada cálculo roda as consultas dos 6 detectores. Rate-limit por IP +
     o `force` (bypass de cache) NÃO é exposto ao cliente — senão dava pra chamar
@@ -158,6 +163,43 @@ async def insights_current_route(request: Request, user_id: int):
     result = await asyncio.to_thread(generate_ai_insights, user_id, force=False)
     motivo = None if result else await asyncio.to_thread(motivo_vazio, user_id)
     return {"ok": True, "insights": result or [], "motivo": motivo}
+
+
+class InsightEstadoBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    chave: str = Field(min_length=1, max_length=CHAVE_MAX)
+    dispensado: StrictBool | None = None
+    util: StrictBool | None = None
+    severidade: str | None = None  # a que o usuário VIU; obrigatória com `dispensado: true`
+    valor: Decimal | None = Field(None, ge=0, max_digits=12, decimal_places=2)  # o visto, só no OF
+
+    @model_validator(mode="after")
+    def _um_dos_dois(self):
+        if self.dispensado is None and self.util is None:
+            raise ValueError("informe dispensado ou util")
+        if self.dispensado and self.severidade not in GRAVIDADE:
+            raise ValueError("dispensar exige a severidade vista")
+        return recusa_veneno(self)  # NUL na chave daria 500 no execute
+
+
+@router.put("/insights/{user_id}/estado")
+@shared.limiter.limit("30/minute")
+async def insights_estado_route(request: Request, user_id: int, body: InsightEstadoBody):
+    """"Dispensar"/"útil" de um insight (PL-06 A2). Estado explícito e idempotente: `dispensado: false` desfaz;
+    o campo ausente fica como está. `dispensado: true` leva a `severity` (e, no OF, o `valor` de
+    `explicacao.atual`, obrigatório: sem ele, 422 só para a chave do dono) que o usuário viu: piora gravada depois disso continua visível. "Útil" é só métrica (D3).
+    404 igual para chave inexistente e de outro usuário."""
+    shared.authorize_dashboard_access(request, user_id)
+    from db.insight_estado import ValorObrigatorio, marcar
+    await asyncio.to_thread(shared.require_plan_feature, user_id, "insights")
+    try:
+        estado = await asyncio.to_thread(marcar, user_id, body.chave, dispensado=body.dispensado, util=body.util,
+                                         severidade=body.severidade, valor=body.valor)
+    except ValorObrigatorio:
+        raise HTTPException(status_code=422, detail="Dispensar este aviso exige o valor visto.") from None
+    if estado is None:
+        raise HTTPException(status_code=404, detail="Insight não encontrado.")
+    return {"ok": True, "chave": body.chave, **estado}
 
 
 @router.get("/analytics/{user_id}/patterns")

@@ -17,7 +17,7 @@ import hashlib
 import re
 from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import Any, Mapping
 
 VERSAO = 1
 _FATURA = {"cartao": "fatura", "origem": "lançamentos + faturas de cartão"}
@@ -32,8 +32,9 @@ TIPOS: dict[str, tuple[str, dict[str, Any]]] = {
     "goal_behind": ("meta", {"base": "caixinhas", "cartao": None, "origem": "depósitos e saques da caixinha"}),
 }
 SO_PRO = ("impacto", "acoes")
+GRAVIDADE = {"info": 0, "warning": 1, "critical": 2}  # a ordem do feed e a régua do "piorou" (D4)
 LIMITE = 6
-_CHAVE_MAX = 160
+CHAVE_MAX = 160
 _MESES = ("janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro",
           "outubro", "novembro", "dezembro")
 
@@ -114,7 +115,7 @@ def chave(tipo: str, sujeito, periodo: str) -> str:
     Sujeito textual entra por `sujeito()`, que troca por hash o nome com dado pessoal.
     """
     c = f"{tipo}:{sujeito}:{periodo}"
-    if len(c) <= _CHAVE_MAX:
+    if len(c) <= CHAVE_MAX:
         return c
     return f"{tipo}:{hashlib.sha1(str(sujeito).encode()).hexdigest()[:12]}:{periodo}"
 
@@ -147,7 +148,32 @@ def montar_item(tipo: str, sujeito, periodo: dict[str, Any], *, title: str, mess
     return item
 
 
-def projetar(itens: list[dict], *, acoes_ok: bool, limite: int = LIMITE) -> list[dict]:
-    """O que o usuário recebe do cache: sem `impacto`/`acoes` fora do Pro, cortado em `limite`."""
-    out = itens if acoes_ok else [{k: v for k, v in it.items() if k not in SO_PRO} for it in itens]
+def medida(item: dict) -> Decimal | None:
+    """A medida da piora além da severidade (DP2 do A2): só a conta do OF, que é sempre `warning`, pelo valor."""
+    if item.get("type") != "of_bill_increase":
+        return None
+    try:
+        v = Decimal(str(item["explicacao"]["atual"]["valor"]))
+    except (KeyError, TypeError, ArithmeticError):  # roda na leitura, fora de try: item torto não vira 500
+        return None
+    return v if v.is_finite() else None
+
+
+def piorou(item: dict, sev_dispensada: str, valor_dispensado: Decimal | None) -> bool:
+    """D4: o dispensado volta se a severidade subiu ou, onde há medida, se ela subiu. Igual ou melhor = escondido."""
+    if GRAVIDADE.get(item.get("severity"), -1) > GRAVIDADE.get(sev_dispensada, -1):
+        return True
+    m = medida(item)
+    return m is not None and valor_dispensado is not None and m > valor_dispensado
+
+
+def projetar(itens: list[dict], *, acoes_ok: bool,
+             dispensadas: Mapping[str, tuple[str, Decimal | None]] | None = None,
+             limite: int = LIMITE) -> list[dict]:
+    """O que o usuário recebe do cache: sem o dispensado que não piorou (chave -> referência da dispensa,
+    `db.insight_estado.dispensadas`), sem `impacto`/`acoes` fora do Pro, e só então cortado em `limite`."""
+    d = dispensadas or {}
+    out = [it for it in itens if it.get("key") not in d or piorou(it, *d[it["key"]])]
+    if not acoes_ok:
+        out = [{k: v for k, v in it.items() if k not in SO_PRO} for it in out]
     return out[:limite]
