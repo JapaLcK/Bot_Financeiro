@@ -10,8 +10,10 @@ sem texto cru de exceção, e o rastro do teto estourado diz QUAL item.
    prazo dobrava. Molde: `test_of_log_teto_e_status.py::
    test_teto_vale_com_o_espelho_do_logging_lento`.
 3. O `print` do tick de refresh não leva o `claimed` (uid dos donos), e os
-   prints de falha do `pluggy_sync` e do tick não levam `str(exc)`: a FK real
-   traz `Key (user_id)=`. Um caso por ponto, pela função que imprime.
+   prints de falha do `pluggy_sync` e do tick não levam `str(exc)`. O
+   `db/connection.py` já redige o DETAIL das violações de constraint (classe 23),
+   então a prova usa um erro real cuja MENSAGEM traz o texto do usuário
+   (`22P02`, entrada inválida). Um caso por ponto, pela função que imprime.
 
 CONTROLES (CLAUDE.md §3), cada um medido num caso verde:
   • tirar `item_id=` do print do `_log_com_teto` → os 3 casos do item 1 vermelhos;
@@ -26,6 +28,7 @@ uma varredura pegaria (PR B da #657).
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 import psycopg
@@ -41,11 +44,14 @@ import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
 from conftest import promote_to_pro
 from core.services import plan_service
+from core.services.pluggy import PluggyApiError
 from db.connection import get_conn
 from test_of_item_ownership import _auth, eventos  # noqa: F401 — fixture
 from test_of_connection_state import ITEM_SAUDAVEL, _conta_pluggy, _mock_pluggy, _tx_pluggy
 from test_of_log_dono_coluna import HOST, _de, _host_fora, _levanta
+from test_of_cartao_sinal import CARTAO
 from test_of_refresh_schedule import _conexao
+from test_of_retentativa import sem_catalogo
 from test_of_webhook_adopt_guards import _limpa_item, _mock_item, webhook_pluggy  # noqa: F401
 
 _INFRA = "sorry, too many clients already"
@@ -102,6 +108,9 @@ def espelho_lento(monkeypatch):
     monkeypatch.setattr(observability, "log_system_event_sync",
                         lambda *a, **k: time.sleep(1.5))
     observability._configure_root_logger()
+    assert any(isinstance(h, observability._DashboardHandler)
+               for h in logging.getLogger().handlers), \
+        "sem o _DashboardHandler no root o espelho não roda e o caso não mede nada"
     monkeypatch.setattr(of_routes, "_backoff_sec", lambda t: 0)
 
 
@@ -152,6 +161,9 @@ def test_aviso_do_registry_vai_ao_stderr_sem_espelho_e_sem_uid(
         time.sleep(1.5)
     monkeypatch.setattr(observability, "log_system_event_sync", _espelho_lento)
     observability._configure_root_logger()
+    assert any(isinstance(h, observability._DashboardHandler)
+               for h in logging.getLogger().handlers), \
+        "sem o _DashboardHandler no root o espelho não roda e o caso não mede nada"
     promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "register_item", _levanta(psycopg.OperationalError(HOST)))
@@ -178,17 +190,23 @@ def test_aviso_do_registry_vai_ao_stderr_sem_espelho_e_sem_uid(
 
 # ── 3. prints do tick de refresh e de falha ───────────────────────────────────
 
-def _uma_volta_do_tick(monkeypatch) -> None:
-    """Roda o `_open_finance_refresh` de verdade por uma volta e corta na 2ª espera."""
+def _uma_volta_do_tick(monkeypatch, tiques: int = 1) -> None:
+    """Roda o `_open_finance_refresh` de verdade por `tiques` voltas e corta na
+    espera seguinte. O PATCH periódico só roda do 2º tique em diante."""
     async def _log(*a, **kw):
         return None
     monkeypatch.setattr(admin_dashboard, "log_system_event", _log)
+    monkeypatch.setattr(dashboard, "_aquece_catalogo", sem_catalogo)
+
+    async def _sem_retentativa(**kw):   # varreria as conexões de outros testes
+        return {}
+    monkeypatch.setattr("frontend.routes.of_retentativa.retentar_leituras", _sem_retentativa)
     voltas = []
     sleep_real = asyncio.sleep
 
     async def _uma_volta(segundos):
         voltas.append(segundos)
-        if len(voltas) > 1:
+        if len(voltas) > tiques:
             raise asyncio.CancelledError
         await sleep_real(0)
 
@@ -209,7 +227,7 @@ def test_tick_do_refresh_nao_imprime_uid(user_id, monkeypatch, capsys):
     monkeypatch.setattr(ps, "run_of_health_check", lambda **kw: {})
     real = ps.request_pluggy_refresh
     monkeypatch.setattr(ps, "request_pluggy_refresh", lambda **kw: real(**kw, user_id=user_id))
-    _uma_volta_do_tick(monkeypatch)
+    _uma_volta_do_tick(monkeypatch, tiques=2)
     linhas = [ln for ln in capsys.readouterr().out.splitlines() if "[open_finance_refresh]" in ln]
     assert linhas == ["[open_finance_refresh] triggered=1 total=1 origin=periodic failures=[]"], linhas
     assert str(user_id) not in linhas[0], linhas
@@ -218,40 +236,45 @@ def test_tick_do_refresh_nao_imprime_uid(user_id, monkeypatch, capsys):
 _ALHEIO = 987654321657
 
 
-def _fk_real() -> psycopg.errors.ForeignKeyViolation:
-    """A exceção do Postgres de verdade, com `Key (user_id)=(<alheio>)` no texto."""
+def _erro_real() -> psycopg.errors.InvalidTextRepresentation:
+    """A exceção do Postgres de verdade, com o texto do usuário (`<alheio>`) na mensagem."""
     with get_conn() as c:
         try:
-            c.execute("insert into pockets (user_id, name) values (%s, 'x')", (_ALHEIO,))
-        except psycopg.errors.ForeignKeyViolation as e:
+            c.execute("select %s::int", (f"x{_ALHEIO}",))
+        except psycopg.errors.InvalidTextRepresentation as e:
             c.rollback()
             return e
-    raise AssertionError("pré-condição: a FK tinha de recusar")
+    raise AssertionError("pré-condição: o cast tinha de recusar")
 
 
-def _hold(mp, uid, fk):
-    mp.setattr(db, "hold_agent_emails", _levanta(fk))
+def _hold(mp, uid, erro):
+    mp.setattr(db, "hold_agent_emails", _levanta(erro))
     ps._hold_aggregate_emails(_ALHEIO, "refresh_all")
 
 
-def _lote(mp, uid, fk):
-    mp.setattr(ps, "sync_pluggy_item", _levanta(fk))
+# A linha que o lote lê no começo do run (`marcar_leitura_falhou` usa as datas).
+_CONEXAO_LOTE = {"provider_item_id": "i657-lote", "id": 1,
+                 "reconnected_at": None, "last_sync_at": None}
+
+
+def _lote(mp, uid, erro):
+    mp.setattr(ps, "sync_pluggy_item", _levanta(erro))
     mp.setattr(ps, "mark_sync_result", lambda *a, **k: None)
-    ps._sync_item_contido({"provider_item_id": "i657-lote", "id": 1}, _ALHEIO)
+    ps._sync_item_contido(_CONEXAO_LOTE, _ALHEIO)
 
 
-def _mark(mp, uid, fk):
+def _mark(mp, uid, erro):
     mp.setattr(ps, "sync_pluggy_item", _levanta(RuntimeError("x")))
-    mp.setattr(ps, "mark_sync_result", _levanta(fk))
-    ps._sync_item_contido({"provider_item_id": "i657-lote", "id": 1}, _ALHEIO)
+    mp.setattr(ps, "mark_sync_result", _levanta(erro))
+    ps._sync_item_contido(_CONEXAO_LOTE, _ALHEIO)
 
 
-def _hook_user(mp, uid, fk):
+def _hook_user(mp, uid, erro):
     mp.setattr(ps, "get_open_finance_snapshot", lambda u: {"connections": [
         {"provider": "pluggy", "provider_item_id": "i657-u", "id": 1}]})
     mp.setattr(ps, "_hold_aggregate_emails", lambda u, o: None)
     mp.setattr(ps, "_sync_item_contido", lambda c, u: {"ok": True})
-    mp.setattr(piggy_agents, "run_faria_limer_once", _levanta(fk))
+    mp.setattr(piggy_agents, "run_faria_limer_once", _levanta(erro))
     mp.setattr(piggy_agents, "run_barao_once", lambda **kw: {})
     ps.sync_pluggy_user(_ALHEIO)
 
@@ -264,19 +287,60 @@ def _sync_real(mp, uid, item_id):
     ps.sync_pluggy_item(item_id)
 
 
-def _caixinha(mp, uid, fk):
-    mp.setattr(plan_service, "require_min_tier", _levanta(fk))
+def _caixinha(mp, uid, erro):
+    mp.setattr(plan_service, "require_min_tier", _levanta(erro))
     _sync_real(mp, uid, "i657-caixinha")
 
 
-def _agentes(mp, uid, fk):
+def _agentes(mp, uid, erro):
     mp.setattr(ps, "import_open_finance_launches", lambda *a, **k: {"inserted": 1})
-    mp.setattr(piggy_agents, "run_agents_for_user", _levanta(fk))
+    mp.setattr(piggy_agents, "run_agents_for_user", _levanta(erro))
     _sync_real(mp, uid, "i657-agentes")
 
 
-def _tick(mp, uid, fk):
-    mp.setattr(ps, "run_of_health_check", _levanta(fk))
+def _leitura_que_falha(mp, uid, item_id, funcao, erro, contas=None):
+    """Sync real em que uma leitura fail-soft da Pluggy levanta `erro`."""
+    _conexao(uid, item_id)
+    _mock_pluggy(mp, item={**ITEM_SAUDAVEL, "id": item_id},
+                 contas=contas or [_conta_pluggy()], txs=[_tx_pluggy()])
+    mp.setattr(ps, "list_pluggy_recurring_payments", lambda i, k=None: [])
+    mp.setattr(ps, "list_pluggy_bills", lambda *a, **k: [])
+    mp.setattr(ps, funcao, _levanta(erro))
+    ps.sync_pluggy_item(item_id)
+
+
+def _investimentos(mp, uid, erro):
+    _leitura_que_falha(mp, uid, "i657-inv", "list_pluggy_investments", erro)
+
+
+def _recorrencias(mp, uid, erro):
+    _leitura_que_falha(mp, uid, "i657-rec", "list_pluggy_recurring_payments", erro)
+
+
+def _faturas(mp, uid, erro):
+    _leitura_que_falha(mp, uid, "i657-fat", "list_pluggy_bills", erro, contas=[CARTAO])
+
+
+def _foto(mp, uid, erro):
+    """O run falha depois do `GET /items`, e gravar a foto dele também falha."""
+    _conexao(uid, "i657-foto")
+    _mock_pluggy(mp, item={**ITEM_SAUDAVEL, "id": "i657-foto"})
+    mp.setattr(ps, "_sync_pluggy_item_confirmado", _levanta(RuntimeError("x")))
+    mp.setattr(ps, "mark_sync_result", _levanta(erro))
+    with pytest.raises(RuntimeError):
+        ps.sync_pluggy_item("i657-foto")
+
+
+def _saude(mp, uid, erro):
+    mp.setattr(ps, "list_connections_for_health_check",
+               lambda **kw: [{"provider_item_id": "i657-saude"}])
+    mp.setattr(ps, "create_pluggy_api_key", lambda: "k")
+    mp.setattr(ps, "get_pluggy_item", _levanta(erro))
+    ps.run_of_health_check()
+
+
+def _tick(mp, uid, erro):
+    mp.setattr(ps, "run_of_health_check", _levanta(erro))
     _uma_volta_do_tick(mp)
 
 
@@ -288,13 +352,34 @@ def _tick(mp, uid, fk):
     (_caixinha, "[pluggy_sync] caixinha auto-import: "),
     (_agentes, "[pluggy_sync] agents hook: "),
     (_tick, "[open_finance_refresh] erro: "),
+    (_investimentos, "[pluggy_sync] investimentos indisponíveis item=i657-inv "),
+    (_recorrencias, "[pluggy_sync] recorrências indisponíveis item=i657-rec "),
+    (_faturas, "[pluggy_sync] faturas indisponíveis item=i657-fat "),
+    (_foto, "[pluggy_sync] foto do run que falhou não gravada (i657-foto): "),
+    (_saude, "[pluggy_sync] health check falhou item=i657-saude: "),
 ], ids=["hold_aggregate_emails", "sync_item_contido", "mark_sync_result", "hook_user",
-        "caixinha", "agents_hook", "tick_erro"])
+        "caixinha", "agents_hook", "tick_erro", "investimentos", "recorrencias", "faturas",
+        "foto_do_run", "health_check"])
 def test_print_de_falha_nao_leva_o_texto_da_excecao(user_id, monkeypatch, capsys,
                                                      roda, prefixo):
-    fk = _fk_real()
-    assert f"Key (user_id)=({_ALHEIO})" in str(fk), "pré-condição: o texto cru traz o uid"
-    roda(monkeypatch, user_id, fk)
+    erro = _erro_real()
+    assert str(_ALHEIO) in str(erro), "pré-condição: o texto cru traz o dado do usuário"
+    roda(monkeypatch, user_id, erro)
     saida = "".join(capsys.readouterr())
-    assert f"{prefixo}motivo=ForeignKeyViolation sqlstate=23503" in saida, saida
-    assert str(_ALHEIO) not in saida and "Key (" not in saida, saida
+    assert f"{prefixo}motivo=InvalidTextRepresentation sqlstate=22P02" in saida, saida
+    assert str(_ALHEIO) not in saida, saida
+
+
+@pytest.mark.parametrize("roda, prefixo", [
+    (_investimentos, "[pluggy_sync] investimentos indisponíveis item=i657-inv "),
+    (_recorrencias, "[pluggy_sync] recorrências indisponíveis item=i657-rec "),
+    (_faturas, "[pluggy_sync] faturas indisponíveis item=i657-fat "),
+    (_saude, "[pluggy_sync] health check falhou item=i657-saude: "),
+], ids=["investimentos", "recorrencias", "faturas", "health_check"])
+def test_falha_da_pluggy_imprime_status_e_code(user_id, monkeypatch, capsys, roda, prefixo):
+    """Sem `str(exc)`, o HTTP e o `code` (já filtrado pelo `safe_code`) são o que
+    separa limite da Pluggy de contrato diferente (`docs/plano-so-open-finance.md`)."""
+    roda(monkeypatch, user_id, PluggyApiError("x", status_code=429, code="RATE_LIMIT"))
+    saida = "".join(capsys.readouterr())
+    assert (f"{prefixo}motivo=PluggyApiError sqlstate=None status=429 code=RATE_LIMIT"
+            in saida), saida

@@ -287,7 +287,7 @@ def sync_pluggy_item(provider_item_id: str, *, expected_user_id: int | None = No
                 dono_unico=True)
         except Exception as exc:
             print(f"[pluggy_sync] foto do run que falhou não gravada ({provider_item_id}): "
-                  f"{type(exc).__name__}: {exc}")
+                  f"motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)}")
         raise
 
 
@@ -362,7 +362,8 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         investments_ok = False
         investments_status = getattr(exc, "status_code", None)
         print(f"[pluggy_sync] investimentos indisponíveis item={provider_item_id} "
-              f"erro={type(exc).__name__}: {exc}", flush=True)
+              f"motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)} "
+              f"status={getattr(exc, 'status_code', None)} code={getattr(exc, 'code', None)}", flush=True)
     heartbeat()
 
     # Assinaturas (Recurring Payments). Fail-soft: `None` = não consegui ler, e
@@ -372,7 +373,8 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         recorrentes = list_pluggy_recurring_payments(provider_item_id, api_key)
     except Exception as exc:
         print(f"[pluggy_sync] recorrências indisponíveis item={provider_item_id} "
-              f"erro={type(exc).__name__}: {exc}", flush=True)
+              f"motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)} "
+              f"status={getattr(exc, 'status_code', None)} code={getattr(exc, 'code', None)}", flush=True)
 
     # RECONCILIAÇÃO do espelho de investimentos — posição que não veio saiu do
     # banco, e a caixinha dela vai junto. Só pode rodar com a leitura PROVADA
@@ -438,7 +440,8 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
                 conta["provider_account_id"], api_key, on_page=heartbeat)
         except Exception as exc:
             print(f"[pluggy_sync] faturas indisponíveis item={provider_item_id} "
-                  f"erro={type(exc).__name__}: {exc}", flush=True)
+                  f"motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)} "
+                  f"status={getattr(exc, 'status_code', None)} code={getattr(exc, 'code', None)}", flush=True)
 
     # ── FASE 2: escrita, serializada por item ────────────────────────────────
     with pluggy_item_lock(provider_item_id) as locked:
@@ -812,7 +815,9 @@ def run_of_health_check(*, limit: int = 200) -> dict:
             item = get_pluggy_item(row["provider_item_id"], api_key)
         except Exception as exc:
             if not item_missing(exc):
-                print(f"[pluggy_sync] health check falhou item={row['provider_item_id']}: {exc}")
+                print(f"[pluggy_sync] health check falhou item={row['provider_item_id']}: "
+                      f"motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)} "
+                      f"status={getattr(exc, 'status_code', None)} code={getattr(exc, 'code', None)}")
                 continue
             ausentes.append(row)   # só grava depois, se o disjuntor não abrir
             continue
