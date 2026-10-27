@@ -255,6 +255,25 @@ test("Resumo: 'Próximos 30 dias' é a /api/v2/previsao (grupo real, sem selo de
   assert.deepEqual(r, { titulo: "Próximos 30 dias", nomes: ["Aluguel"], dado: "real", selo: false });
 });
 
+test("Resumo, 'Próximos 30 dias': a releitura falha (503) e a lista antiga segue com o aviso; Tentar de novo com a API boa tira o aviso", async () => {
+  const { ctx, page, ir } = await abrir();
+  await ir();
+  const w = page.locator("#w-compromissos");
+  await w.locator(".bill-name").first().waitFor();
+  let falhar = true;
+  await ctx.route("**/api/v2/previsao**", (r) => (falhar ? r.fulfill({ status: 503, json: {} }) : r.fallback()));
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  const aviso = w.getByText("Não deu para atualizar.");
+  await aviso.waitFor({ timeout: 15000 });
+  const com = [await w.locator(".bill-name").count(), await w.getByRole("button", { name: "Tentar de novo" }).count()];
+  falhar = false;
+  await w.getByRole("button", { name: "Tentar de novo" }).click();
+  await aviso.waitFor({ state: "detached", timeout: 15000 });
+  const depois = await w.locator(".bill-name").count();
+  await ctx.close();
+  assert.deepEqual([com, depois], [[1, 1], 1]);
+});
+
 test("Resumo, 'Próximos 30 dias' é só Pro (recurso cashflow): Essencial não pede /previsao e não tem o bloco; Plus pede 1 vez (o hero) e não tem o bloco; Pro pede 1 vez e mostra o grupo real", async () => {
   const r = {};
   for (const plano of ["essencial", "plus", "pro"]) {
