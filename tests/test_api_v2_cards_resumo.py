@@ -17,6 +17,7 @@ from db.analytics import compute_evolution
 from db.cards import list_installment_groups_detailed
 from db.cartoes_resumo import resumo_cartoes
 from test_api_app_sessao import completo
+from tests._patrimonio_helpers import conexao, posicao
 from utils_date import today_tz
 
 ROTAS = ("/cartoes", "/parcelas", "/renda", "/insights", "/rendimento")
@@ -180,8 +181,12 @@ def test_controle_positivo_b_ve_os_proprios(a_e_b):
 
 def test_rendimento_de_a_nao_traz_o_de_b_e_responde_nos_dois_namespaces(a_e_b):
     a, b = a_e_b
-    v2 = _ok("/rendimento", a, user_id=b)
-    assert v2["itens"] == [] and v2["tipo"] == "contratado"
+    posicao(conexao(b, f"i-{b}", banco="BancoDoB"), "pB", "4321")  # só o B tem investimento
+    v2 = _ok("/rendimento", a, uid=b, user_id=b)
+    assert v2["itens"] == [] and v2["rendimentos"]["quantidade"] == 0 and "BancoDoB" not in str(v2)
+    assert "4321" not in str(v2)
+    proprio = _ok("/rendimento", b)  # controle positivo: o dado do B existe e a rota o enxerga
+    assert proprio["rendimentos"]["quantidade"] == 1 and proprio["rendimentos"]["saldo"] == "4321.00"
     completo(a)
     r = TestClient(dashboard.app)
     r.headers["Authorization"] = f"Bearer {sessao_de(a)['access']}"
