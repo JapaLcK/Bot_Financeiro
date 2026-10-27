@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from datetime import date
 from typing import Any
 
@@ -759,6 +760,22 @@ def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
         if cached is not None:
             return cached
 
+    # Uma geração por usuário em voo: o cache só é gravado DEPOIS do LLM, então pedidos concorrentes (2 abas,
+    # StrictMode) pagariam N chamadas. Quem espera relê o cache que o primeiro gravou.
+    # ponytail: trava por processo; com mais de uma réplica cada uma pode gerar 1x. Advisory lock do Postgres
+    # prenderia 1 conexão do pool por espera.
+    with _INSIGHTS_LOCKS.setdefault(user_id, threading.Lock()):
+        if not force:
+            cached = _get_cached(user_id, kind, INSIGHTS_CACHE_TTL_SECONDS)
+            if cached is not None:
+                return cached
+        return _gerar_insights(user_id, kind)
+
+
+_INSIGHTS_LOCKS: dict[int, threading.Lock] = {}
+
+
+def _gerar_insights(user_id: int, kind: str) -> list[dict]:
     data = _collect_insights_data(user_id)
     items = _call_llm(INSIGHTS_SYSTEM_PROMPT, data)
     if items is None:
