@@ -6,7 +6,8 @@ import { useConversation } from "../lib/conversation";
 import { mesDe } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { DEMO, ErroApi, apiPost, guiaQuery, perfilQuery } from "../lib/v2";
-import { go, conectarBanco, type Path } from "../router";
+import { temLayoutSalvo } from "../lib/profiles.js";
+import { go, conectarBanco, FERRAMENTAS, type Path } from "../router";
 import { ROTA, aba, achar, caixa, cobrir, corte, guia, posicionar, trazer, type Caixa, type Tipo } from "./guia-posicao";
 import { avisarGuia } from "./Dica";
 import { MOTIVO, destino } from "./guia-falas";
@@ -33,10 +34,14 @@ export const abrirGuia = () => window.dispatchEvent(new Event("dash:guia"));
 // Uma ação é a passagem de um retrato da tela para o seguinte; o retrato de quando o passo
 // começou é o primeiro, então o que já estava escolhido antes não conta. `alvo`: o `data-guia`
 // do que se toca, em ordem de preferência (parts/guia-posicao.ts, `achar`).
-interface Retrato { mes: string; cat: string | null; perguntas: number; path: Path }
+interface Retrato { mes: string; cat: string | null; perguntas: number; path: Path; editando: boolean }
 const ACOES: Record<string, { feito: (antes: Retrato, agora: Retrato) => boolean; alvo: string[] }> = {
   // A seta Mês anterior (a Próximo mês, se não há anterior).
   "mes.trocado": { feito: (a, b) => b.mes !== a.mes, alvo: ["mes.trocar"] },
+  // Ligou o Organizar (o guia some enquanto organiza e volta no Pronto).
+  "organizar.ligado": { feito: (a, b) => b.path === "/" && !a.editando && b.editando, alvo: ["painel.organizar"] },
+  // Saiu de Ferramentas para uma ferramenta da lista; o "Painel antigo" recarrega a página e o "Guia" não troca de rota.
+  "ferramenta.aberta": { feito: (a, b) => a.path === "/ferramentas" && (FERRAMENTAS as readonly Path[]).includes(b.path), alvo: ["ferramentas.compra", "ferramentas.simulador"] },
   // Categoria escolhida no Resumo não conta: o passo é na página de Gastos. Alvo: a 1ª linha não ativa.
   "categoria.aberta": { feito: (a, b) => b.path === "/gastos" && b.cat != null && b.cat !== a.cat, alvo: ["categorias.item"] },
   // Um chip de pergunta pronta; com a conversa já começada (sem chips), o campo da conversa.
@@ -56,6 +61,7 @@ const TECLAS = ["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "
 // do TanStack: ele não tem o teto de ESPERA (um POST pendurado seguraria a fila para sempre). O catch: a falha de um
 // não trava os seguintes.
 const ESPERA = 5000;
+const ORGANIZAR = "resumo.organizar";
 let fila: Promise<unknown> = Promise.resolve();
 let emitido = 0, aplicado = 0;
 const ordem = new WeakMap<object, number>(); // resposta -> o clique que a pediu
@@ -74,8 +80,10 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const [tipo, setTipo] = useState<Tipo>("espera");
   const [paraAba, setParaAba] = useState(""); // "em Gastos": a aba do passo, se é noutra tela (o tick lê)
   const [fechouDialog, reavaliar] = useState(0);
+  const [menu, setMenu] = useState(false); // a folha do Menu (celular) está aberta: o guia espera
   const [fase, setFase] = useState<{ id: string; etapa: Etapa }>({ id: "", etapa: "bloco" }); // presa ao passo atual
   const ofereceu = useRef(false);
+  const pulado = useRef<string | null>(null); // passo dado como feito pelo cliente (sem comemoração)
   const miraAnt = useRef<HTMLElement | null>(null); // onde o Piggy estava mirando: mudou, ele voa
   const voo = useRef<Voo | null>(null);
   const ultimo = useRef<Caixa | null>(null); // o último recorte aceso pintado: o próximo parte dele
@@ -106,7 +114,8 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
         await qc.cancelQueries({ queryKey: guiaQuery.queryKey });
         qc.setQueryData(guiaQuery.queryKey, novo);
       } else qc.invalidateQueries({ queryKey: guiaQuery.queryKey }); // o servidor pode ter aplicado em outra ordem: a verdade é o GET
-      if (c.acao === "feito" && c.passo) { setVistos((v) => [...v, c.passo!]); setFesta(c.passo); }
+      if (c.acao === "feito" && c.passo && pulado.current === c.passo) pulado.current = null;
+      else if (c.acao === "feito" && c.passo) { setVistos((v) => [...v, c.passo!]); setFesta(c.passo); }
     },
     // 409: o passo deixou de valer (o banco sumiu do mês). Não é "tentar de novo": relê e
     // mostra a orientação do motivo.
@@ -121,6 +130,9 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   // Acabaram os passos desta abertura; concluído só quando o servidor diz (um pulado não foi feito).
   const acabou = !!festa && !atual;
   const fim = acabou && g?.estado === "concluido";
+  // Layout já salvo: o Organizar será dado como feito ao começar, então não conta como novidade.
+  const layoutPula = temLayoutSalvo() && passos.some((p) => p.id === ORGANIZAR && !p.feito);
+  const novos = passos.some((p) => p.feito) ? passos.filter((p) => !p.feito).length - (layoutPula ? 1 : 0) : 0; // convite de quem já fez parte do roteiro
   const n = atual ? passos.indexOf(atual) + 1 : 0;
   const v = m.variables;
   const salvando = m.isPending && v?.acao === "feito";
@@ -136,8 +148,11 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   // novo (reabrir, sair do Organizar) nasce parado, sem a mola nem o recorte do anterior.
   // Zera ao desmontar o balão (fechar, Organizar: o efeito depois do `corpo`) e ao iniciar.
   const zerar = () => { voo.current = null; miraAnt.current = null; ultimo.current = null; furo.current = null; };
-  const iniciar = (rever: boolean) => {
-    setRev(rever); setVistos([]); setFesta(null); setModo("ativo"); setFase({ id: "", etapa: "bloco" }); zerar(); rolou.current = "";
+  // Layout já salvo (a pessoa organizou antes): o passo Organizar vale como feito, sem festa.
+  const iniciar = (rever: boolean, ps = passos) => {
+    const pula = !rever && temLayoutSalvo() && ps.some((p) => p.id === ORGANIZAR && !p.feito);
+    if (pula) { pulado.current = ORGANIZAR; m.mutate({ acao: "feito", passo: ORGANIZAR }); }
+    setRev(rever); setVistos(pula ? [ORGANIZAR] : []); setFesta(null); setModo("ativo"); setFase({ id: "", etapa: "bloco" }); zerar(); rolou.current = "";
     focar.current = true;
   };
   const fechar = (dispensa: boolean) => {
@@ -161,6 +176,8 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
       return () => o.disconnect();
     }
     ofereceu.current = true;
+    // Só o passo que se pula sozinho faltava: nada a oferecer, o feito em silêncio conclui o guia.
+    if (layoutPula && novos === 0 && passos.some((p) => p.feito)) { pulado.current = ORGANIZAR; m.mutate({ acao: "feito", passo: ORGANIZAR }); return; }
     setModo("convite");
     m.mutate({ acao: "visto" });
   }, [modo, path, g?.estado, perfil, fechouDialog]);
@@ -173,7 +190,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
       m.mutate({ acao: "reabrir" }, {
         onSettled: (novo) => {
           const ps = (novo ?? qc.getQueryData<typeof novo>(guiaQuery.queryKey))?.passos;
-          if (ps) iniciar(ps.every((p) => p.feito));
+          if (ps) iniciar(ps.every((p) => p.feito), ps);
         },
       });
     };
@@ -181,20 +198,21 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     return () => window.removeEventListener("dash:guia", on);
   });
 
-  // Esc fecha (e dispensa), menos quando é o Esc de um dialog aberto por cima. Na captura:
+  // Esc fecha (e dispensa), menos quando é o Esc de um dialog aberto por cima ou o guia está
+  // pausado (escondido: dispensar o que não se vê). Na captura:
   // no Safari 14 (parts/dialog.ts) o Cmd-K e o perfil tiram o `open` no keydown deles, antes.
   useEffect(() => {
     if (modo === "fechado") return;
-    const on = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector("dialog[open]")) fechar(!acabou); };
+    const on = (e: KeyboardEvent) => { if (e.key === "Escape" && !pausado && !document.querySelector("dialog[open]")) fechar(!acabou); };
     window.addEventListener("keydown", on, true);
     return () => window.removeEventListener("keydown", on, true);
   });
 
   // Ação real: compara o retrato desta renderização com o anterior, só com o passo rodando.
-  const agora: Retrato = { mes: mesDe(s), cat: s.filter.category, perguntas, path };
+  const agora: Retrato = { mes: mesDe(s), cat: s.filter.category, perguntas, path, editando: s.editing };
   const antes = useRef<{ id: string; r: Retrato }>({ id: "", r: agora });
   useEffect(() => {
-    const rodando = etapa === "alvo" && atual && atual.disponivel && !salvando && !falhou && !s.editing;
+    const rodando = etapa === "alvo" && atual && atual.disponivel && !salvando && !falhou && (!s.editing || atual.acao === "organizar.ligado");
     const a = antes.current;
     antes.current = { id: rodando ? atual.id : "", r: agora };
     if (rodando && a.id === atual.id && ACOES[atual.acao]?.feito(a.r, agora)) m.mutate({ acao: "feito", passo: atual.id });
@@ -208,7 +226,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     if (!tela) return;
     const ir = (e: Event) => {
       const a = aba(atual!);
-      if (!a || a.matches("a[href]") || !a.contains(e.target as Node)) return;
+      if (!a || a.matches("a[href]") || a.matches('[data-guia="nav.menu"]') || !a.contains(e.target as Node)) return;
       if (!(e instanceof KeyboardEvent) || e.key === "Enter") go(ROTA[tela]);
     };
     document.addEventListener("click", ir);
@@ -242,6 +260,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   //   alvo: o alvo, tocável e com anel.
   // Mira nova: o Piggy, o balão e o recorte aceso vão até ela na mesma mola; no voo, sem anel.
   const tick = () => {
+    setMenu(!!document.querySelector("dialog.menu-telas[open]"));
     const pg = piggy.current, b = balao.current;
     if (!pg || !b) return;
     const p = modo === "ativo" ? exibido : undefined;
@@ -314,19 +333,20 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const leva = fora ? `Agora toca ${paraAba}.` : null;
   const mot = atual && !atual.disponivel && atual.motivo ? MOTIVO[atual.motivo] : null;
   const entendi = (id: string) => { setFase({ id, etapa: "alvo" }); focar.current = true; };
-  const status = !aberto || s.editing ? ""
+  const pausado = s.editing || menu;
+  const status = !aberto || pausado ? ""
     : modo === "convite" ? "O Piggy quer te mostrar o painel."
     : festa ? (fim ? "Guia concluído." : acabou ? "Por agora é isso. O passo que ficou pra depois volta na Ajuda (no celular, dentro do Menu)." : "Passo feito.")
     // Cada etapa muda o texto (senão a região não fala): o que o balão diz, sem adiantar o passo.
     : leva ?? (mot || tipo === "ausente" ? `Guia, passo ${n} de ${passos.length}: ${atual!.fala.titulo}`
       : etapa === "bloco" ? `Passo ${n} de ${passos.length}: ${atual!.fala.titulo}. ${atual!.fala.apresenta}` : atual!.fala.texto);
   let corpo = null;
-  if (!aberto || s.editing) {
-    // fechado, ou pausado enquanto organiza o painel: só a região de anúncio fica montada
+  if (!aberto || pausado) {
+    // fechado, ou pausado enquanto organiza o painel ou o Menu está aberto: só a região de anúncio fica montada
   } else if (modo === "convite") {
     corpo = <>
-      <h2 key="titulo" id="guia-titulo" tabIndex={-1}>Oi! Te mostro o painel?</h2>
-      <p id="guia-texto">São {passos.length} passos rapidinhos: você faz, eu mostro onde fica cada coisa.</p>
+      <h2 key="titulo" id="guia-titulo" tabIndex={-1}>{novos ? "Tem novidade no painel!" : "Oi! Te mostro o painel?"}</h2>
+      <p id="guia-texto">{novos ? `Tem ${novos} ${novos === 1 ? "novidade" : "novidades"} no painel. São ${novos === 1 ? "1 passo rapidinho" : `${novos} passos rapidinhos`}: você faz, eu mostro.` : `São ${passos.length - (layoutPula ? 1 : 0)} passos rapidinhos: você faz, eu mostro onde fica cada coisa.`}</p>
       <div className="guia-acoes">
         <button type="button" className="btn btn-primary" onClick={() => iniciar(false)}>Bora</button>
         <button type="button" className="btn btn-quiet" onClick={() => fechar(true)}>Agora não</button>
