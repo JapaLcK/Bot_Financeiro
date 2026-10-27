@@ -1800,6 +1800,7 @@ async def _open_finance_refresh():
     interval = int(os.getenv("OF_REFRESH_INTERVAL_SEC", str(6 * 60 * 60)))
     refresh_ligado = (os.getenv("OF_REFRESH_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
     primeiro = True
+    from core.services.pluggy_sync import _falha_da_pluggy  # noqa: PLC0415 — o formato mora lá
     while True:
         try:
             # `min`: com `OF_REFRESH_INTERVAL_SEC` menor que o 1º tique, ele não espera mais que o intervalo.
@@ -1810,8 +1811,7 @@ async def _open_finance_refresh():
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            print(f"[open_finance_refresh] erro: motivo={type(exc).__name__} "
-                  f"sqlstate={getattr(exc, 'sqlstate', None)}", file=sys.stderr)
+            print(f"[open_finance_refresh] erro: {_falha_da_pluggy(exc)}", file=sys.stderr)
 
 
 async def _tarefa_fk_indexes():

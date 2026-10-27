@@ -899,8 +899,7 @@ def _sync_item_contido(connection: dict, user_id: int) -> dict:
     try:
         return sync_pluggy_item(item_id, expected_user_id=user_id)
     except Exception as exc:
-        print(f"[pluggy_sync] item {item_id} falhou no lote: motivo={type(exc).__name__} "
-              f"sqlstate={getattr(exc, 'sqlstate', None)}")
+        print(f"[pluggy_sync] item {item_id} falhou no lote: {_falha_da_pluggy(exc)}")
         marcar_leitura_falhou(connection, exc)
         return {"ok": False, "reason": READ_FAILED, "item_id": item_id,
                 "connection_id": connection.get("id"), "error": type(exc).__name__}

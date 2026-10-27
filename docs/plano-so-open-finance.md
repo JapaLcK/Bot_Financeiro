@@ -407,7 +407,9 @@ feita (§9).
   `texto=<mensagem>` (#657; a mensagem é nossa, sem o corpo da resposta): `status` com
   número é erro HTTP da Pluggy (429 é limite, e `code` traz o código dela); `status=None`
   com `texto=Leitura de /bills incompleta: <regra>` é o leitor recusando a resposta
-  (contrato diferente), e a regra diz qual; outro `motivo` é falha nossa, sem texto.
+  (contrato diferente), e a regra diz qual; `status=None` com `texto=Leitura de /bills
+  passou do teto de N páginas.` é a paginação que não termina; outro `motivo` é falha
+  nossa, sem texto.
   `faturas não gravadas` traz `motivo=<tipo> sqlstate=…` (falha ao gravar). Esse passo não pega nome de campo errado: o leitor
   não levanta por campo ausente, só grava a coluna nula ou o `raw` sem a chave.
 - **Pronto:** fatura paga no banco sai da Previsão sem ação do usuário. Pagamento parcial.

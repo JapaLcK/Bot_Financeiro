@@ -387,7 +387,9 @@ def test_print_de_falha_nao_leva_o_texto_da_excecao(user_id, monkeypatch, capsys
     (_recorrencias, "[pluggy_sync] recorrências indisponíveis item=i657-rec "),
     (_faturas, "[pluggy_sync] faturas indisponíveis item=i657-fat "),
     (_saude, "[pluggy_sync] health check falhou item=i657-saude: "),
-], ids=["investimentos", "recorrencias", "faturas", "health_check"])
+    (_lote, "[pluggy_sync] item i657-lote falhou no lote: "),
+    (_tick, "[open_finance_refresh] erro: "),
+], ids=["investimentos", "recorrencias", "faturas", "health_check", "lote", "tick"])
 def test_falha_da_pluggy_imprime_status_e_code(user_id, monkeypatch, capsys, roda, prefixo):
     """Sem `str(exc)`, o HTTP e o `code` (já filtrado pelo `safe_code`) são o que
     separa limite da Pluggy de contrato diferente (`docs/plano-so-open-finance.md`)."""
