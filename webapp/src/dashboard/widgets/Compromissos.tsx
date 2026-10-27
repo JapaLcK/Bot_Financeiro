@@ -1,6 +1,6 @@
 // Compromissos da /api/v2/previsao, agrupados como a API manda (nunca fundidos por nome).
 // A tela não soma dinheiro: grupo repetido mostra "3 × −R$ 25,00" ou "valores diferentes".
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import type { GrupoCompromissos, OcorrenciaPrevisao } from "../lib/api-v2.gen";
 import { isoDay, moneyText, weekday } from "../lib/format.js";
 import { Frame } from "../parts/Frame";
@@ -82,9 +82,10 @@ export function Grupo({ g, hoje }: { g: GrupoCompromissos; hoje: string }) {
   );
 }
 
-export function Compromissos({ grupos, dias, hoje }: { grupos: GrupoCompromissos[] | null; dias: number; hoje: string }) {
+export function Compromissos({ grupos, dias, hoje, id = "previsao-compromissos", title = "Compromissos", aviso }: { aviso?: ReactNode; grupos: GrupoCompromissos[] | null; dias: number; hoje: string; id?: string; title?: string }) {
   return (
-    <Frame id="previsao-compromissos" title="Compromissos" real>
+    <Frame id={id} title={title} real>
+      {aviso}
       {grupos === null ? <ConvitePro texto="A lista de contas e receitas de cada dia é do Pro." />
         : !grupos.length ? <p className="w-lede">Nenhum compromisso conhecido nos próximos {dias} dias.</p>
         : <ol className="bills">{grupos.map((g) => <Grupo key={g.chave} g={g} hoje={hoje} />)}</ol>}

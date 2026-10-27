@@ -25,8 +25,8 @@ const IDS = ["padrao", ...PROFILES.map((p) => p.id)];
 
 // Bloco pago → recurso → plano mínimo. Espelho de FEATURE_MIN_TIER_V2 em
 // core/services/plan_service.py; tests/frontend/dashboard_v2_profiles.test.mjs compara.
-export const WIDGET_FEATURE = { hero: "forecast", piggy: "insights", simulador: "simulator", comparacao: "financial_comparison" };
-export const FEATURE_TIER = { forecast: "plus", insights: "plus", simulator: "pro", financial_comparison: "plus" };
+export const WIDGET_FEATURE = { hero: "forecast", compromissos: "cashflow", piggy: "insights", simulador: "simulator", comparacao: "financial_comparison" };
+export const FEATURE_TIER = { forecast: "plus", cashflow: "pro", insights: "plus", simulator: "pro", financial_comparison: "plus" };
 export { TIERS };
 
 /** Plano mínimo do bloco, ou null se ele é de todos. */
