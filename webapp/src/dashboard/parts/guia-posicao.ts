@@ -7,7 +7,7 @@ import type { Path } from "../router";
 // "alvo": o que se toca; "nav": a aba que leva de volta à tela; "ausente": a tela já desenhou
 // os blocos e o dele não está (tirado em Organizar); "espera": a tela ainda carrega.
 export type Tipo = "alvo" | "nav" | "ausente" | "espera";
-export const ROTA: Record<Passo["tela"], Path> = { resumo: "/", gastos: "/gastos", piggy: "/piggy" };
+export const ROTA: Record<Passo["tela"], Path> = { resumo: "/", gastos: "/gastos", ferramentas: "/ferramentas", piggy: "/piggy" };
 
 const P = 44; // lado do Piggy
 const M = 12; // margem da tela
@@ -17,7 +17,8 @@ const visivel = (sel: string) =>
 export const guia = (nome: string) => visivel(`[data-guia="${nome}"]`);
 // A aba que leva à tela do passo. No desktop o Piggy não tem aba: perguntar na barra de
 // conversa leva até a conversa (decisão do dono, D9).
-export const aba = (p: Passo) => guia(`nav.${p.tela}`) ?? (p.tela === "piggy" ? guia(p.ancora) : null);
+// No celular as Ferramentas moram dentro do Menu (parts/MenuTelas.tsx): a aba é o botão Menu.
+export const aba = (p: Passo) => guia(`nav.${p.tela}`) ?? (p.tela === "piggy" ? guia(p.ancora) : p.tela === "ferramentas" ? guia("nav.menu") : null);
 
 // `alvos` em ordem de preferência. Fora da tela do passo, a aba.
 export function achar(p: Passo, path: Path, alvos: string[]): { el: HTMLElement | null; tipo: Tipo } {

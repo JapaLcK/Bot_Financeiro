@@ -268,50 +268,60 @@
       "motivo": null,
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": true, "motivo": null, "feito": false},
+        {"id": "resumo.organizar", "tela": "resumo", "ancora": "painel.organizar", "acao": "organizar.ligado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Do seu jeito", "apresenta": "Esse painel é seu: dá pra trocar os blocos de lugar, tirar e pôr outros.", "texto": "Toca em Organizar, mexe no que quiser e toca em Pronto."}, "disponivel": true, "motivo": null, "feito": false},
         {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": false},
-        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": false}
+        {"id": "ferramentas.abrir", "tela": "ferramentas", "ancora": "ferramentas.compra", "acao": "ferramenta.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Ferramentas", "apresenta": "Aqui moram as ferramentas que ajudam a decidir.", "texto": "Abre uma pra ver."}, "disponivel": true, "motivo": null, "feito": false},
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. A barra de conversa fica embaixo em toda tela: pergunta o que quiser. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": false}
       ],
-      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
+      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}, {"id": "previsao.saldo", "tela": "previsao", "titulo": "Como eu prevejo seu saldo", "texto": "Eu parto do seu saldo de hoje e ando dia a dia: somo suas receitas e tiro boletos, faturas, gastos fixos e uma estimativa do gasto do dia a dia. É uma estimativa, não uma promessa.", "vista": true}, {"id": "metas.ritmo", "tela": "metas", "titulo": "Como eu acompanho suas metas", "texto": "Eu mostro quanto cada meta já tem, quanto falta e se o seu ritmo chega lá. O valor vem da conta ou do investimento que você escolher pra ela.", "vista": true}, {"id": "patrimonio.soma", "tela": "patrimonio", "titulo": "De onde vem seu patrimônio", "texto": "Eu somo a Carteira, as contas, as caixinhas e os investimentos, e tiro uma foto por dia, no fim da tarde. A linha aparece no dia seguinte à primeira foto.", "vista": true}, {"id": "simulador.corte", "tela": "simulador", "titulo": "Aqui você só testa", "texto": "Corte um gasto do dia a dia e eu mostro quanto sobra por mês e como fica seu saldo nos próximos 90 dias. É só simulação: nada muda na sua conta.", "vista": true}]
     },
     "indisponivel": {
       "estado": "indisponivel",
       "motivo": "sem_dados",
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": false, "motivo": "sem_dados", "feito": false},
+        {"id": "resumo.organizar", "tela": "resumo", "ancora": "painel.organizar", "acao": "organizar.ligado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Do seu jeito", "apresenta": "Esse painel é seu: dá pra trocar os blocos de lugar, tirar e pôr outros.", "texto": "Toca em Organizar, mexe no que quiser e toca em Pronto."}, "disponivel": true, "motivo": null, "feito": false},
         {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": false},
-        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": false}
+        {"id": "ferramentas.abrir", "tela": "ferramentas", "ancora": "ferramentas.compra", "acao": "ferramenta.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Ferramentas", "apresenta": "Aqui moram as ferramentas que ajudam a decidir.", "texto": "Abre uma pra ver."}, "disponivel": true, "motivo": null, "feito": false},
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. A barra de conversa fica embaixo em toda tela: pergunta o que quiser. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": false}
       ],
-      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
+      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}, {"id": "previsao.saldo", "tela": "previsao", "titulo": "Como eu prevejo seu saldo", "texto": "Eu parto do seu saldo de hoje e ando dia a dia: somo suas receitas e tiro boletos, faturas, gastos fixos e uma estimativa do gasto do dia a dia. É uma estimativa, não uma promessa.", "vista": true}, {"id": "metas.ritmo", "tela": "metas", "titulo": "Como eu acompanho suas metas", "texto": "Eu mostro quanto cada meta já tem, quanto falta e se o seu ritmo chega lá. O valor vem da conta ou do investimento que você escolher pra ela.", "vista": true}, {"id": "patrimonio.soma", "tela": "patrimonio", "titulo": "De onde vem seu patrimônio", "texto": "Eu somo a Carteira, as contas, as caixinhas e os investimentos, e tiro uma foto por dia, no fim da tarde. A linha aparece no dia seguinte à primeira foto.", "vista": true}, {"id": "simulador.corte", "tela": "simulador", "titulo": "Aqui você só testa", "texto": "Corte um gasto do dia a dia e eu mostro quanto sobra por mês e como fica seu saldo nos próximos 90 dias. É só simulação: nada muda na sua conta.", "vista": true}]
     },
     "em_andamento": {
       "estado": "em_andamento",
       "motivo": "sincronizando",
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": false, "motivo": "sincronizando", "feito": false},
+        {"id": "resumo.organizar", "tela": "resumo", "ancora": "painel.organizar", "acao": "organizar.ligado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Do seu jeito", "apresenta": "Esse painel é seu: dá pra trocar os blocos de lugar, tirar e pôr outros.", "texto": "Toca em Organizar, mexe no que quiser e toca em Pronto."}, "disponivel": true, "motivo": null, "feito": false},
         {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": true},
-        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": true}
+        {"id": "ferramentas.abrir", "tela": "ferramentas", "ancora": "ferramentas.compra", "acao": "ferramenta.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Ferramentas", "apresenta": "Aqui moram as ferramentas que ajudam a decidir.", "texto": "Abre uma pra ver."}, "disponivel": true, "motivo": null, "feito": false},
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. A barra de conversa fica embaixo em toda tela: pergunta o que quiser. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": true}
       ],
-      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
+      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}, {"id": "previsao.saldo", "tela": "previsao", "titulo": "Como eu prevejo seu saldo", "texto": "Eu parto do seu saldo de hoje e ando dia a dia: somo suas receitas e tiro boletos, faturas, gastos fixos e uma estimativa do gasto do dia a dia. É uma estimativa, não uma promessa.", "vista": true}, {"id": "metas.ritmo", "tela": "metas", "titulo": "Como eu acompanho suas metas", "texto": "Eu mostro quanto cada meta já tem, quanto falta e se o seu ritmo chega lá. O valor vem da conta ou do investimento que você escolher pra ela.", "vista": true}, {"id": "patrimonio.soma", "tela": "patrimonio", "titulo": "De onde vem seu patrimônio", "texto": "Eu somo a Carteira, as contas, as caixinhas e os investimentos, e tiro uma foto por dia, no fim da tarde. A linha aparece no dia seguinte à primeira foto.", "vista": true}, {"id": "simulador.corte", "tela": "simulador", "titulo": "Aqui você só testa", "texto": "Corte um gasto do dia a dia e eu mostro quanto sobra por mês e como fica seu saldo nos próximos 90 dias. É só simulação: nada muda na sua conta.", "vista": true}]
     },
     "concluido": {
       "estado": "concluido",
       "motivo": null,
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": true, "motivo": null, "feito": true},
+        {"id": "resumo.organizar", "tela": "resumo", "ancora": "painel.organizar", "acao": "organizar.ligado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Do seu jeito", "apresenta": "Esse painel é seu: dá pra trocar os blocos de lugar, tirar e pôr outros.", "texto": "Toca em Organizar, mexe no que quiser e toca em Pronto."}, "disponivel": true, "motivo": null, "feito": true},
         {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": true},
-        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": true}
+        {"id": "ferramentas.abrir", "tela": "ferramentas", "ancora": "ferramentas.compra", "acao": "ferramenta.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Ferramentas", "apresenta": "Aqui moram as ferramentas que ajudam a decidir.", "texto": "Abre uma pra ver."}, "disponivel": true, "motivo": null, "feito": true},
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. A barra de conversa fica embaixo em toda tela: pergunta o que quiser. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": true}
       ],
-      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
+      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}, {"id": "previsao.saldo", "tela": "previsao", "titulo": "Como eu prevejo seu saldo", "texto": "Eu parto do seu saldo de hoje e ando dia a dia: somo suas receitas e tiro boletos, faturas, gastos fixos e uma estimativa do gasto do dia a dia. É uma estimativa, não uma promessa.", "vista": true}, {"id": "metas.ritmo", "tela": "metas", "titulo": "Como eu acompanho suas metas", "texto": "Eu mostro quanto cada meta já tem, quanto falta e se o seu ritmo chega lá. O valor vem da conta ou do investimento que você escolher pra ela.", "vista": true}, {"id": "patrimonio.soma", "tela": "patrimonio", "titulo": "De onde vem seu patrimônio", "texto": "Eu somo a Carteira, as contas, as caixinhas e os investimentos, e tiro uma foto por dia, no fim da tarde. A linha aparece no dia seguinte à primeira foto.", "vista": true}, {"id": "simulador.corte", "tela": "simulador", "titulo": "Aqui você só testa", "texto": "Corte um gasto do dia a dia e eu mostro quanto sobra por mês e como fica seu saldo nos próximos 90 dias. É só simulação: nada muda na sua conta.", "vista": true}]
     },
     "dispensado": {
       "estado": "dispensado",
       "motivo": null,
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": true, "motivo": null, "feito": true},
+        {"id": "resumo.organizar", "tela": "resumo", "ancora": "painel.organizar", "acao": "organizar.ligado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Do seu jeito", "apresenta": "Esse painel é seu: dá pra trocar os blocos de lugar, tirar e pôr outros.", "texto": "Toca em Organizar, mexe no que quiser e toca em Pronto."}, "disponivel": true, "motivo": null, "feito": false},
         {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": false},
-        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": false}
+        {"id": "ferramentas.abrir", "tela": "ferramentas", "ancora": "ferramentas.compra", "acao": "ferramenta.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Ferramentas", "apresenta": "Aqui moram as ferramentas que ajudam a decidir.", "texto": "Abre uma pra ver."}, "disponivel": true, "motivo": null, "feito": false},
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. A barra de conversa fica embaixo em toda tela: pergunta o que quiser. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": false}
       ],
-      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
+      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}, {"id": "previsao.saldo", "tela": "previsao", "titulo": "Como eu prevejo seu saldo", "texto": "Eu parto do seu saldo de hoje e ando dia a dia: somo suas receitas e tiro boletos, faturas, gastos fixos e uma estimativa do gasto do dia a dia. É uma estimativa, não uma promessa.", "vista": true}, {"id": "metas.ritmo", "tela": "metas", "titulo": "Como eu acompanho suas metas", "texto": "Eu mostro quanto cada meta já tem, quanto falta e se o seu ritmo chega lá. O valor vem da conta ou do investimento que você escolher pra ela.", "vista": true}, {"id": "patrimonio.soma", "tela": "patrimonio", "titulo": "De onde vem seu patrimônio", "texto": "Eu somo a Carteira, as contas, as caixinhas e os investimentos, e tiro uma foto por dia, no fim da tarde. A linha aparece no dia seguinte à primeira foto.", "vista": true}, {"id": "simulador.corte", "tela": "simulador", "titulo": "Aqui você só testa", "texto": "Corte um gasto do dia a dia e eu mostro quanto sobra por mês e como fica seu saldo nos próximos 90 dias. É só simulação: nada muda na sua conta.", "vista": true}]
     }
   },
   "erros": {
@@ -9777,6 +9787,431 @@
     "vazia": {
       "total": "0.00",
       "caixinhas": []
+    }
+  },
+  "cartoes": {
+    "padrao": {
+      "cards": [
+        {
+          "name": "Nubank",
+          "last4": "1234",
+          "due_day": 10,
+          "closing_day": 3,
+          "credit_limit": "5000.00",
+          "credit_used": "1800.00",
+          "open_bill": {
+            "paid_amount": "100.00",
+            "due_amount": "1200.50"
+          }
+        },
+        {
+          "name": "Inter",
+          "last4": null,
+          "due_day": 20,
+          "closing_day": 13,
+          "credit_limit": null,
+          "credit_used": "0.00",
+          "open_bill": {
+            "paid_amount": "0.00",
+            "due_amount": "0.00"
+          }
+        }
+      ]
+    },
+    "vazio": {
+      "cards": []
+    }
+  },
+  "parcelas": {
+    "padrao": {
+      "installments": [
+        {
+          "name": "Notebook",
+          "card_name": "Nubank",
+          "installments_total": 3,
+          "manual": true,
+          "parcelas": [
+            {
+              "installment_no": 1,
+              "valor": "1000.00",
+              "is_paid": true,
+              "is_next": false,
+              "due_date": "2026-09-10"
+            },
+            {
+              "installment_no": 2,
+              "valor": "1000.00",
+              "is_paid": false,
+              "is_next": true,
+              "due_date": "2026-10-10"
+            },
+            {
+              "installment_no": 3,
+              "valor": "1000.00",
+              "is_paid": false,
+              "is_next": false,
+              "due_date": "2026-11-10"
+            }
+          ]
+        }
+      ]
+    },
+    "vazio": {
+      "installments": []
+    }
+  },
+  "renda": {
+    "padrao": {
+      "months": 6,
+      "evolution": [
+        {
+          "month": "2026-05",
+          "income": "5000.00",
+          "expense": "3200.40"
+        },
+        {
+          "month": "2026-06",
+          "income": "5000.00",
+          "expense": "3100.00"
+        },
+        {
+          "month": "2026-07",
+          "income": "5200.00",
+          "expense": "4000.10"
+        },
+        {
+          "month": "2026-08",
+          "income": "5000.00",
+          "expense": "2900.00"
+        },
+        {
+          "month": "2026-09",
+          "income": "5000.00",
+          "expense": "3500.00"
+        },
+        {
+          "month": "2026-10",
+          "income": "2500.00",
+          "expense": "1200.00"
+        }
+      ]
+    },
+    "vazio": {
+      "months": 6,
+      "evolution": [
+        {
+          "month": "2026-05",
+          "income": "0.00",
+          "expense": "0.00"
+        },
+        {
+          "month": "2026-06",
+          "income": "0.00",
+          "expense": "0.00"
+        },
+        {
+          "month": "2026-07",
+          "income": "0.00",
+          "expense": "0.00"
+        },
+        {
+          "month": "2026-08",
+          "income": "0.00",
+          "expense": "0.00"
+        },
+        {
+          "month": "2026-09",
+          "income": "0.00",
+          "expense": "0.00"
+        },
+        {
+          "month": "2026-10",
+          "income": "0.00",
+          "expense": "0.00"
+        }
+      ]
+    }
+  },
+  "insights": {
+    "padrao": {
+      "insights": [
+        {
+          "title": "Mercado acima da média",
+          "message": "Você gastou 30% a mais em mercado este mês."
+        },
+        {
+          "title": "Reserva crescendo",
+          "message": "Sua reserva subiu R$ 200,00."
+        }
+      ]
+    },
+    "vazio": {
+      "insights": []
+    }
+  },
+  "rendimento": {
+    "padrao": {
+      "tipo": "contratado",
+      "itens": [],
+      "motivos": [],
+      "rendimentos": {
+        "saldo": "15100.50",
+        "quantidade": 10,
+        "mes": {
+          "valor": "112.35",
+          "pct": "0.75",
+          "sem_dado": 3
+        },
+        "total": {
+          "valor": "665.10",
+          "pct": "4.60",
+          "sem_dado": 3
+        },
+        "mes_desde": "2026-09-30",
+        "sincronizado_em": "2026-10-01T15:30:00Z",
+        "categorias": [
+          {
+            "tipo": "renda_fixa",
+            "rotulo": "Renda fixa",
+            "saldo": "13800.00",
+            "quantidade": 7,
+            "mes": {
+              "valor": "81.65",
+              "pct": "0.60",
+              "sem_dado": 1
+            },
+            "total": {
+              "valor": "665.10",
+              "pct": "5.08",
+              "sem_dado": 0
+            },
+            "ativos": [
+              {
+                "nome": "CDB Liquidez Diária",
+                "instituicao": "Banco Inter",
+                "logo_proprio": null,
+                "saldo": "5000.00",
+                "mes": {
+                  "valor": "45.50",
+                  "pct": "0.92",
+                  "motivo": null
+                },
+                "total": {
+                  "valor": "320.10",
+                  "pct": "6.84",
+                  "motivo": null
+                }
+              },
+              {
+                "nome": "LCI 2027",
+                "instituicao": "Nubank",
+                "logo_proprio": null,
+                "saldo": "3000.00",
+                "mes": {
+                  "valor": "20.25",
+                  "pct": "0.68",
+                  "motivo": null
+                },
+                "total": {
+                  "valor": "150.00",
+                  "pct": "5.26",
+                  "motivo": null
+                }
+              },
+              {
+                "nome": "CDB Pós 110% CDI",
+                "instituicao": "Itaú",
+                "logo_proprio": null,
+                "saldo": "2000.00",
+                "mes": {
+                  "valor": "-5.10",
+                  "pct": "-0.25",
+                  "motivo": null
+                },
+                "total": {
+                  "valor": "90.00",
+                  "pct": "4.71",
+                  "motivo": null
+                }
+              },
+              {
+                "nome": "Tesouro Selic",
+                "instituicao": "XP",
+                "logo_proprio": null,
+                "saldo": "1500.00",
+                "mes": {
+                  "valor": "12.00",
+                  "pct": "0.80",
+                  "motivo": null
+                },
+                "total": {
+                  "valor": "60.00",
+                  "pct": "4.17",
+                  "motivo": null
+                }
+              },
+              {
+                "nome": "LC Banco C6",
+                "instituicao": "C6 Bank",
+                "logo_proprio": null,
+                "saldo": "1000.00",
+                "mes": {
+                  "valor": "8.00",
+                  "pct": "0.80",
+                  "motivo": null
+                },
+                "total": {
+                  "valor": "40.00",
+                  "pct": "4.17",
+                  "motivo": null
+                }
+              },
+              {
+                "nome": "CDB sem leitura",
+                "instituicao": "BTG",
+                "logo_proprio": null,
+                "saldo": "800.00",
+                "mes": {
+                  "valor": "1.00",
+                  "pct": "0.12",
+                  "motivo": null
+                },
+                "total": {
+                  "valor": "0.00",
+                  "pct": "0.00",
+                  "motivo": null
+                }
+              },
+              {
+                "nome": "Poupança antiga",
+                "instituicao": "Caixa",
+                "logo_proprio": null,
+                "saldo": "500.00",
+                "mes": {
+                  "valor": null,
+                  "pct": null,
+                  "motivo": "sem_leitura_no_mes"
+                },
+                "total": {
+                  "valor": "5.00",
+                  "pct": "1.01",
+                  "motivo": null
+                }
+              }
+            ]
+          },
+          {
+            "tipo": "acoes",
+            "rotulo": "Ações",
+            "saldo": "2100.00",
+            "quantidade": 2,
+            "mes": {
+              "valor": "30.00",
+              "pct": "1.45",
+              "sem_dado": 1
+            },
+            "total": {
+              "valor": null,
+              "pct": null,
+              "sem_dado": 2
+            },
+            "ativos": [
+              {
+                "nome": "PETR4",
+                "instituicao": "NuInvest",
+                "logo_proprio": null,
+                "saldo": "1200.00",
+                "mes": {
+                  "valor": "30.00",
+                  "pct": "2.56",
+                  "motivo": null
+                },
+                "total": {
+                  "valor": null,
+                  "pct": null,
+                  "motivo": "sem_custo"
+                }
+              },
+              {
+                "nome": "VALE3",
+                "instituicao": "NuInvest",
+                "logo_proprio": null,
+                "saldo": "900.00",
+                "mes": {
+                  "valor": null,
+                  "pct": null,
+                  "motivo": "sem_leitura_no_mes"
+                },
+                "total": {
+                  "valor": null,
+                  "pct": null,
+                  "motivo": "sem_custo"
+                }
+              }
+            ]
+          },
+          {
+            "tipo": "fii",
+            "rotulo": "Fundos imobiliários",
+            "saldo": "700.50",
+            "quantidade": 1,
+            "mes": {
+              "valor": "6.30",
+              "pct": "0.91",
+              "sem_dado": 0
+            },
+            "total": {
+              "valor": null,
+              "pct": null,
+              "sem_dado": 1
+            },
+            "ativos": [
+              {
+                "nome": "HGLG11",
+                "instituicao": "XP",
+                "logo_proprio": null,
+                "saldo": "700.50",
+                "mes": {
+                  "valor": "6.30",
+                  "pct": "0.91",
+                  "motivo": null
+                },
+                "total": {
+                  "valor": null,
+                  "pct": null,
+                  "motivo": "sem_custo"
+                }
+              }
+            ]
+          }
+        ],
+        "motivos": []
+      }
+    },
+    "vazio": {
+      "tipo": "contratado",
+      "itens": [],
+      "motivos": [],
+      "rendimentos": {
+        "saldo": null,
+        "quantidade": 0,
+        "mes": {
+          "valor": null,
+          "pct": null,
+          "sem_dado": 0
+        },
+        "total": {
+          "valor": null,
+          "pct": null,
+          "sem_dado": 0
+        },
+        "mes_desde": "2026-09-30",
+        "sincronizado_em": null,
+        "categorias": [],
+        "motivos": [
+          "sem_posicoes"
+        ]
+      }
     }
   }
 }

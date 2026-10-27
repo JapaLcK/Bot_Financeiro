@@ -2,7 +2,7 @@
 // série começa amanhã; dinheiro é o texto da API (moneyText) e Number() só desenha o SVG.
 // 4xx nunca mostra dado guardado; rede/5xx com dado mostra o antigo, com aviso.
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { EstimativaVariavel, Previsao } from "../lib/api-v2.gen";
 import { dayMonth, isoDay, longDate, medida, moneyText } from "../lib/format.js";
 import type { Point } from "../lib/types";
@@ -28,14 +28,20 @@ function usePrevisao() {
   const q = useQuery(previsaoQuery(dias));
   // Os horizontes da última resposta boa: o Seg não some enquanto o novo carrega.
   const permitidos = useRef<number[]>([]);
+  // Quantas leituras a chave padrão tinha quando o 4xx de horizonte nos mandou a ela: o Resumo a mantém viva (gcTime 0 só a apaga sem observador), então pode ter dado ANTIGO.
+  // Contagem, não relógio: dois instantes iguais (relógio parado no teste) não separam o velho do novo.
+  const qc = useQueryClient();
+  const lidas = () => qc.getQueryState(previsaoQuery(null).queryKey)?.dataUpdateCount ?? 0;
+  const resetEm = useRef(0);
   const e4 = q.error instanceof ErroApi && q.error.status >= 400 && q.error.status < 500 ? q.error : null;
   // Horizonte fora do plano (ex.: downgrade com 90 dias): volta ao padrão, que recarrega.
   if (e4?.code === "forecast_horizon_not_allowed" && dias !== null) {
+    resetEm.current = lidas();
     setDias(null);
     setAviso("Esse horizonte não está no seu plano.");
   }
   // A guarda do horizonte: a resposta de outro pedido nunca passa pela deste.
-  const d = !e4 && q.data && (dias === null || q.data.dias === dias) ? q.data : undefined;
+  const d = !e4 && q.data && (dias === null ? lidas() > resetEm.current : q.data.dias === dias) ? q.data : undefined;
   if (e4) permitidos.current = [];
   if (d) permitidos.current = d.dias_permitidos;
   // A pilha do topo mostra as pendentes desta lista (a do card do Resumo e a da página dividem o contexto: nunca há as duas na tela); sai de cena junto com o card/página.
@@ -48,7 +54,7 @@ function usePrevisao() {
 }
 type Estado = ReturnType<typeof usePrevisao>;
 
-function Bloqueio({ e }: { e: ErroApi }) {
+export function Bloqueio({ e }: { e: ErroApi }) {
   if (e.code === "pro_required") return <ConvitePro texto="A previsão é do Plus e do Pro." />;
   if (e.code === "password_required") {
     return (
@@ -125,6 +131,16 @@ function Conteudo({ d }: { d: Previsao }) {
   );
 }
 
+// Releitura falhou com dado em tela: o antigo segue, com a hora e como tentar de novo.
+function AvisoAntigo({ q, d, o }: { q: { refetch: () => unknown }; d: Previsao; o: string }) {
+  return (
+    <div className="prev-antigo" role="status">
+      <p>Mostrando {o} calculada às {hora(d)}. Não deu para atualizar.</p>
+      <button type="button" className="btn btn-quiet" onClick={() => q.refetch()}>Tentar de novo</button>
+    </div>
+  );
+}
+
 export function PrevisaoHero({ p, id }: { p: Estado; id: string }) {
   const { q, d, e4, dias, aviso } = p;
   const opcoes = d?.dias_permitidos ?? p.permitidos;
@@ -147,12 +163,7 @@ export function PrevisaoHero({ p, id }: { p: Estado; id: string }) {
           : <p role="status" className="faint">Carregando a previsão…</p>)
         : (
           <div className="prev-corpo" aria-busy={q.isFetching}>
-            {q.isRefetchError && (
-              <div className="prev-antigo" role="status">
-                <p>Mostrando a previsão calculada às {hora(d)}. Não deu para atualizar.</p>
-                <button type="button" className="btn btn-quiet" onClick={() => q.refetch()}>Tentar de novo</button>
-              </div>
-            )}
+            {q.isRefetchError && <AvisoAntigo q={q} d={d} o="a previsão" />}
             <Conteudo d={d} />
             <p className="faint prev-hora" aria-live="polite">{q.isFetching ? "Atualizando…" : `Calculada às ${hora(d)}`}</p>
           </div>
@@ -163,6 +174,26 @@ export function PrevisaoHero({ p, id }: { p: Estado; id: string }) {
 
 // O card "Saldo previsto" do Resumo: o mesmo bloco da página.
 export const PrevisaoCard = () => <PrevisaoHero p={usePrevisao()} id="hero" />;
+
+// "Próximos N dias" do Resumo: a mesma /api/v2/previsao do card acima (mesma chave, um pedido só), sem tocar na lista de receitas (`usePrevisao`).
+export function CompromissosResumo() {
+  const q = useQuery(previsaoQuery(null));
+  const id = "compromissos";
+  const e4 = q.error instanceof ErroApi && q.error.status >= 400 && q.error.status < 500 ? q.error : null;
+  if (!e4 && q.data) return <Compromissos id={id} title={`Próximos ${q.data.dias} dias`} grupos={q.data.compromissos} dias={q.data.dias} hoje={q.data.hoje}
+    aviso={q.isRefetchError && <AvisoAntigo q={q} d={q.data} o="a lista" />} />;
+  return (
+    <Frame id={id} title="Próximos dias" real>
+      {e4 ? <Bloqueio e={e4} />
+        : q.isError && !q.isFetching ? (
+          <div className="empty" role="alert">
+            <p>Não deu para carregar os compromissos.</p>
+            <button type="button" className="btn btn-ghost retry" onClick={() => q.refetch()}>Tentar de novo</button>
+          </div>
+        ) : <p role="status" className="faint">Carregando…</p>}
+    </Frame>
+  );
+}
 
 // Categorias na ordem do servidor; Number() só mede a barra (valor ÷ maior), o dinheiro é o texto da API.
 function Estimativa({ e }: { e: EstimativaVariavel }) {

@@ -27,6 +27,10 @@ const card = (page) => page.locator("#w-milhao");
 const pronto = async (opts) => { const p = await abrir(opts); await card(p.page).locator(".mi-titulo").first().waitFor(); return p; };
 const texto = (page) => card(page).innerText();
 const semRolagem = (page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+// Sai da tela e volta, para o card montar de novo e reler. O router lê o hash quando o `hashchange` CHEGA, e ele chega
+// depois do `goto` resolver: dois `goto` seguidos viram uma navegação só, o card nunca desmonta e a releitura não parte
+// (foi o TimeoutError de `.prev-antigo` do teste "500 numa releitura" no CI; os outros dois pares têm a mesma forma). Esperar o card sair é o que separa as duas navegações.
+const sairEVoltar = async (page, ir) => { await ir("/ferramentas"); await card(page).waitFor({ state: "detached" }); await ir("/milhao"); };
 const slider = (page, nome) => page.getByRole("slider", { name: new RegExp(nome) });
 
 test("padrão: R$ 48.250,37, falta R$ 951.750, chega em agosto de 2058", async () => {
@@ -184,8 +188,7 @@ test("403 numa releitura: o número guardado some e aparece o convite do Plus", 
   await card(page).locator(".mi-titulo").first().waitFor();
   assert.match(await texto(page), /48\.250/);
   nega = true;
-  await ir("/ferramentas");
-  await ir("/milhao");
+  await sairEVoltar(page, ir);
   await card(page).locator(".convite").waitFor();
   const t = await texto(page);
   await ctx.close();
@@ -218,8 +221,7 @@ test("500 numa releitura: o número guardado continua, com o aviso", async () =>
   const { ctx, page, ir } = await abrir({ resposta: (r) => (cai ? r.fulfill({ status: 500, json: { error: { code: "internal_error", message: "x" } } }) : r.fallback()) });
   await card(page).locator(".mi-titulo").first().waitFor();
   cai = true;
-  await ir("/ferramentas");
-  await ir("/milhao");
+  await sairEVoltar(page, ir);
   await card(page).locator(".prev-antigo").waitFor(); // o retry (1 s + 2 s) corre antes do aviso
   const t = await texto(page);
   await ctx.close();
@@ -232,8 +234,7 @@ test("sem banco + 500 numa releitura: o convite continua, com o aviso", async ()
   const { ctx, page, ir } = await abrir({ milhao: "sem_banco", resposta: (r) => (cai ? r.fulfill({ status: 500, json: { error: { code: "internal_error", message: "x" } } }) : r.fallback()) });
   await card(page).locator(".convite").waitFor();
   cai = true;
-  await ir("/ferramentas");
-  await ir("/milhao");
+  await sairEVoltar(page, ir);
   await card(page).locator(".prev-antigo").waitFor(); // o retry (1 s + 2 s) corre antes do aviso
   const t = await texto(page);
   await ctx.close();

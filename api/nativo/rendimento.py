@@ -53,7 +53,7 @@ class Ativo(BaseModel):
     total: PeriodoAtivo
 
 
-class Categoria(BaseModel):
+class CategoriaRendimento(BaseModel):
     tipo: Literal[tuple(TIPOS)]
     rotulo: str
     saldo: Dinheiro | None
@@ -70,7 +70,7 @@ class Rendimentos(BaseModel):
     total: Periodo
     mes_desde: date
     sincronizado_em: datetime | None
-    categorias: list[Categoria]
+    categorias: list[CategoriaRendimento]
     motivos: list[Literal["sem_posicoes", "banco_desatualizado", "plano_sem_investimentos"]]
 
 

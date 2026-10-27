@@ -92,12 +92,11 @@ def test_saiu_so_no_mes_anterior_tambem_oferece(uid):
     assert (g["estado"], disponiveis(g)[0]) == ("oferecer", ("resumo.saiu", True, None))
 
 
-def test_sem_saiu_passo_1_sem_dados_e_2_e_3_disponiveis(uid):
+def test_sem_saiu_passo_1_sem_dados_e_os_outros_disponiveis(uid):
     saiu_em(uid, 2)  # dois meses atrás não conta
     g = ler(uid)
     assert (g["estado"], g["motivo"]) == ("indisponivel", "sem_dados")
-    assert disponiveis(g) == [("resumo.saiu", False, "sem_dados"),
-                              ("gastos.categoria", True, None), ("piggy.pergunta", True, None)]
+    assert disponiveis(g) == [("resumo.saiu", False, "sem_dados")] + [(i, True, None) for i in IDS[1:]]
 
 
 @pytest.mark.parametrize("status,motivo", [("UPDATING", "sincronizando"), ("ERROR", "conexao_com_erro"),
@@ -115,21 +114,21 @@ def test_sincronizando_vence_o_erro(uid):
 
 # ── conclusão ────────────────────────────────────────────────────────────────
 
-def test_dois_de_tres_nao_concluem_e_tres_concluem(uid):
+def test_so_o_ultimo_feito_conclui(uid):
     saiu_em(uid, 0)
-    feito(uid, "resumo.saiu")
-    g = feito(uid, "gastos.categoria")
-    assert g["estado"] == "em_andamento"
-    assert [p["feito"] for p in g["passos"]] == [True, True, False]
-    assert linha(uid)["concluido_em"] is None
-    assert feito(uid, "piggy.pergunta")["estado"] == "concluido"
+    for i in IDS[:-1]:
+        g = feito(uid, i)
+        assert g["estado"] == "em_andamento"
+        assert linha(uid)["concluido_em"] is None
+    assert [p["feito"] for p in g["passos"]] == [True] * (len(IDS) - 1) + [False]
+    assert feito(uid, IDS[-1])["estado"] == "concluido"
     assert linha(uid)["concluido_em"] is not None
 
 
 def test_dois_e_tres_sem_dados_ficam_em_andamento(uid):
     feito(uid, "gastos.categoria")
     g = feito(uid, "piggy.pergunta")
-    assert (g["estado"], g["motivo"]) == ("em_andamento", "sem_dados")
+    assert (g["estado"], g["motivo"]) == ("em_andamento", "sem_dados")  # só 2 de 5 feitos
     saiu_em(uid, 0)  # os dados chegam: segue retomando, agora com o passo 1 disponível
     g = ler(uid)
     assert (g["estado"], g["motivo"]) == ("em_andamento", None)
@@ -230,7 +229,7 @@ def test_feito_do_passo_1_sem_dados_e_409_e_nao_grava(uid):
 def test_feito_do_passo_1_com_saiu_grava(uid):
     saiu_em(uid, 0)
     g = feito(uid, "resumo.saiu")
-    assert [p["feito"] for p in g["passos"]] == [True, False, False]
+    assert [p["feito"] for p in g["passos"]] == [True] + [False] * (len(IDS) - 1)
     assert list(linha(uid)["feitos"]) == ["resumo.saiu"]
 
 
@@ -264,7 +263,7 @@ def test_dispensar_e_reabrir_mantem_os_feitos(uid):
     assert ler(uid)["estado"] == "dispensado"
     g = post(uid, "reabrir").json()
     assert g["estado"] == "em_andamento"
-    assert [p["feito"] for p in g["passos"]] == [True, False, False]
+    assert [p["feito"] for p in g["passos"]] == [True] + [False] * (len(IDS) - 1)
     assert linha(uid)["dispensado_em"] is None
     assert linha(uid)["oferecido_em"] is None  # reabrir depois de feito não carimba a oferta
 
@@ -274,6 +273,57 @@ def test_concluido_vence_a_dispensa(uid):
     for p in IDS:
         feito(uid, p)
     assert post(uid, "dispensar").json()["estado"] == "concluido"
+
+
+# ── quem concluiu o roteiro antigo: convite só dos passos novos ─────────────────
+
+ANTIGOS = ["resumo.saiu", "gastos.categoria", "piggy.pergunta"]
+
+
+def concluiu_o_antigo(uid):
+    """Estado de quem fechou o guia de 3 passos antes dos novos: `concluido_em` e 3 feitos."""
+    saiu_em(uid, 0)
+    for i in ANTIGOS:
+        feito(uid, i)
+    q("update guia_painel set concluido_em = now(), feitos = feitos - 'resumo.organizar' - 'ferramentas.abrir'"
+      " where user_id = %s", (uid,))
+
+
+def test_concluido_antigo_recebe_o_convite_uma_vez_e_depois_retoma(uid):
+    concluiu_o_antigo(uid)
+    g = ler(uid)
+    assert g["estado"] == "oferecer"
+    assert [p["feito"] for p in g["passos"] if p["id"] in ANTIGOS] == [True] * 3
+    assert post(uid, "visto").json()["estado"] == "em_andamento"
+    assert ler(uid)["estado"] == "em_andamento"
+    assert "guia.novos" in linha(uid)["dicas"] and linha(uid)["oferecido_em"] is None
+    assert all(d["id"] != "guia.novos" for d in ler(uid)["dicas"])  # o GET ignora a chave
+
+
+def test_concluido_antigo_com_os_5_feitos_e_concluido(uid):
+    concluiu_o_antigo(uid)
+    feito(uid, "resumo.organizar")
+    assert feito(uid, "ferramentas.abrir")["estado"] == "concluido"
+    assert post(uid, "visto").json()["estado"] == "concluido"
+    assert "guia.novos" not in linha(uid)["dicas"]  # nada novo a convidar
+
+
+def test_dispensar_nao_substitui_o_convite_das_novidades(uid):
+    """O `dispensado_em` pode ser antigo (Pular guia na revisão): só o `visto` apaga o convite."""
+    concluiu_o_antigo(uid)
+    assert post(uid, "dispensar").json()["estado"] == "oferecer"
+
+
+def test_reabrir_pela_ajuda_tambem_conta_como_visto(uid):
+    concluiu_o_antigo(uid)
+    assert post(uid, "reabrir").json()["estado"] == "em_andamento"
+
+
+def test_quem_nunca_concluiu_nao_ganha_a_chave_das_novidades(uid):
+    saiu_em(uid, 0)
+    feito(uid, "resumo.saiu")
+    post(uid, "visto")
+    assert "guia.novos" not in linha(uid)["dicas"]
 
 
 def test_export_lgpd_leva_o_guia(uid):

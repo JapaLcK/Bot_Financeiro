@@ -9,7 +9,7 @@ import { Sub } from "./previsao";
 // float (parts/cardIa/legado.ts). Só leitura do bloco. Parcelas, como no app: uma linha por COMPRA ("n de N pagas" e o trilho; tocar abre as parcelas aqui dentro,
 // 5 compras e "+N"); compra quitada sai do card (dono, 2026-10-24).
 type Cartao = { name: string; last4: string | null; credit_limit: number | null; due_day: number; closing_day: number; credit_used: number; open_bill: { paid_amount: number; due_amount: number } };
-type Compra = { name: string; card_name: string | null; installments_total: number; parcelas: { installment_no: number; valor: number; is_paid: boolean; is_next: boolean; due_date: string }[] };
+type Compra = { name: string; card_name: string | null; installments_total: number; manual?: boolean; parcelas: { installment_no: number; valor: number; is_paid: boolean; is_next: boolean; due_date: string }[] };
 
 const cartaoOk = (c: unknown) => obj(c) && typeof c.name === "string" && textoOuNull(c.last4) && numOuNull(c.credit_limit) && Number.isInteger(c.due_day) && Number.isInteger(c.closing_day)
   && num(c.credit_used) && obj(c.open_bill) && num(c.open_bill.paid_amount) && num(c.open_bill.due_amount);
@@ -42,10 +42,10 @@ export function CardFatura({ d }: { d: { cards: Cartao[] } }) {
 
 // "n de N pagas" pelo total do banco: as parcelas antes da 1ª que o PigBank viu (o Open Finance só traz as faturas lidas) contam como pagas.
 // Cópia de `progresso` em app/src/features/painel/complementos.tsx, executada contra ela por tests/frontend/card_ia_paridade.test.mjs.
-export function progresso(g: { installments_total: number; parcelas: { installment_no: number; is_paid: boolean }[] }) {
+export function progresso(g: { installments_total: number; manual?: boolean; parcelas: { installment_no: number; is_paid: boolean }[] }) {
   const ultima = Math.max(0, ...g.parcelas.map((p) => p.installment_no)); // N nunca abaixo da maior parcela vista (total torto ou ausente)
   const n = Math.max(g.installments_total > 0 ? g.installments_total : g.parcelas.length, ultima);
-  const antes = g.parcelas.length ? Math.max(0, Math.min(...g.parcelas.map((p) => p.installment_no)) - 1) : 0;
+  const antes = g.manual ? Math.max(0, n - g.parcelas.length) : g.parcelas.length ? Math.max(0, Math.min(...g.parcelas.map((p) => p.installment_no)) - 1) : 0; // manual: a que falta foi antecipada
   const pagas = Math.min(n, antes + g.parcelas.filter((p) => p.is_paid).length);
   return { pagas, n, quitada: pagas >= n && g.parcelas.every((p) => p.is_paid) }; // parcela vista em aberto nunca deixa a compra quitada
 }

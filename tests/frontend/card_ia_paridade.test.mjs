@@ -313,24 +313,22 @@ test("parcelas: quantas compras aparecem antes do \"+N\" é o mesmo nos dois lad
   const [w, a] = tetoCompras(CARTAO_WEB(), COMPLEMENTOS_APP().replace("COMPRAS_VISIVEIS = 5;", "COMPRAS_VISIVEIS = 6;")); assert.notEqual(w, a);
 });
 // Parcelas: o "n de N pagas" (`progresso`, executado dos dois lados). N é o total do banco e as parcelas antes da 1ª vista contam como pagas (dono, 2026-10-24).
-const progressoDe = (fonte, rotulo) => new Function(`${stripTypeScriptTypes(semImport(corta(fonte, "export function progresso", "\n}\n", rotulo) + "\n}"))}\nreturn progresso;`)();
-const pc = (no, pago) => ({ installment_no: no, is_paid: pago });
-const PROGRESSO = [
-  [{ installments_total: 12, parcelas: [pc(12, true)] }, { pagas: 12, n: 12, quitada: true }],           // só a última vista (o caso do Open Finance)
-  [{ installments_total: 12, parcelas: [pc(5, false), pc(6, false)] }, { pagas: 4, n: 12, quitada: false }], // as 4 antes da 1ª vista contam como pagas
-  [{ installments_total: 3, parcelas: [pc(1, true), pc(2, false), pc(3, false)] }, { pagas: 1, n: 3, quitada: false }],
-  [{ installments_total: 3, parcelas: [] }, { pagas: 0, n: 3, quitada: false }],
-  [{ installments_total: 0, parcelas: [] }, { pagas: 0, n: 0, quitada: true }],                           // nada a mostrar
-  [{ installments_total: 0, parcelas: [pc(0, true), pc(0, false)] }, { pagas: 1, n: 2, quitada: false }],   // sem total: o que o PigBank viu
-  [{ installments_total: 0, parcelas: [pc(5, false)] }, { pagas: 4, n: 5, quitada: false }],                // sem total e parcela 5 em aberto: não some (Tester)
-  [{ installments_total: 12, parcelas: [pc(13, false)] }, { pagas: 12, n: 13, quitada: false }],            // parcela além do total: N sobe, não some (Tester)
-  [{ installments_total: 2, parcelas: [pc(1, true), pc(1, true), pc(2, false)] }, { pagas: 2, n: 2, quitada: false }], // repetida: a em aberto segura
-];
-test("parcelas: `progresso` dá o mesmo \"n de N pagas\" nos dois lados; negativo: a regra trocada num lado só é vista", () => {
-  const web = progressoDe(CARTAO_WEB(), "cartao.tsx"), app = progressoDe(COMPLEMENTOS_APP(), "complementos.tsx");
-  for (const [g, esperado] of PROGRESSO) { assert.deepEqual(web(g), esperado, JSON.stringify(g)); assert.deepEqual(app(g), esperado, JSON.stringify(g)); }
-  const torto = progressoDe(COMPLEMENTOS_APP().replace("installment_no)) - 1)", "installment_no)) - 0)"), "complementos.tsx");
-  assert.ok(PROGRESSO.some(([g]) => JSON.stringify(torto(g)) !== JSON.stringify(web(g))));
+const progressoDe = (fonte, rotulo, de = "export function progresso") => new Function(`${stripTypeScriptTypes(semImport(corta(fonte, de, "\n}\n", rotulo) + "\n}"))}\nreturn progresso;`)();
+// A mesma tabela do servidor (tests/test_parcelas_progresso.py): [{ grupo, esperado, nota }]. O dashboard.js legado é a 3ª cópia.
+const PROGRESSO = JSON.parse(ler("tests", "fixtures", "parcelas_progresso.json"));
+const DASHBOARD_LEGADO = () => ler("frontend", "dashboard.js");
+test("parcelas: `progresso` dá o mesmo \"n de N pagas\" nas 3 cópias (web, app, dashboard.js legado); negativo: a regra trocada numa cópia só é vista", () => {
+  assert.ok(PROGRESSO.length >= 13);
+  const copias = [
+    progressoDe(CARTAO_WEB(), "cartao.tsx"), progressoDe(COMPLEMENTOS_APP(), "complementos.tsx"),
+    progressoDe(DASHBOARD_LEGADO(), "dashboard.js", "function progresso"),
+  ];
+  for (const { grupo, esperado, nota } of PROGRESSO) for (const f of copias) assert.deepEqual(f(grupo), esperado, nota);
+  const torta = (fonte, de, para, rotulo, ...resto) => progressoDe(fonte.replace(de, para), rotulo, ...resto);
+  for (const t of [
+    torta(COMPLEMENTOS_APP(), "installment_no)) - 1)", "installment_no)) - 0)", "complementos.tsx"),
+    torta(DASHBOARD_LEGADO(), "Math.min(...nos) - 1)", "Math.min(...nos) - 0)", "dashboard.js", "function progresso"),
+  ]) assert.ok(PROGRESSO.some(({ grupo, esperado }) => JSON.stringify(t(grupo)) !== JSON.stringify(esperado)));
 });
 test("a caixinha vazia não volta a ser \"Nenhuma meta ainda.\" no card do app (o texto da aba Metas mora em metasChat.tsx, fora daqui)", () => {
   assert.ok(!APP_CARDS().includes("Nenhuma meta ainda.") && !WEB_CARDS.includes("Nenhuma meta ainda."));

@@ -235,10 +235,10 @@ def _get_total_debt(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 # ─── Read: list_installments ────────────────────────────────────────────────
 
 def _list_installments(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    """Parcelamentos ativos do user (com pelo menos 1 parcela pendente).
+    """Parcelamentos ativos do user (não quitados: `progresso`, "n de N pagas").
 
-    Por padrão filtra `only_pending=True` — só mostra os que ainda têm
-    parcela a vencer. Útil pra "meus parcelamentos?", "o que tenho parcelado?".
+    Por padrão filtra `only_pending=True` — só mostra os que ainda não foram
+    quitados. Útil pra "meus parcelamentos?", "o que tenho parcelado?".
     """
     from core.handlers.credit import _group_code  # o MESMO `PC…` que o WhatsApp mostra
 
@@ -252,17 +252,17 @@ def _list_installments(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     rows = db.list_installment_groups(user_id, limit=limit)
     groups = []
     for r in rows:
-        n_pending = int(r.get("n_pending") or 0)
-        if only_pending and n_pending == 0:
+        if only_pending and r["quitada"]:
             continue
         groups.append({
             "codigo": _group_code(r.get("group_id")),  # o `PC…` que as escritas da IA leem (nunca o uuid cru)
             "card_name": r.get("card_name"),
             "nota": r.get("nota"),
-            "n_total": int(r.get("n_total") or 0),
-            "n_pending": n_pending,
-            "total": float(r.get("total") or 0),
-            "total_pending": float(r.get("total_pending") or 0),
+            "pagas": r["pagas"],
+            "n_parcelas": r["n_parcelas"],
+            # só as parcelas vistas somam: sem todas (Open Finance), o valor não é da compra (dono, 2026-10-26)
+            "total": float(r.get("total") or 0) if r["parcelas_completas"] else None,
+            "total_pending": float(r.get("total_pending") or 0) if r["parcelas_completas"] else None,
             "last_purchase": r["last_purchase"].isoformat() if r.get("last_purchase") else None,
             "upcoming_due_dates": [
                 d.isoformat() for d in (r.get("upcoming_due_dates") or [])
@@ -552,11 +552,12 @@ TOOLS: list[Tool] = [
             "function": {
                 "name": "list_installments",
                 "description": (
-                    "Lista parcelamentos do user — por padrão só os com "
-                    "parcelas ainda a vencer (`only_pending=true`). Use pra "
+                    "Lista parcelamentos do user — por padrão só os "
+                    "não quitados (`only_pending=true`). Use pra "
                     "'meus parcelamentos', 'o que tenho parcelado?', 'quais "
                     "parcelamentos ativos?'. Retorna cartão, descrição, "
-                    "total, total pendente, quantas parcelas faltam e "
+                    "total, total pendente (null quando o PigBank não viu todas "
+                    "as parcelas: não estime), `pagas` de `n_parcelas` e "
                     "`upcoming_due_dates` (datas das próximas cobranças, "
                     "em ordem). Na resposta, intitule a seção como "
                     "*Próximas cobranças:* (NUNCA 'Datas de Vencimento' "
@@ -569,7 +570,7 @@ TOOLS: list[Tool] = [
                         "only_pending": {
                             "type": "boolean",
                             "default": True,
-                            "description": "Se true (padrão), filtra os que ainda têm parcela a pagar.",
+                            "description": "Se true (padrão), só os não quitados (pagas < n_parcelas).",
                         },
                         "limit": {
                             "type": "integer",

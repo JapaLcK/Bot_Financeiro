@@ -30,7 +30,7 @@ import { Yield } from "../widgets/Yield";
 import { Installments } from "../widgets/Installments";
 import { Subscriptions } from "../widgets/Subscriptions";
 import { Contas } from "../widgets/Contas";
-import { PrevisaoCard } from "../widgets/Previsao";
+import { CompromissosResumo, PrevisaoCard } from "../widgets/Previsao";
 import { Comparacao } from "../widgets/Comparacao";
 import { Catalog, ProfileSelect } from "./BoardControls";
 import { ProfilePicker } from "./ProfilePicker";
@@ -65,7 +65,7 @@ const ITEM = new Map(ALL.map((w) => [w.id, w]));
 const VIEWS: Record<string, (p: { s: DashState }) => ReactNode> = {
   contas: () => <Contas />, hero: DEMO ? Hero : () => <PrevisaoCard />, resumo: MonthStats,
   categorias: DEMO ? Categories : GastosCategorias, calendario: DEMO ? Calendar : GastosCalendario, simulador: DEMO ? Simulator : () => <SimuladorHabitos />, // lambda: o simulador importa `comCardPrevisao` daqui (ciclo); a referência só é lida no render
-  compromissos: Bills, piggy: Piggy, patrimonio: () => (DEMO ? <NetWorth /> : <PatrimonioReal />),
+  compromissos: DEMO ? Bills : () => <CompromissosResumo />, piggy: Piggy, patrimonio: () => (DEMO ? <NetWorth /> : <PatrimonioReal />),
   fatura: Invoice, wealth: () => (DEMO ? <Wealth /> : <ComposicaoReal />),
   renda: () => <Income />, rendimento: () => <Yield />, parcelas: () => <Installments />,
   assinaturas: () => <Subscriptions />, comparacao: Comparacao,
@@ -186,7 +186,7 @@ export function Board({ s }: { s: DashState }) {
         </p>
         <div className="board-actions">
           {s.editing && custom && <button type="button" className="btn btn-quiet" onClick={restore}>Restaurar padrão</button>}
-          <button type="button" className="btn btn-ghost" aria-pressed={s.editing} onClick={() => set({ editing: !s.editing })}>
+          <button type="button" className="btn btn-ghost" aria-pressed={s.editing} data-guia="painel.organizar" onClick={() => set({ editing: !s.editing })}>
             <i className={`ph ${s.editing ? "ph-check" : "ph-pencil-simple"}`} aria-hidden="true" />
             {s.editing ? "Pronto" : "Organizar"}
           </button>
