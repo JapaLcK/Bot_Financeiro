@@ -80,6 +80,8 @@ export function readLayout(profile, preset, known, plan) {
   }
   return [...new Set(ids)].filter((id) => known.includes(id) && !locked(id, plan));
 }
+/** Algum perfil tem layout salvo neste navegador: a pessoa já organizou o painel (o guia pula o passo Organizar). */
+export const temLayoutSalvo = () => IDS.some((p) => Array.isArray(parse(read(layoutKey(p)))));
 /** `null` apaga o ajuste: o perfil volta ao preset. */
 export function saveLayout(profile, ids) {
   write(layoutKey(profile), ids && JSON.stringify(ids));

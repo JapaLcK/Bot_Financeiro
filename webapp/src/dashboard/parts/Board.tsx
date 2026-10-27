@@ -186,7 +186,7 @@ export function Board({ s }: { s: DashState }) {
         </p>
         <div className="board-actions">
           {s.editing && custom && <button type="button" className="btn btn-quiet" onClick={restore}>Restaurar padrão</button>}
-          <button type="button" className="btn btn-ghost" aria-pressed={s.editing} onClick={() => set({ editing: !s.editing })}>
+          <button type="button" className="btn btn-ghost" aria-pressed={s.editing} data-guia="painel.organizar" onClick={() => set({ editing: !s.editing })}>
             <i className={`ph ${s.editing ? "ph-check" : "ph-pencil-simple"}`} aria-hidden="true" />
             {s.editing ? "Pronto" : "Organizar"}
           </button>

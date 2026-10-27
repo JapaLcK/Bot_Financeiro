@@ -18,8 +18,14 @@ export function navegador() {
   return () => browser;
 }
 
-export const PASSOS = RESPOSTAS.guia.oferecer.passos;
-export const ROTA = { resumo: "/", gastos: "/gastos", piggy: "/piggy" };
+// Os testes de mecânica (véu, anel, foco, voo, fila de POST) andam pelos 3 passos de sempre: o
+// `abrir` estreita o roteiro da fixture a eles. Os passos Organizar e Ferramentas têm testes próprios
+// (dashboard_v2_guia_novos.test.mjs), que pedem `roteiro: "todos"`.
+const ANTIGOS = ["resumo.saiu", "gastos.categoria", "piggy.pergunta"];
+export const PASSOS_TODOS = RESPOSTAS.guia.oferecer.passos;
+export const PASSOS = PASSOS_TODOS.filter((p) => ANTIGOS.includes(p.id));
+export const antigo = (g) => ({ ...g, passos: g.passos.filter((p) => ANTIGOS.includes(p.id)) }); // uma resposta da fixture, no roteiro de 3
+export const ROTA = { resumo: "/", gastos: "/gastos", ferramentas: "/ferramentas", piggy: "/piggy" };
 
 // O servidor de mentira: aplica visto/feito/dispensar/reabrir como o db/guia.py; `post`
 // pode responder outra coisa (status e corpo) para o POST de número `n`.
@@ -33,7 +39,7 @@ function aplicar(g, c) {
 // dá) ou "ausente" (servidor anterior ao #728, sem a chave `dicas`); `dicaLenta`: o POST
 // /guia/dica responde depois de N ms ou quando a promise dada resolve. `s.dicas`: os ids postados.
 // `postLento(c, n)`: o mesmo para o POST /guia de número `n` (ms, promise ou nada).
-export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", plano = "pro", motion = "reduce", post, postLento, rota = "/", perfilLento = 0, semDialog = false, antes, dica = "vista", dicaLenta = 0 } = {}) {
+export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", plano = "pro", motion = "reduce", post, postLento, rota = "/", perfilLento = 0, semDialog = false, antes, dica = "vista", dicaLenta = 0, roteiro = "antigo" } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, timezoneId: "America/Sao_Paulo" });
   // A caixa do Piggy pelo left/top gravado, sem o transform: a inclinação e o voo aumentam o
   // retângulo pintado, e "encostar" é sobre onde ele pousa.
@@ -49,6 +55,7 @@ export async function abrir({ width = 1280, height = 800, guia = "oferecer", per
   // Perfil chegando depois do guia: a corrida em que o convite brigaria com o modal de perfil.
   if (perfilLento) await ctx.route("**/api/v2/perfil", async (r) => { await new Promise((ok) => setTimeout(ok, perfilLento)); return r.fallback(); });
   const s = { g: structuredClone(RESPOSTAS.guia[guia]), posts: [], dicas: [] };
+  if (roteiro === "antigo") s.g = antigo(s.g);
   if (dica === "sem") s.g.dicas = [];
   if (dica === "ausente") delete s.g.dicas;
   if (dica === "nova") s.g.dicas.forEach((d) => { d.vista = false; });
@@ -142,7 +149,7 @@ export const irAoAlvo = async (page, sel) => { await entendi(page); await anelNo
 // A ação real de cada passo, por `acao` do roteiro, no alvo que o guia destaca (já na tela do
 // passo: o esperaTitulo toca a aba): até o anel chegar ao alvo, toca o "Entendi" se o balão apresenta o bloco
 // (ele pode aparecer um quadro depois do título); aí toca o alvo.
-export const ALVO = { "mes.trocado": "mes.trocar", "categoria.aberta": "categorias.item", "piggy.perguntou": "piggy.chip" };
+export const ALVO = { "mes.trocado": "mes.trocar", "organizar.ligado": "painel.organizar", "categoria.aberta": "categorias.item", "ferramenta.aberta": "ferramentas.compra", "piggy.perguntou": "piggy.chip" };
 export const FAZER = Object.fromEntries(Object.entries(ALVO).map(([acao, a]) => [acao, async (page) => {
   const sel = `[data-guia="${a}"]`;
   for (let i = 0; i < 100 && !(await page.evaluate(temAnel, sel)); i++) {
