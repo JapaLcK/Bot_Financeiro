@@ -41,6 +41,9 @@ export const CONTA: Path[] = ["/conta/perfil", "/conta/cobranca", "/conta/config
 export const RAIL: Path[] = ROUTES.map((r) => r.path).filter((p) => p !== "/piggy" && p !== "/simulador/compra" && p !== "/orcamento" && p !== "/orcamentos-categoria" && p !== "/milhao" && p !== "/agentes" && !CONTA.includes(p));
 // O protótipo (DEMO) não tem conta: as rotas da Conta não existem nele (nem hash, nem ⌘K).
 export const ATIVAS = ROUTES.filter((r) => !(DEMO && (CONTA.includes(r.path) || r.path === "/simulador/compra")));
+// Telas que o card de Ferramentas abre (pages.tsx, TOOLS): abrir uma delas é o passo "Ferramentas" do guia.
+// `as const`: o `to` de cada ferramenta em TOOLS é desse tipo, então ferramenta fora da lista não compila.
+export const FERRAMENTAS = ["/simulador", "/orcamento", "/orcamentos-categoria", "/simulador/compra", "/milhao", "/agentes"] as const satisfies readonly Path[];
 // Páginas que mostram só o presente (ignoram o mês escolhido): o topbar esconde o seletor.
 // A previsão real é de hoje em diante; a do protótipo segue o mês escolhido.
 export const NO_MONTH: Path[] = ["/assinaturas", "/simulador", "/simulador/compra", "/metas", "/patrimonio", "/orcamentos-categoria", "/milhao", "/agentes", "/ferramentas", "/piggy", ...CONTA, ...(DEMO ? [] : ["/previsao" as const])];

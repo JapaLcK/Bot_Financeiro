@@ -16,7 +16,7 @@ import { ContaConfiguracoes } from "./conta/Configuracoes";
 import { ContaPerfil } from "./conta/Perfil";
 import { DEMO, useAgentesLigados } from "./lib/v2";
 import { useMedia } from "./useMedia";
-import { go, href, route, type Path } from "./router";
+import { FERRAMENTAS, go, href, route, type Path } from "./router";
 import { Bills } from "./widgets/Bills";
 import { Calendar } from "./widgets/Calendar";
 import { Categories } from "./widgets/Categories";
@@ -210,15 +210,15 @@ function Launches({ s }: { s: DashState }) {
 // Ferramentas: só o Simulador já existe no protótipo; as outras vêm do dashboard atual
 // (ou são novas) e entram uma de cada vez. O Painel antigo sai do v2 para o /app. O guia mora
 // aqui também (e no Cmd-K e na Ajuda do Menu do celular).
-const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: string; run?: () => void }[] = [
-  { label: "Simulador", line: DEMO ? "E se você cortasse o delivery pela metade? Veja o saldo e as metas mudarem na hora." : "Corte um gasto do dia a dia e veja quanto sobra por mês.", icon: "ph-lightning", to: "/simulador" },
+const TOOLS: { label: string; line: string; icon: string; to?: (typeof FERRAMENTAS)[number]; url?: string; run?: () => void; guia?: string }[] = [
+  { label: "Simulador", line: DEMO ? "E se você cortasse o delivery pela metade? Veja o saldo e as metas mudarem na hora." : "Corte um gasto do dia a dia e veja quanto sobra por mês.", icon: "ph-lightning", to: "/simulador", guia: "ferramentas.simulador" },
   { label: "Painel antigo", line: "O dashboard de sempre, com os seus dados de verdade.", icon: "ph-chart-bar", url: "/app" },
   { label: "Orçamento doméstico", line: "Divida a renda do mês em 6 potes e veja quanto ainda cabe em cada um.", icon: "ph-house", to: "/orcamento" },
   { label: "Orçamentos por categoria", line: "Um teto por categoria e um aviso antes de estourar.", icon: "ph-chart-pie", to: "/orcamentos-categoria" },
-  { label: "Vale a pena comprar?", line: "Veja o que uma compra faz com o seu saldo nos próximos 90 dias.", icon: "ph-shopping-cart", ...(DEMO ? {} : { to: "/simulador/compra" as Path }) },
+  { label: "Vale a pena comprar?", line: "Veja o que uma compra faz com o seu saldo nos próximos 90 dias.", icon: "ph-shopping-cart", guia: "ferramentas.compra", ...(DEMO ? {} : { to: "/simulador/compra" as const }) },
   { label: "Progresso ao milhão", line: "Quanto falta e em quanto tempo você chega ao primeiro milhão.", icon: "ph-trophy", to: "/milhao" },
   { label: "Agentes", line: "Piggys que cuidam de uma parte do seu dinheiro por você.", icon: "ph-robot", to: "/agentes" },
-  ...(DEMO ? [] : [{ label: "Guia do painel", line: "O Piggy te mostra o painel em 3 passos.", icon: "ph-question", run: abrirGuia }]),
+  ...(DEMO ? [] : [{ label: "Guia do painel", line: "O Piggy te mostra o painel passo a passo.", icon: "ph-question", run: abrirGuia }]),
 ];
 
 function Tools() {
@@ -231,7 +231,7 @@ function Tools() {
           const link = t.url ?? (t.to && href(t.to));
           return (
             <li key={t.label}>
-              {link ? <a className="tool" href={link}>{body}</a>
+              {link ? <a className="tool" href={link} data-guia={t.guia}>{body}</a>
                 : t.run ? <button type="button" className="tool" onClick={t.run}>{body}</button>
                 : <div className="tool" aria-disabled="true">{body}<em>Em breve</em></div>}
             </li>

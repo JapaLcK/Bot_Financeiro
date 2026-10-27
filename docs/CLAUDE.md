@@ -539,16 +539,23 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`resumo.saiu`) disponível quando o Saiu de `resumo_do_mes` (com a janela do plano) é > 0 no
   mês corrente OU no anterior; senão `motivo` = `sincronizando` (alguma conexão `updating`)
   > `conexao_com_erro` (`error_recoverable`/`needs_user_action`/`item_missing`) > `sem_dados`.
-  Passos 2 e 3 (exemplo) sempre disponíveis. `estado`, nesta ordem: `concluido` (todos os
-  ids em `feitos`, `?&`) > `dispensado` > `em_andamento` (o guia já foi oferecido ou
-  começado: o cliente não mostra o convite sozinho, só retoma pela Ajuda) > `oferecer` (nada
-  feito, nunca oferecido, passo 1 disponível) > `indisponivel`. Quem fez 2 e 3 sem dados segue `em_andamento` quando os dados chegam, com
+  Os outros quatro passos (`resumo.organizar`, `gastos.categoria`, `ferramentas.abrir`, `piggy.pergunta`; o último é de exemplo)
+  estão sempre disponíveis: o roteiro tem 5 passos, e o servidor não olha se há categoria. `estado`, nesta ordem: `concluido` (todos os
+  ids em `feitos`, `?&`) > `oferecer` (quem já tinha `concluido_em` do roteiro antigo de 3 passos e ainda
+  tem passo por fazer, enquanto a chave `guia.novos` não está em `dicas`) > `dispensado` > `em_andamento` (o guia já foi
+  oferecido ou começado, ou o convite das novidades já foi visto: o cliente não mostra o convite sozinho, só retoma pela
+  Ajuda) > `oferecer` (nada feito, nunca oferecido, passo 1 disponível) > `indisponivel`. **Convite das novidades:** `visto` e
+  `reabrir` carimbam `guia.novos` (chave fora do catálogo `DICAS`, o GET a ignora) uma vez; um 6º passo futuro não reabre o
+  convite. O cliente conta como novidade só o que falta de verdade: com layout salvo no navegador o Organizar é dado
+  como `feito` sozinho, e se só ele faltava o convite nem aparece. **A query de medição abaixo conta como `concluidos` quem só fechou
+  os 3 passos antigos** (`concluido_em` fica preenchido; `estado` passa a `oferecer`), então a taxa de conclusão não separa
+  roteiro de 3 de roteiro de 5 passos. Quem fez os outros passos sem dados segue `em_andamento` quando os dados chegam, com
   o passo 1 agora disponível e não feito. O `motivo` do topo é o do passo 1 quando ele está
   indisponível (só em `em_andamento` e `indisponivel`); senão `null`. O POST recebe `{acao: "visto"|"feito"|"dispensar"|"reabrir", passo?, ordem?}`
   (`ordem` é validada em TODAS as ações: inválida = 422 também em `visto`/`feito`, onde é ignorada)
   e devolve o mesmo `Guia`; `feito` sem `passo` ou `passo` fora do roteiro = 422 no envelope;
   `feito` de passo com `disponivel: false` = 409 `passo_indisponivel` no envelope, sem gravar
-  (sem dados o cliente mostra a orientação e segue para 2 e 3); nas outras ações `passo` é ignorado. Exige o CSRF do pai. Carimbos só gravam uma vez
+  (sem dados o cliente mostra a orientação e segue para os outros passos); nas outras ações `passo` é ignorado. Exige o CSRF do pai. Carimbos só gravam uma vez
   (`oferecido_em` no `visto` e no `reabrir`, `dispensado_em`, `concluido_em`, e o 1º de cada
   passo em `feitos`); `reabrir` zera `dispensado_em` (salvo gesto descartado pela ordem, abaixo). A oferta conta o convite **e** a Ajuda:
   quem abre pela Ajuda sem nunca ter visto o convite fica `em_andamento` e não o recebe depois,
@@ -583,9 +590,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   ```
 
   **Dicas de tela.** O `Guia` também traz `dicas: [{id, tela, titulo, texto, vista}]`, do
-  catálogo `DICAS` em `api/v2/guia.py` (hoje só `assinaturas.marcas`), filtradas pelo plano
-  (`plan_gate_ok` do recurso da tela: `subscriptions` para Assinaturas; o Essencial recebe
-  `[]`). `POST /api/v2/guia/dica {dica}` carimba a 1ª vez em `guia_painel.dicas`
+  catálogo `DICAS` em `api/v2/guia.py` (`assinaturas.marcas`, `previsao.saldo`, `metas.ritmo`, `patrimonio.soma`,
+  `simulador.corte`), filtradas pelo plano (`plan_gate_ok` do recurso da tela, tier mínimo em `FEATURE_MIN_TIER_V2`: `subscriptions`
+  Assinaturas e `forecast` Previsão (Plus), `simulator` Simulador (Pro), `generic` Metas e Patrimônio
+  (Essencial); em carência/tier free nem as de `generic` vêm). `POST /api/v2/guia/dica {dica}` carimba a 1ª vez em `guia_painel.dicas`
   (`{dica_id: carimbo}`, coluna por `alter … if not exists`) e devolve o `Guia`; id fora do
   catálogo = 422; não toca `oferecido_em` nem `feitos` (o guia segue em `oferecer`). Dica que
   o plano não dá grava e é inofensiva: o GET não a devolve. O cliente (`parts/Dica.tsx`) mostra

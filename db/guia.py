@@ -20,10 +20,16 @@ from .connection import get_conn
 # antes de um `visto` concorrente comitar gravaria um carimbo anterior a `oferecido_em`. O
 # UPDATE que esperou a trava reavalia o SET sobre a linha nova (READ COMMITTED), então o
 # relógio sai depois do commit do outro e a guarda `feitos = '{}'` vê o `feito` já gravado.
+# Quem já concluiu o roteiro antigo (`concluido_em`) e ainda tem passo por fazer vê o convite das
+# novidades uma vez: `visto` e `reabrir` carimbam `NOVOS` em `dicas` (chave fora do catálogo `DICAS`, o GET a ignora).
+NOVOS = "guia.novos"
+_VIU_NOVOS = ("dicas = case when concluido_em is not null and not feitos ?& %(ids)s::text[] and not dicas ? '" + NOVOS
+              + "' then dicas || jsonb_build_object('" + NOVOS + "', clock_timestamp()) else dicas end")
 _SET = {
-    "visto": "oferecido_em = coalesce(oferecido_em, case when feitos = '{}'::jsonb then clock_timestamp() end)",
+    "visto": ("oferecido_em = coalesce(oferecido_em, case when feitos = '{}'::jsonb then clock_timestamp() end),"
+              " " + _VIU_NOVOS),
     "reabrir": ("oferecido_em = coalesce(oferecido_em,"
-                " case when feitos = '{}'::jsonb then clock_timestamp() end)"),
+                " case when feitos = '{}'::jsonb then clock_timestamp() end), " + _VIU_NOVOS),
     "feito": ("feitos = case when feitos ? %(passo)s::text then feitos"
               " else feitos || jsonb_build_object(%(passo)s::text, clock_timestamp()) end"),
     # Na `dica`, `%(passo)s` leva o id da dica: o carimbo da 1ª vez, sem tocar o guia.
