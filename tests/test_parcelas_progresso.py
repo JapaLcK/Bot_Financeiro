@@ -10,7 +10,7 @@ TABELA = json.loads((Path(__file__).parent / "fixtures" / "parcelas_progresso.js
 
 
 def test_a_tabela_tem_os_casos_de_sempre():
-    assert len(TABELA) >= 9
+    assert len(TABELA) >= 13
 
 
 @pytest.mark.parametrize("caso", TABELA, ids=[c["nota"] for c in TABELA])

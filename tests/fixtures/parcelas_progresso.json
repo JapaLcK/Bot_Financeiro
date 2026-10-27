@@ -165,5 +165,93 @@
    "quitada": false
   },
   "nota": "repetida: a em aberto segura"
+ },
+ {
+  "grupo": {
+   "installments_total": 3,
+   "manual": true,
+   "parcelas": [
+    {
+     "installment_no": 1,
+     "is_paid": true
+    },
+    {
+     "installment_no": 3,
+     "is_paid": false
+    }
+   ]
+  },
+  "esperado": {
+   "pagas": 2,
+   "n": 3,
+   "quitada": false
+  },
+  "nota": "manual com a 2ª antecipada (o antecipar apaga a parcela): a que falta conta como paga"
+ },
+ {
+  "grupo": {
+   "installments_total": 3,
+   "manual": true,
+   "parcelas": [
+    {
+     "installment_no": 1,
+     "is_paid": true
+    }
+   ]
+  },
+  "esperado": {
+   "pagas": 3,
+   "n": 3,
+   "quitada": true
+  },
+  "nota": "manual com a 2ª e a 3ª antecipadas: quitada"
+ },
+ {
+  "grupo": {
+   "installments_total": 3,
+   "manual": true,
+   "parcelas": [
+    {
+     "installment_no": 1,
+     "is_paid": true
+    },
+    {
+     "installment_no": 2,
+     "is_paid": false
+    },
+    {
+     "installment_no": 3,
+     "is_paid": false
+    }
+   ]
+  },
+  "esperado": {
+   "pagas": 1,
+   "n": 3,
+   "quitada": false
+  },
+  "nota": "manual sem antecipação: igual a antes"
+ },
+ {
+  "grupo": {
+   "installments_total": 3,
+   "manual": false,
+   "parcelas": [
+    {
+     "installment_no": 1,
+     "is_paid": true
+    },
+    {
+     "installment_no": 3,
+     "is_paid": false
+    }
+   ]
+  },
+  "esperado": {
+   "pagas": 1,
+   "n": 3,
+   "quitada": false
+  },
+  "nota": "Open Finance com a mesma forma: a do meio não conta (pode ainda não ter chegado)"
  }
 ]

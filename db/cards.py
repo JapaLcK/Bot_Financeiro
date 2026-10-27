@@ -1564,7 +1564,7 @@ def list_installment_groups_detailed(user_id: int, sort: str = "urgency"):
                     t.id as tx_id,
                     t.group_id::text as group_id, t.bill_id, t.valor,
                     t.categoria, t.nota, o.description as desc_banco,
-                    t.installment_no, t.installments_total, t.purchased_at,
+                    t.installment_no, t.installments_total, t.purchased_at, t.source,
                     t.card_id, c.name as card_name, c.color as card_color,
                     c.flag as card_flag, c.last4 as card_last4,
                     c.closing_day, c.due_day,
@@ -1599,9 +1599,11 @@ def list_installment_groups_detailed(user_id: int, sort: str = "urgency"):
                 "card_flag": r["card_flag"],
                 "card_last4": r["card_last4"],
                 "installments_total": int(r["installments_total"] or 0),
+                "manual": True,  # só se TODAS as linhas forem manuais (o `bool_and` de list_installment_groups)
                 "purchased_at": r["purchased_at"].isoformat() if r["purchased_at"] else None,
                 "parcelas": [],
             }
+        groups[gid]["manual"] = groups[gid]["manual"] and r["source"] == "manual"
         is_paid = r["bill_status"] != "open"
         # cartão de outro usuário (left join vazio): sem dias do cartão, vence no fim do período
         due = (card_bill_due_date(r["period_end"], int(r["closing_day"]), int(r["due_day"]))
@@ -2152,6 +2154,7 @@ def list_installment_groups(user_id: int, limit: int = 15):
                 select t.group_id, coalesce(c.name, 'Cartão') as card_name,
                        c.closing_day, c.due_day,
                        max(t.installments_total) as n_total,
+                       bool_and(t.source = 'manual') as manual,
                        count(*) as n_registered,
                        sum(t.valor) as total,
                        sum(case when b.status = 'open' then t.valor else 0 end) as total_pending,
@@ -2190,7 +2193,7 @@ def list_installment_groups(user_id: int, limit: int = 15):
     for r in rows:
         desc_banco, parcela_n = r.pop("desc_banco"), r.pop("parcela_n")
         vistas = r.pop("parcelas")
-        p = progresso({"installments_total": r["n_total"], "parcelas": vistas})
+        p = progresso({"installments_total": r["n_total"], "manual": r.pop("manual"), "parcelas": vistas})
         r.update(pagas=p["pagas"], n_parcelas=p["n"], quitada=p["quitada"], parcelas_completas=cobre_todas(vistas, p["n"]))
         if (r["nota"] or "").strip() or desc_banco:  # parcelamento manual sem nota segue sem nome
             r["nota"] = nome_grupo(r["nota"], desc_banco, parcela_n, r["n_total"])

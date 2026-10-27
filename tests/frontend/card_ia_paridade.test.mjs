@@ -318,7 +318,7 @@ const progressoDe = (fonte, rotulo, de = "export function progresso") => new Fun
 const PROGRESSO = JSON.parse(ler("tests", "fixtures", "parcelas_progresso.json"));
 const DASHBOARD_LEGADO = () => ler("frontend", "dashboard.js");
 test("parcelas: `progresso` dá o mesmo \"n de N pagas\" nas 3 cópias (web, app, dashboard.js legado); negativo: a regra trocada numa cópia só é vista", () => {
-  assert.ok(PROGRESSO.length >= 9);
+  assert.ok(PROGRESSO.length >= 13);
   const copias = [
     progressoDe(CARTAO_WEB(), "cartao.tsx"), progressoDe(COMPLEMENTOS_APP(), "complementos.tsx"),
     progressoDe(DASHBOARD_LEGADO(), "dashboard.js", "function progresso"),

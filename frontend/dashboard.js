@@ -1448,7 +1448,7 @@ function progresso(g) {
   const parcelas = g.parcelas || [];
   const nos = parcelas.map(p => p.installment_no);
   const n = Math.max(g.installments_total > 0 ? g.installments_total : parcelas.length, Math.max(0, ...nos));
-  const antes = parcelas.length ? Math.max(0, Math.min(...nos) - 1) : 0;
+  const antes = g.manual ? Math.max(0, n - parcelas.length) : parcelas.length ? Math.max(0, Math.min(...nos) - 1) : 0;
   const pagas = Math.min(n, antes + parcelas.filter(p => p.is_paid).length);
   return { pagas, n, quitada: pagas >= n && parcelas.every(p => p.is_paid) };
 }

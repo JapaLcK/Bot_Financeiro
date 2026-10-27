@@ -62,14 +62,15 @@ def nome_grupo(nota: str | None, desc: str | None, n: int | None, total: int | N
 
 
 def progresso(g: dict) -> dict:
-    """{"pagas", "n", "quitada"} de {"installments_total", "parcelas": [{"installment_no", "is_paid"}]}.
+    """{"pagas", "n", "quitada"} de {"installments_total", "manual", "parcelas": [{"installment_no", "is_paid"}]}.
     N é o total do banco (ou o que o PigBank viu, sem total) e as parcelas antes da 1ª vista contam
-    como pagas: o Open Finance só traz as parcelas a partir da que está na fatura."""
+    como pagas: o Open Finance só traz as parcelas a partir da que está na fatura. No parcelamento
+    manual o PigBank cria as N, e a que falta foi antecipada (`anticipate_installment` a apaga): paga."""
     parcelas = g.get("parcelas") or []
     nos = [int(p["installment_no"] or 0) for p in parcelas]
     total = int(g.get("installments_total") or 0)
     n = max(total if total > 0 else len(parcelas), max(nos, default=0))
-    antes = max(0, min(nos) - 1) if nos else 0
+    antes = max(0, n - len(parcelas)) if g.get("manual") else max(0, min(nos) - 1) if nos else 0
     pagas = min(n, antes + sum(1 for p in parcelas if p["is_paid"]))
     return {"pagas": pagas, "n": n, "quitada": pagas >= n and all(p["is_paid"] for p in parcelas)}
 

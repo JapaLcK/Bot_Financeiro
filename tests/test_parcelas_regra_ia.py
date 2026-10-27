@@ -96,3 +96,31 @@ def test_conversa_gastei_no_mercado_e_depois_meus_parcelamentos_mostra_4_de_12()
     _of(uid, db.create_card(uid, "Banco", 10, 17), "Sofa", 5, 12)
     diga(uid, "gastei 50 no mercado")
     assert "4/12 pagas" in diga(uid, "meus parcelamentos")
+
+
+def test_manual_antecipado_conta_a_parcela_apagada_como_paga_e_sai_quando_quita():
+    """O "antecipar" apaga a parcela do parcelamento manual: a que falta foi paga, não "ainda não chegou"."""
+    uid = novo_uid()
+    _tres_vezes_com_a_1a_fechada(uid, db.create_card(uid, "Nubank", 10, 17))
+    gid = q("select distinct group_id::text as g from credit_transactions where user_id = %s", (uid,))["g"]
+    db.anticipate_installment(uid, gid)  # a 2ª
+    g = _list_installments(uid, {})["groups"][0]
+    assert (g["pagas"], g["n_parcelas"]) == (2, 3)  # antes: 1/3
+    (v,) = _visao(uid)
+    assert v["pagas"] == 2 and v["manual"] is True
+    assert "2/3 pagas" in diga(uid, "meus parcelamentos")
+    db.anticipate_installment(uid, gid)  # a 3ª
+    assert _list_installments(uid, {})["groups"] == [] and _visao(uid) == []  # antes: "1/3" para sempre
+    assert "Geladeira" not in diga(uid, "meus parcelamentos").title()
+
+
+def test_grupo_misto_manual_e_ofx_da_o_mesmo_progresso_no_whatsapp_e_no_card():
+    """O OFX liga parcela ao parcelamento manual (`import_credit_ofx_bulk`): `manual` sai de TODAS as linhas nos dois leitores."""
+    uid = novo_uid()
+    _tres_vezes_com_a_1a_fechada(uid, db.create_card(uid, "Nubank", 10, 17))
+    q("update credit_transactions set source = 'ofx' where user_id = %s and installment_no = 3 returning id", (uid,))
+    gid = q("select distinct group_id::text as g from credit_transactions where user_id = %s", (uid,))["g"]
+    db.anticipate_installment(uid, gid)  # a 2ª
+    (g,) = _list_installments(uid, {})["groups"]
+    (v,) = _visao(uid)
+    assert (g["pagas"], v["pagas"], v["manual"]) == (1, 1, False)

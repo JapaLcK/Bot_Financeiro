@@ -15,10 +15,10 @@ export function Faturas() { const p = usePainel(); return <RecursoDados nome="ca
 const COMPRAS_VISIVEIS = 5;
 // "n de N pagas" pelo total do banco: as parcelas antes da 1ª que o PigBank viu (o Open Finance só traz as faturas lidas) contam como pagas.
 // Cópia de `progresso` em webapp/src/dashboard/parts/cardIa/cartao.tsx, executada contra ela por tests/frontend/card_ia_paridade.test.mjs.
-export function progresso(g: { installments_total: number; parcelas: { installment_no: number; is_paid: boolean }[] }) {
+export function progresso(g: { installments_total: number; manual?: boolean; parcelas: { installment_no: number; is_paid: boolean }[] }) {
  const ultima = Math.max(0, ...g.parcelas.map((p) => p.installment_no)); // N nunca abaixo da maior parcela vista (total torto ou ausente)
  const n = Math.max(g.installments_total > 0 ? g.installments_total : g.parcelas.length, ultima);
- const antes = g.parcelas.length ? Math.max(0, Math.min(...g.parcelas.map((p) => p.installment_no)) - 1) : 0;
+ const antes = g.manual ? Math.max(0, n - g.parcelas.length) : g.parcelas.length ? Math.max(0, Math.min(...g.parcelas.map((p) => p.installment_no)) - 1) : 0; // manual: a que falta foi antecipada
  const pagas = Math.min(n, antes + g.parcelas.filter((p) => p.is_paid).length);
  return { pagas, n, quitada: pagas >= n && g.parcelas.every((p) => p.is_paid) }; // parcela vista em aberto nunca deixa a compra quitada
 }
