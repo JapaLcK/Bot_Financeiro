@@ -2255,8 +2255,10 @@ devolver `None` e a mensagem seguir o fluxo normal, que pode criar linha em `use
 (g) depois do "lotou" a mensagem seguinte do número segue o fluxo normal e cria `user_identities`;
 (h) se `sessao_recente` falhar no banco e a mensagem tiver o gatilho, `decidir` manda abrir e nasce a 2ª
 sessão com 8 perguntas novas (fail-open raro);
-(i) o webhook (`wa_app.py`, ~:313-324) grava `recipient_id` CRU em `system_event_logs` quando a Meta devolve
-erro de envio: defeito ANTERIOR a este PR e de todos os usuários;
+(i) até a correção da #919, o webhook (`wa_app.py`, `wa_webhook`) gravava o `recipient_id` CRU e o `errors`
+inteiro em `system_event_logs` quando a Meta devolvia erro de envio (defeito anterior a este PR, de todos os
+usuários); agora grava o número mascarado e, de `errors`, só `code`/`title`. As linhas antigas continuam na
+tabela até existir a retenção de `system_event_logs` (PR-4 do grupo D);
 (j) o worker do WhatsApp é único e serial (`wa_app.py`, ~:360-364): cada pergunta do demo ocupa a fila dos
 pagantes por até 30s×2 tentativas, e a fila (maxsize 500) descarta o excedente: medir a latência antes de
 subir o teto;

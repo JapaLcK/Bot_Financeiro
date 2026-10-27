@@ -54,12 +54,13 @@ def limpa_para_pg(valor):
     `str` → string saneada. `dict`/`list` → percorridos **no lugar** (chave e
     valor) e devolvidos. Qualquer outra coisa volta como veio.
 
-    **"No lugar" é visível para quem chamou, e há chamador vivo que reusa o
-    objeto**: `adapters/whatsapp/wa_app.py:311` passa a lista `status["errors"]`
-    do payload por referência para o `details`, e `:325` enfileira o MESMO
-    payload — a lista chega na fila com U+FFFD onde estava o byte podre
-    (MEDIDO). Aceito: a troca é veneno→U+FFFD, ninguém compara byte a byte, e
-    um `deepcopy` custaria mais que o saneamento inteiro. Quem precisar do
+    **"No lugar" é visível para quem chamou.** Os dois gravadores de
+    `system_event_logs` passam antes pelo `redigir_failing_row`, que copia
+    `dict`/`list`, então o `details` de quem os chama sai intacto. O
+    `record_audit_event` (`core/audit.py:144`) passa o `details` do chamador
+    direto: quem reusar o objeto depois o vê com U+FFFD onde estava o byte
+    podre. Aceito: a troca é veneno→U+FFFD, ninguém compara byte a byte, e um
+    `deepcopy` custaria mais que o saneamento inteiro. Quem precisar do
     original intacto copia ANTES de chamar.
 
     ponytail: teto conhecido — **`tuple` NÃO é percorrida**, volta como veio, e
