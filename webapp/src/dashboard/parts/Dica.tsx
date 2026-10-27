@@ -8,7 +8,7 @@ import type { Path } from "../router";
 // A dica de primeiro uso de uma tela (#728): o texto e o "já vista" vêm do servidor (`DICAS`
 // em api/v2/guia.py, só a da tela que o plano dá). Aparece sozinha uma vez; depois, só pela
 // Ajuda ou pelo Cmd-K ("Como funciona esta tela").
-export const TELA: Record<Dica["tela"], Path> = { assinaturas: "/assinaturas" };
+export const TELA: Record<Dica["tela"], Path> = { assinaturas: "/assinaturas", previsao: "/previsao", metas: "/metas", patrimonio: "/patrimonio", simulador: "/simulador" };
 export const dicaDe = (g: Guia | undefined, path: Path) => g?.dicas?.find((d) => TELA[d.tela] === path);
 export const abrirDica = () => window.dispatchEvent(new Event("dash:dica"));
 

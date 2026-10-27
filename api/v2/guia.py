@@ -70,9 +70,24 @@ DICAS = (
     {"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas",
      "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. "
               "“Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui."},
+    {"id": "previsao.saldo", "tela": "previsao", "titulo": "Como eu prevejo seu saldo",
+     "texto": "Eu parto do seu saldo de hoje e ando dia a dia: somo suas receitas e tiro boletos, faturas, "
+              "gastos fixos e uma estimativa do gasto do dia a dia. É uma estimativa, não uma promessa."},
+    {"id": "metas.ritmo", "tela": "metas", "titulo": "Como eu acompanho suas metas",
+     "texto": "Eu mostro quanto cada meta já tem, quanto falta e se o seu ritmo chega lá. "
+              "O valor vem da conta ou do investimento que você escolher pra ela."},
+    {"id": "patrimonio.soma", "tela": "patrimonio", "titulo": "De onde vem seu patrimônio",
+     "texto": "Eu somo a Carteira, as contas, as caixinhas e os investimentos, e tiro uma foto por dia, no fim da tarde. "
+              "A linha aparece no dia seguinte à primeira foto."},
+    {"id": "simulador.corte", "tela": "simulador", "titulo": "Aqui você só testa",
+     "texto": "Corte um gasto do dia a dia e eu mostro quanto sobra por mês e como fica seu saldo nos próximos "
+              "90 dias. É só simulação: nada muda na sua conta."},
 )
 DICA_IDS = [d["id"] for d in DICAS]
-_RECURSO = {"assinaturas": "subscriptions"}  # a tela → o recurso do plano (api/v2/assinaturas.py)
+# A tela → o recurso do plano, o mesmo do gate do endpoint dela (assinaturas.py, previsao.py, simulador.py).
+# Metas e Patrimônio não têm tier: "generic" (a base da escada) é Essencial ou acima: em carência (tier free) a dica não vem, limite aceito.
+_RECURSO = {"assinaturas": "subscriptions", "previsao": "forecast", "simulador": "simulator",
+            "metas": "generic", "patrimonio": "generic"}
 
 PassoId = Literal[tuple(IDS)]
 DicaId = Literal[tuple(DICA_IDS)]
@@ -101,7 +116,7 @@ class Passo(BaseModel):
 
 class Dica(BaseModel):
     id: DicaId
-    tela: Literal["assinaturas"]
+    tela: Literal["assinaturas", "previsao", "metas", "patrimonio", "simulador"]
     titulo: str
     texto: str
     vista: bool

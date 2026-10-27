@@ -1,8 +1,9 @@
-// A dica de primeiro uso de Assinaturas (#728, parts/Dica.tsx) e a Ajuda que vira menu nas telas
+// A dica de primeiro uso de Assinaturas, Previsão, Metas, Patrimônio e Simulador (#728, parts/Dica.tsx) e a Ajuda que vira menu nas telas
 // com dica (parts/Ajuda.tsx). O servidor de mentira e as opções `dica`/`dicaLenta` estão em
 // _guia.mjs; o carimbo e o portão de plano de verdade, em tests/test_api_v2_guia_dica.py.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { RESPOSTAS } from "./_painel.mjs";
 import { FAZER, PASSOS, abrir, acoes, esperaTitulo, naRota, navegador } from "./_guia.mjs";
 
 navegador();
@@ -252,5 +253,57 @@ for (const [semDialog, rota, w, h] of [[false, "/", 375, 812], [true, "/", 375, 
     await ctx.close();
     assert.deepEqual(r, { folha: 0, guia: 0, dica: 0, hash: `#${rota}` }, `${rota}`); // hash: o 2º toque não navegou para a tela de baixo
     assert.deepEqual(acoes(s), [], `${rota}`);
+  });
+}
+
+// As outras quatro telas com dica. Os textos vêm da fixture, que tests/test_api_v2_contrato.py prende
+// ao catálogo `DICAS` do servidor: tirar a dica de lá (ou da TELA em parts/Dica.tsx) deixa isto vermelho.
+const OUTRAS = [["/previsao", "previsao.saldo"], ["/metas", "metas.ritmo"], ["/patrimonio", "patrimonio.soma"], ["/simulador", "simulador.corte"]];
+for (const [rota, id] of OUTRAS) {
+  test(`${rota}: a dica aparece na 1ª visita com um POST, não volta ao sair e voltar, reabre pela Ajuda (1280 e 390) e some com o guia aberto`, async () => {
+    const titulo = RESPOSTAS.guia.concluido.dicas.find((d) => d.id === id).titulo;
+    const { ctx, page, s, erros } = await abrir({ guia: "concluido", dica: "nova", rota });
+    await page.locator(CARD).waitFor();
+    const r = await page.evaluate((sel) => {
+      const c = document.querySelector(sel).getBoundingClientRect();
+      return { titulo: document.querySelector(`${sel} h2`).textContent, dentro: c.left >= 0 && c.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth };
+    }, CARD);
+    await page.waitForTimeout(300);
+    await ir(page, "/");
+    await naRota(page, "#/");
+    await ir(page, rota);
+    await naRota(page, `#${rota}`);
+    await page.waitForTimeout(500);
+    const volta = await page.locator(CARD).count(); // a mesma carga de página: o card montou de novo? não
+    // Pela Ajuda do trilho: o menu tem as duas ações e a dica reabre com o foco no título.
+    const ajuda = menu(page, ".rail");
+    await ajuda.click();
+    const itens = await page.locator(".rail .ajuda-menu button").allTextContents();
+    await page.getByRole("button", { name: "Como funciona esta tela" }).click();
+    await focoNoTitulo(page);
+    const reaberta = await page.locator(`${CARD} h2`).textContent();
+    // Com o guia aberto (Ajuda > Guia do painel) o card some.
+    await ajuda.click();
+    await page.getByRole("button", { name: "Guia do painel" }).click();
+    await page.locator(".guia-balao").waitFor();
+    const comGuia = await page.locator(CARD).count();
+    await ctx.close();
+    // Celular: o Menu da barra de baixo reabre a mesma dica.
+    const cel = await abrir({ width: 390, height: 844, guia: "concluido", rota });
+    await cel.page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
+    const itensCel = await ajudaDaFolha(cel.page);
+    await cel.page.locator(".menu-telas").getByRole("button", { name: "Como funciona esta tela" }).click();
+    await cel.page.locator(CARD).waitFor();
+    const noCel = await cel.page.evaluate((sel) => { const b = document.querySelector(sel).getBoundingClientRect(); return b.left >= 0 && b.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth; }, CARD);
+    await cel.ctx.close();
+    assert.deepEqual(r, { titulo, dentro: true });
+    assert.deepEqual(s.dicas, [id]); // um POST só, mesmo saindo e voltando
+    assert.equal(volta, 0);
+    assert.deepEqual(itens, ["Guia do painel", "Como funciona esta tela"]);
+    assert.equal(reaberta, titulo);
+    assert.equal(comGuia, 0);
+    assert.deepEqual(itensCel, ["Guia do painel", "Como funciona esta tela"]);
+    assert.ok(noCel);
+    assert.deepEqual(erros, []);
   });
 }
