@@ -48,7 +48,7 @@ function usePrevisao() {
 }
 type Estado = ReturnType<typeof usePrevisao>;
 
-function Bloqueio({ e }: { e: ErroApi }) {
+export function Bloqueio({ e }: { e: ErroApi }) {
   if (e.code === "pro_required") return <ConvitePro texto="A previsão é do Plus e do Pro." />;
   if (e.code === "password_required") {
     return (
@@ -163,6 +163,25 @@ export function PrevisaoHero({ p, id }: { p: Estado; id: string }) {
 
 // O card "Saldo previsto" do Resumo: o mesmo bloco da página.
 export const PrevisaoCard = () => <PrevisaoHero p={usePrevisao()} id="hero" />;
+
+// "Próximos N dias" do Resumo: a mesma /api/v2/previsao do card acima (mesma chave, um pedido só), sem tocar na lista de receitas (`usePrevisao`).
+export function CompromissosResumo() {
+  const q = useQuery(previsaoQuery(null));
+  const id = "compromissos";
+  const e4 = q.error instanceof ErroApi && q.error.status >= 400 && q.error.status < 500 ? q.error : null;
+  if (!e4 && q.data) return <Compromissos id={id} title={`Próximos ${q.data.dias} dias`} grupos={q.data.compromissos} dias={q.data.dias} hoje={q.data.hoje} />;
+  return (
+    <Frame id={id} title="Próximos dias" real>
+      {e4 ? <Bloqueio e={e4} />
+        : q.isError && !q.isFetching ? (
+          <div className="empty" role="alert">
+            <p>Não deu para carregar os compromissos.</p>
+            <button type="button" className="btn btn-ghost retry" onClick={() => q.refetch()}>Tentar de novo</button>
+          </div>
+        ) : <p role="status" className="faint">Carregando…</p>}
+    </Frame>
+  );
+}
 
 // Categorias na ordem do servidor; Number() só mede a barra (valor ÷ maior), o dinheiro é o texto da API.
 function Estimativa({ e }: { e: EstimativaVariavel }) {

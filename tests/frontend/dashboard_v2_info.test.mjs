@@ -97,7 +97,7 @@ for (const width of [1440, 390]) for (const fallback of [false, true]) {
 }
 
 test("Resumo, card Próximos dias: com item 'estimado' na lista há ⓘ (o estado sem estimado não é alcançável: a lista vem do protótipo)", async () => {
-  const { ctx, page, ir } = await abrir({ width: 1440, espera: "#w-hero .hero-value" });
+  const { ctx, page, ir } = await abrir({ width: 1440, espera: "#w-hero .hero-value", demo: true });
   await ir("/");
   await page.locator("#w-compromissos .bill").first().waitFor();
   const r = await page.evaluate(() => ({
