@@ -108,4 +108,4 @@ def test_dica_de_a_b_nao_ve_nem_altera(a_e_b):
     assert dica(b, user_id=a, uid=a).status_code == 200
     assert linha(a) == antes
     assert list(linha(b)["dicas"]) == [ID]
-    assert [(d["id"], d["vista"]) for d in ler(a)["dicas"]] == [(ID, True)]
+    assert [d["id"] for d in ler(a)["dicas"] if d["vista"]] == [ID]  # só a de A, e só a que ela marcou

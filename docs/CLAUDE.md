@@ -590,9 +590,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   ```
 
   **Dicas de tela.** O `Guia` também traz `dicas: [{id, tela, titulo, texto, vista}]`, do
-  catálogo `DICAS` em `api/v2/guia.py` (hoje só `assinaturas.marcas`), filtradas pelo plano
-  (`plan_gate_ok` do recurso da tela: `subscriptions` para Assinaturas; o Essencial recebe
-  `[]`). `POST /api/v2/guia/dica {dica}` carimba a 1ª vez em `guia_painel.dicas`
+  catálogo `DICAS` em `api/v2/guia.py` (`assinaturas.marcas`, `previsao.saldo`, `metas.ritmo`, `patrimonio.soma`,
+  `simulador.corte`), filtradas pelo plano (`plan_gate_ok` do recurso da tela, tier mínimo em `FEATURE_MIN_TIER_V2`: `subscriptions`
+  Assinaturas e `forecast` Previsão (Plus), `simulator` Simulador (Pro), `generic` Metas e Patrimônio
+  (Essencial); em carência/tier free nem as de `generic` vêm). `POST /api/v2/guia/dica {dica}` carimba a 1ª vez em `guia_painel.dicas`
   (`{dica_id: carimbo}`, coluna por `alter … if not exists`) e devolve o `Guia`; id fora do
   catálogo = 422; não toca `oferecido_em` nem `feitos` (o guia segue em `oferecer`). Dica que
   o plano não dá grava e é inofensiva: o GET não a devolve. O cliente (`parts/Dica.tsx`) mostra
