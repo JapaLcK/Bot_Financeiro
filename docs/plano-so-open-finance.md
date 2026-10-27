@@ -403,10 +403,12 @@ feita (§9).
   LEVANTA quando a metadata foge do contrato (`totalPages` ausente, eco de `page` diferente)
   e o sync engole o erro (fail-soft). Então zero linhas pode ser contrato da Pluggy diferente
   do esperado, não ausência de faturas. A linha de `faturas indisponíveis` traz
-  `motivo=<tipo> sqlstate=… status=… code=…`, sem o texto da exceção (#657): `status` com
-  número é erro HTTP da Pluggy (429 é limite, e `code` traz o código dela); `PluggyApiError`
-  com `status=None` é o leitor recusando a resposta (contrato diferente), sem dizer qual das
-  regras falhou; outro `motivo` é falha nossa. Esse passo não pega nome de campo errado: o leitor
+  `motivo=<tipo> sqlstate=… status=… code=…` e, só quando o tipo é `PluggyApiError`,
+  `texto=<mensagem>` (#657; a mensagem é nossa, sem o corpo da resposta): `status` com
+  número é erro HTTP da Pluggy (429 é limite, e `code` traz o código dela); `status=None`
+  com `texto=Leitura de /bills incompleta: <regra>` é o leitor recusando a resposta
+  (contrato diferente), e a regra diz qual; outro `motivo` é falha nossa, sem texto.
+  `faturas não gravadas` traz `motivo=<tipo> sqlstate=…` (falha ao gravar). Esse passo não pega nome de campo errado: o leitor
   não levanta por campo ausente, só grava a coluna nula ou o `raw` sem a chave.
 - **Pronto:** fatura paga no banco sai da Previsão sem ação do usuário. Pagamento parcial.
   Duas faturas abertas. Estorno. Reconexão. O mesmo pagamento não quita duas faturas.

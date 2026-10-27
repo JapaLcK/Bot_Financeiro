@@ -30,6 +30,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from types import SimpleNamespace
+
+import httpx
 
 import psycopg
 import pytest
@@ -37,6 +40,7 @@ from fastapi.testclient import TestClient
 
 import core.admin_dashboard as admin_dashboard
 import core.observability as observability
+import core.services.pluggy as pluggy_api
 import core.services.piggy_agents as piggy_agents
 import core.services.pluggy_sync as ps
 import db
@@ -45,6 +49,7 @@ import frontend.routes.open_finance as of_routes
 from conftest import promote_to_pro
 from core.services import plan_service
 from core.services.pluggy import PluggyApiError
+from core.services.pluggy_bills import list_pluggy_bills
 from db.connection import get_conn
 from test_of_item_ownership import _auth, eventos  # noqa: F401 — fixture
 from test_of_connection_state import ITEM_SAUDAVEL, _conta_pluggy, _mock_pluggy, _tx_pluggy
@@ -305,7 +310,8 @@ def _leitura_que_falha(mp, uid, item_id, funcao, erro, contas=None):
                  contas=contas or [_conta_pluggy()], txs=[_tx_pluggy()])
     mp.setattr(ps, "list_pluggy_recurring_payments", lambda i, k=None: [])
     mp.setattr(ps, "list_pluggy_bills", lambda *a, **k: [])
-    mp.setattr(ps, funcao, _levanta(erro))
+    if erro is not None:
+        mp.setattr(ps, funcao, _levanta(erro))
     ps.sync_pluggy_item(item_id)
 
 
@@ -319,6 +325,11 @@ def _recorrencias(mp, uid, erro):
 
 def _faturas(mp, uid, erro):
     _leitura_que_falha(mp, uid, "i657-fat", "list_pluggy_bills", erro, contas=[CARTAO])
+
+
+def _faturas_gravacao(mp, uid, erro):
+    mp.setattr(ps, "salvar_faturas_do_banco", _levanta(erro))
+    _leitura_que_falha(mp, uid, "i657-fgr", "list_pluggy_bills", None, contas=[CARTAO])
 
 
 def _foto(mp, uid, erro):
@@ -355,11 +366,12 @@ def _tick(mp, uid, erro):
     (_investimentos, "[pluggy_sync] investimentos indisponíveis item=i657-inv "),
     (_recorrencias, "[pluggy_sync] recorrências indisponíveis item=i657-rec "),
     (_faturas, "[pluggy_sync] faturas indisponíveis item=i657-fat "),
+    (_faturas_gravacao, "[pluggy_sync] faturas não gravadas item=i657-fgr "),
     (_foto, "[pluggy_sync] foto do run que falhou não gravada (i657-foto): "),
     (_saude, "[pluggy_sync] health check falhou item=i657-saude: "),
 ], ids=["hold_aggregate_emails", "sync_item_contido", "mark_sync_result", "hook_user",
         "caixinha", "agents_hook", "tick_erro", "investimentos", "recorrencias", "faturas",
-        "foto_do_run", "health_check"])
+        "faturas_gravacao", "foto_do_run", "health_check"])
 def test_print_de_falha_nao_leva_o_texto_da_excecao(user_id, monkeypatch, capsys,
                                                      roda, prefixo):
     erro = _erro_real()
@@ -383,3 +395,56 @@ def test_falha_da_pluggy_imprime_status_e_code(user_id, monkeypatch, capsys, rod
     saida = "".join(capsys.readouterr())
     assert (f"{prefixo}motivo=PluggyApiError sqlstate=None status=429 code=RATE_LIMIT"
             in saida), saida
+
+
+# ── 4. o texto da `PluggyApiError` entra no print; o corpo da resposta, nunca ──
+# O texto entra porque é todo nosso e diz qual regra do leitor recusou (o operador
+# o procura em `docs/plano-so-open-finance.md`). Isso só vale enquanto o
+# `_raise_for_pluggy_response` não puser o corpo da resposta na mensagem, e o
+# corpo de erro da Pluggy traz dado do titular. O caso 22P02 do grupo acima prova
+# que o texto de qualquer OUTRA exceção continua fora.
+
+_CORPO_COM_PII = {"code": "INVALID_PARAM", "message": "Fulano de Tal Sobrenome",
+                  "email": "fulano657@exemplo.com", "cpf": "123.456.789-01"}
+_PII = ("Fulano de Tal", "fulano657@exemplo.com", "123.456.789-01")
+
+
+def _pluggy_http(mp, status: int, corpo: dict) -> None:
+    """Todo `httpx.Client` de `core/services/pluggy.py` responde `status` + `corpo`
+    pelo `MockTransport`: `_pluggy_get` e `_raise_for_pluggy_response` são os reais."""
+    real = httpx.Client
+    resposta = httpx.MockTransport(lambda req: httpx.Response(status, json=corpo))
+    mp.setattr(pluggy_api, "httpx",
+               SimpleNamespace(Client=lambda **kw: real(transport=resposta, **kw)))
+
+
+def test_pluggy_api_error_nunca_leva_o_corpo_da_resposta(monkeypatch):
+    _pluggy_http(monkeypatch, 400, _CORPO_COM_PII)
+    with pytest.raises(PluggyApiError) as exc:
+        list_pluggy_bills("acc-657", "k")
+    texto = str(exc.value)
+    assert "HTTP 400" in texto and "code=INVALID_PARAM" in texto, texto
+    for pii in _PII:
+        assert pii not in texto, texto
+
+
+@pytest.mark.parametrize("status, corpo, esperado", [
+    (200, {"results": [], "totalPages": None},
+     "status=None code=None texto=Leitura de /bills incompleta: metadata de paginação incoerente."),
+    (400, _CORPO_COM_PII,
+     "status=400 code=INVALID_PARAM texto=Falha ao consultar /bills na Pluggy: "
+     "Pluggy retornou HTTP 400 (code=INVALID_PARAM)"),
+], ids=["recusa_do_leitor", "http_com_pii_no_corpo"])
+def test_print_de_faturas_traz_o_texto_da_pluggy_api_error(user_id, monkeypatch, capsys,
+                                                          status, corpo, esperado):
+    _conexao(user_id, "i657-fat-http")
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "i657-fat-http"},
+                 contas=[CARTAO], txs=[_tx_pluggy()])
+    monkeypatch.setattr(ps, "list_pluggy_recurring_payments", lambda i, k=None: [])
+    _pluggy_http(monkeypatch, status, corpo)
+    ps.sync_pluggy_item("i657-fat-http")
+    saida = "".join(capsys.readouterr())
+    assert (f"[pluggy_sync] faturas indisponíveis item=i657-fat-http "
+            f"motivo=PluggyApiError sqlstate=None {esperado}") in saida, saida
+    for pii in _PII:
+        assert pii not in saida, saida
