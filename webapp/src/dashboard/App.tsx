@@ -72,6 +72,8 @@ export function App() {
   useEffect(() => {
     // O card de compras de /gastos não sobrevive à saída da tela (voltar pelo menu reabriria e roubaria o foco); a ida do Resumo, que o abre, não passa por aqui.
     if (anterior.current === "/gastos" && path !== "/gastos") set({ gastosAberto: null });
+    // O modo Organizar só existe no Board (Resumo): sair dele desliga, senão o guia ficaria pausado em todas as telas.
+    if (path !== "/" && s.editing) set({ editing: false });
     anterior.current = path;
     document.title = `PigBank · ${route(path).label}`;
     if (first.current) { first.current = false; return; }
@@ -140,7 +142,7 @@ export function App() {
             </a>
           );
         })}
-        <button type="button" aria-haspopup="dialog" aria-current={TABBAR.includes(path) ? undefined : "true"} onClick={() => window.dispatchEvent(new Event("dash:menu"))}><i className="ph ph-list" aria-hidden="true" /><span>Menu</span></button>
+        <button type="button" aria-haspopup="dialog" aria-current={TABBAR.includes(path) ? undefined : "true"} data-guia="nav.menu" onClick={() => window.dispatchEvent(new Event("dash:menu"))}><i className="ph ph-list" aria-hidden="true" /><span>Menu</span></button>
       </nav>
       <AskBar path={path} />
       <Tip />

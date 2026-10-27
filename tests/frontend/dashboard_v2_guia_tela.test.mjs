@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAINEL, PROTOTIPO, RAIZ, servir } from "./_painel.mjs";
-import { FAZER, PASSOS, abrir, acoes, ajudaDoMenu, bora, esperaTitulo, irAoAlvo, navegador } from "./_guia.mjs";
+import { FAZER, PASSOS, PASSOS_TODOS, tocarAba, abrir, acoes, ajudaDoMenu, bora, esperaTitulo, irAoAlvo, navegador } from "./_guia.mjs";
 
 const browser = navegador();
 
@@ -93,11 +93,13 @@ const ALVOS = {
   "mes.trocado": ['[data-guia="mes.trocar"]', '[data-guia="resumo.saiu"]'],
   "categoria.aberta": ['[data-guia="categorias.item"]'],
   "piggy.perguntou": ['[data-guia="piggy.chip"]'],
+  "organizar.ligado": ['[data-guia="painel.organizar"]'],
+  "ferramenta.aberta": ['[data-guia="ferramentas.compra"]'],
 };
 const NAV = [".rail a", ".rail button", ".tabbar a", ".tabbar button"];
-for (const [width, height] of [[1280, 800], [1024, 768], [900, 600], [700, 600], [375, 812], [320, 640]]) {
+for (const [width, height] of [[1280, 800], [1024, 768], [900, 600], [700, 600], [375, 812], [320, 640], [660, 520], [375, 553]]) {
   test(`posição ${width}×${height}: balão na tela, fora dos alvos do passo e da navegação; Piggy na âncora`, async () => {
-    const { ctx, page, s } = await abrir({ width, height });
+    const { ctx, page, s } = await abrir({ width, height, roteiro: "todos" });
     await bora(page);
     const medidas = [];
     const medir = async (p, fase, ancora) => {
@@ -128,23 +130,26 @@ for (const [width, height] of [[1280, 800], [1024, 768], [900, 600], [700, 600],
         }
         const fora = bb.left < 0 || bb.top < 0 || bb.right > innerWidth || bb.bottom > innerHeight;
         const cola = [Math.round(pg.bottom - a.top), Math.round(a.bottom - pg.top)];
+        const sobrePiggy = Math.max(0, Math.min(pg.right, bb.right) - Math.max(pg.left, bb.left)) * Math.max(0, Math.min(pg.bottom, bb.bottom) - Math.max(pg.top, bb.top));
         const encosta = pg.left < a.right && pg.right > a.left && cola.includes(8);
-        return { balao: [bb.left, bb.top, bb.right, bb.bottom].map(Math.round), alvos, cobertos, fora, cola, encosta };
+        return { balao: [bb.left, bb.top, bb.right, bb.bottom].map(Math.round), alvos, cobertos, fora, cola, encosta, sobrePiggy: Math.round(sobrePiggy) };
       }, [[...ALVOS[p.acao], `[data-guia="nav.${p.tela}"]`, ...NAV], ancora])]);
     };
-    for (const [i, p] of PASSOS.entries()) {
-      if (i) await esperaTitulo(page, p.fala.titulo);
+    for (const [i, p] of PASSOS_TODOS.entries()) {
+      if (i && p.id === "ferramentas.abrir" && width < 760) { await tocarAba(page); await page.locator(".menu-telas").getByRole("link", { name: "Ferramentas" }).click(); }
+      if (i) await esperaTitulo(page, (p.id === "ferramentas.abrir" ? /^Ferramentas$/ : p.fala.titulo));
       await page.locator(ALVOS[p.acao][0]).first().waitFor();
       await medir(p, "bloco", `[data-guia="${p.ancora}"]`);
       await irAoAlvo(page, ALVOS[p.acao][0]);
       await medir(p, "alvo", ALVOS[p.acao][0]);
       await FAZER[p.acao](page);
+      if (p.acao === "organizar.ligado") { await page.waitForFunction(() => !document.querySelector(".guia-balao")); await page.waitForTimeout(300); await page.locator('[data-guia="painel.organizar"]').click(); }
     }
     await esperaTitulo(page, "Fechou!");
     await ctx.close();
     console.log(`# posição ${width}×${height}:`, JSON.stringify(medidas));
-    assert.deepEqual(medidas.filter(([, , m]) => m.fora || m.cobertos.length || !m.encosta), []);
-    assert.equal(acoes(s).length, 4);
+    assert.deepEqual(medidas.filter(([, , m]) => m.fora || m.cobertos.length || m.sobrePiggy || !m.encosta), []);
+    assert.equal(acoes(s).length, 6);
   });
 }
 

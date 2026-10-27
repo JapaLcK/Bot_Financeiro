@@ -539,16 +539,23 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`resumo.saiu`) disponível quando o Saiu de `resumo_do_mes` (com a janela do plano) é > 0 no
   mês corrente OU no anterior; senão `motivo` = `sincronizando` (alguma conexão `updating`)
   > `conexao_com_erro` (`error_recoverable`/`needs_user_action`/`item_missing`) > `sem_dados`.
-  Passos 2 e 3 (exemplo) sempre disponíveis. `estado`, nesta ordem: `concluido` (todos os
-  ids em `feitos`, `?&`) > `dispensado` > `em_andamento` (o guia já foi oferecido ou
-  começado: o cliente não mostra o convite sozinho, só retoma pela Ajuda) > `oferecer` (nada
-  feito, nunca oferecido, passo 1 disponível) > `indisponivel`. Quem fez 2 e 3 sem dados segue `em_andamento` quando os dados chegam, com
+  Os outros quatro passos (`resumo.organizar`, `gastos.categoria`, `ferramentas.abrir`, `piggy.pergunta`; o último é de exemplo)
+  estão sempre disponíveis: o roteiro tem 5 passos, e o servidor não olha se há categoria. `estado`, nesta ordem: `concluido` (todos os
+  ids em `feitos`, `?&`) > `oferecer` (quem já tinha `concluido_em` do roteiro antigo de 3 passos e ainda
+  tem passo por fazer, enquanto a chave `guia.novos` não está em `dicas`) > `dispensado` > `em_andamento` (o guia já foi
+  oferecido ou começado, ou o convite das novidades já foi visto: o cliente não mostra o convite sozinho, só retoma pela
+  Ajuda) > `oferecer` (nada feito, nunca oferecido, passo 1 disponível) > `indisponivel`. **Convite das novidades:** `visto` e
+  `reabrir` carimbam `guia.novos` (chave fora do catálogo `DICAS`, o GET a ignora) uma vez; um 6º passo futuro não reabre o
+  convite. O cliente conta como novidade só o que falta de verdade: com layout salvo no navegador o Organizar é dado
+  como `feito` sozinho, e se só ele faltava o convite nem aparece. **A query de medição abaixo conta como `concluidos` quem só fechou
+  os 3 passos antigos** (`concluido_em` fica preenchido; `estado` passa a `oferecer`), então a taxa de conclusão não separa
+  roteiro de 3 de roteiro de 5 passos. Quem fez os outros passos sem dados segue `em_andamento` quando os dados chegam, com
   o passo 1 agora disponível e não feito. O `motivo` do topo é o do passo 1 quando ele está
   indisponível (só em `em_andamento` e `indisponivel`); senão `null`. O POST recebe `{acao: "visto"|"feito"|"dispensar"|"reabrir", passo?, ordem?}`
   (`ordem` é validada em TODAS as ações: inválida = 422 também em `visto`/`feito`, onde é ignorada)
   e devolve o mesmo `Guia`; `feito` sem `passo` ou `passo` fora do roteiro = 422 no envelope;
   `feito` de passo com `disponivel: false` = 409 `passo_indisponivel` no envelope, sem gravar
-  (sem dados o cliente mostra a orientação e segue para 2 e 3); nas outras ações `passo` é ignorado. Exige o CSRF do pai. Carimbos só gravam uma vez
+  (sem dados o cliente mostra a orientação e segue para os outros passos); nas outras ações `passo` é ignorado. Exige o CSRF do pai. Carimbos só gravam uma vez
   (`oferecido_em` no `visto` e no `reabrir`, `dispensado_em`, `concluido_em`, e o 1º de cada
   passo em `feitos`); `reabrir` zera `dispensado_em` (salvo gesto descartado pela ordem, abaixo). A oferta conta o convite **e** a Ajuda:
   quem abre pela Ajuda sem nunca ter visto o convite fica `em_andamento` e não o recebe depois,
