@@ -2714,16 +2714,17 @@ def handle(user_id: int, text: str) -> str | None:
             refund_items = [it for it in items if it.get("is_refund")]
 
             # ── Parcelamentos ─────────────────────────────────────────────────
-            # Exibe um bloco por group_id (evita repetir se várias parcelas do
-            # mesmo grupo caírem na mesma fatura, o que é raro mas possível)
-            seen_groups: set[str] = set()
+            # Um bloco por PARCELA do grupo: no Open Finance várias parcelas da mesma compra
+            # caem na mesma fatura (antecipação) e cada uma é uma cobrança; só a repetida sai.
+            seen_groups: set[tuple[str, object]] = set()
             if installment_items:
                 lines.append("📦 **Parcelamentos nesta fatura:**")
                 for it in installment_items:
                     gid = str(it["group_id"])
-                    if gid in seen_groups:
+                    # teto de 10 blocos: com a antecipação a mensagem passava de 4096 (o resto vai em "… e mais N")
+                    if (gid, it.get("installment_no")) in seen_groups or len(seen_groups) >= 10:
                         continue
-                    seen_groups.add(gid)
+                    seen_groups.add((gid, it.get("installment_no")))
 
                     inst_no = it.get("installment_no") or "?"
                     inst_total = it.get("installments_total") or "?"
@@ -2745,10 +2746,17 @@ def handle(user_id: int, text: str) -> str | None:
                     # ── Valor restante ────────────────────────────────────────
                     # Usa o DB quando ele tem dados para TODAS as parcelas futuras
                     # (histórico completo). Caso contrário, estima pelo valor desta.
-                    parcelas_futuras_db = max(0, parcelas_restantes_db - 1)
+                    # O resumo é do grupo inteiro: tira desta e das anteriores DESTA fatura
+                    # (no Open Finance várias parcelas da compra caem juntas).
+                    ate_esta = [
+                        x for x in installment_items
+                        if str(x["group_id"]) == gid and isinstance(x.get("installment_no"), int)
+                        and x["installment_no"] <= inst_no_int
+                    ] or [it]
+                    parcelas_futuras_db = max(0, parcelas_restantes_db - len(ate_esta))
                     if parcelas_futuras_db >= proximas_pelo_memo and parcelas_restantes_db > 0:
                         # DB completo — usa os valores reais
-                        valor_restante_final = max(0.0, valor_restante_db - valor_parcela)
+                        valor_restante_final = max(0.0, valor_restante_db - sum(float(x["valor"]) for x in ate_esta))
                         estimado = False
                     else:
                         # Histórico parcial — estima pelo valor desta parcela
@@ -2935,20 +2943,20 @@ def _list_active_installments(user_id: int) -> str:
 
     lines = ["📦 **Parcelamentos ativos:**"]
     for r in rows:
-        n_total = int(r.get("n_total") or r.get("n_registered") or 0)
-        n_pending = int(r.get("n_pending") or 0)
-        if n_pending == 0:
+        if r["quitada"]:
             continue
-        n_paid = n_total - n_pending
         total = float(r.get("total") or 0)
         pending = float(r.get("total_pending") or 0)
         nota = (r.get("nota") or "").strip()
         desc = f" — {nota}" if nota else ""
-        progress = f"{n_paid}/{n_total} pagas"
+        progress = f"{r['pagas']}/{r['n_parcelas']} pagas"
         group_code = _group_code(r.get("group_id"))
+        # parcelas vistas não cobrem as N (Open Finance): total/restante seriam só o visto, não se inventa dinheiro
+        dinheiro = (f"💰 Total: {fmt_brl(total)} | Restante: {fmt_brl(pending)} ({progress})"
+                    if r["parcelas_completas"] else f"📊 {progress}")
         lines.append(
             f"• {r.get('card_name', '?')}{desc}\n"
-            f"  💰 Total: {fmt_brl(total)} | Restante: {fmt_brl(pending)} ({progress})\n"
+            f"  {dinheiro}\n"
             f"  🔢 Código: `{group_code}`\n"
             f"  🗑️ Apagar: `apagar {group_code}`"
         )

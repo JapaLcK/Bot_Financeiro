@@ -86,14 +86,14 @@ def test_guia_de_a_b_nao_ve_nem_altera(a_e_b):
     feito(a, "gastos.categoria")
     assert post(a, "dispensar").status_code == 200
     de_b = ler(b, user_id=a, uid=a)
-    assert (de_b["estado"], [p["feito"] for p in de_b["passos"]]) == ("indisponivel", [False] * 3)
+    assert (de_b["estado"], [p["feito"] for p in de_b["passos"]]) == ("indisponivel", [False] * 5)
     antes = linha(a)
     assert post(b, "feito", "piggy.pergunta", user_id=a, uid=a).status_code == 200
     assert post(b, "reabrir", user_id=a, uid=a).status_code == 200
     assert linha(a) == antes
     assert list(linha(b)["feitos"]) == ["piggy.pergunta"]
     de_a = ler(a)
-    assert (de_a["estado"], [p["feito"] for p in de_a["passos"]]) == ("dispensado", [False, True, False])
+    assert (de_a["estado"], [p["feito"] for p in de_a["passos"]]) == ("dispensado", [False, False, True, False, False])
 
 
 def test_dica_de_a_b_nao_ve_nem_altera(a_e_b):
@@ -108,4 +108,4 @@ def test_dica_de_a_b_nao_ve_nem_altera(a_e_b):
     assert dica(b, user_id=a, uid=a).status_code == 200
     assert linha(a) == antes
     assert list(linha(b)["dicas"]) == [ID]
-    assert [(d["id"], d["vista"]) for d in ler(a)["dicas"]] == [(ID, True)]
+    assert [d["id"] for d in ler(a)["dicas"] if d["vista"]] == [ID]  # só a de A, e só a que ela marcou

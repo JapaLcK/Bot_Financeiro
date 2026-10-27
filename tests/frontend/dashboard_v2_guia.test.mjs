@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAINEL, RESPOSTAS } from "./_painel.mjs";
-import { ALVO, FAZER, PASSOS, ROTA, abrir, acoes, ajudaDoMenu, bora, esperaTitulo, irAoAlvo, naRota, navegador, piggyEm } from "./_guia.mjs";
+import { ALVO, FAZER, PASSOS, ROTA, abrir, antigo, acoes, ajudaDoMenu, bora, esperaTitulo, irAoAlvo, naRota, navegador, piggyEm } from "./_guia.mjs";
 
 navegador();
 
@@ -160,7 +160,7 @@ test("POST 500: sem comemoração, \"Tentar de novo\"; o 200 depois comemora", a
 
 test("POST 409 passo_indisponivel: relê o guia e mostra a orientação, sem \"Tentar de novo\"; Seguir vai ao passo 2", async () => {
   const { ctx, page, s } = await abrir({
-    post: (c, n, st) => { if (c.acao !== "feito") return null; st.g = { ...RESPOSTAS.guia.indisponivel, estado: "em_andamento" }; const e = RESPOSTAS.erros["409_passo_indisponivel"]; return { status: e.status, json: e.body }; },
+    post: (c, n, st) => { if (c.acao !== "feito") return null; st.g = { ...antigo(RESPOSTAS.guia.indisponivel), estado: "em_andamento" }; const e = RESPOSTAS.erros["409_passo_indisponivel"]; return { status: e.status, json: e.body }; },
   });
   await bora(page);
   await FAZER["mes.trocado"](page);
@@ -226,7 +226,7 @@ test("passo 1 pulado, 2 e 3 feitos: sem \"Fechou!\" nem \"Guia concluído.\" (o 
 // servidor está sempre disponível e a barra de conversa sempre na #/piggy: o caso vem da
 // fixture, protegendo um roteiro em que o último passo possa ficar indisponível.
 const ultimoPulavel = (estado, feitos) => {
-  const g = structuredClone(RESPOSTAS.guia.oferecer);
+  const g = antigo(structuredClone(RESPOSTAS.guia.oferecer));
   g.estado = estado;
   g.passos.forEach((p, i) => { p.feito = feitos[i]; if (i === 2 || estado === "concluido") Object.assign(p, { disponivel: false, motivo: "sem_dados" }); });
   return g;

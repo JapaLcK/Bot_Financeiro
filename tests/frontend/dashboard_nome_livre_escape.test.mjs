@@ -82,7 +82,7 @@ const historico = (page, name, categoria) => page.evaluate(async ([name, categor
   _instTab = "history";
   renderInstallmentsView([{
     group_id: 1, name, categoria, total: 10, paid_amount: 10,
-    n_pending: 0, n_paid: 1, installments_total: 1, parcelas: [],
+    n_pending: 0, n_paid: 1, installments_total: 1, parcelas: [{ installment_no: 1, is_paid: true }], // quitada: vai ao histórico
   }]);
   await new Promise((r) => setTimeout(r, 300));
   const tile = (rotulo) => [...document.querySelectorAll("#installments-stats .stat-tile")]

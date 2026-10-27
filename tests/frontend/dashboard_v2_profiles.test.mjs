@@ -93,7 +93,7 @@ test("storage que lança: preset na leitura e tudo segue em memória", () => {
 
 test("locked nos três planos", () => {
   const tabela = Object.fromEntries(TIERS.map((plan) => [plan, KNOWN.filter((id) => locked(id, plan))]));
-  assert.deepEqual(tabela, { essencial: ["hero", "simulador", "piggy", "comparacao"], plus: ["simulador"], pro: [] });
+  assert.deepEqual(tabela, { essencial: ["hero", "simulador", "compromissos", "piggy", "comparacao"], plus: ["simulador", "compromissos"], pro: [] });
   assert.equal(locked("renda", "essencial"), false); // bloco sem recurso pago é de todos
 });
 

@@ -238,9 +238,54 @@ test("selo de demonstração: em todo bloco inventado do Resumo, e não em Conta
   });
   await ctx.close();
   // "Saldo previsto" é a /api/v2/previsao desde a Etapa 3 PR3 (decisão do dono, Q1 = a); "Para onde vai" e "Dia a dia", a /api/v2/gastos (Etapa 5 PR 2); "Patrimônio", a /api/v2/patrimonio (Etapa 6 PR B)
-  assert.deepEqual(r.blocos, { contas: false, hero: false, resumo: false, categorias: false, calendario: false, simulador: false, compromissos: true, piggy: true, patrimonio: false });
+  assert.deepEqual(r.blocos, { contas: false, hero: false, resumo: false, categorias: false, calendario: false, simulador: false, compromissos: false, piggy: true, patrimonio: false });
   assert.deepEqual(r.stats, [null, null, "demonstração"]);
   assert.equal(r.etiqueta, false);
+});
+
+test("Resumo: 'Próximos 30 dias' é a /api/v2/previsao (grupo real, sem selo de demonstração, data-dado real)", async () => {
+  const { ctx, page, ir } = await abrir();
+  await ir();
+  await page.locator("#w-compromissos .bill-name").first().waitFor();
+  const r = await page.evaluate(() => {
+    const w = document.querySelector("#w-compromissos");
+    return { titulo: w.querySelector(".w-title").textContent, nomes: [...w.querySelectorAll(".bill-name")].map((n) => n.firstChild.textContent), dado: w.dataset.dado, selo: w.querySelector(".w-title > .selo") !== null };
+  });
+  await ctx.close();
+  assert.deepEqual(r, { titulo: "Próximos 30 dias", nomes: ["Aluguel"], dado: "real", selo: false });
+});
+
+test("Resumo, 'Próximos 30 dias': a releitura falha (503) e a lista antiga segue com o aviso; Tentar de novo com a API boa tira o aviso", async () => {
+  const { ctx, page, ir } = await abrir();
+  await ir();
+  const w = page.locator("#w-compromissos");
+  await w.locator(".bill-name").first().waitFor();
+  let falhar = true;
+  await ctx.route("**/api/v2/previsao**", (r) => (falhar ? r.fulfill({ status: 503, json: {} }) : r.fallback()));
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  const aviso = w.getByText("Não deu para atualizar.");
+  await aviso.waitFor({ timeout: 15000 });
+  const com = [await w.locator(".bill-name").count(), await w.getByRole("button", { name: "Tentar de novo" }).count()];
+  falhar = false;
+  await w.getByRole("button", { name: "Tentar de novo" }).click();
+  await aviso.waitFor({ state: "detached", timeout: 15000 });
+  const depois = await w.locator(".bill-name").count();
+  await ctx.close();
+  assert.deepEqual([com, depois], [[1, 1], 1]);
+});
+
+test("Resumo, 'Próximos 30 dias' é só Pro (recurso cashflow): Essencial não pede /previsao e não tem o bloco; Plus pede 1 vez (o hero) e não tem o bloco; Pro pede 1 vez e mostra o grupo real", async () => {
+  const r = {};
+  for (const plano of ["essencial", "plus", "pro"]) {
+    const { ctx, page, ir } = await abrir({ plano });
+    let pedidos = 0;
+    page.on("request", (q) => { if (new URL(q.url()).pathname === "/api/v2/previsao") pedidos++; });
+    await ir();
+    await page.waitForTimeout(500);
+    r[plano] = [pedidos, await page.locator("#w-compromissos").count(), await page.locator("#w-compromissos .bill-name").allTextContents()];
+    await ctx.close();
+  }
+  assert.deepEqual(r, { essencial: [0, 0, []], plus: [1, 0, []], pro: [1, 1, ["AluguelGasto fixo · 1 ocorrência · 07/10"]] });
 });
 
 test("rendimento (preset Investir) leva o selo; a data é a de hoje, não a da demonstração", async () => {

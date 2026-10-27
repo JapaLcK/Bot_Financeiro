@@ -19,7 +19,7 @@ import pytest
 from _cards_apoio import M, mostrar, mundo  # noqa: F401  (mundo é fixture)
 from api.nativo.mes_detalhes import Categoria, CategoriaDoPeriodo, Dia, Guardado, MesDetalhes, MesDoPeriodo, Origens, Periodo
 from api.nativo.rendimento import Ativo, PeriodoAtivo, Rendimento, Rendimentos, TaxaContratada
-from api.nativo.rendimento import Categoria as CategoriaRend
+from api.nativo.rendimento import CategoriaRendimento as CategoriaRend
 from api.nativo.rendimento import Periodo as PeriodoRend
 from test_ai_chat_periodo import _conforme
 

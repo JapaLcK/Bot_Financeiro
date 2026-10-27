@@ -19,6 +19,8 @@ from api.v2 import app as app_v2
 from api.v2.assinaturas import Assinaturas
 from api.v2.bancos import Bancos
 from api.v2.caixinhas import Caixinhas
+from api.nativo.rendimento import Rendimento
+from api.v2.cartoes import Cartoes, Parcelas
 from api.v2.categorias import Categorias
 from api.v2.comparacao import Comparacao
 from api.v2.contas import Contas
@@ -26,6 +28,7 @@ from api.v2.contas_a_pagar import ContasAPagar
 from api.v2.erros import ErroV2
 from api.v2.gastos import Gastos, GastosDaCategoria
 from api.v2.guia import DICAS, PASSOS, Guia
+from api.v2.insights import Insights
 from api.v2.investido import Investido
 from api.v2.lancamentos import Lancamentos
 from api.v2.me import Me
@@ -36,6 +39,7 @@ from api.v2.progresso_milhao import ProgressoMilhao
 from api.v2.patrimonio import Patrimonio
 from api.v2.perfil import Perfil
 from api.v2.previsao import Previsao
+from api.v2.renda import RendaMensal
 from api.v2.resumo_mes import ResumoDoMes
 from db import investido
 from db.gastos import MAIORES_POR_DIA
@@ -190,7 +194,7 @@ _AA = {"Aa": {"type": "object", "properties": {"x": {"type": "string"}}}}
 @pytest.mark.parametrize("param", [
     dict(_MES, **{"in": "path"}), dict(_MES, **{"in": "header"}), dict(_MES, name="com-hifen"),
     dict(_MES, required="nao"), dict(_MES, description="x"), {k: v for k, v in _MES.items() if k != "required"},
-    dict(_MES, schema={"type": "string", "format": "date"}), "mes",
+    dict(_MES, schema={"type": "string", "format": "uuid"}), "mes",
 ], ids=["path", "header", "nome_invalido", "required_nao_bool", "chave_a_mais", "sem_required",
         "schema_fora_da_lista", "nao_e_objeto"])
 def test_gerador_recusa_query_fora_da_lista(param):
@@ -215,7 +219,7 @@ def test_gerador_recusa_parametro_em_escrita():
           {"/x": _post("#/components/schemas/X", required=False)}),
     _spec({}, {"/s": _sse({"type": "string"})}),
     _spec({}, {"/s": _sse()}),
-    _spec({"X": {"type": "string", "format": "date"}}),
+    _spec({"X": {"type": "string", "format": "uuid"}}),
     _spec({"X": {"type": "integer", "pattern": "1"}}),
     _spec({"X": {"type": "integer", "maxLength": 1}}),
     _spec({"X": {"type": "string", "maxLength": 1, "format": "date"}}),
@@ -226,7 +230,7 @@ def test_gerador_recusa_parametro_em_escrita():
     _spec({"Bb": {"type": "string"}}, {"/b": {"get": _get("#/components/schemas/Bb")["get"],
                                               "put": _get("#/components/schemas/Bb")["get"]}}),
 ], ids=["additionalProperties", "oneOf", "allOf", "const", "post", "post_corpo_opcional",
-        "sse_sem_ref", "sse_sem_contentSchema", "format_date", "pattern_fora_de_string",
+        "sse_sem_ref", "sse_sem_contentSchema", "format_uuid", "pattern_fora_de_string",
         "maxLength_fora_de_string", "maxLength_com_format", "number_float",
         "put_sem_get", "put_corpo_opcional", "put_sem_corpo"])
 def test_gerador_recusa_o_que_nao_traduz(spec):
@@ -600,3 +604,11 @@ def test_fixture_de_caixinhas_segue_o_modelo(nome):
         assert (x.meta is None) == (x.progresso_pct is None) == (x.atingida is None)
         if x.meta:
             assert x.progresso_pct == min(x.saldo / x.meta * 100, 100).quantize(Decimal("0.01")) and x.atingida == (x.saldo >= x.meta)
+
+
+@pytest.mark.parametrize("rota,modelo", [("cartoes", Cartoes), ("parcelas", Parcelas), ("renda", RendaMensal), ("insights", Insights), ("rendimento", Rendimento)])
+def test_fixtures_dos_cards_do_resumo_seguem_o_modelo(rota, modelo):
+    """`padrao` e `vazio` de cada rota nova são o dump exato do modelo (dinheiro em texto de 2 casas)."""
+    assert set(FIXTURES[rota]) == {"padrao", "vazio"}
+    for f in FIXTURES[rota].values():
+        assert modelo.model_validate(f).model_dump(mode="json") == f

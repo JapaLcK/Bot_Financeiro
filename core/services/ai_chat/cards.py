@@ -138,6 +138,21 @@ def visao_hero(r: dict) -> dict:
                                  for x in p["receitas_do_banco"] if x["status"] == "confirmada"]}
 
 
+def visao_parcelas(r: dict) -> dict:
+    """O "n de N pagas" da regra única (`parcelas_of.progresso`), no lugar dos contadores de parcelas vistas
+    (`n_paid`/`n_pending`/`installments_total`), e sem os parcelamentos quitados. O bloco (abas) segue inteiro."""
+    from db.parcelas_of import cobre_todas, progresso
+
+    grupos = []
+    for g in r["parcelas"]["installments"]:
+        p = progresso(g)
+        if not p["quitada"]:
+            sem_rs = {} if cobre_todas(g["parcelas"], p["n"]) else dict.fromkeys(("total", "paid_amount", "remaining_amount"))
+            grupos.append({k: v for k, v in g.items() if k not in ("n_paid", "n_pending", "installments_total")}
+                          | {"pagas": p["pagas"], "n_parcelas": p["n"]} | sem_rs)
+    return {**r["parcelas"], "installments": grupos}
+
+
 def visao_contas(r: dict) -> dict:
     """O logo (caminho de arquivo e URL) é só do cliente, que desenha o ladrilho: o modelo não lê URL."""
     c = r["contas"]
@@ -290,7 +305,7 @@ def registro() -> dict[str, Card]:
         "fatura": Card(lambda uid, a: [(None, {"cartoes": {"ok": True, "cards": resumo_cartoes(uid)}})],
                        todo("cartoes")),
         "parcelas": Card(lambda uid, a: [(None, {"parcelas": {
-            "ok": True, "installments": list_installment_groups_detailed(uid, "urgency")}})], todo("parcelas")),
+            "ok": True, "installments": list_installment_groups_detailed(uid, "urgency")}})], visao_parcelas),
         # `tendencia` = a do get_spending_trend (oculta no app), das mesmas linhas do bloco. Como lá,
         # só entram os meses com movimento: o `compute_evolution` preenche os N meses com zero.
         "renda": Card(renda, lambda r: {**r["renda"], "tendencia": _tendencia(

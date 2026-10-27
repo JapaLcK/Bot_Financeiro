@@ -57,6 +57,15 @@ it("Open Finance: só a parcela 12 de 12 vista e paga = quitada (o vazio); a 5 d
   expect(a.getByText("Não há parcelamentos registrados.")).toBeTruthy(); expect(b.getByText("Nubank · 4 de 12 pagas")).toBeTruthy();
 });
 
+it("manual antecipado (o antecipar apaga a parcela): a 2 de 3 que falta conta como paga, \"2 de 3 pagas\"; sem `manual` (Open Finance) a mesma forma segue \"1 de 3\"", async () => {
+  const pc = (no: number, pago: boolean) => ({ ...NOTEBOOK.parcelas[0], tx_id: 900 + no, installment_no: no, is_paid: pago, is_next: !pago });
+  const forma = { installments_total: 3, parcelas: [pc(1, true), pc(3, false)] };
+  comBlocos(parcelas([compra(1, { ...forma, manual: true })]), parcelas([compra(2, forma)])); await perguntar();
+  const [a, b] = screen.getAllByTestId("bloco-parcelas").map((n) => within(n));
+  if (!a || !b) throw new Error("os dois blocos de parcelas");
+  expect(a.getByText("Nubank · 2 de 3 pagas")).toBeTruthy(); expect(b.getByText("Nubank · 1 de 3 pagas")).toBeTruthy();
+});
+
 it("parcela em aberto nunca some: sem o total do banco, a parcela 5 em aberto vira \"4 de 5 pagas\" (não \"1 de 1\" quitada)", async () => {
   comBlocos(parcelas([compra(1, { installments_total: 0, parcelas: [{ ...NOTEBOOK.parcelas[2], installment_no: 5 }] })])); await perguntar();
   expect(card().getByText("Nubank · 4 de 5 pagas")).toBeTruthy();

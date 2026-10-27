@@ -666,7 +666,8 @@ test("X2: `/` Pro com o card em 90 dias; no downgrade o 90 volta 403 horizon e o
   await ctx.close();
   assert.match(hero, /Carregando a previsão/);
   assert.equal(radios, 0, "o card mostrou o dado guardado do Pro");
-  assert.deepEqual(gets, ["90", null], `GETs: ${gets}`); // o 90 (403) e depois o padrão do card; nenhum extra da pilha
+  // O 90 (403) e o padrão (um só, dividido entre o card e o "Próximos 30 dias"), nenhum extra da pilha; a ordem é a dos observadores no foco, que não é contrato.
+  assert.deepEqual(gets.map(String).sort(), ["90", "null"], `GETs: ${gets}`);
 });
 
 for (const atraso of [0, 150, 600]) {

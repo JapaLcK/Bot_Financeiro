@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from typing import Any
 
 from core.services.modelo_openai import CHAT_MODEL, completion_options
@@ -523,15 +524,32 @@ def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
     kind = _cache_kind("insights")
     itens = None if force else _get_cached(user_id, kind, INSIGHTS_CACHE_TTL_SECONDS)
     if itens is None:
-        from db import compute_active_insights
-        from utils_date import now_tz
-        itens, falhas = compute_active_insights(user_id)
-        agora = now_tz().isoformat(timespec="seconds")
-        for it in itens:
-            it["explicacao"]["calculado_em"] = agora
-        if not falhas:
-            _save_cache(user_id, kind, itens)
+        # Uma geração por usuário em voo: o cache só é gravado DEPOIS das consultas dos 6 detectores, então pedidos
+        # concorrentes (2 abas, StrictMode) repetiriam todas. Quem espera relê o cache que o primeiro gravou (com
+        # detector em falha não há cache, e o próximo da fila recalcula).
+        # ponytail: trava por processo; com mais de uma réplica cada uma pode gerar 1x. Advisory lock do Postgres
+        # prenderia 1 conexão do pool por espera.
+        with _INSIGHTS_LOCKS.setdefault(user_id, threading.Lock()):
+            itens = None if force else _get_cached(user_id, kind, INSIGHTS_CACHE_TTL_SECONDS)
+            if itens is None:
+                itens = _gerar_insights(user_id, kind)
     return _projetar(user_id, itens)
+
+
+_INSIGHTS_LOCKS: dict[int, threading.Lock] = {}
+
+
+def _gerar_insights(user_id: int, kind: str) -> list[dict]:
+    """Os fatos dos detectores, carimbados; o cache só é gravado se nenhum detector falhou."""
+    from db import compute_active_insights
+    from utils_date import now_tz
+    itens, falhas = compute_active_insights(user_id)
+    agora = now_tz().isoformat(timespec="seconds")
+    for it in itens:
+        it["explicacao"]["calculado_em"] = agora
+    if not falhas:
+        _save_cache(user_id, kind, itens)
+    return itens
 
 
 def motivo_vazio(user_id: int) -> str | None:

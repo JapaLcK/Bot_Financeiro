@@ -101,7 +101,7 @@ export function PatrimonioReal({ title = "Patrimônio" }: { title?: string }) {
   return (
     <Frame id="patrimonio" title={title} className="w-nw" real aside={variacaoPatrimonio(d)}>
       <div className="nw-top"><span className="stat-value num">{moneyText(d.total) ?? "—"}</span></div>
-      {pts.length < 2 ? <p className="faint">Ainda sem histórico: a linha aparece a partir do 2º dia.</p> : <Grafico pts={pts} d={d} />}
+      {pts.length < 2 ? <p className="faint">Ainda sem histórico: a linha aparece no dia seguinte à primeira foto.</p> : <Grafico pts={pts} d={d} />}
       <Selos motivos={motivosDaTela(d.motivos, ...d.historico.map((h) => h.motivos))} />
     </Frame>
   );
