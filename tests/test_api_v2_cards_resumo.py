@@ -116,6 +116,46 @@ def test_insights_cacheado_nao_chama_o_llm_e_sem_cache_gera_uma_vez(a_e_b, llm_n
     assert len(llm_nunca_real) == 1  # a 2ª leitura vem do cache de 6 h
 
 
+def _rajada(quem, n=6):
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(n * len(quem)) as ex:
+        return list(ex.map(lambda u: _get("/insights", u), quem * n))
+
+
+@pytest.fixture
+def llm_lento(monkeypatch):
+    import time
+    chamadas = []
+    monkeypatch.setattr(ai_patterns, "_call_llm", lambda *a, **k: chamadas.append(a) or time.sleep(0.4) or [{"title": "Gerada", "message": "m"}])
+    return chamadas
+
+
+def test_rajada_do_mesmo_usuario_sem_cache_gera_uma_vez_so(a_e_b, llm_lento):
+    a, _ = a_e_b
+    rs = _rajada([a])
+    assert {r.status_code for r in rs} == {200} and len({r.text for r in rs}) == 1
+    assert len(llm_lento) == 1
+
+
+def test_controle_negativo_sem_a_trava_a_rajada_paga_varias_vezes(a_e_b, llm_lento, monkeypatch):
+    import threading
+
+    class Solta(dict):
+        def setdefault(self, k, v):
+            return threading.Lock()  # trava nova a cada pedido = sem trava
+    monkeypatch.setattr(ai_patterns, "_INSIGHTS_LOCKS", Solta())
+    _rajada([a_e_b[0]])
+    assert len(llm_lento) > 1
+
+
+def test_controle_positivo_dois_usuarios_geram_um_cada(monkeypatch, a_e_b, llm_lento):
+    a, _ = a_e_b
+    c = usuario_pagante("pro")
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", f"{a},{c}")
+    rs = _rajada([a, c], n=3)
+    assert {r.status_code for r in rs} == {200} and len(llm_lento) == 2
+
+
 # ── isolamento ───────────────────────────────────────────────────────────────
 
 def test_a_nao_ve_nada_do_b_nem_com_uid_na_query(a_e_b, llm_nunca_real):
