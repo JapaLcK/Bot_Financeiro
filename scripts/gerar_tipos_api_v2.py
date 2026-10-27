@@ -42,9 +42,9 @@ def _tipo(s: dict) -> str:
         return json.dumps(s["const"], ensure_ascii=False)
     if chaves == {"type"} and t in _PRIMITIVO:
         return _PRIMITIVO[t]
-    # Decimal (dinheiro, sai como texto), datetime e o teto de tamanho da query: o TS só vê a string.
+    # Decimal (dinheiro, sai como texto), date, datetime e o teto de tamanho da query: o TS só vê a string.
     if t == "string" and (chaves - {"pattern", "minLength", "maxLength"} == {"type"}
-                          or (chaves == {"type", "format"} and s["format"] == "date-time")):
+                          or (chaves == {"type", "format"} and s["format"] in ("date", "date-time"))):
         return "string"
     # Inteiro com teto/piso (`ge`/`le`): o TS só vê `number`.
     if t == "integer" and chaves - {"minimum", "maximum"} == {"type"}:
