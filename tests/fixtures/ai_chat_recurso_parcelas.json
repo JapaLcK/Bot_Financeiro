@@ -11,6 +11,7 @@
       "card_flag": null,
       "card_last4": null,
       "installments_total": 3,
+      "manual": false,
       "purchased_at": "2026-08-20",
       "parcelas": [
         {
@@ -62,6 +63,7 @@
       "card_flag": null,
       "card_last4": null,
       "installments_total": 3,
+      "manual": false,
       "purchased_at": "2026-08-20",
       "parcelas": [
         {
@@ -113,6 +115,7 @@
       "card_flag": null,
       "card_last4": null,
       "installments_total": 2,
+      "manual": false,
       "purchased_at": "2026-07-05",
       "parcelas": [
         {
