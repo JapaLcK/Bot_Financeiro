@@ -111,9 +111,6 @@ def mundo(monkeypatch):
     # a chave do /painel novo: o card `metas` e a tool `list_metas` só leem para quem a tem (P1-b).
     # Depois de semear: com a chave, a escrita manual de investimento é recusada (fonte única).
     monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", f"{a},{b}")
-    # `_call_llm` falso: o insights passa pelo cache de verdade e é igual nas duas leituras.
-    monkeypatch.setattr("core.ai_patterns._call_llm", lambda *a, **k: [
-        {"title": "Mercado subiu", "message": "Gastou R$ 80", "severity": "info", "key": "k1"}])
     for uid in (a, b):
         generate_ai_insights(uid, force=False)  # o card piggy só lê o cache de 6 h
     return a, b

@@ -173,7 +173,7 @@ def registro() -> dict[str, Card]:
     from api.v2.contas import contas
     from api.v2.previsao import _assinante as gate_previsao, previsao
     from api.v2.resumo_mes import mes_pedido, resumo
-    from core.ai_patterns import INSIGHTS_CACHE_TTL_SECONDS, _cache_kind, _get_cached
+    from core.ai_patterns import ler_insights, motivo_vazio
     from core.services.ai_chat.tools.launches import _tendencia
     from core.services import metas_conversa
     from core.services.metas_status import status_metas
@@ -236,7 +236,7 @@ def registro() -> dict[str, Card]:
 
     def gate_piggy(uid, a):
         require_plan_feature(uid, "insights")
-        if _get_cached(uid, _cache_kind("insights"), INSIGHTS_CACHE_TTL_SECONDS) is None:
+        if ler_insights(uid) is None:
             raise CardIndisponivel(piggy_pendente)
 
     def gate_metas(uid, a):  # P1-b: as metas novas só para quem tem a chave do /painel; os demais, caixinhas
@@ -254,13 +254,13 @@ def registro() -> dict[str, Card]:
         return [(None, {"renda": {"ok": True, "evolution": compute_evolution(uid, n), "months": n}})]
 
     def piggy(uid, a):
-        # ponytail: SÓ o cache de 6 h. `generate_ai_insights` sem cache chama o LLM sem
-        # timeout com a trava do turno na mão (o 2º turno do usuário receberia _OCUPADO).
-        # O /insights do painel segue gerando. Gerar aqui exige timeout em `_call_llm`.
-        itens = _get_cached(uid, _cache_kind("insights"), INSIGHTS_CACHE_TTL_SECONDS)
+        # ponytail: SÓ o cache de 6 h (gerar aqui fica para decisão do dono: seriam as consultas dos
+        # 6 detectores com a trava do turno na mão). O /insights do painel segue gerando.
+        itens = ler_insights(uid)  # a mesma projeção por plano e o mesmo envelope da rota
         if itens is None:
             raise CardIndisponivel(piggy_pendente)
-        return [(None, {"insights": {"ok": True, "insights": itens}})]
+        return [(None, {"insights": {"ok": True, "insights": itens,
+                                     "motivo": None if itens else motivo_vazio(uid)}})]
 
     def historico(r):
         p = r["patrimonio"]

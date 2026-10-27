@@ -23,7 +23,7 @@ export const CASOS = {
     quebra: (r) => com(r, (c) => { c.parcelas.installments[0].parcelas[0].valor = "100.5"; }), fundo: null, injeta: (r, p) => com(r, (c) => { c.parcelas.installments[0].name = p; }) },
   renda: { titulo: "Renda mês a mês", manchete: "R$ 3.100,25", recursos: { renda: FX.renda },
     quebra: (r) => com(r, (c) => { c.renda.evolution[0].month = "2026-13"; }), fundo: null, injeta: null },
-  piggy: { titulo: "Piggy notou", manchete: "Mercado subiu", recursos: { insights: FX.insights },
+  piggy: { titulo: "Piggy notou", manchete: "Meta 'Viagem' atrasada", recursos: { insights: FX.insights },
     quebra: (r) => com(r, (c) => { c.insights.insights[0].title = 5; }), fundo: null, injeta: (r, p) => com(r, (c) => { c.insights.insights[0].title = p; }) },
   rendimento: { titulo: "Rendimentos", manchete: "+R$ 112,35", recursos: { rendimento: FX.rendimento },
     quebra: (r) => com(r, (c) => { c.rendimento.rendimentos.mes.valor = "lixo"; }), fundo: (r) => com(r, (c) => { c.rendimento.rendimentos.categorias[0].rotulo = { a: 1 }; }),
