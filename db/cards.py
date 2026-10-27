@@ -12,7 +12,7 @@ from utils_text import valor_valido
 from .connection import get_conn
 from .users import ensure_user
 from .accounts import add_launch_and_update_balance
-from .parcelas_of import nome_grupo
+from .parcelas_of import cobre_todas, nome_grupo, progresso
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -2141,6 +2141,9 @@ def list_installment_groups(user_id: int, limit: int = 15):
     parcelas pendentes — calculada por cartão: se `due_day >= closing_day`,
     vence no mesmo mês do period_end; senão vence no mês seguinte. Usada
     no display de "meus parcelamentos" pra mostrar quando cada parcela cai.
+
+    `pagas`/`n_parcelas`/`quitada` são o "n de N pagas" (`parcelas_of.progresso`, a regra do card da IA);
+    `parcelas_completas` diz se as parcelas vistas cobrem as N (senão total/restante são só o visto).
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -2163,7 +2166,9 @@ def list_installment_groups(user_id: int, limit: int = 15):
                            order by b.period_end asc
                          ),
                          null
-                       ) as pending_period_ends
+                       ) as pending_period_ends,
+                       json_agg(json_build_object('installment_no', coalesce(t.installment_no, 0),
+                                                  'is_paid', b.status <> 'open')) as parcelas
                 from credit_transactions t
                 left join credit_cards c on c.id = t.card_id and c.user_id = t.user_id
                 join credit_bills b on b.id = t.bill_id and b.user_id = t.user_id
@@ -2184,6 +2189,9 @@ def list_installment_groups(user_id: int, limit: int = 15):
 
     for r in rows:
         desc_banco, parcela_n = r.pop("desc_banco"), r.pop("parcela_n")
+        vistas = r.pop("parcelas")
+        p = progresso({"installments_total": r["n_total"], "parcelas": vistas})
+        r.update(pagas=p["pagas"], n_parcelas=p["n"], quitada=p["quitada"], parcelas_completas=cobre_todas(vistas, p["n"]))
         if (r["nota"] or "").strip() or desc_banco:  # parcelamento manual sem nota segue sem nome
             r["nota"] = nome_grupo(r["nota"], desc_banco, parcela_n, r["n_total"])
         period_ends = r.get("pending_period_ends") or []

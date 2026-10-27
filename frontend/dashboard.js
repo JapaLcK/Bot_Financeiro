@@ -1440,7 +1440,18 @@ function _isNextMonthIso(iso) {
   return y === nextYear && m === realMonth;
 }
 
-let _instTab = "active"; // 'active' (n_pending > 0) | 'history' (n_pending === 0)
+let _instTab = "active"; // 'active' (não quitada) | 'history' (quitada: `progresso`)
+
+// O "n de N pagas": a mesma regra de db/parcelas_of.py e dos cards da IA (tests/fixtures/parcelas_progresso.json).
+// Cópia: este arquivo é script clássico e não importa módulo.
+function progresso(g) {
+  const parcelas = g.parcelas || [];
+  const nos = parcelas.map(p => p.installment_no);
+  const n = Math.max(g.installments_total > 0 ? g.installments_total : parcelas.length, Math.max(0, ...nos));
+  const antes = parcelas.length ? Math.max(0, Math.min(...nos) - 1) : 0;
+  const pagas = Math.min(n, antes + parcelas.filter(p => p.is_paid).length);
+  return { pagas, n, quitada: pagas >= n && parcelas.every(p => p.is_paid) };
+}
 
 function setInstallmentsTab(tab) {
   if (tab !== "active" && tab !== "history") return;
@@ -1459,9 +1470,7 @@ function renderInstallmentsView(groups) {
   if (!stats || !list) return;
 
   const isHistory = _instTab === "history";
-  const filtered = (groups || []).filter(g => isHistory
-    ? (g.n_pending || 0) === 0
-    : (g.n_pending || 0) > 0);
+  const filtered = (groups || []).filter(g => progresso(g).quitada === isHistory);
 
   const totalDevido = filtered.reduce((s, g) => s + (g.remaining_amount || 0), 0);
   const totalPago = filtered.reduce((s, g) => s + (g.paid_amount || 0), 0);
@@ -1576,11 +1585,15 @@ function _renderInstallmentItem(g, idx = 0) {
     return `<span class="progress-block" title="Parcela ${p.installment_no} · pendente"></span>`;
   }).join("");
 
-  const progressText = g.n_pending === 0
-    ? `${g.n_paid}/${parcelas.length} · quitado`
-    : (g.n_pending === 1
-        ? `${g.n_paid}/${parcelas.length} · última ${_fmtDateBR(g.next_due_date)}`
-        : `${g.n_paid}/${parcelas.length} · próx. ${_fmtDateBR(g.next_due_date)}`);
+  const prog = progresso(g);
+  const nPagas = `${prog.pagas}/${prog.n}`;
+  const progressText = prog.quitada
+    ? `${nPagas} · quitado`
+    : (g.n_pending === 0
+        ? nPagas
+        : (prog.n - prog.pagas === 1 // "última" pelo N do banco, não pelas vistas (a 5/12 sozinha não é a última)
+            ? `${nPagas} · última ${_fmtDateBR(g.next_due_date)}`
+            : `${nPagas} · próx. ${_fmtDateBR(g.next_due_date)}`));
 
   const parcelaRows = parcelas.map(p => {
     const dateBR = _fmtDateBR(p.due_date);
@@ -1588,7 +1601,7 @@ function _renderInstallmentItem(g, idx = 0) {
       return `<div class="parcel-row paid"><div class="parcel-status-icon paid"><i class="ph ph-check" aria-hidden="true"></i></div><div class="parcel-info"><span class="parcel-name">Parcela ${p.installment_no}</span><span class="parcel-date">${dateBR}</span><span class="parcel-tag paid">paga</span></div><span class="parcel-val">${_fmtBRL(p.valor)}</span></div>`;
     }
     if (p.is_next) {
-      const tagText = g.n_pending === 1 ? "última!" : "próxima";
+      const tagText = prog.n - prog.pagas === 1 ? "última!" : "próxima";
       return `<div class="parcel-row next"><div class="parcel-status-icon next">${p.installment_no}</div><div class="parcel-info"><span class="parcel-name">Parcela ${p.installment_no}</span><span class="parcel-date">${dateBR}</span><span class="parcel-tag next">${tagText}</span></div><span class="parcel-val">${_fmtBRL(p.valor)}</span></div>`;
     }
     return `<div class="parcel-row"><div class="parcel-status-icon future">${p.installment_no}</div><div class="parcel-info"><span class="parcel-name">Parcela ${p.installment_no}</span><span class="parcel-date">${dateBR}</span></div><span class="parcel-val">${_fmtBRL(p.valor)}</span></div>`;

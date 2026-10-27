@@ -1,0 +1,169 @@
+[
+ {
+  "grupo": {
+   "installments_total": 12,
+   "parcelas": [
+    {
+     "installment_no": 12,
+     "is_paid": true
+    }
+   ]
+  },
+  "esperado": {
+   "pagas": 12,
+   "n": 12,
+   "quitada": true
+  },
+  "nota": "só a última vista (o caso do Open Finance)"
+ },
+ {
+  "grupo": {
+   "installments_total": 12,
+   "parcelas": [
+    {
+     "installment_no": 5,
+     "is_paid": false
+    },
+    {
+     "installment_no": 6,
+     "is_paid": false
+    }
+   ]
+  },
+  "esperado": {
+   "pagas": 4,
+   "n": 12,
+   "quitada": false
+  },
+  "nota": "as 4 antes da 1ª vista contam como pagas"
+ },
+ {
+  "grupo": {
+   "installments_total": 3,
+   "parcelas": [
+    {
+     "installment_no": 1,
+     "is_paid": true
+    },
+    {
+     "installment_no": 2,
+     "is_paid": false
+    },
+    {
+     "installment_no": 3,
+     "is_paid": false
+    }
+   ]
+  },
+  "esperado": {
+   "pagas": 1,
+   "n": 3,
+   "quitada": false
+  },
+  "nota": "manual 3x com a 1ª paga"
+ },
+ {
+  "grupo": {
+   "installments_total": 3,
+   "parcelas": []
+  },
+  "esperado": {
+   "pagas": 0,
+   "n": 3,
+   "quitada": false
+  },
+  "nota": "sem parcela vista"
+ },
+ {
+  "grupo": {
+   "installments_total": 0,
+   "parcelas": []
+  },
+  "esperado": {
+   "pagas": 0,
+   "n": 0,
+   "quitada": true
+  },
+  "nota": "nada a mostrar"
+ },
+ {
+  "grupo": {
+   "installments_total": 0,
+   "parcelas": [
+    {
+     "installment_no": 0,
+     "is_paid": true
+    },
+    {
+     "installment_no": 0,
+     "is_paid": false
+    }
+   ]
+  },
+  "esperado": {
+   "pagas": 1,
+   "n": 2,
+   "quitada": false
+  },
+  "nota": "sem total: o que o PigBank viu"
+ },
+ {
+  "grupo": {
+   "installments_total": 0,
+   "parcelas": [
+    {
+     "installment_no": 5,
+     "is_paid": false
+    }
+   ]
+  },
+  "esperado": {
+   "pagas": 4,
+   "n": 5,
+   "quitada": false
+  },
+  "nota": "sem total e parcela 5 em aberto: não some (Tester)"
+ },
+ {
+  "grupo": {
+   "installments_total": 12,
+   "parcelas": [
+    {
+     "installment_no": 13,
+     "is_paid": false
+    }
+   ]
+  },
+  "esperado": {
+   "pagas": 12,
+   "n": 13,
+   "quitada": false
+  },
+  "nota": "parcela além do total: N sobe, não some (Tester)"
+ },
+ {
+  "grupo": {
+   "installments_total": 2,
+   "parcelas": [
+    {
+     "installment_no": 1,
+     "is_paid": true
+    },
+    {
+     "installment_no": 1,
+     "is_paid": true
+    },
+    {
+     "installment_no": 2,
+     "is_paid": false
+    }
+   ]
+  },
+  "esperado": {
+   "pagas": 2,
+   "n": 2,
+   "quitada": false
+  },
+  "nota": "repetida: a em aberto segura"
+ }
+]
