@@ -209,7 +209,7 @@ export const caixinhasQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/caixinhas", signal),
   ...vivo,
 };
-// Os blocos do Resumo que eram de exemplo: fatura, parcelas, renda (Plus), "Piggy notou" (Plus; o servidor gera ao abrir, no máx. 1 IA a cada 6 h) e Rendimentos (widgets/BlocosReais.tsx). `gcTime: 0`, como a comparação: dado privado sem bloco olhando sai do cache, e a conta pode ter mudado fora da aba antes de o perfil ser relido.
+// Os blocos do Resumo que eram de exemplo: fatura, parcelas, renda (Plus), "Piggy notou" (Plus; o servidor gera ao abrir, com as consultas dos detectores e cache de 6 h) e Rendimentos (widgets/BlocosReais.tsx). `gcTime: 0`, como a comparação: dado privado sem bloco olhando sai do cache, e a conta pode ter mudado fora da aba antes de o perfil ser relido.
 const rota = <P extends "/cartoes" | "/parcelas" | "/renda" | "/insights" | "/rendimento">(p: P) => ({
   queryKey: [p.slice(1)],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet(p, signal),

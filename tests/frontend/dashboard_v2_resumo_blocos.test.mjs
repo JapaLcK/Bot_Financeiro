@@ -242,16 +242,24 @@ test("Essencial: renda e Piggy notou fora do Resumo (e do Organizar, travados), 
 });
 
 test("protótipo (DEMO): os cinco blocos seguem de exemplo, com selo, sem pedido à API", async () => {
-  const todos = Object.keys(BLOCOS);
-  const { ctx, page, ir } = await abrir({ demo: true, perfil: "padrao", espera: "#page-title" });
   const pedidos = [];
-  page.on("request", (q) => { if (/\/api\/v2\/(cartoes|parcelas|renda|insights|rendimento)$/.test(new URL(q.url()).pathname)) pedidos.push(q.url()); });
-  await ir();
-  await page.locator("#board-profile").waitFor();
-  await page.waitForTimeout(500);
-  const piggy = await page.locator('[data-widget-id="piggy"] .w-title > .selo').count();
-  await ctx.close();
-  assert.equal(piggy, 1);
+  const selos = {};
+  const carregando = {};
+  // Cada bloco só monta no perfil em que está no preset (o `padrao` só tem o piggy): abre-se o perfil de cada um.
+  for (const [id, b] of Object.entries(BLOCOS)) {
+    const { ctx, page, ir } = await abrir({ demo: true, espera: "#page-title" });
+    // No protótipo o perfil mora no localStorage (não na API).
+    await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), b.perfil);
+    page.on("request", (q) => { if (/\/api\/v2\/(cartoes|parcelas|renda|insights|rendimento)$/.test(new URL(q.url()).pathname)) pedidos.push(q.url()); });
+    await ir();
+    await page.locator(`[data-widget-id="${id}"]`).waitFor();
+    await page.waitForTimeout(300);
+    selos[id] = await page.locator(`[data-widget-id="${id}"] .w-title > .selo`).count();
+    // O bloco real no protótipo (consulta desligada) fica para sempre no "Carregando…" [role=status]; o de exemplo desenha o corpo.
+    carregando[id] = await corpo(page, id).locator('[role="status"]').count();
+    await ctx.close();
+  }
+  assert.deepEqual(selos, { fatura: 1, parcelas: 1, renda: 1, piggy: 1, rendimento: 1 });
+  assert.deepEqual(carregando, { fatura: 0, parcelas: 0, renda: 0, piggy: 0, rendimento: 0 });
   assert.deepEqual(pedidos, []);
-  assert.ok(todos.length === 5);
 });
