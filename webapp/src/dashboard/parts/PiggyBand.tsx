@@ -9,7 +9,6 @@ import { go } from "../router";
 import { insights } from "../widgets/Piggy";
 import { ICON } from "../lib/brand";
 import { DEMO, usePlan } from "../lib/v2";
-import { Demonstracao } from "./Selos";
 
 // Faixa fixa no topo do Resumo: um convite para conversar com o Piggy, sorteado a cada
 // visita entre os insights do dia e perguntas (as do perfil pesam mais). O clique abre a
@@ -23,7 +22,8 @@ const lastShown = () => { try { return sessionStorage.getItem(LAST); } catch { r
 const remember = (key: string) => { try { sessionStorage.setItem(LAST, key); } catch { /* sem storage, pode repetir */ } };
 
 function options(s: DashState, profile: string, plan: string): Option[] {
-  const today = locked("piggy", plan) ? [] : insights({ ...s, month: MONTHS[MONTHS.length - 1] })
+  // Só o protótipo tem destaque aqui: com backend a faixa é só pergunta, sem pedido próprio; os destaques reais são do bloco "Piggy notou".
+  const today = !DEMO || locked("piggy", plan) ? [] : insights({ ...s, month: MONTHS[MONTHS.length - 1] })
     .filter((i) => i.head && i.ask)
     .map((i) => ({ key: `insight-${i.key}`, weight: 2, head: i.head!, ask: i.ask!, topic: i.topic, cat: i.cat, text: i.text }));
   const mine = ((BY_PROFILE as Record<string, Prompt[]>)[profile] ?? []).map((p) => ({ ...p, weight: 2 }));
@@ -40,7 +40,7 @@ export function PiggyBand({ s, profile }: { s: DashState; profile: string }) {
 
   return (
     <button type="button" className="piggy-band" data-band={o.key} onClick={() => (o.ask ? ask({ text: o.ask, topic: o.topic, cat: o.cat, key: o.key }) : go("/piggy"))}>
-      <span className="piggy-band-by"><img src={ICON} alt="" width={28} height={28} />Piggy · hoje{!DEMO && <Demonstracao />}</span>
+      <span className="piggy-band-by"><img src={ICON} alt="" width={28} height={28} />Piggy · hoje</span>
       <span className="piggy-band-head">{o.head}</span>
       {o.text && <span className="piggy-band-text">{o.text}</span>}
       <span className="piggy-band-cta">

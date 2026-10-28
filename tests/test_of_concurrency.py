@@ -1461,7 +1461,7 @@ def test_log_diz_QUAL_falha_e_nao_so_lock_ocupado(
     assert "restante_ms_antes_do_log" in retry, retry
 
 
-def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch):
+def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch, capsys):
     """Infra na 1ª tentativa + lock ocupado na 2ª: o log FINAL diz "lock", não a
     infra — e a infra fica registrada no log do retry.
 
@@ -1472,7 +1472,11 @@ def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch):
 
     CONTROLE NEGATIVO: tirar o `causa = None` do caminho de sucesso do `try` (a
     linha logo depois do `to_thread`) → a infra da 1ª tentativa gruda e o log
-    final passa a acusar `TooManyConnections`, vermelho na última asserção."""
+    final passa a acusar `TooManyConnections`, vermelho na última asserção. O
+    mesmo vale para o `motivo` (#657): zerar só `causa` e não `causa_tipo` → o
+    `motivo` final fica `TooManyConnections`, vermelho na asserção dele. Idem
+    para o `sqlstate` do stderr: zerar `causa_tipo` e não `causa_sqlstate` → o
+    print final sai com `sqlstate=53300`, vermelho na asserção do stderr."""
     eventos = []
     tentativas = []
 
@@ -1503,9 +1507,13 @@ def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch):
     assert final[2].get("erro") is None, \
         f"a causa da 2ª tentativa é lock ocupado, não a infra da 1ª: {final}"
     assert "lock do item ocupado" in final[1], final
+    assert retry[2]["motivo"] == "TooManyConnections", retry
+    assert final[2]["motivo"] == "lock_ocupado", final
+    err = capsys.readouterr().err
+    assert "of_reconnect_lock_timeout item_id=item-mix motivo=lock_ocupado sqlstate=None" in err, err
 
 
-def test_causa_sobrevive_ao_log_system_event_que_nao_grava(user_id, monkeypatch, caplog):
+def test_causa_sobrevive_ao_log_system_event_que_nao_grava(user_id, monkeypatch, capsys):
     """O canal que diagnostica o 503 não pode depender do banco que caiu.
 
     `log_system_event` (`core/admin_dashboard.py`) abre conexão NOVA para
@@ -1517,12 +1525,14 @@ def test_causa_sobrevive_ao_log_system_event_que_nao_grava(user_id, monkeypatch,
     exemplar: lá o `_log` stub SEMPRE grava, então ele prova composição, não
     gravação. Aqui o stub modela o desfecho real (engole e não grava nada).
 
-    CONTROLE NEGATIVO: apagar o `logging.getLogger(__name__).warning(...)` do
-    `_grava_reconexao` → vermelho na asserção do `caplog`, porque não sobra canal
-    nenhum com a causa.
+    CONTROLE NEGATIVO: apagar OS DOIS `print(..., file=sys.stderr)` do
+    `_grava_reconexao` (retry e timeout) → vermelho na asserção do stderr, porque
+    não sobra canal nenhum com a causa (era `logging` até a #657, D2). Apagar só
+    o do timeout deixa este caso VERDE (o do retry já traz item e causa); quem
+    prende o do timeout sozinho é
+    `tests/test_of_log_stderr.py::test_aviso_do_timeout_nao_paga_o_espelho`.
     CONTROLE POSITIVO: o 503 continua saindo com o log mudo — o diagnóstico não
     pode virar um segundo modo de falha."""
-    import logging as _logging
 
     async def _log_que_engole(*a, **kw):
         # Desfecho de produção sob banco fora: a exceção morre dentro da
@@ -1540,18 +1550,17 @@ def test_causa_sobrevive_ao_log_system_event_que_nao_grava(user_id, monkeypatch,
     monkeypatch.setattr(of_routes.asyncio, "sleep", _dorme)
     monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _falha)
 
-    with caplog.at_level(_logging.WARNING, logger="frontend.routes.open_finance"):
-        with pytest.raises(of_routes.HTTPException) as exc:
-            asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-mudo"))
+    with pytest.raises(of_routes.HTTPException) as exc:
+        asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-mudo"))
 
     assert exc.value.status_code == 503          # CONTROLE POSITIVO
 
-    texto = "\n".join(r.getMessage() for r in caplog.records)
+    texto = capsys.readouterr().err
     assert "item-mudo" in texto and "TooManyConnections" in texto, \
         f"a causa sumiu junto com o banco: {texto!r}"
 
 
-def test_infra_na_1a_que_some_na_2a_ainda_deixa_rastro(user_id, monkeypatch, caplog):
+def test_infra_na_1a_que_some_na_2a_ainda_deixa_rastro(user_id, monkeypatch, capsys):
     """O caso que o log FINAL não cobre, porque ele não acontece.
 
     Infra na 1ª tentativa + sucesso na 2ª → a rota devolve 200 e o
@@ -1562,13 +1571,12 @@ def test_infra_na_1a_que_some_na_2a_ainda_deixa_rastro(user_id, monkeypatch, cap
     desaparece por completo: o usuário recebe 200 e ops nunca soube que o banco
     piscou.
 
-    CONTROLE NEGATIVO: apagar o `logging.getLogger(__name__).warning(...)` do
+    CONTROLE NEGATIVO: apagar o `print(..., file=sys.stderr)` do
     ramo do retry (o `if tentativa < _RECONNECT_LOCK_ATTEMPTS`) → vermelho aqui,
     e o `test_causa_sobrevive_ao_log_system_event_que_nao_grava` continua VERDE,
     porque lá as duas tentativas falham e o log final salva o diagnóstico.
     CONTROLE POSITIVO: o 200 continua saindo — o rastro não pode custar o
     caminho de sucesso."""
-    import logging as _logging
 
     async def _log_que_engole(*a, **kw):
         return None
@@ -1589,19 +1597,18 @@ def test_infra_na_1a_que_some_na_2a_ainda_deixa_rastro(user_id, monkeypatch, cap
     monkeypatch.setattr(of_routes.asyncio, "sleep", _dorme)
     monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _falha_depois_grava)
 
-    with caplog.at_level(_logging.WARNING, logger="frontend.routes.open_finance"):
-        conexao = asyncio.run(
-            of_routes._grava_reconexao(user_id, {"id": "i"}, "item-piscou"))
+    conexao = asyncio.run(
+        of_routes._grava_reconexao(user_id, {"id": "i"}, "item-piscou"))
 
     assert conexao["provider_item_id"] == "item-piscou"   # CONTROLE POSITIVO
     assert tentativas["n"] == 2, "a 2ª tentativa tem de ter acontecido"
 
-    texto = "\n".join(r.getMessage() for r in caplog.records)
+    texto = capsys.readouterr().err
     assert "item-piscou" in texto and "TooManyConnections" in texto, \
         f"a infra da 1ª tentativa sumiu sem deixar rastro: {texto!r}"
 
 
-def test_log_do_diagnostico_nao_fura_o_prazo(user_id, monkeypatch, caplog):
+def test_log_do_diagnostico_nao_fura_o_prazo(user_id, monkeypatch, capsys):
     """Banco que aceita a conexão do log e trava no INSERT não pendura o 503.
 
     `log_system_event` (`core/admin_dashboard.py`) ganhou `statement_timeout` na
@@ -1621,11 +1628,12 @@ def test_log_do_diagnostico_nao_fura_o_prazo(user_id, monkeypatch, caplog):
     CONTROLE NEGATIVO: tirar o `asyncio.wait_for` do `_log_com_teto` → os dois
     logs dormem 5s cada e a asserção de tempo fica vermelha (o teste passa a
     levar ~10s).
-    CONTROLE POSITIVO: o 503 continua saindo E o `caplog` continua com a causa —
-    o `logging.warning` local roda ANTES do log com teto, então o diagnóstico
+    CONTROLE POSITIVO: o 503 continua saindo E o stderr continua com a causa —
+    o `print` local roda ANTES do log com teto, então o diagnóstico
     sobrevive ao log que estourou. Sem isso, limitar o log teria trocado
-    lentidão por cegueira."""
-    import logging as _logging
+    lentidão por cegueira. Desde a #657 o rastro do teto estourado também traz
+    `motivo` e `item_id`, então este caso NÃO discrimina o `print` local — quem
+    discrimina é o `tests/test_of_log_stderr.py::test_aviso_do_timeout_nao_paga_o_espelho`."""
 
     monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 300)
     monkeypatch.setattr(of_routes, "_LOG_DIAG_TIMEOUT_S", 0.05)
@@ -1643,9 +1651,8 @@ def test_log_do_diagnostico_nao_fura_o_prazo(user_id, monkeypatch, caplog):
     monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _falha)
 
     t0 = time.monotonic()
-    with caplog.at_level(_logging.WARNING, logger="frontend.routes.open_finance"):
-        with pytest.raises(of_routes.HTTPException) as exc:
-            asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-log-preso"))
+    with pytest.raises(of_routes.HTTPException) as exc:
+        asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-log-preso"))
     gasto = time.monotonic() - t0
 
     assert exc.value.status_code == 503                       # CONTROLE POSITIVO
@@ -1655,6 +1662,6 @@ def test_log_do_diagnostico_nao_fura_o_prazo(user_id, monkeypatch, caplog):
     # sem o `wait_for` seriam ~10s, então a margem não come o sinal.
     assert gasto < 1.0, f"o 503 levou {gasto:.2f}s — os logs furaram o prazo"
 
-    texto = "\n".join(r.getMessage() for r in caplog.records)
+    texto = capsys.readouterr().err
     assert "item-log-preso" in texto and "TooManyConnections" in texto, \
         f"o log estourou e levou a causa junto: {texto!r}"

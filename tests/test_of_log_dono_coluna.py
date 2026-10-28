@@ -189,7 +189,8 @@ def test_sync_que_cai_em_fk_real_nao_grava_uid_com_coluna_nula(monkeypatch):
     assert str(alheio) not in falha[0]["message"], falha
 
 
-# ── logging espelhado pelo `_DashboardHandler` (1396 e 1856) ────────────────
+# ── logging espelhado pelo `_DashboardHandler` (`_msg_sem_open_finance`; o aviso do
+# `/pluggy-item` foi para `test_of_log_stderr.py`) ──
 
 def test_falha_na_copia_do_402_espelha_com_dono_e_sem_traceback(user_id, monkeypatch, coletor):
     # Plano sem vaga de OF (`of_banks_max=0`) com acesso ao app: sem plano nenhum
@@ -208,24 +209,6 @@ def test_falha_na_copia_do_402_espelha_com_dono_e_sem_traceback(user_id, monkeyp
     assert linhas[0]["user_id"] == user_id, linhas
     assert "traceback" not in linhas[0]["details"], linhas
     _host_fora(linhas[0]["message"], linhas[0]["details"])
-
-
-def test_aviso_local_do_rastro_espelha_com_dono(user_id, monkeypatch, coletor, eventos,
-                                                webhook_pluggy):
-    promote_to_pro(user_id)
-    _mock_item(monkeypatch, user_id)
-    monkeypatch.setattr(of_routes, "register_item", _levanta(psycopg.OperationalError(HOST)))
-    client = TestClient(dashboard.app)
-    try:
-        r = client.post(f"/open-finance/{user_id}/pluggy-item",
-                        json={"item": {"id": "i541-rastro"}}, headers=_auth(client, user_id))
-        assert r.status_code == 200, r.text
-        linhas = [g for g in coletor if "of_item_registry_failed item_id=" in g["message"]]
-        assert len(linhas) == 1, coletor
-        assert linhas[0]["user_id"] == user_id, linhas
-    finally:
-        db.disconnect_open_finance_connection(user_id)
-        _limpa_item("i541-rastro")
 
 
 # ── connect-token (1671): o log com teto não pendura a emissão ──────────────

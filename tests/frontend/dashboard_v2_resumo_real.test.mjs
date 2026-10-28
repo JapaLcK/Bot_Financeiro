@@ -9,7 +9,7 @@
  *   · "Recomeçar do zero" (o servidor volta a `null` e o SSE avisa): o modal reabre;
  *   · Entrou e Saiu do fixture com centavos, o mês anterior só quando não é null, motivos como selos;
  *   · selo "demonstração" em todo bloco inventado, e nunca em Contas, Entrou e Saiu; com
- *     backend também na faixa do Piggy, no extrato e na conversa (no protótipo, onde tudo é de
+ *     backend também no extrato e na conversa (a faixa do Piggy é só pergunta, sem selo) (no protótipo, onde tudo é de
  *     exemplo, não); o título do Resumo nunca leva (decisão do dono, PR C2: só os blocos);
  *   · o mês da página é o corrente em America/Sao_Paulo (não o do aparelho nem o do UTC),
  *     o seletor tem os 6 últimos e cada um pede o seu `mes=`;
@@ -237,8 +237,8 @@ test("selo de demonstração: em todo bloco inventado do Resumo, e não em Conta
     return { blocos, stats, etiqueta: document.body.innerText.includes("Dados de demonstração") };
   });
   await ctx.close();
-  // "Saldo previsto" é a /api/v2/previsao desde a Etapa 3 PR3 (decisão do dono, Q1 = a); "Para onde vai" e "Dia a dia", a /api/v2/gastos (Etapa 5 PR 2); "Patrimônio", a /api/v2/patrimonio (Etapa 6 PR B)
-  assert.deepEqual(r.blocos, { contas: false, hero: false, resumo: false, categorias: false, calendario: false, simulador: false, compromissos: false, piggy: true, patrimonio: false });
+  // "Saldo previsto" é a /api/v2/previsao desde a Etapa 3 PR3 (decisão do dono, Q1 = a); "Para onde vai" e "Dia a dia", a /api/v2/gastos (Etapa 5 PR 2); "Patrimônio", a /api/v2/patrimonio (Etapa 6 PR B); "Piggy notou", a /api/v2/insights (PR B das telas reais)
+  assert.deepEqual(r.blocos, { contas: false, hero: false, resumo: false, categorias: false, calendario: false, simulador: false, compromissos: false, piggy: false, patrimonio: false });
   assert.deepEqual(r.stats, [null, null, "demonstração"]);
   assert.equal(r.etiqueta, false);
 });
@@ -288,12 +288,14 @@ test("Resumo, 'Próximos 30 dias' é só Pro (recurso cashflow): Essencial não 
   assert.deepEqual(r, { essencial: [0, 0, []], plus: [1, 0, []], pro: [1, 1, ["AluguelGasto fixo · 1 ocorrência · 07/10"]] });
 });
 
-test("rendimento (preset Investir) leva o selo; a data é a de hoje, não a da demonstração", async () => {
+test("Rendimentos (preset Investir) é real, sem selo; a data é a de hoje, não a da demonstração", async () => {
   const { ctx, page, ir } = await abrir({ perfil: "investir" });
   await ir();
-  const r = [await page.locator('[data-widget-id="rendimento"] .w-title > .selo').textContent(), await page.locator(".board-hint").textContent()];
+  const w = page.locator('[data-widget-id="rendimento"]');
+  await w.locator(".ci-total").waitFor();
+  const r = [await w.locator(".w-title").textContent(), await w.locator("article").getAttribute("data-dado"), await w.locator(".w-title > .selo").count(), await page.locator(".board-hint").textContent()];
   await ctx.close();
-  assert.deepEqual(r, ["demonstração", "hoje é 2 de outubro de 2026"]); // o relógio congelado, não os 23/09 da demonstração
+  assert.deepEqual(r, ["Rendimentos", "real", 0, "hoje é 2 de outubro de 2026"]); // o relógio congelado, não os 23/09 da demonstração
 });
 
 // --- O rodapé do menu: bancos via Open Finance ---------------------------------------
@@ -400,7 +402,7 @@ async function conversar(page) {
   await page.locator(".chat > .msg-piggy").waitFor();
 }
 for (const demo of [false, true]) {
-  test(`selo "demonstração" na faixa do Piggy, no extrato demonstrativo e na conversa: ${demo ? "não no protótipo" : "com backend"}; no título do Resumo, nunca`, async () => {
+  test(`selo "demonstração" no extrato demonstrativo e na conversa: ${demo ? "não no protótipo" : "com backend"}; na faixa do Piggy e no título do Resumo, nunca`, async () => {
     const { ctx, page, ir } = await abrir({ demo, espera: "#page-title" });
     const r = {};
     for (const [rota, seletores] of Object.entries(SELO)) {
@@ -416,7 +418,7 @@ for (const demo of [false, true]) {
     await ctx.close();
     const um = demo ? [] : ["demonstração"];
     const titulo = [demo ? "Resumo de setembro" : "Resumo de outubro", 0];
-    assert.deepEqual(r, { titulo, ".piggy-band-by > .selo /": um, "#ledger-h > .selo /lancamentos": [], "#page-title > .selo /piggy": [], ".chat > .msg-piggy .msg-by > .selo /piggy": um });
+    assert.deepEqual(r, { titulo, ".piggy-band-by > .selo /": [], "#ledger-h > .selo /lancamentos": [], "#page-title > .selo /piggy": [], ".chat > .msg-piggy .msg-by > .selo /piggy": um });
   });
 }
 

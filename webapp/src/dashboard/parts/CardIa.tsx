@@ -53,10 +53,11 @@ const abaOk = (a: unknown) => {
 const Marcador = () => <p className="msg-text msg-bloco">{SEM_CARD}</p>;
 
 // Um campo fundo malformado que passa pelo `contrato` lança no render e, sem isto, desmontaria a raiz do React (o /painel some): só este card cai.
-class LimiteCard extends Component<{ children: ReactNode }, { caiu: boolean }> {
+// O Resumo (widgets/BlocosReais.tsx) o reusa e troca o marcador do chat pela frase do bloco (`fallback`).
+export class LimiteCard extends Component<{ children: ReactNode; fallback?: ReactNode }, { caiu: boolean }> {
   state = { caiu: false };
   static getDerivedStateFromError() { return { caiu: true }; }
-  render() { return this.state.caiu ? <Marcador /> : this.props.children; }
+  render() { return this.state.caiu ? this.props.fallback ?? <Marcador /> : this.props.children; }
 }
 
 type Aba = { mes: string | null; recursos: unknown };

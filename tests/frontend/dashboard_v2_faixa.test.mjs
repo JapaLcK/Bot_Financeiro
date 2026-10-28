@@ -2,12 +2,12 @@
 //   · o sorteio (lib/prompts.js): peso, e nunca a mesma opção duas visitas seguidas;
 //   · fixa em todos os painéis e fora do grid (sem ✕, fora do catálogo);
 //   · o clique abre a conversa do Piggy (#/piggy) com a pergunta já enviada e respondida;
-//   · no Essencial também abre a conversa, mas o sorteio não tem os insights (são do Plus);
+//   · com backend a faixa é só pergunta (os insights de exemplo são do protótipo; os reais ficam no bloco "Piggy notou"), sem selo e sem pedido próprio;
 //   · 320 e 390 sem rolagem para o lado.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
+import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 import { BY_PROFILE, COMMON, pick } from "../../webapp/src/dashboard/lib/prompts.js";
 
 const PERFIS = ["padrao", "economizar", "investir", "controlar", "dividas", "autonomo"];
@@ -36,14 +36,15 @@ before(async () => {
 after(() => browser?.close());
 
 // `sorte` fixa o Math.random (0 = sempre a primeira opção do sorteio).
-async function abrir({ width = 1440, perfil = "padrao", plano = "pro", sorte = null } = {}) {
+async function abrir({ width = 1440, perfil = "padrao", plano = "pro", sorte = null, demo = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
-  await servir(ctx, undefined, { plano, perfil }); // o perfil mora no servidor (/api/v2/perfil)
+  await servir(ctx, demo ? RAIZ : undefined, { plano, perfil }); // o perfil mora no servidor (/api/v2/perfil)
+  if (demo) await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil); // o protótipo lê o perfil daqui
   if (sorte !== null) await ctx.addInitScript((v) => { Math.random = () => v; }, sorte);
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
-  await page.goto(`${PAINEL}#/`);
+  await page.goto(`${demo ? PROTOTIPO : PAINEL}#/`);
   await page.locator(".piggy-band").waitFor();
   return { ctx, page, erros };
 }
@@ -71,8 +72,8 @@ test("a cada visita outra opção: com a mesma sorte, duas visitas seguidas dife
   for (let i = 1; i < vistas.length; i++) assert.notEqual(vistas[i], vistas[i - 1], JSON.stringify(vistas));
 });
 
-test("insight do dia: o clique abre a conversa com a pergunta dele respondida", async () => {
-  const { ctx, page, erros } = await abrir({ perfil: "economizar", sorte: 0 }); // 1ª opção = 1º insight
+test("insight do dia, só no protótipo: o clique abre a conversa com a pergunta dele respondida", async () => {
+  const { ctx, page, erros } = await abrir({ perfil: "economizar", sorte: 0, demo: true }); // 1ª opção = 1º insight
   const chave = await faixa(page);
   const cta = await page.locator(".piggy-band-cta").innerText();
   await page.locator(".piggy-band").click();
@@ -84,33 +85,32 @@ test("insight do dia: o clique abre a conversa com a pergunta dele respondida", 
   assert.deepEqual(erros, []);
 });
 
-test("Essencial: a faixa abre a conversa e nunca sorteia um insight", async () => {
-  // O Essencial é medido com as 8 sortes porque a posição dos insights no pool não é
-  // invariante (começo, meio ou fim); o Plus sorteia insight na sorte 0.
-  const sorteio = async (plano, sorte) => {
-    const { ctx, page, erros } = await abrir({ perfil: "investir", plano, sorte });
-    return { ctx, page, erros, vista: [await faixa(page), await page.locator(".piggy-band").evaluate((b) => b.tagName)] };
-  };
-  const { ctx: ctxPlus, vista: vPlus } = await sorteio("plus", 0);
-  await ctxPlus.close();
-  const essencial = [];
-  for (const sorte of [0.1, 0.2, 0.3, 0.45, 0.6, 0.8, 0.99]) {
-    const { ctx: c, vista } = await sorteio("essencial", sorte);
-    essencial.push(vista);
-    await c.close();
+test("com backend a faixa é só pergunta: nenhum insight em nenhum plano, sem selo, sem pedido próprio; a conversa abre", async () => {
+  const sortes = [0, 0.1, 0.2, 0.3, 0.45, 0.6, 0.8, 0.99];
+  const vistas = [];
+  for (const plano of ["essencial", "plus", "pro"]) for (const sorte of sortes) {
+    const { ctx, page } = await abrir({ perfil: "investir", plano, sorte });
+    vistas.push([await faixa(page), await page.locator(".piggy-band").evaluate((b) => b.tagName), await page.locator(".piggy-band .selo").count()]);
+    await ctx.close();
   }
-  const { ctx, page, erros, vista: v0 } = await sorteio("essencial", 0);
-  essencial.unshift(v0);
-  const plus = [vPlus];
-  await page.locator(".piggy-band").click();
-  await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
-  const hash = await page.evaluate(() => location.hash);
-  await ctx.close();
-  assert.ok(essencial.every(([k, tag]) => !k.startsWith("insight-") && tag === "BUTTON"), JSON.stringify(essencial));
-  assert.ok(plus.some(([k]) => k.startsWith("insight-")), JSON.stringify(plus)); // a mesma sorte sorteia insight no Plus
-  assert.ok(plus.every(([, tag]) => tag === "BUTTON"));
-  assert.equal(hash, "#/piggy");
-  assert.deepEqual(erros, []);
+  assert.ok(vistas.every(([k, tag, selo]) => !k.startsWith("insight-") && tag === "BUTTON" && selo === 0), JSON.stringify(vistas));
+  // Zero pedido da faixa: o Essencial (sem o bloco "Piggy notou") não pede /insights nem /renda; com o bloco, o pedido é um só e é dele.
+  const pedidos = {};
+  for (const plano of ["essencial", "plus"]) {
+    const { ctx, page } = await abrir({ perfil: "investir", plano, sorte: 0 });
+    pedidos[plano] = [];
+    page.on("request", (q) => { const p = new URL(q.url()).pathname; if (p === "/api/v2/insights" || p === "/api/v2/renda") pedidos[plano].push(p); });
+    await page.reload();
+    await page.locator(".piggy-band").waitFor();
+    await page.waitForTimeout(500);
+    if (plano === "essencial") {
+      await page.locator(".piggy-band").click();
+      await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
+      assert.equal(await page.evaluate(() => location.hash), "#/piggy");
+    }
+    await ctx.close();
+  }
+  assert.deepEqual(pedidos, { essencial: [], plus: ["/api/v2/insights"] });
 });
 
 test("320 e 390: a faixa cabe na tela", async () => {

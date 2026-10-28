@@ -85,6 +85,16 @@ def item_missing(exc: Exception) -> bool:
     return isinstance(exc, PluggyApiError) and exc.status_code == 404
 
 
+def _falha_da_pluggy(exc: BaseException) -> str:
+    """Rastro de stdout de uma leitura da Pluggy que falhou: tipo, `sqlstate`, HTTP e
+    `code`, nunca `str(exc)` (#657, D4). Só o texto de `PluggyApiError` entra: ele é
+    todo nosso (`_raise_for_pluggy_response` não põe o corpo da resposta) e é o que
+    diz qual regra do leitor recusou a resposta (`pluggy_bills.py`)."""
+    texto = f" texto={exc}" if isinstance(exc, PluggyApiError) else ""
+    return (f"motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)} "
+            f"status={getattr(exc, 'status_code', None)} code={getattr(exc, 'code', None)}{texto}")
+
+
 def _to_decimal(value: Any, default: str = "0") -> Decimal:
     # NaN/Infinity/absurdo do banco ou da Pluggy caem no `default`, como "abc": o CHECK
     # `finito_*` (db/finito_checks.py) recusaria a linha e derrubaria o sync inteiro.
@@ -287,7 +297,7 @@ def sync_pluggy_item(provider_item_id: str, *, expected_user_id: int | None = No
                 dono_unico=True)
         except Exception as exc:
             print(f"[pluggy_sync] foto do run que falhou não gravada ({provider_item_id}): "
-                  f"{type(exc).__name__}: {exc}")
+                  f"motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)}")
         raise
 
 
@@ -362,7 +372,7 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         investments_ok = False
         investments_status = getattr(exc, "status_code", None)
         print(f"[pluggy_sync] investimentos indisponíveis item={provider_item_id} "
-              f"erro={type(exc).__name__}: {exc}", flush=True)
+              f"{_falha_da_pluggy(exc)}", flush=True)
     heartbeat()
 
     # Assinaturas (Recurring Payments). Fail-soft: `None` = não consegui ler, e
@@ -372,7 +382,7 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         recorrentes = list_pluggy_recurring_payments(provider_item_id, api_key)
     except Exception as exc:
         print(f"[pluggy_sync] recorrências indisponíveis item={provider_item_id} "
-              f"erro={type(exc).__name__}: {exc}", flush=True)
+              f"{_falha_da_pluggy(exc)}", flush=True)
 
     # RECONCILIAÇÃO do espelho de investimentos — posição que não veio saiu do
     # banco, e a caixinha dela vai junto. Só pode rodar com a leitura PROVADA
@@ -438,7 +448,7 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
                 conta["provider_account_id"], api_key, on_page=heartbeat)
         except Exception as exc:
             print(f"[pluggy_sync] faturas indisponíveis item={provider_item_id} "
-                  f"erro={type(exc).__name__}: {exc}", flush=True)
+                  f"{_falha_da_pluggy(exc)}", flush=True)
 
     # ── FASE 2: escrita, serializada por item ────────────────────────────────
     with pluggy_item_lock(provider_item_id) as locked:
@@ -552,7 +562,7 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
             frescas = salvar_faturas_do_banco(connection["id"], faturas)
         except Exception as exc:
             print(f"[pluggy_sync] faturas não gravadas item={provider_item_id} "
-                  f"erro={type(exc).__name__}", flush=True)
+                  f"motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)}", flush=True)
 
         # Caixinhas do OF viram caixinhas do Pig automaticamente (auto-create + dedup) e o
         # saldo do banco é espelhado nas vinculadas — mas SÓ pra planos pagos (Essencial+).
@@ -588,7 +598,8 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
                           f"{caixinha_result['caixinhas_sem_nome']} sem nome livre "
                           f"(user={connection['user_id']})")
         except Exception as exc:
-            print(f"[pluggy_sync] caixinha auto-import: {exc}")
+            print(f"[pluggy_sync] caixinha auto-import: motivo={type(exc).__name__} "
+                  f"sqlstate={getattr(exc, 'sqlstate', None)}")
 
         # Fase 1: conta BANK → launches (analytics, sem mover saldo); cartão → faturas (opção a).
         imported = import_open_finance_launches(connection["user_id"], connection["id"])
@@ -632,7 +643,8 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
             from core.services.piggy_agents import run_agents_for_user
             run_agents_for_user(connection["user_id"], trigger="of_sync")
         except Exception as exc:  # nunca derruba o sync por causa de agente
-            print(f"[pluggy_sync] agents hook: {exc}")
+            print(f"[pluggy_sync] agents hook: motivo={type(exc).__name__} "
+                  f"sqlstate={getattr(exc, 'sqlstate', None)}")
 
     return {
         "ok": True,
@@ -810,7 +822,8 @@ def run_of_health_check(*, limit: int = 200) -> dict:
             item = get_pluggy_item(row["provider_item_id"], api_key)
         except Exception as exc:
             if not item_missing(exc):
-                print(f"[pluggy_sync] health check falhou item={row['provider_item_id']}: {exc}")
+                print(f"[pluggy_sync] health check falhou item={row['provider_item_id']}: "
+                      f"{_falha_da_pluggy(exc)}")
                 continue
             ausentes.append(row)   # só grava depois, se o disjuntor não abrir
             continue
@@ -859,7 +872,9 @@ def _hold_aggregate_emails(user_id: int, origem: str) -> None:
         from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN, _SYNC_QUIET_MIN
         hold_agent_emails(user_id, list(_AGENT_EMAIL_MIN_AGE_MIN), _SYNC_QUIET_MIN)
     except Exception as exc:
-        print(f"[pluggy_sync] hold agregados ({origem}): {exc}")
+        # Tipo + `sqlstate`, nunca `str(exc)`: a FK do banco traz `Key (user_id)=` (#657, D4).
+        print(f"[pluggy_sync] hold agregados ({origem}): motivo={type(exc).__name__} "
+              f"sqlstate={getattr(exc, 'sqlstate', None)}")
 
 
 def _sync_item_contido(connection: dict, user_id: int) -> dict:
@@ -884,7 +899,7 @@ def _sync_item_contido(connection: dict, user_id: int) -> dict:
     try:
         return sync_pluggy_item(item_id, expected_user_id=user_id)
     except Exception as exc:
-        print(f"[pluggy_sync] item {item_id} falhou no lote: {type(exc).__name__}: {exc}")
+        print(f"[pluggy_sync] item {item_id} falhou no lote: {_falha_da_pluggy(exc)}")
         marcar_leitura_falhou(connection, exc)
         return {"ok": False, "reason": READ_FAILED, "item_id": item_id,
                 "connection_id": connection.get("id"), "error": type(exc).__name__}
@@ -930,7 +945,8 @@ def marcar_leitura_falhou(conexao: dict, erro: BaseException | None = None) -> N
                          motivos_substituiveis=MOTIVOS_QUE_A_FALHA_SUBSTITUI,
                          dono_unico=True)
     except Exception as exc:  # banco fora do ar não pode derrubar o chamador também
-        print(f"[pluggy_sync] mark_sync_result falhou ({item_id}): {exc}")
+        print(f"[pluggy_sync] mark_sync_result falhou ({item_id}): "
+              f"motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)}")
 
 
 def sync_pluggy_user(user_id: int) -> dict:
@@ -962,7 +978,8 @@ def sync_pluggy_user(user_id: int) -> dict:
                 import core.services.piggy_agents as _agents
                 getattr(_agents, f"run_{nome}_once")(user_id=user_id)
             except Exception as exc:
-                print(f"[pluggy_sync] {nome} hook (user): {exc}")
+                print(f"[pluggy_sync] {nome} hook (user): motivo={type(exc).__name__} "
+                      f"sqlstate={getattr(exc, 'sqlstate', None)}")
 
     return {
         "ok": True,

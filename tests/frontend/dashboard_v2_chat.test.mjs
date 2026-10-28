@@ -12,7 +12,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { PAINEL, exigeArtefatoEmDia, passouATrava, servir } from "./_painel.mjs";
+import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, passouATrava, servir } from "./_painel.mjs";
 
 let browser;
 before(async () => {
@@ -21,14 +21,16 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir({ width = 1440, hash = "#/", perfil = "padrao", plano = "pro", sorte = null } = {}) {
+// `demo`: o protótipo (sem backend), onde a faixa ainda sorteia os insights de exemplo.
+async function abrir({ width = 1440, hash = "#/", perfil = "padrao", plano = "pro", sorte = null, demo = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
-  await servir(ctx, undefined, { plano, perfil }); // o perfil mora no servidor (/api/v2/perfil)
+  await servir(ctx, demo ? RAIZ : undefined, { plano, perfil }); // o perfil mora no servidor (/api/v2/perfil)
+  if (demo) await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil); // o protótipo lê o perfil daqui
   if (sorte !== null) await ctx.addInitScript((v) => { Math.random = () => v; }, sorte);
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
-  await page.goto(`${PAINEL}${hash}`);
+  await page.goto(`${demo ? PROTOTIPO : PAINEL}${hash}`);
   await page.locator("#page-title").waitFor();
   return { ctx, page, erros };
 }
@@ -138,9 +140,9 @@ test("\"qual categoria mais cresceu\" e \"que dia da semana\" respondem o que fo
 });
 
 test("\"qual foi meu maior gasto este mês\" olha o mês inteiro, não a semana", async () => {
-  // Padrão sem perfil: 3 insights (peso 2) + 10 comuns (peso 1) = 16; "maior-gasto" é a
-  // 8ª comum, na faixa [13, 14). A 1ª checagem confirma que a sorte caiu nela.
-  const { ctx, page } = await abrir({ sorte: 13.5 / 16 });
+  // Padrão sem perfil, com backend: a faixa é só pergunta, as 11 comuns (peso 1); "maior-gasto" é a
+  // 9ª, na faixa [8, 9). A 1ª checagem confirma que a sorte caiu nela.
+  const { ctx, page } = await abrir({ sorte: 8.5 / 11 });
   const chave = await page.locator(".piggy-band").getAttribute("data-band");
   await page.locator(".piggy-band").click();
   await page.locator(".chat > .msg-piggy .msg-block").first().waitFor();
@@ -222,8 +224,8 @@ test("toda pergunta pronta responde com texto, sem erro (as sugestões de cada p
     vistos[pergunta] = [await page.locator(".chat > .msg-piggy .msg-text").textContent(), erros.length];
     await ctx.close();
   }
-  // "fim-de-semana" não está entre as sugestões: pela faixa, com a sorte na faixa [13, 14) de 17.
-  const { ctx, page, erros } = await abrir({ sorte: 13.5 / 17 });
+  // "fim-de-semana" não está entre as sugestões: pela faixa, com a sorte na faixa [7, 8) de 11.
+  const { ctx, page, erros } = await abrir({ sorte: 7.5 / 11 });
   const chave = await page.locator(".piggy-band").getAttribute("data-band");
   await page.locator(".piggy-band").click();
   await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
@@ -286,16 +288,16 @@ test("as perguntas de dívida, assinatura, resumo, reserva e economia respondem 
   // metas é real: o chip da reserva mostra as metas do servidor, não o texto de exemplo (que o teste do protótipo cobre)
   assert.match(await pela("investir", "reserva de emergência"), /^Você tem 11 metas\./);
   assert.match(await pela("dividas", "economizar este mês"), /^O que mais subiu foi Delivery/);
-  // comuns fora das sugestões: pela faixa (3 insights × 2 + 11 comuns × 1 = 17)
-  assert.match(await faixa(12.5 / 17, "assinaturas"), /^Você paga 3 assinaturas: Spotify .*Netflix .* e Academia .*R\$ 166,70 por mês/);
-  assert.match(await faixa(15.5 / 17, "resumo"), /^1\. Entraram .*2\. O que mais pesa .*3\. No ritmo atual/);
+  // comuns fora das sugestões: pela faixa (11 comuns × 1)
+  assert.match(await faixa(6.5 / 11, "assinaturas"), /^Você paga 3 assinaturas: Spotify .*Netflix .* e Academia .*R\$ 166,70 por mês/);
+  assert.match(await faixa(9.5 / 11, "resumo"), /^1\. Entraram .*2\. O que mais pesa .*3\. No ritmo atual/);
 });
 
 // 3ª rodada do Codex no #584: o critério "o texto responde literalmente ao que foi
 // perguntado?" aplicado às 23 perguntas e aos 3 insights. Estas eram as que faltavam.
 test("insights e as perguntas restantes respondem o que pediram (e com o mesmo número do painel)", async () => {
-  const pelaFaixa = async (sorte) => {
-    const { ctx, page } = await abrir({ sorte });
+  const pelaFaixa = async (sorte, demo = false) => {
+    const { ctx, page } = await abrir({ sorte, demo });
     const chave = await page.locator(".piggy-band").getAttribute("data-band");
     await page.locator(".piggy-band").click();
     await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
@@ -311,11 +313,11 @@ test("insights e as perguntas restantes respondem o que pediram (e com o mesmo n
     await ctx.close();
     return t;
   };
-  // padrão: 3 insights (peso 2) nas faixas [0,2), [2,4), [4,6); "normal" é a 5ª comum, [10,11) de 17
-  const [k1, rise] = await pelaFaixa(1 / 17);
-  const [k2, trend] = await pelaFaixa(3 / 17);
-  const [k3, next] = await pelaFaixa(5 / 17);
-  const [k4, normal] = await pelaFaixa(10.5 / 17);
+  // protótipo: 3 insights (peso 2) nas faixas [0,2), [2,4), [4,6) de 17 (com backend a faixa não os tem); com backend, "normal" é a 5ª comum, [4,5) de 11
+  const [k1, rise] = await pelaFaixa(1 / 17, true);
+  const [k2, trend] = await pelaFaixa(3 / 17, true);
+  const [k3, next] = await pelaFaixa(5 / 17, true);
+  const [k4, normal] = await pelaFaixa(4.5 / 11);
   assert.deepEqual([k1, k2, k3, k4], ["insight-rise", "insight-trend", "insight-next", "normal"]);
   assert.match(rise, /^Subiu porque você pediu mais vezes: 7 contra 6 em agosto/);
   assert.match(trend, /cerca de R\$ 866 em 90 dias: R\$ 665 por mês a menos/); // o "Piggy notou" diz R$ 665
