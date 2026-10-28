@@ -1020,7 +1020,7 @@ def _compra_no_credito(user_id: int, text: str) -> str:
     if (recusa := recusa_q36(user_id, "cartao")):
         return recusa
     if fp.regra_ativa(user_id) and compra_fica_com_o_of(user_id, text):
-        return fp.msg_banco(user_id, "despesa", parse_money(text))
+        return fp.msg_banco(user_id, "despesa", parse_money(text), cartao=True)
 
     dt_evento, text_without_date = extract_date_from_text(text)
     if dt_evento is None:

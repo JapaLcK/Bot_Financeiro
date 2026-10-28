@@ -21,6 +21,8 @@ preserva o contexto da declaração na Carteira (`efeitos.foi_em_dinheiro.declar
 I9 o lembrete de 7 dias do A2c não muda lançamento, vínculo nem saldo: escreve só `lembrete_em` (`db/bank_lembrete.py`).
   criar (`add_launch_and_update_balance`)  I1 recusa argumento; I5; I6   mutex = o `update accounts`, e o
                                            reconcile na mesma transação (cursor externo é recusado)
+  criar com `chave_acao` (PR-B, WhatsApp)  I6: a consulta da chave filtra `user_id`; checa e escreve sob o
+                                           MESMO mutex (a chave mora em `launches.external_id`)
   editar categoria / lote                  I1 recusa categoria interna   SEM mutex, de propósito: a
                                            declaração nasce com o lançamento e só some com ele (propriedade
                                            imutável); v2 toma o mutex pelo `pode`
@@ -80,6 +82,35 @@ CASADA_SQL = f"""({DECLARADA_SQL} and exists (
 CARTEIRA_SQL = """(coalesce(source, 'manual') = 'manual'
         and jsonb_typeof(efeitos -> 'delta_conta') = 'number'
         and (efeitos ->> 'delta_conta')::numeric <> 0)"""
+
+
+class DeclaracaoRepetida(Exception):
+    """A ação (uma mensagem do WhatsApp) já gravou esta declaração. Não é `ValueError` de propósito: nenhum
+    chamador a trata como erro de validação. Sobe ANTES do commit; a transação inteira volta."""
+
+    def __init__(self, launch_id: int, user_seq: int):
+        super().__init__(f"DECLARACAO_REPETIDA: lançamento {launch_id}")
+        self.launch_id, self.user_seq = launch_id, user_seq
+
+
+def chave_existente(cur, user_id: int, chave: str) -> dict | None:
+    """O lançamento do usuário que já carrega a chave de ação (`launches.external_id`), sob o mutex do chamador."""
+    cur.execute("select id, user_seq from launches where user_id=%s and source='manual' and external_id=%s",
+                (user_id, chave))
+    return cur.fetchone()
+
+
+def par_da_declaracao(user_id: int, launch_id: int) -> dict | None:
+    """Data, descrição e valor da transação do extrato com que a declaração casou (None = sem par). Só leitura."""
+    from .connection import get_conn
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""select o.transaction_date as dia, o.description as alvo, abs(o.amount) as valor
+                         from bank_movement_declarations dec
+                         join open_finance_transactions o on o.id = dec.matched_transaction_id
+                         join open_finance_accounts a on a.id = o.account_id
+                         join open_finance_connections c on c.id = a.connection_id and c.user_id = dec.user_id
+                        where dec.user_id=%s and dec.launch_id=%s""", (user_id, launch_id))
+        return cur.fetchone()
 
 
 def e_fluxo(declaration: dict) -> bool:

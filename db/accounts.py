@@ -7,12 +7,14 @@ from datetime import datetime, date, time, timedelta
 from decimal import Decimal
 from math import isfinite
 
+from psycopg.errors import UniqueViolation
 from psycopg.types.json import Json
 
 import db_support as _db_support
 from utils_date import _tz, day_tz, launch_day, tz_name
 from utils_text import fmt_brl
 
+from .bank_declaracoes import DeclaracaoRepetida, chave_existente
 from .connection import (
     get_conn, cat_key_sql, LAUNCH_HAS_TIME_SQL,
     TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
@@ -87,6 +89,7 @@ def add_launch_and_update_balance(
     origem: str | None = ORIGEM_CARTEIRA,
     cur=None,
     declaracao_banco: bool = False,
+    chave_acao: str | None = None,
 ):
     """
     Lança em launches e atualiza saldo em accounts na mesma transação.
@@ -112,7 +115,11 @@ def add_launch_and_update_balance(
     `declaracao_banco=True` (despesa/receita "paga pelo banco"): `delta_conta: 0`, `origem=None`,
     e a declaração (`db/bank_declaracoes.py`) nasce no MESMO cursor/commit do lançamento, que
     ainda concilia com o extrato. Erros `ValueError` `DECLARACAO_*` antes de abrir a conexão; não aceita `cur` externo.
+    `chave_acao` (só com `declaracao_banco`; identifica a AÇÃO, nunca o conteúdo) vai em `launches.external_id`: se o
+    usuário já tem um lançamento com a chave, sob o mesmo mutex, levanta `DeclaracaoRepetida` e nada é gravado.
     """
+    if chave_acao is not None and not declaracao_banco:
+        raise ValueError("DECLARACAO_ARGS_INCOMPATIVEIS")
     if declaracao_banco:
         if tipo not in ("despesa", "receita"):
             raise ValueError("DECLARACAO_TIPO_INVALIDO")
@@ -166,15 +173,17 @@ def add_launch_and_update_balance(
         )
         new_bal = cur.fetchone()["balance"]
 
+        if chave_acao is not None and (ja := chave_existente(cur, user_id, chave_acao)):
+            raise DeclaracaoRepetida(ja["id"], ja["user_seq"])
         cur.execute(
             """
             insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos,
-                                 is_internal_movement, origem)
-            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                 is_internal_movement, origem, external_id)
+            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             returning id, user_seq
             """,
             (user_id, tipo, v, alvo, nota, cat, criado_em,
-             Json(efeitos), is_internal_movement, origem),
+             Json(efeitos), is_internal_movement, origem, chave_acao),
         )
         row = cur.fetchone()
         if declaracao_banco:
@@ -185,10 +194,20 @@ def add_launch_and_update_balance(
 
     if cur is not None:
         return grava(cur)
-    with get_conn() as conn:
-        with conn.cursor() as c:
-            resultado = grava(c)
-        conn.commit()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as c:
+                resultado = grava(c)
+            conn.commit()
+    except UniqueViolation as exc:
+        if chave_acao is None or exc.diag.constraint_name != "uq_launches_user_source_external":
+            raise  # outra violação (ex.: user_seq) não é "já registrei"
+        # 2ª linha de defesa: o índice único (user_id, source, external_id) pegou o que o mutex deixou passar.
+        with get_conn() as conn, conn.cursor() as c:
+            ja = chave_existente(c, user_id, chave_acao)
+        if ja is None:
+            raise
+        raise DeclaracaoRepetida(ja["id"], ja["user_seq"])
     return resultado
 
 

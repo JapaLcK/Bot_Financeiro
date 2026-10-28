@@ -146,10 +146,11 @@ def test_rota_de_debug_aplica_a_mesma_projecao_por_plano(llm, monkeypatch):
 
 # ── 3. conta do OF: chave pelo mês da cobrança ─────────────────────────────────
 
-def _conta_of(uid, dia, valor):
+def _conta_of(uid, dia, valor, criado_em=None, launch_id=None):
     with db.get_conn() as conn, conn.cursor() as cur:
-        cur.execute("insert into launches (user_id, tipo, valor, alvo, criado_em, posted_at, source) "
-                    "values (%s, 'despesa', %s, 'Enel Luz', %s, %s, 'open_finance')", (uid, valor, dia, dia))
+        cur.execute("insert into launches (id, user_id, tipo, valor, alvo, criado_em, posted_at, source) "
+                    "values (coalesce(%s, nextval(pg_get_serial_sequence('launches', 'id'))), %s, 'despesa', %s, "
+                    "'Enel Luz', %s, %s, 'open_finance')", (launch_id, uid, valor, criado_em or dia, dia))
         conn.commit()
 
 
