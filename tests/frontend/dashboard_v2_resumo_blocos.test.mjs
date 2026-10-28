@@ -182,7 +182,7 @@ test("troca de conta sem o perfil ser relido: o Piggy notou da conta A não apar
   const pedidos = [];
   page.on("request", (q) => { if (new URL(q.url()).pathname === "/api/v2/insights") pedidos.push(uid); });
   await ctx.route("**/api/v2/insights", async (rt) => {
-    if (uid === 8 || lento) await new Promise((ok) => setTimeout(ok, 600));
+    if (uid === 8 || lento) await new Promise((ok) => setTimeout(ok, 1500));
     await rt.fulfill({ json: { insights: [{ title: uid === 7 ? "Segredo da conta A" : "Aviso da conta B", message: "x" }] } }).catch(() => {});
   });
   await ir();
@@ -191,8 +191,10 @@ test("troca de conta sem o perfil ser relido: o Piggy notou da conta A não apar
   await page.waitForTimeout(500);
   lento = true; // a volta à mesma conta demora, para o carregando poder ser visto
   const entradaUnica = pedidos.length;
+  // A amostragem começa ANTES de voltar ao Resumo, no mesmo evaluate: sem a ida e volta do Playwright no meio (máquina lenta do CI).
   const amostra = () => page.evaluate(() => new Promise((ok) => {
     const v = []; const t0 = Date.now();
+    location.hash = "#/";
     const i = setInterval(() => {
       const t = document.querySelector('[data-widget-id="piggy"]')?.textContent ?? "";
       v.push(t);
@@ -202,13 +204,11 @@ test("troca de conta sem o perfil ser relido: o Piggy notou da conta A não apar
   // mesma conta: sai, volta, vê o carregando e depois o dado
   await page.evaluate(() => { location.hash = "#/conta/bancos"; });
   await piggy.waitFor({ state: "detached" });
-  await page.evaluate(() => { location.hash = "#/"; });
   const mesma = await amostra();
   // outra conta, perfil não relido
   await page.evaluate(() => { location.hash = "#/conta/bancos"; });
   await piggy.waitFor({ state: "detached" });
   uid = 8;
-  await page.evaluate(() => { location.hash = "#/"; });
   const vistos = await amostra();
   await page.waitForTimeout(500);
   const total = pedidos.length;
@@ -216,7 +216,8 @@ test("troca de conta sem o perfil ser relido: o Piggy notou da conta A não apar
   assert.equal(entradaUnica, 1, "uma entrada no Resumo = um GET /insights");
   assert.ok(vistos.every((t) => !t.includes("Segredo da conta A")), "texto da conta A visto depois da troca");
   assert.ok(vistos.at(-1).includes("Aviso da conta B"), "a conta B chegou");
-  assert.ok(mesma.some((t) => t.includes("olhando os seus números")) && mesma.at(-1).includes("Segredo da conta A"), "mesma conta: carregando e depois o dado");
+  assert.ok(mesma.some((t) => t.includes("olhando os seus números")), "mesma conta: carregando");
+  assert.ok(mesma.at(-1).includes("Segredo da conta A"), "mesma conta: depois o dado");
   assert.equal(total, 3, "um GET por entrada, sem laço");
 });
 
