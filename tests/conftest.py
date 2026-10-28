@@ -435,6 +435,13 @@ def _all_user_ids() -> set[int]:
 
 
 @pytest.fixture(autouse=True)
+def _declaracao_banco_desligada(monkeypatch):
+    """A flag nasce DESLIGADA (ADR 0006): um `.env` de quem roda com ela ligada não vira os testes que afirmam a recusa."""
+    monkeypatch.delenv("DECLARACAO_BANCO", raising=False)
+    monkeypatch.delenv("DECLARACAO_BANCO_USER_IDS", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _zera_rate_limit_em_memoria():
     """Storage do slowapi zerado por teste — ele é EM MEMÓRIA e vale pela sessão
     inteira do pytest, então teto de rota vaza de um arquivo para o outro.
