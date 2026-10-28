@@ -132,7 +132,7 @@ test("renda: as barras são o que entrou, só até o mês atual (o mês a mais d
 test("piggy: título em destaque e a frase em cinza, na ordem; `key` repetida do modelo não quebra; sem destaque, o vazio com o texto certo", async () => {
   const igual = com(FX.insights, (c) => { c.insights[1].key = c.insights[0].key; });
   const a = await um("piggy", { insights: igual });
-  assert.deepEqual(await linhasDe(a.page, ".card-ia .ci-grupo"), ["Mercado subiu Você gastou R$ 80,50 a mais em mercado que no mês passado.", "Fatura chegando A fatura do Nubank vence dia 17."]);
+  assert.deepEqual(await linhasDe(a.page, ".card-ia .ci-grupo"), ["Meta 'Viagem' atrasada Pra bater o prazo precisaria de R$ 350,50/mês, mas o ritmo atual tá em R$ 100,50/mês.", "Alimentação tá apertando 97% do orçamento de alimentação e faltam 19 dias."]);
   assert.equal(await a.page.locator(".card-ia .ci-grupo b").count(), 2);
   assert.equal(await a.page.locator(".card-ia button, .card-ia a").count(), 0, "o action_view do destaque não vira botão");
   assert.deepEqual(a.erros, []);

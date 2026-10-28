@@ -656,6 +656,7 @@ FEATURE_MIN_TIER_V2 = {
     "forecast": "plus",
     "cashflow": "pro",
     "insights": "plus",
+    "insights_acoes": "pro",  # PL-06: `impacto` e `acoes` do insight; o Plus recebe a explicação
     "financial_comparison": "plus",
     "weekly_report": "plus",
     "simulator": "pro",

@@ -454,5 +454,6 @@ def test_spike_query_convertida_ainda_executa(pro_user_id, monkeypatch):
     assert len(spikes) == 1, spikes
     # 500 contra média de 100 nos dois meses anteriores com dado = +400%
     assert spikes[0]["type"] == "category_spike", spikes
-    assert spikes[0]["key"] == "spike:mercado", spikes
+    assert spikes[0]["key"] == f"category_spike:mercado:{date.today():%Y-%m}", spikes
     assert spikes[0]["title"] == "Mercado subiu 400% no mês", spikes
+    assert spikes[0]["explicacao"]["amostra"]["meses_com_gasto"] == 2, spikes  # PL-06: a amostra vai junto

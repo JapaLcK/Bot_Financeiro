@@ -1,18 +1,19 @@
 """
-core/ai_patterns.py — Sprint 7. Insights e padrões proativos via LLM (OpenAI).
+core/ai_patterns.py — Sprint 7. Padrões proativos via LLM (OpenAI) e o cache dos insights.
 
-Estratégia: backend agrega dados estruturados, manda pra o modelo com
-prompt específico, recebe JSON validado, cacheia em `ai_proactive_cache`.
+Estratégia dos padrões: backend agrega dados estruturados, manda pra o modelo com
+prompt específico, recebe JSON validado, cacheia em `ai_proactive_cache`. Os insights
+usam o mesmo cache, mas NÃO passam pelo LLM (D12 do PL-06): saem dos detectores de
+`db/insights.py`, com o texto deles.
 
 Cache TTL por kind:
 - `insights`: 6h (estado financeiro muda rápido — orçamento, salário)
 - `patterns`: 24h (padrões comportamentais são estáveis)
 
-Fallback: se LLM falha (sem API key, erro de rede, JSON inválido), retorna
-lista vazia (frontend mostra empty state). Para insights, usa heurística
-de `db.insights.compute_active_insights` como segundo nível de fallback.
+Fallback: se LLM falha (sem API key, erro de rede, JSON inválido), os padrões
+saem vazios (frontend mostra empty state).
 
-Por que LLM e não heurística:
+Por que LLM e não heurística (nos padrões):
 - Padrões variam por user (descoberta dinâmica, não regras fixas)
 - Permite dicas acionáveis customizadas baseadas no perfil real
 - Tom Piggy (anti-fricção) consistente, geração natural
@@ -27,7 +28,6 @@ import json
 import logging
 import os
 import threading
-from datetime import date
 from typing import Any
 
 from core.services.modelo_openai import CHAT_MODEL, completion_options
@@ -41,10 +41,10 @@ TEMPERATURE = 0.4  # ligeiramente acima do chat IA pra ter variedade nas narrati
 INSIGHTS_CACHE_TTL_SECONDS = 6 * 3600     # 6h
 PATTERNS_CACHE_TTL_SECONDS = 24 * 3600    # 24h
 
-# Bumpe quando mudar prompt/payload de forma significativa. Cache antigo
-# vira garbage instantaneamente (kind diferente = miss).
+# Bumpe quando mudar o prompt/payload dos padrões ou o CONTRATO dos itens de insights
+# (`core/services/insights_contrato.py`). Cache antigo vira miss (kind diferente).
 _PROMPT_VERSION_PATTERNS = 8
-_PROMPT_VERSION_INSIGHTS = 8
+_PROMPT_VERSION_INSIGHTS = 10
 
 
 def _cache_kind(base: str) -> str:
@@ -53,14 +53,6 @@ def _cache_kind(base: str) -> str:
     if base == "insights":
         return f"insights_v{_PROMPT_VERSION_INSIGHTS}"
     return base
-
-
-def _days_left_in_month(today: date) -> int:
-    if today.month == 12:
-        nxt = date(today.year + 1, 1, 1)
-    else:
-        nxt = date(today.year, today.month + 1, 1)
-    return (nxt - today).days
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -258,157 +250,6 @@ def _collect_patterns_data(user_id: int) -> dict[str, Any]:
     return out
 
 
-def _collect_insights_data(user_id: int) -> dict[str, Any]:
-    """Junta estado financeiro ATUAL pro LLM gerar alertas/dicas acionáveis."""
-    from db import (
-        get_budgets_status_for_month,
-        compute_kpis,
-        resolve_window,
-    )
-    from db.recurring import list_recurring_expenses
-
-    out: dict[str, Any] = {}
-    today = date.today()
-    out["_meta"] = {
-        "today": today.isoformat(),
-        "month_label": f"{_MONTH_PT[today.month - 1]}/{today.year}",
-        "day_of_month": today.day,
-        "days_left_in_month": _days_left_in_month(today),
-        "data_source_note": (
-            "Todos os números refletem o ESTADO ATUAL no mês corrente, exceto "
-            "onde explicitamente indicado outro período."
-        ),
-    }
-
-    # Orçamentos do mês corrente
-    try:
-        out["budgets"] = get_budgets_status_for_month(user_id)
-    except Exception as e:
-        logger.warning("ai_patterns: budgets falhou: %s", e)
-        out["budgets"] = None
-
-    # Recurring com reajustes recentes (enrich com change_pct e change_brl
-    # pré-calculados — LLM não precisa fazer (atual-anterior)/anterior).
-    try:
-        recurrings = list_recurring_expenses(user_id, include_inactive=False)
-        enriched_recs = []
-        for r in (recurrings or []):
-            cur_amt = float(r.get("amount") or 0)
-            prev_amt = r.get("last_amount")
-            change_pct = None
-            change_brl = None
-            if prev_amt is not None and float(prev_amt) > 0:
-                prev_f = float(prev_amt)
-                change_brl = round(cur_amt - prev_f, 2)
-                change_pct = round((cur_amt - prev_f) / prev_f * 100.0, 1)
-            enriched_recs.append({
-                "name": r.get("name"),
-                "amount": cur_amt,
-                "last_amount": prev_amt,
-                "last_amount_changed_at": r.get("last_amount_changed_at"),
-                "change_brl": change_brl,           # ex: 5.00 (subiu R$ 5)
-                "change_pct": change_pct,           # ex: 11.1 (subiu 11,1%)
-                "category": r.get("category"),
-                "is_essential": r.get("is_essential"),
-                "due_day": r.get("due_day"),
-            })
-        out["recurrings"] = enriched_recs
-    except Exception as e:
-        logger.warning("ai_patterns: recurrings falhou: %s", e)
-        out["recurrings"] = []
-
-    # KPIs do mês corrente
-    try:
-        today = date.today()
-        fd = date(today.year, today.month, 1)
-        td = resolve_window(months=1)[1]
-        out["month_kpis"] = compute_kpis(user_id, fd, td)
-    except Exception as e:
-        logger.warning("ai_patterns: kpis falhou: %s", e)
-        out["month_kpis"] = None
-
-    # Metas (goals) com status
-    try:
-        out["goals"] = _compact_goals_status(user_id)
-    except Exception as e:
-        logger.warning("ai_patterns: goals falhou: %s", e)
-        out["goals"] = []
-
-    return out
-
-
-def _compact_goals_status(user_id: int) -> list[dict]:
-    """Replica essencial de /goals/{uid}/status sem precisar do HTTP.
-
-    Retorna só metas (target_amount NOT NULL) com pct_complete e indicator.
-    """
-    from db.pockets import list_pockets
-    from db.connection import get_conn
-
-    out: list[dict] = []
-    today = date.today()
-    pockets = list_pockets(user_id)
-    for p in pockets:
-        ta = p.get("target_amount")
-        td = p.get("target_date")
-        if ta is None or td is None:
-            continue
-        saved = float(p.get("balance") or 0)
-        tgt = float(ta)
-        if tgt <= 0:
-            continue
-        pct = (saved / tgt * 100.0)
-        days_left = (td - today).days
-        monthly_needed = None
-        if days_left and days_left > 0:
-            monthly_needed = (tgt - saved) / max(1, days_left / 30.0)
-
-        # Ritmo dos últimos 90d
-        monthly_pace = 0.0
-        try:
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        select
-                          coalesce(sum(case when tipo='deposito_caixinha' then valor else 0 end), 0) -
-                          coalesce(sum(case when tipo='saque_caixinha' then valor else 0 end), 0)
-                          as net
-                        from launches
-                        where user_id=%s and alvo=%s
-                          and criado_em >= now() - interval '90 days'
-                        """,
-                        (user_id, p["name"]),
-                    )
-                    r = cur.fetchone()
-                    monthly_pace = float(r["net"] or 0) / 3.0
-        except Exception:
-            monthly_pace = 0.0
-
-        indicator = "on_track"
-        if pct >= 100:
-            indicator = "achieved"
-        elif days_left is not None and days_left < 0:
-            indicator = "behind"
-        elif monthly_needed and monthly_pace < monthly_needed * 0.5:
-            indicator = "behind"
-        elif monthly_needed and monthly_pace < monthly_needed * 0.9:
-            indicator = "tight"
-
-        out.append({
-            "name": p["name"],
-            "balance": saved,
-            "target_amount": tgt,
-            "target_date": td.isoformat(),
-            "pct_complete": round(pct, 1),
-            "days_left": days_left,
-            "monthly_pace_current": round(monthly_pace, 2),
-            "monthly_pace_needed": round(monthly_needed, 2) if monthly_needed else None,
-            "indicator": indicator,
-        })
-    return out
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Prompts
 # ─────────────────────────────────────────────────────────────────────────────
@@ -580,82 +421,6 @@ Se não houver sinal suficiente pra padrões verificáveis, retorne {"items": []
 """
 
 
-INSIGHTS_SYSTEM_PROMPT = """\
-Você é o Piggy 🐷, o assistente financeiro do PigBank. Sua tarefa: analisar
-um JSON com o ESTADO FINANCEIRO ATUAL de um usuário (orçamentos do mês,
-recorrentes, metas, KPIs) e gerar 3 a 5 INSIGHTS ACIONÁVEIS.
-
-Tom: amigo presente, anti-fricção, direto. PT-BR coloquial.
-
-Diferença para padrões: insights são sobre o ESTADO ATUAL (orçamento
-estourando AGORA, recorrente reajustou, meta atrasada). Padrões são
-descobertas de comportamento ao longo do tempo.
-
-╔══════════════════════════════════════════════════════════════════════════╗
-║ ANTI-ALUCINAÇÃO — REGRAS ABSOLUTAS                                       ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ 1. Use SOMENTE números EXATOS do JSON. NUNCA invente valores.            ║
-║                                                                          ║
-║ 2. ⚠️ PROIBIDO FAZER ARITMÉTICA. Nada de divisões, multiplicações, %    ║
-║    calculadas por você. Os valores prontos a usar:                       ║
-║      • Orçamento atual                  → budgets.budgets[i].pct, .spent,║
-║                                           .budget, .remaining            ║
-║      • Recorrente reajustado           → recurrings[i].amount,           ║
-║                                           recurrings[i].last_amount      ║
-║      • Meta atrasada                    → goals[i].pct_complete,         ║
-║                                           goals[i].monthly_pace_current, ║
-║                                           goals[i].monthly_pace_needed   ║
-║      • Dias restantes no mês           → _meta.days_left_in_month        ║
-║      • Mês atual                       → _meta.month_label               ║
-║    Se quiser citar "subiu 12%", o JSON precisa ter ESSE 12% pronto.     ║
-║    Senão, descreva sem o ratio (ex: "passou de R$ X pra R$ Y").         ║
-║                                                                          ║
-║ 3. Cada insight precisa ser sobre uma row VERIFICÁVEL no JSON:           ║
-║    - Orçamento → tem que existir em budgets.budgets[]                    ║
-║    - Recorrente → tem que existir em recurrings[] com last_amount preenchido║
-║    - Meta → tem que existir em goals[] com indicator='behind'/'tight'    ║
-║                                                                          ║
-║ 4. Insights são sobre o MÊS CORRENTE (`_meta.month_label`). Sempre cite  ║
-║    o mês quando o insight é sobre orçamento ou consumo do mês.           ║
-║                                                                          ║
-║ 5. Para "faltam X dias no mês", use `_meta.days_left_in_month`.          ║
-║                                                                          ║
-║ 6. Inteiros sem '.5'. Não use 'dia 14,5' — arredonde pra inteiro.        ║
-║                                                                          ║
-║ 7. Se nada relevante na seção, NÃO faça insight forçado.                ║
-║                                                                          ║
-║ 8. NUNCA invente marcas, lojas, apps ou produtos. Se for citar um       ║
-║    estabelecimento, ele tem que aparecer LITERALMENTE no JSON. Categoria║
-║    como "alimentacao" NÃO autoriza falar "iFood" ou "delivery".          ║
-╚══════════════════════════════════════════════════════════════════════════╝
-
-OUTRAS REGRAS:
-- Severidade:
-  - critical → orçamento vermelho (≥100%), meta vencida, recorrente subiu >20%
-  - warning  → orçamento amarelo (80-99%), meta behind, recorrente subiu 5-20%
-  - info     → observação relevante mas sem ação urgente
-- action_view permitidos: budgets | fixed | goals | analytics | null
-- Formatação de R$: vírgula decimal (R$ 1.234,56)
-- Máximo 1 emoji por insight (deixe o título limpo)
-- Se nada relevante, retorne {"items": []}.
-
-FORMATO DE SAÍDA — JSON ESTRITO:
-{
-  "items": [
-    {
-      "icon": "🍔",
-      "title": "Alimentação estourou o orçamento de mai/2026",
-      "message": "R$ 487,00 de R$ 500,00 (97%) e faltam 19 dias no mês.",
-      "severity": "critical",
-      "action_label": "Ajustar",
-      "action_view": "budgets",
-      "key": "budget:alimentacao:2026-05"
-    }
-  ]
-}
-"""
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Chamada LLM
 # ─────────────────────────────────────────────────────────────────────────────
@@ -746,50 +511,68 @@ def generate_ai_patterns(user_id: int, *, force: bool = False) -> list[dict]:
 
 
 def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
-    """Insights acionáveis via LLM. Cache 6h.
+    """Insights do PigBank (contrato v1, `core/services/insights_contrato.py`). Cache 6h.
 
-    Fallback: se LLM falha por qualquer motivo, usa heurística antiga
-    (`db.insights.compute_active_insights`) pra não deixar o card vazio.
+    Gate de plano -> cache -> (miss) fatos dos detectores, com o texto deles -> cache completo -> projeção
+    por plano. Sem LLM (D12 do PL-06); o nome ficou pelos chamadores (rota, agendador, card, testes).
+    Detector em falha: os itens dos outros saem, mas o cache NÃO é gravado (uma lista incompleta não pode
+    valer 6 h como "nada a apontar"); o próximo pedido recalcula.
     """
     from core.services.plan_service import plan_gate_ok
     if not plan_gate_ok(user_id, "insights"):
         return []
     kind = _cache_kind("insights")
-    if not force:
-        cached = _get_cached(user_id, kind, INSIGHTS_CACHE_TTL_SECONDS)
-        if cached is not None:
-            return cached
-
-    # Uma geração por usuário em voo: o cache só é gravado DEPOIS do LLM, então pedidos concorrentes (2 abas,
-    # StrictMode) pagariam N chamadas. Quem espera relê o cache que o primeiro gravou.
-    # ponytail: trava por processo; com mais de uma réplica cada uma pode gerar 1x. Advisory lock do Postgres
-    # prenderia 1 conexão do pool por espera.
-    with _INSIGHTS_LOCKS.setdefault(user_id, threading.Lock()):
-        if not force:
-            cached = _get_cached(user_id, kind, INSIGHTS_CACHE_TTL_SECONDS)
-            if cached is not None:
-                return cached
-        return _gerar_insights(user_id, kind)
+    itens = None if force else _get_cached(user_id, kind, INSIGHTS_CACHE_TTL_SECONDS)
+    if itens is None:
+        # Uma geração por usuário em voo: o cache só é gravado DEPOIS das consultas dos 6 detectores, então pedidos
+        # concorrentes (2 abas, StrictMode) repetiriam todas. Quem espera relê o cache que o primeiro gravou (com
+        # detector em falha não há cache, e o próximo da fila recalcula).
+        # ponytail: trava por processo; com mais de uma réplica cada uma pode gerar 1x. Advisory lock do Postgres
+        # prenderia 1 conexão do pool por espera.
+        with _INSIGHTS_LOCKS.setdefault(user_id, threading.Lock()):
+            itens = None if force else _get_cached(user_id, kind, INSIGHTS_CACHE_TTL_SECONDS)
+            if itens is None:
+                itens = _gerar_insights(user_id, kind)
+    return _projetar(user_id, itens)
 
 
 _INSIGHTS_LOCKS: dict[int, threading.Lock] = {}
 
 
 def _gerar_insights(user_id: int, kind: str) -> list[dict]:
-    data = _collect_insights_data(user_id)
-    items = _call_llm(INSIGHTS_SYSTEM_PROMPT, data)
-    if items is None:
-        # Fallback heurístico
-        try:
-            from db import compute_active_insights
-            items = compute_active_insights(user_id)
-        except Exception as e:
-            logger.warning("ai_patterns: fallback heurística falhou: %s", e)
-            items = []
+    """Os fatos dos detectores, carimbados; o cache só é gravado se nenhum detector falhou."""
+    from db import compute_active_insights
+    from utils_date import now_tz
+    itens, falhas = compute_active_insights(user_id)
+    agora = now_tz().isoformat(timespec="seconds")
+    for it in itens:
+        it["explicacao"]["calculado_em"] = agora
+    if not falhas:
+        _save_cache(user_id, kind, itens)
+    return itens
 
-    items = _sanitize_insight_items(items)
-    _save_cache(user_id, kind, items)
-    return items
+
+def motivo_vazio(user_id: int) -> str | None:
+    """Por que a lista saiu vazia (`sem_dados`/`sem_destaques`), só se o cálculo completo está no cache.
+    Sem cache (um detector falhou) = None: o vazio não é "nada a apontar"."""
+    if _get_cached(user_id, _cache_kind("insights"), INSIGHTS_CACHE_TTL_SECONDS) is None:
+        return None
+    from db.insights import motivo_sem_insights
+    return motivo_sem_insights(user_id)
+
+
+def ler_insights(user_id: int) -> list[dict] | None:
+    """O cache de 6 h com a mesma projeção da rota, sem gerar (o card `piggy` do chat). None = sem cache.
+    Quem chama já passou no gate `insights`."""
+    itens = _get_cached(user_id, _cache_kind("insights"), INSIGHTS_CACHE_TTL_SECONDS)
+    return None if itens is None else _projetar(user_id, itens)
+
+
+def _projetar(user_id: int, itens: list[dict]) -> list[dict]:
+    # O plano vale na LEITURA: o cache guarda `impacto`/`acoes` e quem caiu do Pro dentro das 6 h não os vê.
+    from core.services.insights_contrato import projetar
+    from core.services.plan_service import plan_gate_ok
+    return projetar(itens, acoes_ok=plan_gate_ok(user_id, "insights_acoes"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -797,8 +580,6 @@ def _gerar_insights(user_id: int, kind: str) -> list[dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _ALLOWED_TONES = {"neutral", "warn", "tip"}
-_ALLOWED_SEVERITIES = {"critical", "warning", "info"}
-_ALLOWED_VIEWS = {"budgets", "fixed", "goals", "analytics", "pockets", "recurring"}
 
 
 # Regex pra extrair "Nx" / "N,Mx" / "N.Mx" do título — busca alegação de ratio.
@@ -889,43 +670,10 @@ def _sanitize_pattern_items(items: list[dict]) -> list[dict]:
     return out
 
 
-def _sanitize_insight_items(items: list[dict]) -> list[dict]:
-    out: list[dict] = []
-    for idx, it in enumerate(items or []):
-        if not isinstance(it, dict):
-            continue
-        title = str(it.get("title", "") or "").strip()
-        if not title:
-            continue
-        sev = it.get("severity")
-        if sev not in _ALLOWED_SEVERITIES:
-            sev = "info"
-        action_view = it.get("action_view")
-        if action_view not in _ALLOWED_VIEWS:
-            action_view = None
-        action_label = it.get("action_label")
-        if action_view is None:
-            action_label = None
-        elif action_label:
-            action_label = str(action_label)[:24]
-
-        out.append({
-            "icon": str(it.get("icon") or "🐷")[:4],
-            "title": title[:140],
-            "message": str(it.get("message") or "")[:240],
-            "severity": sev,
-            "action_label": action_label,
-            "action_view": action_view,
-            "key": str(it.get("key") or f"ai-{idx}")[:120],
-        })
-        if len(out) >= 6:
-            break
-    return out
-
-
 __all__ = [
     "generate_ai_patterns",
     "generate_ai_insights",
+    "ler_insights",
     "PATTERNS_CACHE_TTL_SECONDS",
     "INSIGHTS_CACHE_TTL_SECONDS",
 ]

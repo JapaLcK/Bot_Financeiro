@@ -8346,10 +8346,12 @@ async def debug_ai_payload_route(
     if os.getenv("DEBUG_AI_ROUTES", "").strip().lower() not in ("1", "true", "yes"):
         raise HTTPException(status_code=404, detail="Not found")
     _authorize_dashboard_access(request, user_id)
-    from core.ai_patterns import _collect_patterns_data, _collect_insights_data
+    from core.ai_patterns import _collect_patterns_data, _projetar
+    from db import compute_active_insights
     _require_pro(user_id, "insights")
-    if kind == "insights":
-        data = await asyncio.to_thread(_collect_insights_data, user_id)
+    if kind == "insights":  # sem LLM desde a D12 do PL-06: os fatos, com a projeção por plano da rota oficial
+        itens, falhas = await asyncio.to_thread(compute_active_insights, user_id)
+        data = {"itens": await asyncio.to_thread(_projetar, user_id, itens), "falhas": falhas}
     else:
         data = await asyncio.to_thread(_collect_patterns_data, user_id)
     return {"ok": True, "kind": kind, "payload": data}

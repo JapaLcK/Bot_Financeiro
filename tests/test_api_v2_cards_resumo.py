@@ -1,6 +1,7 @@
 """`/api/v2/cartoes`, `/parcelas`, `/renda`, `/insights` e `/rendimento` (dados reais dos cards do Resumo do /painel) pelo
 monólito real: a MESMA função da rota legada e do chat (número igual, dinheiro em texto), isolamento entre usuários, gate
-de plano antes de ler ou gerar, LLM nunca real, dois namespaces e não-finito. Banco real."""
+de plano antes de ler ou gerar, nenhuma chamada ao LLM (os insights saem dos detectores, D12 do PL-06), dois namespaces e
+não-finito. Banco real."""
 from datetime import timedelta
 from decimal import Decimal
 
@@ -43,9 +44,29 @@ def a_e_b(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def llm_nunca_real(monkeypatch):
+    """Guarda: os insights não chamam o LLM (D12). Vale para todo teste daqui: o fim da fixture reprova se houve chamada."""
     chamadas = []
-    monkeypatch.setattr(ai_patterns, "_call_llm", lambda *a, **k: chamadas.append(a) or [{"title": "Gerada", "message": "m"}])
-    return chamadas
+    monkeypatch.setattr(ai_patterns, "_call_llm", lambda *a, **k: chamadas.append(a) or [{"title": "LLM", "message": "m"}])
+    yield chamadas
+    assert chamadas == [], "os insights chamaram o LLM"
+
+
+def _conta_geracoes(monkeypatch, pausa=0.0):
+    """Troca a geração (as consultas dos 6 detectores) por uma que conta e, com `pausa`, demora."""
+    import time
+    geracoes = []
+
+    def gera(uid):
+        geracoes.append(uid)
+        time.sleep(pausa)
+        return [{"title": "Gerada", "message": "m", "explicacao": {}}], []
+    monkeypatch.setattr("db.compute_active_insights", gera)
+    return geracoes
+
+
+@pytest.fixture
+def geracoes(monkeypatch):
+    return _conta_geracoes(monkeypatch)
 
 
 def _get(rota, quem, prefixo=V2, **q):
@@ -108,13 +129,13 @@ def test_renda_e_a_evolucao_de_6_meses(a_e_b):
     assert Decimal(j["evolution"][-1]["income"]) == 1000 and j["evolution"][0]["income"] == "0.00"
 
 
-def test_insights_cacheado_nao_chama_o_llm_e_sem_cache_gera_uma_vez(a_e_b, llm_nunca_real):
+def test_insights_cacheado_nao_gera_e_sem_cache_gera_uma_vez(a_e_b, llm_nunca_real, geracoes):
     a, b = a_e_b
-    assert _ok("/insights", b) == {"insights": [{"title": "Dica so do B", "message": "mensagem do B"}]}  # cache: sem LLM
-    assert llm_nunca_real == []
+    assert _ok("/insights", b) == {"insights": [{"title": "Dica so do B", "message": "mensagem do B"}]}  # do cache
+    assert geracoes == []
     assert _ok("/insights", a) == {"insights": [{"title": "Gerada", "message": "m"}]}
     _ok("/insights", a)
-    assert len(llm_nunca_real) == 1  # a 2ª leitura vem do cache de 6 h
+    assert geracoes == [a] and llm_nunca_real == []  # a 2ª leitura vem do cache de 6 h; o LLM, nunca
 
 
 def _rajada(quem, n=6):
@@ -124,21 +145,18 @@ def _rajada(quem, n=6):
 
 
 @pytest.fixture
-def llm_lento(monkeypatch):
-    import time
-    chamadas = []
-    monkeypatch.setattr(ai_patterns, "_call_llm", lambda *a, **k: chamadas.append(a) or time.sleep(0.4) or [{"title": "Gerada", "message": "m"}])
-    return chamadas
+def geracao_lenta(monkeypatch):
+    return _conta_geracoes(monkeypatch, pausa=0.4)
 
 
-def test_rajada_do_mesmo_usuario_sem_cache_gera_uma_vez_so(a_e_b, llm_lento):
+def test_rajada_do_mesmo_usuario_sem_cache_gera_uma_vez_so(a_e_b, geracao_lenta, llm_nunca_real):
     a, _ = a_e_b
     rs = _rajada([a])
     assert {r.status_code for r in rs} == {200} and len({r.text for r in rs}) == 1
-    assert len(llm_lento) == 1
+    assert len(geracao_lenta) == 1 and llm_nunca_real == []
 
 
-def test_controle_negativo_sem_a_trava_a_rajada_paga_varias_vezes(a_e_b, llm_lento, monkeypatch):
+def test_controle_negativo_sem_a_trava_a_rajada_gera_varias_vezes(a_e_b, geracao_lenta, monkeypatch):
     import threading
 
     class Solta(dict):
@@ -146,15 +164,15 @@ def test_controle_negativo_sem_a_trava_a_rajada_paga_varias_vezes(a_e_b, llm_len
             return threading.Lock()  # trava nova a cada pedido = sem trava
     monkeypatch.setattr(ai_patterns, "_INSIGHTS_LOCKS", Solta())
     _rajada([a_e_b[0]])
-    assert len(llm_lento) > 1
+    assert len(geracao_lenta) > 1
 
 
-def test_controle_positivo_dois_usuarios_geram_um_cada(monkeypatch, a_e_b, llm_lento):
+def test_controle_positivo_dois_usuarios_geram_um_cada(monkeypatch, a_e_b, geracao_lenta, llm_nunca_real):
     a, _ = a_e_b
     c = usuario_pagante("pro")
     monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", f"{a},{c}")
     rs = _rajada([a, c], n=3)
-    assert {r.status_code for r in rs} == {200} and len(llm_lento) == 2
+    assert {r.status_code for r in rs} == {200} and sorted(geracao_lenta) == sorted([a, c]) and llm_nunca_real == []
 
 
 # ── isolamento ───────────────────────────────────────────────────────────────

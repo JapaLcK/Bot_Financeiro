@@ -141,23 +141,23 @@ async def analytics_top_merchants_route(
 @router.get("/insights/{user_id}/current")
 @shared.limiter.limit("20/minute")
 async def insights_current_route(request: Request, user_id: int):
-    """Insights acionáveis do Piggy, gerados via LLM.
+    """Insights acionáveis do Piggy, sem LLM (D12 do PL-06).
 
-    Recebe estado financeiro ATUAL (orçamentos, recorrentes, metas, KPIs) e
-    devolve 3-5 insights priorizados por severidade. Cache 6h por user.
+    Contrato v1 (`core/services/insights_contrato.py`): os fatos e o texto vêm dos
+    detectores (`compute_active_insights`); até 6 itens por severidade, cache 6h por
+    user. `impacto`/`acoes` só no Pro (`insights_acoes`). Lista vazia traz `motivo`
+    (`sem_dados`/`sem_destaques`), ou nulo se um detector falhou.
 
-    Fallback: se OPENAI_API_KEY ausente ou LLM falha, usa heurística antiga
-    (`compute_active_insights`) pra não deixar o card vazio.
-
-    Segurança: cada chamada é uma completion paga da LLM. Rate-limit por IP +
-    o `force` (bypass de cache) NÃO é mais exposto ao cliente — senão dava pra
-    chamar `?force=true` em loop e queimar tokens (custo/DoS de carteira).
+    Segurança: cada cálculo roda as consultas dos 6 detectores. Rate-limit por IP +
+    o `force` (bypass de cache) NÃO é exposto ao cliente — senão dava pra chamar
+    `?force=true` em loop e martelar o banco.
     """
     shared.authorize_dashboard_access(request, user_id)
-    from core.ai_patterns import generate_ai_insights
+    from core.ai_patterns import generate_ai_insights, motivo_vazio
     await asyncio.to_thread(shared.require_plan_feature, user_id, "insights")
     result = await asyncio.to_thread(generate_ai_insights, user_id, force=False)
-    return {"ok": True, "insights": result or []}
+    motivo = None if result else await asyncio.to_thread(motivo_vazio, user_id)
+    return {"ok": True, "insights": result or [], "motivo": motivo}
 
 
 @router.get("/analytics/{user_id}/patterns")
