@@ -542,21 +542,26 @@ _INSIGHTS_LOCKS: dict[int, threading.Lock] = {}
 def _gerar_insights(user_id: int, kind: str) -> list[dict]:
     """Os fatos dos detectores, carimbados; o cache só é gravado se nenhum detector falhou."""
     from db import compute_active_insights
+    from db.insight_estado import registrar
     from utils_date import now_tz
     itens, falhas = compute_active_insights(user_id)
     agora = now_tz().isoformat(timespec="seconds")
     for it in itens:
         it["explicacao"]["calculado_em"] = agora
+    registrar(user_id, itens)  # antes do cache: item em cache sem registro daria 404 no dispensar; fail-open
     if not falhas:
         _save_cache(user_id, kind, itens)
     return itens
 
 
 def motivo_vazio(user_id: int) -> str | None:
-    """Por que a lista saiu vazia (`sem_dados`/`sem_destaques`), só se o cálculo completo está no cache.
-    Sem cache (um detector falhou) = None: o vazio não é "nada a apontar"."""
-    if _get_cached(user_id, _cache_kind("insights"), INSIGHTS_CACHE_TTL_SECONDS) is None:
+    """Por que a lista PROJETADA saiu vazia (só se chama assim): `dispensados` se o cache tem itens (todos
+    dispensados), senão `sem_dados`/`sem_destaques`. Sem cache (um detector falhou) = None: não é "nada a apontar"."""
+    itens = _get_cached(user_id, _cache_kind("insights"), INSIGHTS_CACHE_TTL_SECONDS)
+    if itens is None:
         return None
+    if itens:
+        return "dispensados"
     from db.insights import motivo_sem_insights
     return motivo_sem_insights(user_id)
 
@@ -569,10 +574,13 @@ def ler_insights(user_id: int) -> list[dict] | None:
 
 
 def _projetar(user_id: int, itens: list[dict]) -> list[dict]:
-    # O plano vale na LEITURA: o cache guarda `impacto`/`acoes` e quem caiu do Pro dentro das 6 h não os vê.
+    # O plano e as dispensas valem na LEITURA: o cache guarda `impacto`/`acoes` e quem caiu do Pro dentro das 6 h
+    # não os vê; dispensar não invalida o cache.
     from core.services.insights_contrato import projetar
     from core.services.plan_service import plan_gate_ok
-    return projetar(itens, acoes_ok=plan_gate_ok(user_id, "insights_acoes"))
+    from db.insight_estado import dispensadas
+    return projetar(itens, acoes_ok=plan_gate_ok(user_id, "insights_acoes"),
+                    dispensadas=dispensadas(user_id, [it.get("key") for it in itens]))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

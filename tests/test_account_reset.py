@@ -273,6 +273,11 @@ def _semeia(uid: int) -> None:
                 (uid, Jsonb({})),
             )
             cur.execute(
+                "insert into insight_estado (user_id, chave, tipo, severidade, util_em)"
+                " values (%s, 'budget_warning:mercado:2026-08', 'budget_warning', 'warning', now())",
+                (uid,),
+            )
+            cur.execute(
                 "insert into pending_actions (user_id, action_type, payload, expires_at) "
                 "values (%s, 'confirm', %s, now() + interval '1 hour')",
                 (uid, Jsonb({})),
@@ -340,7 +345,7 @@ _TABELAS_SIMPLES = (
     "budget_alert_sent", "category_budgets",
     "user_category_rules", "user_categories", "agent_events", "agents",
     "ai_messages", "ai_pending_actions", "ai_fallback_log", "ai_proactive_cache",
-    "pending_actions",
+    "insight_estado", "pending_actions",
     "ofx_imports", "daily_report_prefs", "guia_painel", "metas", "launches", "financial_spaces",
     # `accounts` NÃO entra: desde o conserto do #246 a linha SOBREVIVE ao reset
     # com balance = 0 (é o lock dela que serializa o reset contra um lançamento

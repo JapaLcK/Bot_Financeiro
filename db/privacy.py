@@ -436,6 +436,7 @@ def build_user_export_zip(user_id: int) -> bytes:
             ("transacoes_cartao", "select * from credit_transactions where user_id = %s", (user_id,)),
             ("preferencias_resumo_diario", "select * from daily_report_prefs where user_id = %s", (user_id,)),
             ("marcacoes_assinaturas", "select * from subscription_marks where user_id = %s", (user_id,)),
+            ("insights_estado", "select * from insight_estado where user_id = %s", (user_id,)),
             ("guia_do_painel", "select * from guia_painel where user_id = %s", (user_id,)),
             ("metas", "select * from metas where user_id = %s", (user_id,)),
             ("importacoes_ofx", "select * from ofx_imports where user_id = %s", (user_id,)),
@@ -647,6 +648,7 @@ _RESET_TABLES = (
     "ai_pending_actions",
     "ai_fallback_log",
     "ai_proactive_cache",
+    "insight_estado",
     "pending_actions",
     # Uso / lançamentos. launches ANTES de financial_spaces: deletar o filho
     # primeiro evita o set null inútil da FK composta (user_id, space_id).

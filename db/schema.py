@@ -1966,6 +1966,24 @@ def init_db():
           on ai_proactive_cache (generated_at desc)
         """,
 
+        # PL-06 A2: "dispensado"/"útil" de cada insight, por usuário. Helper em db/insight_estado.py.
+        """
+        create table if not exists insight_estado (
+          user_id bigint not null references users(id) on delete cascade,
+          chave text not null,                 -- insights_contrato.chave(): opaca, nunca split(":")
+          tipo text not null,
+          severidade text not null,            -- do último cálculo
+          valor numeric(12,2),                 -- medida da piora do último cálculo; null onde não há
+          registrado_em timestamptz not null default now(),
+          dispensado_em timestamptz,
+          dispensado_severidade text,
+          dispensado_valor numeric(12,2),
+          util_em timestamptz,
+          primary key (user_id, chave),
+          check ((dispensado_em is null) = (dispensado_severidade is null))
+        )
+        """,
+
         # ─── Refresh tokens (auth: access curto 15min + refresh longo 14d) ─────
         # Sessão (auth_sessions) hospeda o jti. Refresh token é o "permite trocar
         # access expirado" — armazenamos só SHA-256 do plain token, nunca o valor.
