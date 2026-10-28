@@ -402,7 +402,15 @@ feita (§9).
   Railway `faturas indisponíveis`, `faturas não gravadas` e `[of_card_bills] conta=`. O leitor
   LEVANTA quando a metadata foge do contrato (`totalPages` ausente, eco de `page` diferente)
   e o sync engole o erro (fail-soft). Então zero linhas pode ser contrato da Pluggy diferente
-  do esperado, não ausência de faturas. Esse passo não pega nome de campo errado: o leitor
+  do esperado, não ausência de faturas. A linha de `faturas indisponíveis` traz
+  `motivo=<tipo> sqlstate=… status=… code=…` e, só quando o tipo é `PluggyApiError`,
+  `texto=<mensagem>` (#657; a mensagem é nossa, sem o corpo da resposta): `status` com
+  número é erro HTTP da Pluggy (429 é limite, e `code` traz o código dela); `status=None`
+  com `texto=Leitura de /bills incompleta: <regra>` é o leitor recusando a resposta
+  (contrato diferente), e a regra diz qual; `status=None` com `texto=Leitura de /bills
+  passou do teto de N páginas.` é a paginação que não termina; outro `motivo` é falha
+  nossa, sem texto.
+  `faturas não gravadas` traz `motivo=<tipo> sqlstate=…` (falha ao gravar). Esse passo não pega nome de campo errado: o leitor
   não levanta por campo ausente, só grava a coluna nula ou o `raw` sem a chave.
 - **Pronto:** fatura paga no banco sai da Previsão sem ação do usuário. Pagamento parcial.
   Duas faturas abertas. Estorno. Reconexão. O mesmo pagamento não quita duas faturas.

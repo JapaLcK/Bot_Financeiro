@@ -1754,7 +1754,10 @@ async def _open_finance_tick(*, interval: int, com_patch: bool) -> None:
         print(f"[open_finance_push] erro: {type(exc).__name__}", file=sys.stderr)
     if com_patch:
         res = await asyncio.to_thread(request_pluggy_refresh, origin="periodic")
-        print(f"[open_finance_refresh] {res}", flush=True)
+        # Sem o `claimed`: ele traz o uid de cada dono (#657).
+        print(f"[open_finance_refresh] triggered={res.get('triggered')} "
+              f"total={res.get('total')} origin={res.get('origin')} "
+              f"failures={res.get('failures')}", flush=True)
         # Os eventos ficam AQUI porque `request_pluggy_refresh` roda numa
         # thread (log_system_event é async). Ela devolve o que reivindicou
         # e o que falhou; nada mais é engolido.
@@ -1797,6 +1800,7 @@ async def _open_finance_refresh():
     interval = int(os.getenv("OF_REFRESH_INTERVAL_SEC", str(6 * 60 * 60)))
     refresh_ligado = (os.getenv("OF_REFRESH_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
     primeiro = True
+    from core.services.pluggy_sync import _falha_da_pluggy  # noqa: PLC0415 — o formato mora lá
     while True:
         try:
             # `min`: com `OF_REFRESH_INTERVAL_SEC` menor que o 1º tique, ele não espera mais que o intervalo.
@@ -1807,7 +1811,7 @@ async def _open_finance_refresh():
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            print(f"[open_finance_refresh] erro: {exc}", file=sys.stderr)
+            print(f"[open_finance_refresh] erro: {_falha_da_pluggy(exc)}", file=sys.stderr)
 
 
 async def _tarefa_fk_indexes():
