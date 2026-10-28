@@ -706,6 +706,27 @@ def list_connections_para_retentar(*, id: int | None = None) -> list[dict]:
             return [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
 
 
+# Os eventos em que o DELETE remoto de um item falhou. Formato de LOG virou
+# contrato de LEITURA (um teste por formato em tests/test_of_diagnostico_estados.py):
+#   • `pluggy_item_delete_failed`, `details.item_id` — 1º passe, por item
+#     (`delete_pluggy_items_best_effort`, frontend/routes/open_finance.py);
+#   • `pluggy_item_delete_failed`, `details.items` — 2º passe do disconnect;
+#   • `pluggy_disconnect_auth_failed`, `details.items` — sem apiKey;
+#   • `account_reset_pluggy_cleanup_failed`, `details.items` — 2º passe do reset
+#     (frontend/routes/settings.py; o do 1º passe não traz os items);
+#   • `account_deletion_pluggy_cleanup_failed`, `details.items`, `source='db.privacy'`
+#     — exclusão de conta. Ali a cascata já levou o registry: o log é o ÚNICO rastro.
+# Filtra por `event_type` e não por `source`: o nome do evento é o que identifica.
+# Mora aqui e não em `db/open_finance_diagnostico.py` (quem lê) porque a retenção
+# (`core/services/log_retention.py`) também precisa da lista, e produção não importa
+# a ferramenta do operador (`tests/test_of_operador_isolamento.py`).
+EVENTOS_FALHA_DELETE = (
+    "pluggy_item_delete_failed",
+    "pluggy_disconnect_auth_failed",
+    "account_reset_pluggy_cleanup_failed",
+    "account_deletion_pluggy_cleanup_failed",
+)
+
 # Item cuja linha de MAIOR `id` no registry (com ou sem dono) é `operator_delete`:
 # o operador já o apagou na Pluggy (`scripts/of_itens_operador.py`). Linha nova
 # depois (webhook, POST) tem `id` maior e o reabre. Predicado sobre o alias `r`.

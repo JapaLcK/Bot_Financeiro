@@ -1657,7 +1657,9 @@ admin confirma a entrega (senão log `pix_alerta_nao_entregue` e o próximo even
 manual (`receiveInCash`) e em cobrança editada no painel do Asaas, se o pagador pode digitar o
 valor no QR dinâmico (Passo 0, sandbox), se o `value` do webhook é BRUTO ou LÍQUIDO da tarifa
 (se fosse líquido, toda venda com tarifa > 0 seria retida), se `ADMIN_NOTIFY_WEBHOOK_URL`
-existe e responde 2xx em produção (sem ele o parcial fica só em `system_event_logs`) e o estado de
+existe e responde 2xx em produção (sem ele o parcial fica só em `system_event_logs`; os três logs
+`pix_pagamento_parcial_retido`, `pix_excesso_recebido` e `pix_retido_completado` estão em
+`EVENTOS_PERMANENTES` e não caem na retenção de 90 dias, só com a conta) e o estado de
 `ASAAS_PIX_ANNUAL_ENABLED` (o webhook não olha a flag). Antes de ligar: ver o checklist do PR #1228.
 Runbook do operador (parcial retido):
 1. Localizar (de quem é a linha): `select created_at, user_id, message, details, (select
@@ -2302,7 +2304,7 @@ sessão com 8 perguntas novas (fail-open raro);
 (i) até a correção da #919, o webhook (`wa_app.py`, `wa_webhook`) gravava o `recipient_id` CRU e o `errors`
 inteiro em `system_event_logs` quando a Meta devolvia erro de envio (defeito anterior a este PR, de todos os
 usuários); agora grava o número mascarado e, de `errors`, só `code`/`title`. As linhas antigas continuam na
-tabela até existir a retenção de `system_event_logs` (PR-4 do grupo D);
+tabela até saírem pela retenção de 90 dias de `system_event_logs` (`core/services/log_retention.py`);
 (j) o worker do WhatsApp é único e serial (`wa_app.py`, ~:360-364): cada pergunta do demo ocupa a fila dos
 pagantes por até 30s×2 tentativas, e a fila (maxsize 500) descarta o excedente: medir a latência antes de
 subir o teto;
@@ -2755,7 +2757,16 @@ Sobem no startup do app quando `RUN_BACKGROUND_TASKS != "0"`: rendimento de
 investimento, Open Finance (abaixo), contas a pagar dos recorrentes (o mesmo loop manda o aviso do autopay e, por último, o lembrete de 7 dias da declaração bancária "a conferir", `core/services/declaracao_lembrete.py`: texto livre, das 9h às 21:59, só para quem falou com o Piggy nas últimas 23h, uma vez por declaração, sem env de liga/desliga), agendadores de
 engajamento e de IA proativa, retenção de eventos de login, poda das tabelas de
 refresh token / challenge de MFA / cadastro Google pendente
-(`core/services/table_cleanup.py`), e a entrega do e-book da `/assinar`
+(`core/services/table_cleanup.py`), a retenção de 90 dias de `system_event_logs`
+(`core/services/log_retention.py`, no mesmo job: lotes de `LOTE`, até `TETO_LOTES` por volta,
+`LOCK_TIMEOUT` por lote; `EVENTOS_PERMANENTES` é a fonte única dos eventos que nunca
+caem; o mesmo job reescreve as linhas de `EVENTOS_FALHA_DELETE` com mensagem fixa e só
+`item_id`/`items`/`motivo`/`sqlstate`/`status_code` em `details`, porque elas ficam sem prazo
+e o texto cru da exceção já trouxe corpo de resposta da Pluggy; os escritores ainda gravam
+esse texto, até a fatia C; dedup novo com janela maior que `RETENCAO_MINIMA_DIAS` entra em
+`EVENTOS_PERMANENTES` e no §6 de `frontend/privacy.html`, senão
+`tests/test_eventos_permanentes_guarda.py` ou `tests/test_politica_retencao.py` reprova), e a
+entrega do e-book da `/assinar`
 (`_ebook_worker` → `core/services/ebook_entrega.entregar_pendentes`, a cada 5 min, a
 1ª volta sem delay; inerte sem `STRIPE_SECRET_KEY` no ambiente), o e-mail trocado em
 `/settings` levado ao cliente do Stripe (`_stripe_email_worker` →
@@ -2935,7 +2946,11 @@ Grupos: `DATABASE_URL`/`DB_POOL_*` · `JWT_SECRET`/`DASHBOARD_*` ·
 `PLUGGY_*`/`OF_*` · `RESEND_API_KEY`/`EMAIL_FROM*` · `APNS_*` · `ADMIN_DASHBOARD_*` ·
 `META_PIXEL_ID` · `RUN_BACKGROUND_TASKS`/`SKIP_INIT_DB`/`ENABLE_DEV_ENDPOINTS` ·
 `ACCOUNT_DELETION_JOB_LIMIT`/`TABLE_CLEANUP_INTERVAL_HOURS` (os dois kill switches
-de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
+de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda) ·
+`SYSTEM_EVENT_LOGS_RETENTION_DAYS` (default 90; `<= 0` desliga só a retenção de
+`system_event_logs`; 1 a 89 sobe para o piso de 90; inválido cai no 90; o §6 de
+`frontend/privacy.html` promete 90 dias, então mudar o valor exige mudar a política, e
+nenhum teste vê o valor do Railway).
 
 ---
 

@@ -13,13 +13,18 @@ O RASTRO DE LOG É APAGÁVEL: `DELETE /admin/api/events` e `admin.py purge` limp
 `system_event_logs`, e log com `user_id` na COLUNA some na cascata da exclusão de
 conta. Nesses casos a marca "remoção remota falhou" desaparece e, se o registry
 também não tiver o item, ele sai da ferramenta (DESCONHECIDO) — sobra o painel
-da Pluggy.
+da Pluggy. A retenção diária de 90 dias (`core/services/log_retention.py`) NÃO
+apaga estes eventos: `EVENTOS_FALHA_DELETE` está em `EVENTOS_PERMANENTES`.
 """
 from __future__ import annotations
 
 from core.audit import AuditEvent
 from db.connection import get_conn
-from db.open_finance_state import ITEMS_SEM_CONEXAO, RESOLVIDO_PELO_OPERADOR
+from db.open_finance_state import (
+    EVENTOS_FALHA_DELETE,
+    ITEMS_SEM_CONEXAO,
+    RESOLVIDO_PELO_OPERADOR,
+)
 
 REMOVIDO = "REMOVIDO"
 INTERROMPIDO = "INTERROMPIDO"
@@ -31,24 +36,6 @@ DESCONHECIDO = "DESCONHECIDO"
 # Só estes aceitam `--apagar`: CONECTADO* tem conexão local e DESCONHECIDO não é
 # item que vimos — os três são recusados.
 ESTADOS_SEM_CONEXAO = (REMOVIDO, INTERROMPIDO, LEGADO_AMBIGUO, NUNCA_ATRIBUIDO)
-
-# Os eventos em que o DELETE remoto de um item falhou. Formato de LOG virou
-# contrato de LEITURA (um teste por formato em tests/test_of_diagnostico_estados.py):
-#   • `pluggy_item_delete_failed`, `details.item_id` — 1º passe, por item
-#     (`delete_pluggy_items_best_effort`, frontend/routes/open_finance.py);
-#   • `pluggy_item_delete_failed`, `details.items` — 2º passe do disconnect;
-#   • `pluggy_disconnect_auth_failed`, `details.items` — sem apiKey;
-#   • `account_reset_pluggy_cleanup_failed`, `details.items` — 2º passe do reset
-#     (frontend/routes/settings.py; o do 1º passe não traz os items);
-#   • `account_deletion_pluggy_cleanup_failed`, `details.items`, `source='db.privacy'`
-#     — exclusão de conta. Ali a cascata já levou o registry: o log é o ÚNICO rastro.
-# Filtra por `event_type` e não por `source`: o nome do evento é o que identifica.
-EVENTOS_FALHA_DELETE = (
-    "pluggy_item_delete_failed",
-    "pluggy_disconnect_auth_failed",
-    "account_reset_pluggy_cleanup_failed",
-    "account_deletion_pluggy_cleanup_failed",
-)
 
 
 def classifica_item(item_id: str, *, provider: str = "pluggy") -> str:

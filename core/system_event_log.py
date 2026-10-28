@@ -249,6 +249,9 @@ def recent_event_exists(event_type: str, user_id: int, within_days: float = 7.0)
     disparados por múltiplas fontes (webhook + scheduler).
     Falha silenciosa retorna False — melhor mandar duplicado que perder.
 
+    Janela maior que a retenção (`core/services/log_retention.py`) exige o
+    evento em `EVENTOS_PERMANENTES`; preso por `tests/test_eventos_permanentes_guarda.py`.
+
     E o que esse corte custa NÃO é "um duplicado". Em 12 call sites esta função
     é a metade de LEITURA de um check-then-act (medido em 2026-09-29 com
     `grep -rn "recent_event_exists" --include='*.py' . | grep -v tests/ | grep -v .venv`,
