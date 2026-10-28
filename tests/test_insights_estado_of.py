@@ -1,10 +1,13 @@
 """PL-06 A2: a conta do Open Finance (`of_bill_increase`), sempre `warning`: a piora é o valor (DP2), e
 dispensar exige o valor que o usuário viu. Pelo monólito real, com Postgres.
 
-O valor muda pela própria cobrança (o banco corrige o lançamento). Com DUAS cobranças no mês, o detector fica com
-a "última" linha de um select sem `order by` (risco 3 do plano), e aqui o plano é um index scan que devolve a mais
-nova primeiro: a 2ª cobrança não muda o valor."""
-from datetime import date
+O valor muda pela própria cobrança (o banco corrige o lançamento). Com DUAS cobranças no mês vale a mais recente
+(#1277): o select ordena por data, `criado_em` e `id`. O controle negativo são os testes que desarrumam a ordem de
+inserção (no desempate, a ordem física contra a do `id`): sem o `order by`, o grupo fica vermelho em qualquer plano
+de execução, embora caso a caso dependa do plano. O `test_cobranca_mais_recente_e_a_dispensa_pelo_valor` insere em
+ordem cronológica: é integração com a dispensa do A2, não controle negativo (sem o `order by` só cai se o plano usar
+um índice com `criado_em desc`)."""
+from datetime import date, datetime, time
 from decimal import Decimal
 
 import pytest
@@ -94,3 +97,96 @@ def test_conta_do_of_sem_valor_legivel_nao_derruba_a_leitura(atual):
           "explicacao": {} if atual is None else {"atual": atual}}
     assert medida(it) is None
     assert projetar([it], acoes_ok=True, dispensadas={it["key"]: ("warning", Decimal("130"))}) == []
+
+
+# ── #1277: duas cobranças no mês, vale a mais recente ──────────────────────────
+
+def _meses():
+    hoje = date.today()
+    return _mes_menos(hoje, 2), _mes_menos(hoje, 1)  # dia 10 de m-2 e m-1, nunca o mês corrente
+
+
+def test_vale_a_cobranca_mais_recente_do_mes_atual(llm):
+    uid = _usuario("pro")
+    m2, m1 = _meses()
+    _conta_of(uid, m2, 100)
+    _conta_of(uid, m1.replace(day=20), 170)  # a mais nova entra primeiro
+    _conta_of(uid, m1.replace(day=5), 160)
+    (f,) = db.detect_open_finance_bill_increase(uid)
+    assert (f["new"], f["date"]) == (170, m1.replace(day=20))
+    (it,) = _of(uid)
+    assert it["key"] == f"of_bill_increase:enel luz:{m1:%Y-%m}" and "R$ 170,00" in it["message"]
+    assert llm == []
+
+
+def test_vale_a_cobranca_mais_recente_do_mes_base(llm):
+    uid = _usuario("pro")
+    m2, m1 = _meses()
+    _conta_of(uid, m2.replace(day=20), 100)
+    _conta_of(uid, m2.replace(day=5), 300)  # a mais velha entra depois: com ela, a média seria 300 e não há alerta
+    _conta_of(uid, m1, 130)
+    (f,) = db.detect_open_finance_bill_increase(uid)
+    assert (f["old"], f["new"], f["pct"]) == (100, 130, 30)
+
+
+def test_no_mesmo_dia_desempata_pelo_criado_em(llm):
+    uid = _usuario("pro")
+    m2, m1 = _meses()
+    _conta_of(uid, m2, 100)
+    _conta_of(uid, m1, 170, criado_em=datetime.combine(m1, time(18)))
+    _conta_of(uid, m1, 160, criado_em=datetime.combine(m1, time(8)))
+    (f,) = db.detect_open_finance_bill_increase(uid)
+    assert f["new"] == 170
+
+
+def test_cobranca_mais_recente_e_a_dispensa_pelo_valor(llm):
+    uid = _usuario("pro")
+    m2, m1 = _meses()
+    _conta_of(uid, m2, 100)
+    _conta_of(uid, m1.replace(day=5), 160)
+    (it,) = [i for i in _get(uid)["insights"] if i["type"] == "of_bill_increase"]
+    assert _dispensa(uid, it["key"], 160).status_code == 200 and _of(uid) == []
+    _conta_of(uid, m1.replace(day=20), 170)  # cobrança mais nova e maior: volta
+    (volta,) = _of(uid)
+    assert (volta["key"], volta["explicacao"]["atual"]["valor"]) == (it["key"], 170.0)
+    assert _dispensa(uid, it["key"], 170).status_code == 200 and _of(uid) == []
+    _conta_of(uid, m1.replace(day=25), 165)  # mais nova e menor que a dispensada: segue fora
+    assert _of(uid) == []
+    assert llm == []
+
+
+def _meio_dia(d):  # como o `_insert_of_shadow` grava `criado_em` quando o banco manda só a data
+    return datetime.combine(d, time(12))
+
+
+def test_mesmo_dia_e_mesmo_criado_em_desempata_pelo_id(llm):
+    uid = _usuario("pro")
+    m2, m1 = _meses()
+    _conta_of(uid, m2, 100, criado_em=_meio_dia(m2))
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select nextval(pg_get_serial_sequence('launches', 'id')) as id from generate_series(1, 2)")
+        menor, maior = sorted(r["id"] for r in cur.fetchall())
+        conn.commit()
+    # o id maior entra primeiro: a ordem física é o contrário da do `id`
+    _conta_of(uid, m1, 170, criado_em=_meio_dia(m1), launch_id=maior)
+    _conta_of(uid, m1, 160, criado_em=_meio_dia(m1), launch_id=menor)
+    (f,) = db.detect_open_finance_bill_increase(uid)
+    assert f["new"] == 170
+
+
+@pytest.mark.parametrize("cobrancas, dia", [
+    # a data do lançamento vence o `criado_em` (importação tardia do dia 5)
+    (lambda m1: [(m1.replace(day=20), _meio_dia(m1.replace(day=20)), 170), (m1.replace(day=5), datetime.now(), 160)],
+     20),
+    # sem `posted_at` vale o `criado_em` como data, e não o fim da fila
+    (lambda m1: [(m1.replace(day=20), _meio_dia(m1.replace(day=20)), 170), (None, _meio_dia(m1.replace(day=5)), 160)],
+     20),
+], ids=["data_antes_do_criado_em", "posted_at_nulo"])
+def test_ordem_das_cobrancas_do_mes(llm, cobrancas, dia):
+    uid = _usuario("pro")
+    m2, m1 = _meses()
+    _conta_of(uid, m2, 100, criado_em=_meio_dia(m2))
+    for posted_at, criado_em, valor in cobrancas(m1):
+        _conta_of(uid, posted_at, valor, criado_em=criado_em)
+    (f,) = db.detect_open_finance_bill_increase(uid)
+    assert (f["new"], f["date"]) == (170, m1.replace(day=dia))
