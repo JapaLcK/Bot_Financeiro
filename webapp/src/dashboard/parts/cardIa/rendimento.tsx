@@ -24,12 +24,12 @@ const din = (v: unknown) => v === null || moneyText(v) !== null;
 const per = (p: unknown, comContagem = true) => obj(p) && din(p.valor) && (p.pct === null || typeof p.pct === "string") && (!comContagem || Number.isInteger(p.sem_dado));
 const ativoOk = (a: unknown) => obj(a) && din(a.saldo) && per(a.mes, false) && per(a.total, false);
 const categoriaOk = (c: unknown) => obj(c) && din(c.saldo) && per(c.mes) && per(c.total) && lista(c.ativos, ativoOk);
-export const contratoRendimento = (r: unknown) => {
-  const d = (r as { rendimento?: unknown } | null)?.rendimento;
+export const rendimentoOk = (d: unknown) => {
   if (!obj(d) || d.tipo !== "contratado" || !textos(d.motivos)) return false;
   const x = d.rendimentos;
   return x === null || (obj(x) && din(x.saldo) && Number.isInteger(x.quantidade) && per(x.mes) && per(x.total) && typeof x.mes_desde === "string" && textos(x.motivos) && lista(x.categorias, categoriaOk));
 };
+export const contratoRendimento = (r: unknown) => rendimentoOk((r as { rendimento?: unknown } | null)?.rendimento);
 
 const frase = (k: "plano_sem_investimentos" | "nenhum_investimento") => (FRASE_RITMO[k] as Frase).texto; // as duas são texto fixo
 /** "+1,23%" / "−0,50%" / "0,00%" do texto do servidor (só exibição); ausente ou não numérico = `null` (a regra de `pctTexto` do app). */

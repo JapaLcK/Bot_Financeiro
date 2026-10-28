@@ -1,22 +1,25 @@
 import { useId, useState } from "react";
 import { obj } from "../../lib/ia-cards";
 import { Expansivel } from "./Expansivel";
-import { dataPtBr, lista, nomeLegivel, num, numOuNull, reais, textoOuNull } from "./legado";
+import { dataPtBr, lista, nomeLegivel, num, reais, textoOuNull, type Dinheiro } from "./legado";
 import { useMais } from "./mais";
 import { Sub } from "./previsao";
 
 // Os cards `fatura` ("Fatura do cartão", `{ cartoes: { ok, cards[] } }`) e `parcelas` ("Parcelas futuras", `{ parcelas: { ok, installments[] } }`): formato legado, dinheiro em
 // float (parts/cardIa/legado.ts). Só leitura do bloco. Parcelas, como no app: uma linha por COMPRA ("n de N pagas" e o trilho; tocar abre as parcelas aqui dentro,
 // 5 compras e "+N"); compra quitada sai do card (dono, 2026-10-24).
-type Cartao = { name: string; last4: string | null; credit_limit: number | null; due_day: number; closing_day: number; credit_used: number; open_bill: { paid_amount: number; due_amount: number } };
-type Compra = { name: string; card_name: string | null; installments_total: number; manual?: boolean; parcelas: { installment_no: number; valor: number; is_paid: boolean; is_next: boolean; due_date: string }[] };
+type Cartao = { name: string; last4: string | null; credit_limit: number | string | null; due_day: number; closing_day: number; credit_used: number | string; open_bill: { paid_amount: number | string; due_amount: number | string } };
+type Compra = { name: string; card_name: string | null; installments_total: number; manual?: boolean; parcelas: { installment_no: number; valor: number | string; is_paid: boolean; is_next: boolean; due_date: string }[] };
 
-const cartaoOk = (c: unknown) => obj(c) && typeof c.name === "string" && textoOuNull(c.last4) && numOuNull(c.credit_limit) && Number.isInteger(c.due_day) && Number.isInteger(c.closing_day)
-  && num(c.credit_used) && obj(c.open_bill) && num(c.open_bill.paid_amount) && num(c.open_bill.due_amount);
-const parcelaOk = (p: unknown) => obj(p) && Number.isInteger(p.installment_no) && num(p.valor) && typeof p.is_paid === "boolean" && typeof p.is_next === "boolean" && typeof p.due_date === "string";
-const compraOk = (g: unknown) => obj(g) && typeof g.name === "string" && textoOuNull(g.card_name) && Number.isInteger(g.installments_total) && lista(g.parcelas, parcelaOk);
-export const contratoFatura = (r: unknown) => { const d = (r as { cartoes?: unknown } | null)?.cartoes; return obj(d) && d.ok === true && lista(d.cards, cartaoOk); };
-export const contratoParcelas = (r: unknown) => { const d = (r as { parcelas?: unknown } | null)?.parcelas; return obj(d) && d.ok === true && lista(d.installments, compraOk); };
+const cartaoOk = (din: Dinheiro) => (c: unknown) => obj(c) && typeof c.name === "string" && textoOuNull(c.last4) && (c.credit_limit === null || din(c.credit_limit)) && Number.isInteger(c.due_day) && Number.isInteger(c.closing_day)
+  && din(c.credit_used) && obj(c.open_bill) && din(c.open_bill.paid_amount) && din(c.open_bill.due_amount);
+const parcelaOk = (din: Dinheiro) => (p: unknown) => obj(p) && Number.isInteger(p.installment_no) && din(p.valor) && typeof p.is_paid === "boolean" && typeof p.is_next === "boolean" && typeof p.due_date === "string";
+const compraOk = (din: Dinheiro) => (g: unknown) => obj(g) && typeof g.name === "string" && textoOuNull(g.card_name) && Number.isInteger(g.installments_total) && lista(g.parcelas, parcelaOk(din));
+// O corpo (`cartoesOk`/`parcelasOk`) vale para o chat (legado: `ok`, float) e para o bloco do Resumo (a /api/v2: sem `ok`, dinheiro `texto`).
+export const cartoesOk = (d: unknown, din: Dinheiro = num) => obj(d) && lista(d.cards, cartaoOk(din));
+export const parcelasOk = (d: unknown, din: Dinheiro = num) => obj(d) && lista(d.installments, compraOk(din));
+export const contratoFatura = (r: unknown) => { const d = (r as { cartoes?: unknown } | null)?.cartoes; return obj(d) && d.ok === true && cartoesOk(d); };
+export const contratoParcelas = (r: unknown) => { const d = (r as { parcelas?: unknown } | null)?.parcelas; return obj(d) && d.ok === true && parcelasOk(d); };
 
 const trilho = (razao: number) => <span className="ci-trilho" aria-hidden="true"><i style={{ background: "var(--ink-2)", transform: `scaleX(${Math.min(1, Math.max(0, razao))})` }} /></span>;
 
@@ -32,7 +35,7 @@ export function CardFatura({ d }: { d: { cards: Cartao[] } }) {
             <Sub nome="Limite" valor={reais(c.credit_limit)} />
             <Sub nome="Crédito utilizado" valor={reais(c.credit_used)} />
           </ul>
-          {c.credit_limit !== null && c.credit_limit > 0 && trilho(c.credit_used / c.credit_limit)}
+          {c.credit_limit !== null && Number(c.credit_limit) > 0 && trilho(Number(c.credit_used) / Number(c.credit_limit))}
           <ul className="ci-subs"><Sub nome="Já pago nesta fatura" valor={reais(c.open_bill.paid_amount)} /></ul>
         </li>
       ))}

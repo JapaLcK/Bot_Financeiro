@@ -41,6 +41,8 @@ test("contrato: lista que não é lista, id sem data, dinheiro que é texto, nul
   const ruins = [
     blocoDoCaso("caixinhas", { caixinhas: { ...FX.caixinhas, goals: "x" } }), blocoDoCaso("caixinhas", { caixinhas: { ...FX.caixinhas, ok: false } }),
     blocoDoCaso("fatura", { cartoes: com(FX.cartoes, (c) => { c.cards[0].open_bill.due_amount = "10"; }) }), blocoDoCaso("fatura", { cartoes: com(FX.cartoes, (c) => { c.cards[0].due_day = 17.5; }) }),
+    // O chat segue "só float": texto decimal válido na /api/v2 (o do Resumo) é recusado aqui ("10" acima já cai pelo formato do texto, não por ser texto).
+    blocoDoCaso("fatura", { cartoes: com(FX.cartoes, (c) => { c.cards[0].credit_used = "10.00"; }) }),
     blocoDoCaso("parcelas", { parcelas: com(FX.parcelas, (c) => { c.installments[0].parcelas = null; }) }), blocoDoCaso("parcelas", { parcelas: com(FX.parcelas, (c) => { c.installments[0].parcelas[0].is_paid = "sim"; }) }),
     blocoDoCaso("renda", { renda: com(FX.renda, (c) => { c.evolution[0].expense = null; }) }), blocoDoCaso("renda", { renda: { ...FX.renda, evolution: {} } }),
     blocoDoCaso("piggy", { insights: com(FX.insights, (c) => { c.insights[1].message = null; }) }), blocoDoCaso("piggy", { insights: [] }),

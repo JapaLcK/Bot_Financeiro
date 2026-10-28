@@ -5,7 +5,8 @@ import { lista } from "./legado";
 // Só leitura: o `action_view` do destaque não leva a lugar nenhum no chat (o app também o ignora). A chave do React é o índice, porque a `key` do modelo pode repetir.
 type Destaque = { title: string; message: string };
 const destaqueOk = (i: unknown) => obj(i) && typeof i.title === "string" && typeof i.message === "string";
-export const contratoPiggy = (r: unknown) => { const d = (r as { insights?: unknown } | null)?.insights; return obj(d) && d.ok === true && lista(d.insights, destaqueOk); };
+export const insightsOk = (d: unknown) => obj(d) && lista(d.insights, destaqueOk);
+export const contratoPiggy = (r: unknown) => { const d = (r as { insights?: unknown } | null)?.insights; return obj(d) && d.ok === true && insightsOk(d); };
 
 export function CardPiggy({ d }: { d: { insights: Destaque[] } }) {
   if (!d.insights.length) return <p className="ci-vazio">O Piggy ainda não encontrou um destaque para você.</p>;

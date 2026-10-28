@@ -1,4 +1,4 @@
-import { money } from "../../lib/format.js";
+import { money, moneyText } from "../../lib/format.js";
 
 // As peças dos cards de rota legada (caixinhas, fatura, parcelas, renda, piggy): o servidor os manda como dict de float, sem o Pydantic da /api/v2. Por isso o
 // contrato de cada um confere TODO número que o card desenha (`num`): "R$ NaN" e "∞" nunca chegam à tela. `nomeLegivel`, `indicadorMeta` e `dataPtBr` são cópia de
@@ -7,8 +7,11 @@ export const num = (x: unknown): x is number => typeof x === "number" && Number.
 export const numOuNull = (x: unknown) => x === null || num(x);
 export const textoOuNull = (x: unknown) => x === null || typeof x === "string";
 export const lista = (x: unknown, ok: (i: unknown) => boolean) => Array.isArray(x) && x.every(ok);
-/** Dinheiro em float (já conferido por `num`); `null` é "Não informado", nunca R$ 0,00. */
-export const reais = (n: number | null) => (n === null ? "Não informado" : money(n));
+/** O dinheiro que o card confere: `num` no chat (float legado) ou `texto` no Resumo (a /api/v2: texto decimal que `moneyText` lê; "NaN", "∞" e texto torto nunca passam). O chat segue só com float. */
+export type Dinheiro = (x: unknown) => boolean;
+export const texto: Dinheiro = (x) => typeof x === "string" && moneyText(x) !== null;
+/** Dinheiro já conferido por `num` ou `texto`; `null` é "Não informado", nunca R$ 0,00. */
+export const reais = (n: number | string | null) => (n === null ? "Não informado" : typeof n === "string" ? moneyText(n)! : money(n));
 
 export function dataPtBr(dia: string | null) {
   if (!dia || !/^\d{4}-\d{2}-\d{2}$/.test(dia)) return "Data não informada";

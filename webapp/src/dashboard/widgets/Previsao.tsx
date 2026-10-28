@@ -132,10 +132,10 @@ function Conteudo({ d }: { d: Previsao }) {
 }
 
 // Releitura falhou com dado em tela: o antigo segue, com a hora e como tentar de novo.
-function AvisoAntigo({ q, d, o }: { q: { refetch: () => unknown }; d: Previsao; o: string }) {
+export function AvisoAntigo({ q, texto }: { q: { refetch: () => unknown }; texto: string }) {
   return (
     <div className="prev-antigo" role="status">
-      <p>Mostrando {o} calculada às {hora(d)}. Não deu para atualizar.</p>
+      <p>{texto} Não deu para atualizar.</p>
       <button type="button" className="btn btn-quiet" onClick={() => q.refetch()}>Tentar de novo</button>
     </div>
   );
@@ -163,7 +163,7 @@ export function PrevisaoHero({ p, id }: { p: Estado; id: string }) {
           : <p role="status" className="faint">Carregando a previsão…</p>)
         : (
           <div className="prev-corpo" aria-busy={q.isFetching}>
-            {q.isRefetchError && <AvisoAntigo q={q} d={d} o="a previsão" />}
+            {q.isRefetchError && <AvisoAntigo q={q} texto={`Mostrando a previsão calculada às ${hora(d)}.`} />}
             <Conteudo d={d} />
             <p className="faint prev-hora" aria-live="polite">{q.isFetching ? "Atualizando…" : `Calculada às ${hora(d)}`}</p>
           </div>
@@ -181,7 +181,7 @@ export function CompromissosResumo() {
   const id = "compromissos";
   const e4 = q.error instanceof ErroApi && q.error.status >= 400 && q.error.status < 500 ? q.error : null;
   if (!e4 && q.data) return <Compromissos id={id} title={`Próximos ${q.data.dias} dias`} grupos={q.data.compromissos} dias={q.data.dias} hoje={q.data.hoje}
-    aviso={q.isRefetchError && <AvisoAntigo q={q} d={q.data} o="a lista" />} />;
+    aviso={q.isRefetchError && <AvisoAntigo q={q} texto={`Mostrando a lista calculada às ${hora(q.data)}.`} />} />;
   return (
     <Frame id={id} title="Próximos dias" real>
       {e4 ? <Bloqueio e={e4} />
