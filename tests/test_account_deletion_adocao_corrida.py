@@ -549,7 +549,9 @@ def test_t18d_falha_do_provedor_no_delete_nao_derruba_o_webhook(user_id, monkeyp
         assert deletados == [item_novo], f"nem tentou apagar: {deletados}"
         falhas = _skips(item_novo, "pluggy_item_delete_failed")
         assert len(falhas) == 1, f"a falha do provedor ficou sem rastro nenhum: {falhas}"
-        assert str(erro) in falhas[0]["details"].get("error", ""), falhas[0]
+        # O contrato é o item (`itens_com_remocao_remota_falha`); o texto do erro
+        # sai na limpeza diária (core/services/log_retention.py).
+        assert falhas[0]["details"].get("item_id") == item_novo, falhas[0]
     finally:
         _limpa_item(item_novo)
 
