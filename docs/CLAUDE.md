@@ -384,7 +384,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   diz PENDING, `outra_moeda`, `moeda_presumida`). **`origem`**: `carteira` (manual com
   `delta_conta` ≠ 0 e com a marca `launches.origem`), `banco` (sombra do Open Finance),
   `cartao` (compra do cartão do Open Finance) e `registro_antigo` (o resto: manual sem a
-  marca, manual com delta 0, OFX, compra manual no cartão). **Desde o PR-A da [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md) (#969, mergeado em 2026-10-15):** `banco` inclui também a despesa ou receita que o usuário declarou como paga pelo banco (`DECLARADA_SQL`, `db/bank_declaracoes.py`; o resto do “manual com delta 0” continua em `registro_antigo`); `fundido` vale “casada com o extrato”, e a linha sem par tem o motivo `conciliacao_pendente` e `pode = [categoria, descricao, apagar]`. A tela precisa tratar `instituicao` nula nessa linha sem par. Nenhum caminho de produção cria essa declaração até o PR-B. **`pode`** é uma regra só
+  marca, manual com delta 0, OFX, compra manual no cartão). **Desde o PR-A da [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md) (#969, mergeado em 2026-10-15):** `banco` inclui também a despesa ou receita que o usuário declarou como paga pelo banco (`DECLARADA_SQL`, `db/bank_declaracoes.py`; o resto do “manual com delta 0” continua em `registro_antigo`); `fundido` vale “casada com o extrato”, e a linha sem par tem o motivo `conciliacao_pendente` e `pode = [categoria, descricao, apagar]`. A tela precisa tratar `instituicao` nula nessa linha sem par. Só o PR-B (a) a cria, pelo WhatsApp e atrás da flag `DECLARACAO_BANCO` (desligada por padrão). **`pode`** é uma regra só
   (`db/lancamentos.PODE_SQL`): guardado = `[]` sempre (1ª cláusula, vence todas as outras,
   inclusive P5 e `source='open_finance'`; editar/apagar dão 409 `nao_editavel`, e essa é a
   guarda de escrita, `pode_da_linha`); antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
@@ -1075,7 +1075,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   novo nessas tabelas ou dos importadores de arquivo reprova em
   `tests/test_fonte_unica_q36.py` até ser classificado (trava ou motivo de ficar livre).
 - **Nota de revisão de 2026-10-09 (Q36 e Q40, que têm coortes diferentes):** ver
-  [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md), decidida pelo dono. **O código desta seção continua valendo até os PRs de código (A2, B, B1, C)**; o PR-A (#969, mergeado em 2026-10-15) é inerte (nenhum chamador de produção grava declaração enquanto o PR-B não existir e a flag dele estiver desligada) e por isso não mudou o comportamento; nada
+  [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md), decidida pelo dono. **O código desta seção continua valendo até os PRs de código (A2, B, B1, C)**; o PR-A (#969, mergeado em 2026-10-15) é inerte e o PR-B (a) (núcleo, flag e WhatsApp, `core/handlers/declaracao_banco.py`; leitura inequívoca do valor em `core/handlers/declaracao_valor.py`) só grava declaração com `DECLARACAO_BANCO` ligada, então com a flag desligada o comportamento não mudou; nada
   desta seção mudou na `main`. A **Q36** (esta seção) vale só para a chave `dashboard_v2_enabled`. A
   **Q40** (`core/handlers/forma_pagamento.py`, citada na tabela acima) vale para quem tem Open
   Finance conectado (`regra_ativa`), e **não** é parte da Q36 nem depende da chave. O que a ADR
@@ -1083,9 +1083,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   sincronizado (PR-B1), e continuará travando extrato OFX/CSV/PDF, fatura OFX e cartão
   sincronizado. Fora da chave do v2, quem tem banco, é Pro e importa OFX já pode dobrar hoje
   (risco existente); o dono decidiu em 2026-10-13 **preservar esse comportamento neste pacote**, e
-  qualquer novo bloqueio de arquivo exige decisão separada. Na Q40, a resposta “banco” passará a
-  gravar como declaração conferida com o extrato: o PR-B entrega o caminho atrás de uma flag que
-  nasce desligada, e ligá-la é ato operacional separado. A conciliação (PR-A) e o lembrete de 7 dias (PR-A2; “foi em dinheiro” só age por ação e confirmação do usuário, e o PR-A2 inclui “trocar o par” e “desfazer a confirmação”, pela decisão do dono de 2026-10-13) vêm antes (ordem decidida pelo dono; entregues: A2a, A2b-1 com trocar/desfazer e, com o A2b-2, “foi em dinheiro” por `POST /open-finance/{user_id}/movements/cash`, só no /app, `db/bank_dinheiro.py`; o A2c, lembrete de WhatsApp do 7º dia (#1291), está em revisão: `core/services/declaracao_lembrete.py`, passo horário do loop de recorrentes, coluna `bank_movement_declarations.lembrete_em`, ADR 0006); o PR-A2 é pré-condição para ligar a flag, por decisão do dono. A Q42
+  qualquer novo bloqueio de arquivo exige decisão separada. Na Q40, a resposta “banco” grava
+  como declaração conferida com o extrato quando a flag `DECLARACAO_BANCO` (nasce desligada; ligá-la é ato operacional
+  separado) está ligada: o PR-B (a) entrega o WhatsApp; o chat IA (b) e o /app e /painel (c) ainda recusam. A conciliação (PR-A) e o lembrete de 7 dias (PR-A2; “foi em dinheiro” só age por ação e confirmação do usuário, e o PR-A2 inclui “trocar o par” e “desfazer a confirmação”, pela decisão do dono de 2026-10-13) vêm antes (ordem decidida pelo dono; entregues: A2a, A2b-1 com trocar/desfazer e, com o A2b-2, “foi em dinheiro” por `POST /open-finance/{user_id}/movements/cash`, só no /app, `db/bank_dinheiro.py`; o A2c, lembrete de WhatsApp do 7º dia (#1291, mergeado em 2026-10-26): `core/services/declaracao_lembrete.py`, passo horário do loop de recorrentes, coluna `bank_movement_declarations.lembrete_em`, ADR 0006); o PR-A2 é pré-condição para ligar a flag, por decisão do dono. A Q42
   não muda.
 - A página é `/painel` (`frontend/painel.html` + o artefato `frontend/dashboard-app.*`,
   de `webapp/src/dashboard`): sessão por `auth_token` ou `dashboard_token`

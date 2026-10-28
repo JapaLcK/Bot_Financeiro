@@ -303,7 +303,8 @@ RECEITA_START_VERBS = (
 )
 
 
-def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
+def parse_receita_despesa_natural(user_id: int, raw_text: str, aprender: bool = True) -> dict | None:
+    """`aprender=False`: não grava regra de categoria (o chamador ainda pode recusar o lançamento; recusa não persiste nada)."""
     text_clean = (raw_text or "").strip()
     if not text_clean:
         return None
@@ -353,7 +354,7 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
     categoria = res.category
 
     # aprendizado automático (somente se explícita)
-    if explicit_cat:
+    if explicit_cat and aprender:
         inferred_no_explicit = infer_category(
             user_id=user_id,
             text_base=text_base,

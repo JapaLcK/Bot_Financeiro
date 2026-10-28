@@ -175,7 +175,7 @@ Para cada onda, registrar separadamente: `planejada → em implementação → v
 
 Decisão do dono, mesma data: a conciliação de despesa e receita vem **antes** de destravar o lançamento manual com banco conectado (ordem PR-A, PR-A2, PR-B).
 
-Decisão do dono de 2026-10-13: o PR-A2 (lembrete de 7 dias, “foi em dinheiro” com ação confirmada, “trocar o par” e “desfazer a confirmação”) é **pré-condição para ligar a flag do PR-B**; ligar a flag continua sendo ato operacional separado e autorizado por ele. Detalhes na ADR 0006, seção “Decisões do dono em 2026-10-13”.
+Decisão do dono de 2026-10-13: o PR-A2 (lembrete de 7 dias, “foi em dinheiro” com ação confirmada, “trocar o par” e “desfazer a confirmação”) é **pré-condição para ligar a flag do PR-B**; ligar a flag continua sendo ato operacional separado e autorizado por ele. Detalhes na ADR 0006, seção “Decisões do dono em 2026-10-13”. **Estado em 2026-10-26:** o PR-A2c (#1291) está mergeado e o PR-B (a) (WhatsApp) entrega o caminho “banco grava declaração” atrás de `DECLARACAO_BANCO`, desligada; o chat IA (b) e o /app e /painel (c) seguem pendentes.
 
 **Testes:** grupo C, testes novos de sequência e os consumidores alterados. A lista existente não é prova de cobertura completa.
 
