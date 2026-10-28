@@ -44,7 +44,7 @@ PATTERNS_CACHE_TTL_SECONDS = 24 * 3600    # 24h
 # Bumpe quando mudar o prompt/payload dos padrões ou o CONTRATO dos itens de insights
 # (`core/services/insights_contrato.py`). Cache antigo vira miss (kind diferente).
 _PROMPT_VERSION_PATTERNS = 8
-_PROMPT_VERSION_INSIGHTS = 10
+_PROMPT_VERSION_INSIGHTS = 11
 
 
 def _cache_kind(base: str) -> str:

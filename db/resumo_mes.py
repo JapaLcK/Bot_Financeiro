@@ -12,7 +12,8 @@ card `periodo` do chat; `forecast_month_end`, que lê o mês por `mes_detalhes.l
 lista de `GET /api/v2/lancamentos` (`db/lancamentos.py`). `compute_evolution` é cópia em
 consulta única, comparada mês a mês em `tests/test_resumo_mes_regra.py`.
 
-`categorias` abre a despesa de `TOTAIS_SQL` por categoria (a soma é o `saiu`); lê dela
+`categorias` abre a despesa de `TOTAIS_SQL` por categoria (a soma é o `saiu`); leem dela o `category_spike` dos
+insights (`db/insights.py`, PL-06 B1, mês corrente × anterior inteiro) e
 `core/services/comparacao_periodos.py` (`compare_periods` da IA, PL-07, com `mes=`; com datas que não são meses
 inteiros dos dois lados ele usa a regra de período livre das outras tools, cartão pela data da compra:
 `n_compras_cartao` conta essas compras). O mês aberto da comparação é o mês inteiro, como o `resumo_do_mes`.
