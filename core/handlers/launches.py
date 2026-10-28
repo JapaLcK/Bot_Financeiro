@@ -18,7 +18,7 @@ from utils_date import (
 from core.intent_classifier import (contains_comparative_question, is_comparative_question,
                                     sem_perguntas_comparativas)
 from core.observability import _log_falha
-from core.services.category_service import infer_category, learn_from_inference
+from core.services.category_service import infer_category, learn_from_explicit_category, learn_from_inference
 from parsers import (
     parse_receita_despesa_natural,
     split_financial_transactions,
@@ -1132,9 +1132,17 @@ def add_from_entities(
     if not valor_valido(valor):  # NaN, inf ou acima do teto: o valor foi lido, só não cabe
         return "❌ Valor inválido."
 
+    from core.handlers import declaracao_banco as decl
     from core.handlers import forma_pagamento as fp
-    if fp.decidir(user_id, forma_pagamento) != fp.CARTEIRA:
+    decisao = fp.decidir(user_id, forma_pagamento)
+    if decisao != fp.CARTEIRA and not decl.declara(user_id, decisao):  # banco + flag: declaração (ADR 0006)
         raise ValueError("FORMA_PAGAMENTO_NAO_GRAVA")
+
+    chave = None
+    if decisao == fp.BANCO:  # só chega aqui com `declara`. ANTES do teto: a reentrega (T3) não ganha aviso de upgrade
+        chave = decl.preparar(user_id)
+        if isinstance(chave, decl.NaoGravou):
+            return chave
 
     # Teto mensal de lançamentos do tier (Grátis no v2; no-op com v2 off).
     # PlanLimitExceeded sobe pro handle_incoming, que responde com a mensagem
@@ -1142,6 +1150,8 @@ def add_from_entities(
     from core.services.plan_service import check_can_create_launch
     check_can_create_launch(user_id)
 
+    if decisao == fp.BANCO:  # declaração: a forma dita (OCR, IA, fila) não é comércio (ADR 0006)
+        alvo = fp.limpar(alvo or "", banco=True)
     alvo_clean = (alvo or "").strip()
     nota_clean = (nota or "").strip() or alvo_clean
 
@@ -1163,21 +1173,32 @@ def add_from_entities(
         categoria_final = res.category or "outros"
         reason_final = res.reason
 
+    if decisao == fp.BANCO and reason_final != "explicit" and (is_internal or is_internal_category(categoria_final)):
+        # "interna" só recusa (T6) quando o USUÁRIO escreveu a categoria; a inferida não (M4): fica "outros" e não aprende
+        categoria_final, reason_final, is_internal = "outros", "default", False
+
     is_int = (
         is_internal if is_internal is not None
         else is_internal_category(categoria_final)
     )
 
-    launch_id, user_seq, new_balance = db.add_launch_and_update_balance(
-        user_id=user_id,
-        tipo=tipo,
-        valor=valor,
-        alvo=alvo_clean or None,
-        nota=nota_clean,
-        categoria=categoria_final,
-        criado_em=criado_em,
-        is_internal_movement=is_int,
-    )
+    declaracao = {"declaracao_banco": True, "chave_acao": chave} if decisao == fp.BANCO else {}  # sem saldo a mostrar
+    try:
+        launch_id, user_seq, new_balance = db.add_launch_and_update_balance(
+            user_id=user_id,
+            tipo=tipo,
+            valor=valor,
+            alvo=alvo_clean or None,
+            nota=nota_clean,
+            categoria=categoria_final,
+            criado_em=criado_em,
+            is_internal_movement=is_int,
+            **declaracao,
+        )
+    except Exception as exc:
+        if declaracao and (texto := decl.recusa(exc, user_id, valor)):  # repetida ou recusada: nada foi gravado
+            return texto
+        raise
 
     # DEPOIS DO COMMIT nada pode subir exceção. O lançamento e o saldo já
     # existem; quem chamou não tem como distinguir "não gravou" de "gravou e
@@ -1193,6 +1214,8 @@ def add_from_entities(
             target_hint=alvo_clean,
             reason=reason_final,
         )
+        if declaracao and reason_final == "explicit":  # o parser não aprende na declaração (recusa não persiste): aqui
+            learn_from_explicit_category(user_id, normalize_text(nota_clean), categoria_final)
     except Exception:
         logger.exception(
             "learn_from_inference falhou depois do commit (user %s, lancamento %s)",
@@ -1201,7 +1224,9 @@ def add_from_entities(
     # Banco importou antes e o usuário lançou depois: vira a mesma pendência
     # confirmável da ordem direta, nunca fusão. ANTES do saldo relido abaixo,
     # para o aviso "a conferir" sair nesta resposta. Não sobe exceção.
-    db.propose_manual_reconciliation(user_id, launch_id)
+    # (A declaração já conciliou na própria transação, e a busca de candidatos a exclui.)
+    if not declaracao:
+        db.propose_manual_reconciliation(user_id, launch_id)
 
     # Detecção "essa despesa se repete → sugere gasto fixo". Só para despesa
     # real (não movimentação interna). A oferta divide a linha de pending_actions
@@ -1268,36 +1293,39 @@ def add_from_entities(
     # criada acima, que não muda a Carteira mas entra no aviso "a conferir".
     # Pós-commit: qualquer falha aqui cai na linha de hoje em vez de subir exceção
     # (a fila de multi-lançamento devolveria o item e lançaria o gasto de novo).
-    linha_saldo = f"🏦 Saldo: {fmt_brl(float(new_balance))}"
-    linha_aviso = ""
-    try:
-        from core.services.plan_service import consolidated_balance_enabled
-        from core.services.funding import aviso_conferir
-        cb = db.get_consolidated_balance(user_id)
-        if int(cb.get("of_bank_count") or 0) > 0:
-            # Lançamento manual é dinheiro em espécie (decisão "lançamentos
-            # manuais exclusivos para dinheiro"): com banco conectado o saldo
-            # da linha é a Carteira Piggy, NOMEADA — o mesmo recorte do /saldo
-            # (cb['manual']), relido agora.
-            linha_saldo = (
-                f"👛 Saldo (Carteira Piggy): {fmt_brl(float(cb['manual'] or 0))}"
-            )
-            linha_aviso = aviso_conferir(cb["manual"], cb.get("reconciliation"))
-            if consolidated_balance_enabled(user_id):
-                linha_saldo += (
-                    f"\n💰 Saldo total: {fmt_brl(float(cb['consolidated'] or 0))}"
+    if declaracao:  # T1/T2 no lugar do saldo: nada a reler, a Carteira não mudou
+        linha_saldo, linha_aviso = decl.linha_do_par(user_id, launch_id), ""
+    else:
+        linha_saldo = f"🏦 Saldo: {fmt_brl(float(new_balance))}"
+        linha_aviso = ""
+        try:
+            from core.services.plan_service import consolidated_balance_enabled
+            from core.services.funding import aviso_conferir
+            cb = db.get_consolidated_balance(user_id)
+            if int(cb.get("of_bank_count") or 0) > 0:
+                # Lançamento manual é dinheiro em espécie (decisão "lançamentos
+                # manuais exclusivos para dinheiro"): com banco conectado o saldo
+                # da linha é a Carteira Piggy, NOMEADA — o mesmo recorte do /saldo
+                # (cb['manual']), relido agora.
+                linha_saldo = (
+                    f"👛 Saldo (Carteira Piggy): {fmt_brl(float(cb['manual'] or 0))}"
                 )
-        else:
-            # MESMA string de hoje, número RELIDO: o gate desligado congela o
-            # formato, não autoriza imprimir a Carteira de antes da fusão.
-            linha_saldo = f"🏦 Saldo: {fmt_brl(float(cb['manual'] or 0))}"
-            linha_aviso = aviso_conferir(cb["manual"], cb.get("reconciliation"))
-    except Exception:
-        logger.exception(
-            "saldo consolidado falhou depois do commit (user_id=%s, lancamento %s)",
-            user_id, launch_id, extra={"user_id": user_id})
+                linha_aviso = aviso_conferir(cb["manual"], cb.get("reconciliation"))
+                if consolidated_balance_enabled(user_id):
+                    linha_saldo += (
+                        f"\n💰 Saldo total: {fmt_brl(float(cb['consolidated'] or 0))}"
+                    )
+            else:
+                # MESMA string de hoje, número RELIDO: o gate desligado congela o
+                # formato, não autoriza imprimir a Carteira de antes da fusão.
+                linha_saldo = f"🏦 Saldo: {fmt_brl(float(cb['manual'] or 0))}"
+                linha_aviso = aviso_conferir(cb["manual"], cb.get("reconciliation"))
+        except Exception:
+            logger.exception(
+                "saldo consolidado falhou depois do commit (user_id=%s, lancamento %s)",
+                user_id, launch_id, extra={"user_id": user_id})
     resposta = (
-        f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
+        f"{emoji} **{tipo.capitalize()} registrada{' pelo banco' if declaracao else ''}**: {fmt_brl(valor)}\n"
         f"🏷️ Categoria: {categoria_final}\n"
         f"{linha_saldo}\n"
         + (f"{linha_aviso}\n" if linha_aviso else "")
@@ -1614,11 +1642,15 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
         #
         # Item sem forma que grave (Q40: de antes do deploy, ou do áudio, de
         # quem tem banco conectado) já saiu da fila pelo CAS e não é gravado.
+        from core.handlers import declaracao_banco as decl
         from core.handlers import forma_pagamento as fp
         forma = head.get("forma_pagamento", fp.DESCONHECIDA)
-        if fp.decidir(user_id, forma) != fp.CARTEIRA:
+        decisao = fp.decidir(user_id, forma)
+        if decisao != fp.CARTEIRA and not decl.declara(user_id, decisao):
             resp = (f"🐷 Não registrei *{head.get('desc') or 'esse lançamento'}*: me manda "
                     "de novo dizendo se foi em dinheiro.")
+        elif decisao == fp.BANCO and (resp := decl.recusa_valor(limpo)):  # o item volta para a fila
+            _devolve_head(user_id, head, platform)
         else:
             try:
                 resp = add_from_entities(
@@ -1641,6 +1673,8 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
                 # `core/handle_incoming.py`, que só responde o texto de upgrade.
                 _devolve_head(user_id, head, platform)
                 raise
+            if isinstance(resp, decl.NaoGravou):  # reentrega ou sem como garantir a ação: o item volta
+                _devolve_head(user_id, head, platform)
 
         # RELÊ antes de perguntar: `resto` é do momento da reivindicação. Se
         # outra tarefa registrou itens enquanto esta demorava, perguntar pelo
@@ -1757,6 +1791,7 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
     passou pelo banco chega pelo Open Finance, e sem forma o Piggy pergunta
     ANTES de qualquer outra pergunta (Q4)."""
     from core.handlers import credit as h_credit
+    from core.handlers import declaracao_banco as decl
     from core.handlers import forma_pagamento as fp
 
     # Compra no crédito (com banco conectado, só cartão manual — Q2b).
@@ -1777,15 +1812,22 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
     declarada = forma_pagamento or fp.detectar(limpo or text)
     decisao = fp.decidir(user_id, declarada)
     if decisao == fp.MISTO:
-        return fp.msg_misto()
-    if declarada == fp.DINHEIRO:
-        text = fp.limpar(text)
+        return decl.msg_misto(user_id)
+    declara = decl.declara(user_id, decisao)
+    if declara and (recusa := decl.recusa_valor(text)):  # "2,2k" o parser lê como 2,2: não grava o palpite
+        return recusa
+    cartao = declara and decl.tem_cartao(split_financial_transactions(text))  # cartão nunca declara (despesa ou receita)
+    if declarada == fp.DINHEIRO or declara:  # a forma dita não entra no alvo
+        text = fp.limpar(text, banco=declara)
     parts = split_financial_transactions(text)
-    if decisao == fp.BANCO:
+    if decisao == fp.BANCO and (not declara or cartao):
         tipo_b = "receita" if normalize_text(text).startswith(RECEITA_START_VERBS) else "despesa"
         # Com mais de um lançamento na frase, um valor só não acha nada certo.
-        return fp.msg_banco(user_id, tipo_b, _extract_valor(text) if len(parts) == 1 else None)
+        return fp.msg_banco(user_id, tipo_b, _extract_valor(text) if len(parts) == 1 else None, cartao=cartao)
     pergunta = decisao == fp.PERGUNTA
+    # A regra da #hashtag só se aprende quando o lançamento grava (Carteira). Banco e pergunta podem recusar: a declaração
+    # aprende depois do commit (`add_from_entities`) e a pergunta, na resposta.
+    aprender = decisao == fp.CARTEIRA
 
     def _pergunta(tipo: str, valor: float | None) -> str:
         # O texto e as entities do classificador (com o fallback do LLM) vão
@@ -1810,7 +1852,7 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
                 # "... e gastei mais em 2025 ou 2026?": pergunta, não grava R$ 2.025
                 puladas.append(part)
                 continue
-            p = parse_receita_despesa_natural(user_id, part)
+            p = parse_receita_despesa_natural(user_id, part, aprender=aprender)
             if p:
                 if pergunta:
                     return _pergunta(p["tipo"], None)
@@ -1843,7 +1885,7 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
             return "\n\n".join(responses + [aviso_pergunta_pulada(p) for p in puladas])
         # nenhum pedaço virou lançamento válido — cai no fluxo single abaixo
 
-    parsed = parse_receita_despesa_natural(user_id, text)
+    parsed = parse_receita_despesa_natural(user_id, text, aprender=aprender)
 
     if parsed:
         if not valor_valido(parsed["valor"]):

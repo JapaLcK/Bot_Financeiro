@@ -276,6 +276,8 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
     `core/handlers/forma_pagamento.py`); None = cada pedaço pela própria frase.
     `resultados`: as classificações já feitas, alinhadas com `parts`."""
     from core.handlers import forma_pagamento as fp
+    from core.handlers.declaracao_banco import declara, recusa_valor
+    from core.handlers.declaracao_valor import reunir
     is_multi = len(parts) > 1
     responses = []
     fallbacks = []
@@ -290,15 +292,20 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
     if is_multi:
         from parsers import describe_valueless_launch
         from core.handlers.launches import aviso_pergunta_pulada, register_if_recurring
+    declarando = is_multi and bool(forma) and fp.decidir(uid, forma) == fp.BANCO and declara(uid, fp.BANCO)
+    if declarando:
+        if (recusa := recusa_valor(reunir([p for p in parts if not is_comparative_question(p)]))):
+            return str(recusa), False  # "2 reais e 50" partido em dois: não grava nenhum pedaço (T10/T11)
     for i, part in enumerate(parts):
         if is_multi and is_comparative_question(part):
             puladas.append(part)  # igual ao texto
             continue
         if is_multi:
-            info = describe_valueless_launch(fp.limpar(part) if forma == fp.DINHEIRO else part)
+            info = describe_valueless_launch(
+                fp.limpar(part, banco=declarando) if forma == fp.DINHEIRO or declarando else part)
             if info:
                 tipo, desc = info
-                if forma and fp.decidir(uid, forma) == fp.BANCO:
+                if forma and fp.decidir(uid, forma) == fp.BANCO and not declarando:
                     responses.append(format_for_platform(fp.msg_banco(uid, tipo, None), platform))
                     continue
                 f = forma or fp.detectar(part)
@@ -535,9 +542,14 @@ def _handle_audio(msg: IncomingMessage, platform: str,
         # texto digitado — mas cada pedaço segue no SEU fluxo (caixinha, conta,
         # gasto), igual ao áudio sem banco.
         from core.handlers import forma_pagamento as fp
+        from core.handlers.declaracao_banco import declara, msg_misto
+        from core.handlers.declaracao_valor import tem_cartao
         from parsers import describe_valueless_launch
         if fp.regra_ativa(uid):
             forma = fp.detectar(transcription)
+            if forma == fp.BANCO and declara(uid, fp.BANCO) and tem_cartao(parts):
+                # cartão: a mensagem toda segue o caminho do texto (T8); nenhum pedaço declara
+                parts, forma = [transcription], None
         if forma in (fp.DESCONHECIDA, fp.MISTO):
             # Quem precisa da forma: gasto/receita (com ou sem valor) e conta.
             resultados = [None if describe_valueless_launch(p) else classify(p, user_id=uid)
@@ -554,7 +566,7 @@ def _handle_audio(msg: IncomingMessage, platform: str,
                 return [OutgoingMessage(text=preview + format_for_platform(texto, platform))]
             if any(precisa):
                 # Misto: o que precisa da forma não grava; o resto segue.
-                aviso_misto = fp.msg_misto()
+                aviso_misto = msg_misto(uid)
                 resultados = [r for r, x in zip(resultados, precisa) if not x]
                 parts = [p for p, x in zip(parts, precisa) if not x]
                 if not parts:
@@ -1033,6 +1045,8 @@ def handle_incoming(msg: IncomingMessage, *,
     marca = pergunta_no_turno.set(None)
     from core.services.wa_ia_primeiro import SEM_LLM_NO_TURNO
     sem_llm = SEM_LLM_NO_TURNO.set(False)
+    from core.handlers.declaracao_banco import abre_turno, fecha_turno
+    acao = abre_turno(msg)  # a chave da declaração pelo banco é a mensagem (wamid), ADR 0006
     pergunta_uid = pergunta_ia = None
     try:
         pergunta_uid = _normalize_user_id(msg)
@@ -1369,3 +1383,4 @@ def handle_incoming(msg: IncomingMessage, *,
             encerra_pergunta_da_ia(pergunta_uid, pergunta_ia)
         pergunta_no_turno.reset(marca)
         SEM_LLM_NO_TURNO.reset(sem_llm)
+        fecha_turno(acao)

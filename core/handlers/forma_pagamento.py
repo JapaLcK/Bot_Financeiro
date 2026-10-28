@@ -22,6 +22,7 @@ import logging
 import re
 
 import db
+from core.handlers import declaracao_banco_textos
 from core.response_formatter import wrap_wa_markup
 from utils_text import fmt_brl, normalize_text
 
@@ -34,9 +35,10 @@ CARTEIRA, PERGUNTA = "carteira", "pergunta"
 # Sobre o texto NORMALIZADO (minúsculo, sem acento, sem pontuação). Só marcador
 # de COMO pagou: "boleto" e "doc" dizem O QUE foi pago (boleto se paga em
 # dinheiro na lotérica; "doc do carro"; o DOC bancário acabou em 2024).
-_BANCO_RE = re.compile(
-    r"\b(pix|pixei|cartao|credito|debito|debitei|transferencias?|transferi|ted"
-    r"|no banco|pelo banco)\b")
+# A lista de formas é UMA só (`_FORTE`/`_FRACA`): a detecção e a limpeza do alvo (`_EXPRESSAO_BANCO_RE`) saem dela.
+_FORTE = r"pix|d[eé]bito|transfer[eê]ncias?|ted"          # "no pix" é forma em qualquer posição
+_FRACA = r"cart[aã]o|cr[eé]dito"                          # só no fim da oração ou antes de outra preposição
+_BANCO_RE = re.compile(rf"\b(?:{_FORTE}|{_FRACA}|pixei|debitei|transferi|no banco|pelo banco)\b")
 # Sozinhos, "banco", "dinheiro", "espécie" e "vivo" só valem como RESPOSTA à
 # pergunta: numa frase eles são ambíguos ("banco da praça", "o dinheiro do
 # freela", "uma espécie de taxa", "show ao vivo"). Na frase, o dinheiro é a
@@ -49,6 +51,21 @@ _DINHEIRO_RESPOSTA_RE = re.compile(r"\b(dinheiro|especie|cash|vivo)\b")
 _EXPRESSAO_DINHEIRO_RE = re.compile(
     r"\s*\b(?:(?:em|no|de|com)\s+(?:dinheiro(?:\s+vivo)?|esp[eé]cie|cash)|dinheiro\s+vivo)\b"
     r"|(?:(?<=\d)|(?<=\breal)|(?<=\breais))\s+dinheiro\b",
+    re.IGNORECASE)
+# A expressão de banco (preposição + forma), que sai do alvo da DECLARAÇÃO pelo banco (ADR 0006): o comércio
+# casa com o extrato por "mercado", não por "mercado pelo banco". Forma fraca ("cartão", "banco") só sai no fim da
+# oração ou antes de outra preposição: "Pixar", "no Banco Inter", "banco de dados" e "cartão de visita" ficam.
+# ponytail: "pelo Nubank", "pela conta" e "app do banco" não são forma (decisão A1, ADR 0006).
+_PREP = r"(?:em|no|na|pelo|pela|via|por|com|usando|utilizando)\s+(?:(?:o|a)\s+)?"
+# Palavras de enchimento (lista FECHADA; "hoje"/"ontem" são data, `extract_date_from_text` já as tira). Saem do FIM do
+# alvo da declaração, para "no pix mesmo" / "no mercado tbm" casarem com o extrato.
+_ENCHIMENTO = r"mesmo|tbm|tb|tamb[eé]m|aqui"
+_RESTO = rf"(?:\s+(?:de\s+(?:cr[eé]dito|d[eé]bito)|banc[aá]ria|autom[aá]tico|{_ENCHIMENTO}))*"
+_ENCHIMENTO_NO_FIM_RE = re.compile(rf"(?:\s+(?:{_ENCHIMENTO}))+\b(?=\s*[.,;!?]*$)", re.IGNORECASE)
+_FIM = r"(?=\s*(?:[.,;!?]|$)|\s+(?:no|na|em|num|numa|pra|para|e)\b)"
+_EXPRESSAO_BANCO_RE = re.compile(
+    rf"\s*\b(?:(?:{_PREP}|de\s+)(?:{_FORTE})\b{_RESTO}"
+    rf"|(?:{_PREP}(?:{_FRACA})|(?:no|pelo|via)\s+banco|(?:{_FORTE}|{_FRACA}))\b{_RESTO}{_FIM})",
     re.IGNORECASE)
 # Negação em qualquer lugar ("não foi em dinheiro", "pix não", "nem pix", "sem
 # ser no pix"): o texto não decide a forma. Com banco o Piggy pergunta (ou
@@ -103,8 +120,12 @@ def detectar(texto: str) -> str:
     return BANCO if banco else DINHEIRO if dinheiro else DESCONHECIDA
 
 
-def limpar(texto: str) -> str:
-    return re.sub(r"\s{2,}", " ", _EXPRESSAO_DINHEIRO_RE.sub("", texto or "")).strip()
+def limpar(texto: str, banco: bool = False) -> str:
+    """Tira a expressão de dinheiro (e, com `banco`, a de banco) do texto antes do parse."""
+    texto = _EXPRESSAO_DINHEIRO_RE.sub("", texto or "")
+    if banco:
+        texto = _ENCHIMENTO_NO_FIM_RE.sub("", _EXPRESSAO_BANCO_RE.sub("", texto))
+    return re.sub(r"\s{2,}", " ", texto).strip()
 
 
 def e_resposta(texto: str) -> str | None:
@@ -143,9 +164,12 @@ def pergunta_conta(nome: str) -> str:
     return f"🐷 Pagou a {wrap_wa_markup(nome)} pelo banco (Pix, débito, app do banco) ou em dinheiro vivo?"
 
 
-def msg_banco(user_id: int, tipo: str | None, valor: float | None) -> str:
+def msg_banco(user_id: int, tipo: str | None, valor: float | None, cartao: bool = False) -> str:
     texto = ("🐷 Não registrei: com banco conectado, Pix, cartão e débito chegam "
              "sozinhos pelo Open Finance.")
+    from core.handlers.declaracao_banco import ligada
+    if cartao and ligada(user_id):  # com a flag, Pix e débito deixam de "chegar sozinhos": só o cartão (T8)
+        texto = declaracao_banco_textos.CARTAO
     if not valor or float(valor) <= 0:
         return texto
     achados = buscar_no_extrato(user_id, tipo or "despesa", float(valor))
@@ -261,16 +285,17 @@ def resolver(user_id: int, text: str, pending: dict) -> str | None:
         return corpo
     if fluxo == "entities":
         ents = dict(payload.get("entities") or {})
-        if forma == BANCO:
-            return msg_banco(user_id, ents.get("tipo"), ents.get("valor"))
+        from core.handlers.declaracao_banco import declara
+        if forma == BANCO and (no_cartao or not declara(user_id, BANCO)):  # cartão nunca declara
+            return msg_banco(user_id, ents.get("tipo"), ents.get("valor"), cartao=no_cartao)
         from datetime import datetime
         from core.handlers.launches import add_from_entities
         if ents.get("criado_em"):
             ents["criado_em"] = datetime.fromisoformat(ents["criado_em"])
         with db.restore_pending_on_error(user_id, pending):
-            resp = add_from_entities(user_id, **ents, forma_pagamento=DINHEIRO,
+            resp = add_from_entities(user_id, **ents, forma_pagamento=forma,
                                      platform=payload.get("platform") or "whatsapp")
-        return f"✅ Lançamento registrado!\n{resp}"
+        return resp if forma == BANCO else f"✅ Lançamento registrado!\n{resp}"  # a declaração traz o próprio cabeçalho
     if fluxo == "conta":
         return _resolver_conta(user_id, payload, forma, pending)
     return None

@@ -87,6 +87,18 @@ def manda(uid: int, texto: str) -> str:
     return out[0].text
 
 
+def manda_wamid(uid: int, texto: str, wamid: str | None = None) -> list[str]:
+    """Como `manda()`, mas com `message_id` ÚNICO por mensagem (o `manda()` fixa "1" em todas) e todas as
+    respostas. A chave de idempotência da declaração pelo banco é o wamid: com id fixo duas mensagens do
+    mesmo teste colidiriam. `wamid` repetido = a MESMA mensagem entregue de novo."""
+    out = hi.handle_incoming(IncomingMessage(
+        platform="whatsapp", user_id=uid, text=texto,
+        message_id=wamid or "wamid.test-" + uuid.uuid4().hex, attachments=[], external_id=str(uid), raw={},
+    ))
+    assert out, f"handler devolveu vazio para {texto!r}"
+    return [o.text for o in out]
+
+
 def consolidado(uid: int) -> tuple[float, float]:
     """(consolidado, carteira manual) — a MESMA fonte que o /saldo lê."""
     cb = db.get_consolidated_balance(uid)
