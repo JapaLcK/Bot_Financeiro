@@ -2734,7 +2734,8 @@ def detect_open_finance_salary(user_id: int, months: int = 4) -> dict | None:
 
 def detect_bill_increase(expenses, threshold_pct=Decimal("0.15")) -> list:
     """Puro. expenses: [{merchant, valor, date}]. Agrupa por estabelecimento; se aparece em
-    >=2 meses e o mais recente subiu >= threshold vs a média anterior → flag de aumento."""
+    >=2 meses e o mais recente subiu >= threshold vs a média anterior → flag de aumento.
+    Pré-condição: `expenses` em ordem cronológica — no mês vale a cobrança mais recente (#1277)."""
     from collections import defaultdict
     groups: dict = defaultdict(list)
     for e in expenses:
@@ -2745,7 +2746,7 @@ def detect_bill_increase(expenses, threshold_pct=Decimal("0.15")) -> list:
     for items in groups.values():
         by_month = {}
         for e in items:
-            by_month[(e["date"].year, e["date"].month)] = e  # último do mês vence
+            by_month[(e["date"].year, e["date"].month)] = e  # entrada cronológica: o último do mês é a mais recente
         if len(by_month) < 2:
             continue
         ordered = [by_month[k] for k in sorted(by_month)]
@@ -2780,6 +2781,7 @@ def detect_open_finance_bill_increase(user_id: int, months: int = 4) -> list:
                 where user_id=%s and coalesce(source,'')='open_finance' and tipo='despesa'
                   and is_internal_movement=false
                   and coalesce(posted_at, criado_em::date) >= %s
+                order by coalesce(posted_at, criado_em::date), criado_em, id
                 """,
                 (user_id, since),
             )
