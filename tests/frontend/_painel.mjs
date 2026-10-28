@@ -54,11 +54,12 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * `mes` do pedido não as reescreve). O GET `/patrimonio` responde a fixture `patrimonio` (padrão `continuo`). O GET `/metas` responde a fixture de nome `metas` (padrão `varios`); os POST `/metas`, `/metas/editar` e
  * `/metas/apagar` respondem `{id}` (o teste sobrescreve com `ctx.route` para erro ou para espiar). O `/orcamentos-categoria` (GET e os 2 POST): fixture `orcamentosCategoria` (padrão `padrao`), sem gate de plano. O `/orcamento-domestico` (GET e os 2 POST): fixture `orcamento` (padrão `padrao`) no Plus e no Pro, 403 `pro_required` nos outros.
  * `/comparacao` responde a fixture de nome `comparacao` (padrão `aberto`) no Plus e no Pro e, como o
- * servidor (`financial_comparison`), o 403 `pro_required` nos outros.
+ * servidor (`financial_comparison`), o 403 `pro_required` nos outros. `/cartoes`, `/parcelas` e `/rendimento` (sem gate de plano) e `/renda` e `/insights` (Plus e Pro; 403 `pro_required` nos outros)
+ * respondem as fixtures de mesmo nome (padrão `padrao`).
  * Registrar de novo vale para as próximas requisições (atraso, falha, troca de
  * resposta): no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "em_dia", orcamento = "padrao", milhao = "padrao", orcamentosCategoria = "padrao", patrimonio = "continuo", comparacao = "aberto" } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "em_dia", orcamento = "padrao", milhao = "padrao", orcamentosCategoria = "padrao", patrimonio = "continuo", comparacao = "aberto", cartoes = "padrao", parcelas = "padrao", renda = "padrao", insights = "padrao", rendimento = "padrao" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
   let atual = perfil;
@@ -107,6 +108,14 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
     if (url.pathname === "/api/v2/comparacao") {
       const e = RESPOSTAS.erros["403_pro_required"];
       return plano === "plus" || plano === "pro" ? r.fulfill({ json: RESPOSTAS.comparacao[comparacao] }) : r.fulfill({ status: e.status, json: e.body });
+    }
+    if (url.pathname === "/api/v2/cartoes") return r.fulfill({ json: RESPOSTAS.cartoes[cartoes] });
+    if (url.pathname === "/api/v2/parcelas") return r.fulfill({ json: RESPOSTAS.parcelas[parcelas] });
+    if (url.pathname === "/api/v2/rendimento") return r.fulfill({ json: RESPOSTAS.rendimento[rendimento] });
+    if (url.pathname === "/api/v2/renda" || url.pathname === "/api/v2/insights") {
+      const e = RESPOSTAS.erros["403_pro_required"];
+      const corpo = url.pathname === "/api/v2/renda" ? RESPOSTAS.renda[renda] : RESPOSTAS.insights[insights];
+      return plano === "plus" || plano === "pro" ? r.fulfill({ json: corpo }) : r.fulfill({ status: e.status, json: e.body });
     }
     if (url.pathname === "/api/v2/bancos") return r.fulfill({ json: RESPOSTAS.bancos[bancos] });
     if (url.pathname === "/api/v2/contas") return r.fulfill({ json: RESPOSTAS.contas[contas] });

@@ -297,15 +297,17 @@ test("integração: Cmd-K e Piggy reais sem horizonte de exemplo, sem seletor de
     await page.locator(".cmdk input").fill("Previsão");
     const cmdk = await page.locator(".cmdk-item").allTextContents();
     await page.keyboard.press("Escape");
+    // Com backend o "Piggy notou" é o bloco real (sem ação): vai-se à página pelo endereço. No protótipo a ação de exemplo abre a previsão de 90 dias.
     const acao = page.locator('[data-widget-id="piggy"] button', { hasText: /Ver (90 dias|a previsão)/ });
-    const rotulo = await acao.textContent();
-    await acao.click();
+    const rotulo = demo ? await acao.textContent() : null;
+    if (demo) await acao.click();
+    else await page.evaluate(() => { location.hash = "#/previsao"; });
     await page.waitForFunction(() => location.hash === "#/previsao");
     await page.locator("#page-title").waitFor();
     if (!demo) await pronta(page);
-    r[demo ? "prototipo" : "real"] = { cmdk, rotulo: rotulo.trim(), mes: await page.locator(".month-switch").count(), pedidos: [...new Set(pedidos)] };
+    r[demo ? "prototipo" : "real"] = { cmdk, ...(demo ? { rotulo: rotulo.trim() } : {}), mes: await page.locator(".month-switch").count(), pedidos: [...new Set(pedidos)] };
     await ctx.close();
   }
-  assert.deepEqual(r.real, { cmdk: ["Previsão"], rotulo: "Ver a previsão", mes: 0, pedidos: [""] });
+  assert.deepEqual(r.real, { cmdk: ["Previsão"], mes: 0, pedidos: [""] });
   assert.deepEqual(r.prototipo, { cmdk: ["Previsão", "Previsão: fim do mês", "Previsão: 30 dias", "Previsão: 90 dias"], rotulo: "Ver 90 dias", mes: 1, pedidos: [] });
 });

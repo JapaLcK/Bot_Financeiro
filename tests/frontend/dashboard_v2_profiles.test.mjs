@@ -93,8 +93,9 @@ test("storage que lança: preset na leitura e tudo segue em memória", () => {
 
 test("locked nos três planos", () => {
   const tabela = Object.fromEntries(TIERS.map((plan) => [plan, KNOWN.filter((id) => locked(id, plan))]));
-  assert.deepEqual(tabela, { essencial: ["hero", "simulador", "compromissos", "piggy", "comparacao"], plus: ["simulador", "compromissos"], pro: [] });
-  assert.equal(locked("renda", "essencial"), false); // bloco sem recurso pago é de todos
+  assert.deepEqual(tabela, { essencial: ["hero", "simulador", "compromissos", "piggy", "renda", "comparacao"], plus: ["simulador", "compromissos"], pro: [] });
+  assert.deepEqual(["essencial", "plus", "pro"].map((p) => locked("renda", p)), [true, false, false]); // renda é Plus+ (financial_comparison)
+  assert.equal(locked("fatura", "essencial"), false); // bloco sem recurso pago é de todos
 });
 
 test("paridade: plano mínimo e ordem dos planos iguais aos do backend", () => {

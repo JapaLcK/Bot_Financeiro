@@ -9,7 +9,7 @@ export const PROFILES = [
     line: "Pra guardar mais todo mês. Mostra quanto sobrou e onde dá pra cortar.",
     preset: ["contas", "resumo", "patrimonio", "piggy", "categorias", "assinaturas", "simulador", "compromissos"] },
   { id: "investir", label: "Investir", icon: "ph-trend-up",
-    line: "Pra fazer o dinheiro trabalhar. Mostra seu patrimônio, quanto rendeu perto do CDI e onde ele está.",
+    line: "Pra fazer o dinheiro trabalhar. Mostra seu patrimônio, quanto seus investimentos renderam e onde ele está.",
     preset: ["contas", "patrimonio", "rendimento", "wealth", "simulador", "resumo", "piggy"] },
   { id: "controlar", label: "Controlar gastos", icon: "ph-chart-bar",
     line: "Pra saber pra onde vai cada real. Mostra os gastos por categoria, dia a dia, e as contas que vêm aí.",
@@ -25,7 +25,7 @@ const IDS = ["padrao", ...PROFILES.map((p) => p.id)];
 
 // Bloco pago → recurso → plano mínimo. Espelho de FEATURE_MIN_TIER_V2 em
 // core/services/plan_service.py; tests/frontend/dashboard_v2_profiles.test.mjs compara.
-export const WIDGET_FEATURE = { hero: "forecast", compromissos: "cashflow", piggy: "insights", simulador: "simulator", comparacao: "financial_comparison" };
+export const WIDGET_FEATURE = { hero: "forecast", compromissos: "cashflow", piggy: "insights", renda: "financial_comparison", simulador: "simulator", comparacao: "financial_comparison" };
 export const FEATURE_TIER = { forecast: "plus", cashflow: "pro", insights: "plus", simulator: "pro", financial_comparison: "plus" };
 export { TIERS };
 

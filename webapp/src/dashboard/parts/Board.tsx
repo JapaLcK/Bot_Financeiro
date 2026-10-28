@@ -32,6 +32,7 @@ import { Subscriptions } from "../widgets/Subscriptions";
 import { Contas } from "../widgets/Contas";
 import { CompromissosResumo, PrevisaoCard } from "../widgets/Previsao";
 import { Comparacao } from "../widgets/Comparacao";
+import { FaturaReal, ParcelasReal, PiggyReal, RendaReal, RendimentoReal } from "../widgets/BlocosReais";
 import { Catalog, ProfileSelect } from "./BoardControls";
 import { ProfilePicker } from "./ProfilePicker";
 import { PiggyBand } from "./PiggyBand";
@@ -53,7 +54,7 @@ const EXTRA: WidgetItem[] = [
   { id: "fatura", size: "tall", label: "Fatura do cartão" },
   { id: "wealth", size: "tall", label: "Onde está o dinheiro" },
   { id: "renda", size: "tall", label: "Renda mês a mês" },
-  { id: "rendimento", size: "wide", label: "Rendimento × CDI" },
+  { id: "rendimento", size: "wide", label: "Rendimentos" },
   { id: "parcelas", size: "wide", label: "Parcelas futuras" },
   { id: "assinaturas", size: "tall", label: "Assinaturas" },
   { id: "comparacao", size: "tall", label: "Comparado ao mês anterior" },
@@ -65,9 +66,9 @@ const ITEM = new Map(ALL.map((w) => [w.id, w]));
 const VIEWS: Record<string, (p: { s: DashState }) => ReactNode> = {
   contas: () => <Contas />, hero: DEMO ? Hero : () => <PrevisaoCard />, resumo: MonthStats,
   categorias: DEMO ? Categories : GastosCategorias, calendario: DEMO ? Calendar : GastosCalendario, simulador: DEMO ? Simulator : () => <SimuladorHabitos />, // lambda: o simulador importa `comCardPrevisao` daqui (ciclo); a referência só é lida no render
-  compromissos: DEMO ? Bills : () => <CompromissosResumo />, piggy: Piggy, patrimonio: () => (DEMO ? <NetWorth /> : <PatrimonioReal />),
-  fatura: Invoice, wealth: () => (DEMO ? <Wealth /> : <ComposicaoReal />),
-  renda: () => <Income />, rendimento: () => <Yield />, parcelas: () => <Installments />,
+  compromissos: DEMO ? Bills : () => <CompromissosResumo />, piggy: DEMO ? Piggy : () => <PiggyReal />, patrimonio: () => (DEMO ? <NetWorth /> : <PatrimonioReal />),
+  fatura: DEMO ? Invoice : () => <FaturaReal />, wealth: () => (DEMO ? <Wealth /> : <ComposicaoReal />),
+  renda: DEMO ? () => <Income /> : () => <RendaReal />, rendimento: DEMO ? () => <Yield /> : () => <RendimentoReal />, parcelas: DEMO ? () => <Installments /> : () => <ParcelasReal />,
   assinaturas: () => <Subscriptions />, comparacao: Comparacao,
 };
 
