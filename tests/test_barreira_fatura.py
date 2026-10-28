@@ -33,6 +33,7 @@ from datetime import date, timedelta
 
 import db
 from conftest import usuario_pagante
+from core.services.insights_contrato import periodo_mes
 from db import insights
 from db.household_budget import _month_rows
 from tests._patrimonio_helpers import q
@@ -88,18 +89,19 @@ def test_potes_do_orcamento_domestico_contam_o_2o_cartao_e_nunca_a_de_b():
 
 
 def test_alertas_de_categoria_e_de_mes_queimando_contam_o_2o_cartao_e_nunca_a_de_b(monkeypatch):
-    """Detectores chamados direto (`compute_active_insights` engole exceção) e progresso do
-    mês fixo em 50%. Spike: 130 contra média 80 (sem o 2º cartão dá 80 e o alerta some). Burn:
-    530 + 130 = 66% da receita (sem o 2º cartão, 61% e lista vazia). Sem caso
+    """Detectores chamados direto (`compute_active_insights` engole exceção). Spike (P1-B): 130 no mês
+    contra 80 no anterior inteiro, +62,5% (sem o 2º cartão dá 80 × 80 e o alerta some). Burn, com progresso
+    do mês fixo em 50%: 530 + 130 = 66% da receita (sem o 2º cartão, 61% e lista vazia). Sem caso
     do B: ele não tem histórico para alerta nenhum, e [] ali seria verde por construção."""
     a, _ = _cena(mes_corrente=True)
     for meses in (1, 2):
         _grava(a, "despesa", 80, dia=_mes_passado(5, meses))
         _grava(a, "receita", 1000, categoria="salario", dia=_mes_passado(5, meses))
     _grava(a, "despesa", 530, categoria="aluguel")
+    anterior = periodo_mes(_mes_passado(1))["rotulo"]
+    assert [(s["severity"], s["message"]) for s in insights._detect_category_spike(a)] == [
+        ("critical", f"{fmt_brl(130.0)} até agora contra {fmt_brl(80.0)} em {anterior} inteiro. Vale conferir.")]
     monkeypatch.setattr(insights, "_month_progress_pct", lambda *_a, **_k: 50.0)
-    assert [s["message"] for s in insights._detect_category_spike(a)] == [
-        f"{fmt_brl(130.0)} contra média de {fmt_brl(80.0)} nos 3 meses anteriores. Vale conferir."]
     assert [x["message"] for x in insights._detect_salary_burn_fast(a)] == [
         "Já consumiu 66% da sua receita média mensal e só 50% do mês passou. Vale dar uma freada."]
 
@@ -271,7 +273,7 @@ def test_todo_join_de_fatura_por_bill_id_tem_a_barreira():
             com_join.add(unidade)
             if _sem_guarda(texto):
                 faltando.append(unidade)
-    assert {("db/insights.py", "_detect_category_spike"), ("db/resumo_mes.py", "<módulo>")} <= com_join
+    assert {("db/insights.py", "_detect_salary_burn_fast"), ("db/resumo_mes.py", "<módulo>")} <= com_join
     assert not faltando, f"join credit_bills por bill_id sem b.user_id = (%s | ct.user_id): {faltando}"
 
 

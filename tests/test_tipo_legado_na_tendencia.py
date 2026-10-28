@@ -432,28 +432,23 @@ def test_burn_fast_sem_gap_nao_alerta(pro_user_id, monkeypatch):
 
 # ── e o irmão convertido junto: _detect_category_spike ─────────────────────
 
-def test_spike_query_convertida_ainda_executa(pro_user_id, monkeypatch):
-    """GUARDA da f-string, não conserto: em `_detect_category_spike` o predicado já
-    era `tipo in ('despesa','saida')` e a troca por `{TIPO_DESPESA_SQL}` é no-op —
-    este teste passa COM e SEM este diff.
+def test_spike_conta_o_tipo_legado(pro_user_id):
+    """O `category_spike` lê o gasto por `resumo_mes.categorias` (P1-B, PL-06 B1), que canoniza o tipo pelo
+    `TIPO_CANON_SQL`: a forma legada `saida` continua contando. Chamado direto porque
+    `compute_active_insights` engole exceção de detector e o insight sumiria do painel SEM erro.
+    Fica vermelho se alguém tirar o `'saida'` da constante compartilhada (500 e 100 deixam de contar).
 
-    Ele existe porque a conversão para f-string é o risco real: uma chave ou um
-    `%` a mais e a query estoura, e `compute_active_insights` engole exceção de
-    detector (`except Exception: continue`), então o insight sumiria do painel SEM
-    erro nenhum. Chamado direto, é o mínimo que fica vermelho aí — e também se
-    alguém tirar o `'saida'` da constante compartilhada.
-
-    Mesmo referencial de data dos `burn_fast`: a função lê `date.today()`.
+    Relógio real: o detector lê `now_tz()` e os lançamentos usam `date.today()` (o mesmo fuso, `align_process_tz`).
     """
-    monkeypatch.setattr(insights, "_month_progress_pct", lambda *_a, **_k: 87.0)
     _grava(pro_user_id, "saida", 100, dia=_mes_passado(5, 1))
     _grava(pro_user_id, "saida", 100, dia=_mes_passado(5, 2))
     _grava(pro_user_id, "saida", 500, dia=date.today())
 
     spikes = insights._detect_category_spike(pro_user_id)
     assert len(spikes) == 1, spikes
-    # 500 contra média de 100 nos dois meses anteriores com dado = +400%
+    # 500 contra 100 no mês anterior inteiro = +400%
     assert spikes[0]["type"] == "category_spike", spikes
     assert spikes[0]["key"] == f"category_spike:mercado:{date.today():%Y-%m}", spikes
     assert spikes[0]["title"] == "Mercado subiu 400% no mês", spikes
-    assert spikes[0]["explicacao"]["amostra"]["meses_com_gasto"] == 2, spikes  # PL-06: a amostra vai junto
+    ref = spikes[0]["explicacao"]["referencia"]
+    assert (ref["estatistica"], ref["valor"]) == ("mes_anterior_inteiro", 100.0), spikes  # PL-06: a referência vai junto

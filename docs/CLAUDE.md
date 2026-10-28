@@ -2212,8 +2212,7 @@ tira o alerta existente do feed e da fila de e-mail e deixa uma lápide em `anom
 não ressuscita alerta velho. A exclusão do lançamento não limpa o alerta: ele é limpo no primeiro clique em "Era esperado" (a rota responde 404 e tira o evento do feed; ocultar ao apagar é follow-up do PR B). Botão "Era esperado" no feed: `frontend/dashboard-agent-esperado.js`.
 PR B: sensibilidade editável, validação estrita da config, e-mail configurável, lista de esperados
 e regras recorrentes com teto/data final estão descritos em `docs/pl04-prb.md`. O contador já exclui
-eventos stale. Continuam fora: `_detect_category_spike` (`db/insights.py`, compara mês parcial
-com meses cheios) e cartão no Xerife (PL-06/07). Limites conhecidos: o
+eventos stale. Continua fora: cartão no Xerife (PL-06/07). Limites conhecidos: o
 mesmo gasto como lançamento manual e do Open Finance gera dois alertas; alerta gerado com histórico
 parcial no 1º sync fica gravado. `config` com `multiplicador`/`minimo` não finito ou <= 0 cai no padrão
 (`anomalia.limiar`) no PR A. No PR B, `config_publica` recupera campos legados inválidos por
@@ -2244,7 +2243,9 @@ todos os itens; a leitura corta em 6, por severidade. Detector em falha não gra
 outros saem e o `motivo` vai nulo, nunca `sem_destaques`; `ai_patterns.motivo_vazio`). `impacto` e `acoes` (só em `budget_warning` e em
 `recurring_increase` mensal/anual) são do Pro (`insights_acoes`) e saem na LEITURA
 (`ai_patterns.ler_insights`/`_projetar`), então o Pro que vira Plus dentro das 6 h não os vê. O
-`category_spike` pela `comparacao_periodos` fica para o PR B.
+`category_spike` segue a P1-B (PL-06 B1): o mês corrente inteiro contra o anterior inteiro (`escolher_janelas` e
+`resumo_mes.categorias`), warning a partir de +30% e critical a partir de +60%, os dois meses >= R$ 50, sem portão de dia
+do mês, "sem categoria" fora e corte pelo histórico do plano.
 
 **PigBank Insights, dispensar e útil (PL-06 PR A2).** Tabela `insight_estado` (PK `user_id, chave`;
 `db/insight_estado.py`): cada cálculo registra a chave com a severidade e a medida do ÚLTIMO cálculo

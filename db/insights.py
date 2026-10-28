@@ -16,19 +16,24 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 from core.services.insights_contrato import (
     GRAVIDADE, dinheiro, diferenca, montar_item, navegar, nome, periodo_dia, periodo_mes, sujeito,
 )
+from utils_date import day_tz, now_tz
 from utils_text import fmt_brl, merchant_key
 
 from .budgets import get_budgets_status_for_month
-from .connection import TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, cat_key, get_conn
+from .connection import CAT_VAZIA_LABEL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, cat_key, get_conn
 from .recurring import list_recurring_expenses
 from .users import ensure_user
 
 logger = logging.getLogger(__name__)
+
+# category_spike: anterior abaixo disso não é base (nem "+567%" sobre centavos); o atual, com +30%, já passa de 65.
+PISO_ANTERIOR = Decimal(50)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -112,106 +117,50 @@ def _detect_budget_warnings(user_id: int) -> list[dict[str, Any]]:
 
 
 def _detect_category_spike(user_id: int) -> list[dict[str, Any]]:
-    """Categorias com gasto >30% acima da média dos 3 meses anteriores.
-
-    Só dispara se o mês corrente já está >= 40% transcorrido (evita falso
-    positivo no dia 2 do mês quando a primeira despesa já distorce tudo).
-    """
-    today = date.today()
-    if _month_progress_pct(today) < 40.0:
+    """Categoria cujo mês corrente INTEIRO (o que já está lançado, como o Resumo do mês) passou o anterior inteiro
+    em 30% (`warning`) ou 60% (`critical`), o anterior >= R$ 50: a regra P1-B (`comparacao_periodos.escolher_janelas`
+    e `resumo_mes.categorias`, cartão pela fatura). Sem o portão de 40% do mês: o parcial que já passou o anterior
+    só cresce. "Sem categoria" fica fora; o plano que não enxerga o anterior inteiro não vê (corte do histórico).
+    Fica de fora o `motivos` do Resumo ("número pode estar incompleto")."""
+    from core.reports.weekly import _pct
+    from core.services.comparacao_periodos import escolher_janelas
+    from core.services.plan_service import history_earliest_date
+    from .resumo_mes import categorias
+    agora = now_tz()
+    hoje = day_tz(agora)
+    j = escolher_janelas(hoje, hoje.year, hoje.month)
+    a, p = j["atual"], j["anterior"]
+    corte = history_earliest_date(user_id, agora)
+    if corte and corte > p["inicio"]:
         return []
-
-    prev_months = _prev_n_months(today, 3)
-    if not prev_months:
-        return []
-
-    # Spent atual + média dos 3 anteriores, por categoria, incluindo cartão.
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                with spent_per_month as (
-                  select lower(categoria) as cat,
-                         date_part('year',  criado_em)::int as y,
-                         date_part('month', criado_em)::int as m,
-                         sum(valor)::float as total
-                  from launches
-                  where user_id=%s
-                    and {TIPO_DESPESA_SQL}
-                    and is_internal_movement = false
-                    and categoria is not null
-                    and criado_em >= make_date(%s, %s, 1) - interval '4 months'
-                  group by 1, 2, 3
-                  union all
-                  select lower(ct.categoria) as cat,
-                         date_part('year',  b.period_end)::int as y,
-                         date_part('month', b.period_end)::int as m,
-                         sum(ct.valor)::float as total
-                  from credit_transactions ct
-                  join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id
-                  where ct.user_id=%s
-                    and ct.is_refund = false
-                    and ct.categoria is not null
-                    and b.period_end >= make_date(%s, %s, 1) - interval '4 months'
-                  group by 1, 2, 3
-                )
-                select cat, y, m, sum(total) as total
-                from spent_per_month
-                group by cat, y, m
-                order by cat, y, m
-                """,
-                (user_id, today.year, today.month, user_id, today.year, today.month),
-            )
-            rows = cur.fetchall() or []
-
-    # Indexa por (cat, y, m) → total
-    by_cat: dict[str, dict[tuple[int, int], float]] = {}
-    for r in rows:
-        cat = r["cat"]
-        by_cat.setdefault(cat, {})[(r["y"], r["m"])] = float(r["total"] or 0)
-
-    out: list[dict[str, Any]] = []
-    for cat, by_month in by_cat.items():
-        current = by_month.get((today.year, today.month), 0.0)
-        if current < 50:  # ignora categorias pequenas (< R$ 50 não é alerta)
-            continue
-        prev_totals = [by_month.get((y, m), 0.0) for (y, m) in prev_months]
-        # Considera só meses com dado real (>0) pra evitar dividir por zero
-        prev_nonzero = [t for t in prev_totals if t > 0]
-        if len(prev_nonzero) < 2:
-            continue
-        avg_prev = sum(prev_nonzero) / len(prev_nonzero)
-        if avg_prev <= 0:
-            continue
-        delta_pct = (current - avg_prev) / avg_prev * 100.0
-        if delta_pct < 30.0:
-            continue
-        # Pega emoji da user_categories se houver
-        emoji = "📈"
-        try:
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "select emoji from user_categories where user_id=%s and name=%s",
-                        (user_id, cat),
-                    )
-                    row = cur.fetchone()
-                    if row and row.get("emoji"):
-                        emoji = row["emoji"]
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("set transaction isolation level repeatable read, read only")
+        atuais = categorias(cur, user_id, a["inicio"], a["fim"] + timedelta(days=1))
+        anteriores = {r["chave"]: r["total"] for r in categorias(cur, user_id, p["inicio"], p["fim"] + timedelta(days=1))}
+        emojis: dict[str, str] = {}
+        try:  # a última consulta da conexão (só leitura): falha aqui não estraga nada lido antes
+            cur.execute("select name, emoji from user_categories where user_id=%s", (user_id,))
+            emojis = {r["name"]: r["emoji"] for r in cur.fetchall() if r["emoji"]}
         except Exception:
             pass
 
+    rot_ant = periodo_mes(p["inicio"])["rotulo"]
+    out: list[dict[str, Any]] = []
+    for r in atuais:
+        chave, label = r["chave"], r["categoria"]
+        atual, ant = dinheiro(r["total"]), dinheiro(anteriores.get(chave, 0))
+        if chave == cat_key(CAT_VAZIA_LABEL) or ant < PISO_ANTERIOR or atual * 10 < ant * 13:
+            continue
         out.append(montar_item(
-            "category_spike", sujeito(cat, cat_key(cat)), periodo_mes(today),
-            severity="warning" if delta_pct < 60 else "critical",
-            title=f"{cat.capitalize()} subiu {delta_pct:.0f}% no mês",
-            message=(f"{fmt_brl(current)} contra média de {fmt_brl(avg_prev)} "
-                     f"nos 3 meses anteriores. Vale conferir."),
-            action_label="Ver análises", action_view="analytics", icon=emoji,
-            referencia={"estatistica": "media_meses_com_gasto", "categoria": nome(cat),
-                        "valor": dinheiro(avg_prev), "janela": {"meses": 3}},
-            atual={"valor": dinheiro(current)}, diferenca=diferenca(current, avg_prev),
-            amostra={"suficiente": True, "meses_com_gasto": len(prev_nonzero), "minimo_meses": 2}))
+            # A chave vem do SQL (`cat_key_sql`, a mesma da main): recalcular do rótulo sanitizado mudaria a chave.
+            "category_spike", sujeito(label, chave), periodo_mes(hoje),
+            severity="critical" if atual * 10 >= ant * 16 else "warning",
+            title=f"{label.capitalize()} subiu {_pct(atual - ant, ant, 0)}% no mês",
+            message=f"{fmt_brl(atual)} até agora contra {fmt_brl(ant)} em {rot_ant} inteiro. Vale conferir.",
+            action_label="Ver análises", action_view="analytics", icon=emojis.get(label.lower(), "📈"),
+            referencia={"estatistica": "mes_anterior_inteiro", "categoria": nome(label), "valor": ant,
+                        "periodo": {**periodo_mes(p["inicio"]), "parcial": False}},
+            atual={"valor": atual}, diferenca=diferenca(atual, ant), amostra=None))
     return out
 
 

@@ -1,7 +1,8 @@
 """Comparação de períodos equivalentes (PL-07, Plus/Pro): a regra única de "mês passado".
 
 Quem decide a janela e o delta é este módulo; os consumidores (a tool `compare_periods` da IA,
-`GET /api/v2/comparacao` e o KPI das Análises, com `meses=N`) só mostram. Dois caminhos, um formato
+`GET /api/v2/comparacao` e o KPI das Análises, com `meses=N`) só mostram. O `category_spike` dos insights
+(`db/insights.py`) usa só `escolher_janelas`, com `resumo_mes.categorias`. Dois caminhos, um formato
 de saída; só a base do cartão muda (`base.cartao`):
 - `mes` (aberto ou fechado): os números do "Entrou/Saiu do mês" (`db/resumo_mes`), cartão pela
   FATURA.
