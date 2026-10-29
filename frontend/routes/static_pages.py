@@ -19,7 +19,6 @@ from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
 from frontend.routes.shared import (
     FRONTEND_DIR,
-    _is_pigbank_app,
     _resolve_page_user_id,
     gate_onboarding,
     gate_plan_selection,
@@ -27,6 +26,7 @@ from frontend.routes.shared import (
     html_file,
     inject_tracking,
     limiter,
+    painel_no_navegador,
     public_site_url,
     stamp_asset_versions,
 )
@@ -103,17 +103,10 @@ def serve_painel(request: Request):
     O user agent do app só ESCOLHE a tela (o app segue no /app): ele não
     concede nada, quem libera é a chave, no servidor. Chave que falha = fechado.
     """
-    from core.services.plan_service import dashboard_v2_enabled
-
     uid = _resolve_page_user_id(request)
     if uid is None:
         return RedirectResponse(url="/login?next=/painel", status_code=302)
-    try:
-        liberado = not _is_pigbank_app(request) and dashboard_v2_enabled(uid)
-    except Exception:
-        logging.getLogger(__name__).warning("dashboard_v2_enabled falhou", exc_info=True)
-        liberado = False
-    if not liberado:
+    if not painel_no_navegador(request, uid):
         return RedirectResponse(url="/app", status_code=302)
     # Mesma sequência do /app: plano primeiro, onboarding depois.
     gate = gate_plan_selection(request)

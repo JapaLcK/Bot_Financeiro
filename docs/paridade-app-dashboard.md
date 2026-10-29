@@ -59,7 +59,7 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Conversa | Atrás do freio `PAINEL_CHAT_IA_USER_IDS` (lista de user_id; ausente = ninguém): ligado, texto em `/ai/chat/stream` (Etapa 7 PR 1); desligado, de exemplo, só `investido` e `metas` reais | Real (`/ai/chat/stream`, feedback, cancelar pendência) | — | Web | a discutir com o dono |
+| Conversa | Atrás do freio `PAINEL_CHAT_IA_USER_IDS` (lista de user_id; ausente = ninguém) ou aberto a todos por `PAINEL_CHAT_IA_TODOS=1`: ligado, texto em `/ai/chat/stream` (Etapa 7 PR 1); desligado, de exemplo, só `investido` e `metas` reais | Real (`/ai/chat/stream`, feedback, cancelar pendência) | — | Web | a discutir com o dono |
 | Cards no chat | Desenha os cards reais do `show_card` (todos os ids de `cards.IDS`) a partir do bloco, sem consulta; não recebe os da tool (manda `cards: []`). Divergências: rendimento com campo fora do contrato derruba o card inteiro (o app tira só o item) e sem o logo do banco; `card_name` nulo o web aceita e o zod do app recusa; sem o modo "ocultar valores" | Renderiza os cards reais que o servidor manda (período, caixinhas, metas, gastos e os blocos do catálogo); parcelas em uma linha por compra ("n de N pagas" com N = o total do banco e as parcelas antes da 1ª vista contadas como pagas; compra quitada sai; tocar abre as parcelas, 5 e "+ N") e caixinhas vazia "Nenhuma caixinha ainda.", como o web | Rendimento, logo, `card_name` nulo e ocultar valores, declarados | — | a discutir com o dono |
 | Guia do Piggy e dicas | `Guia.tsx`, `Dica.tsx` | Não há | — | App | a discutir com o dono |
 

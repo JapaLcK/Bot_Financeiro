@@ -200,7 +200,7 @@ def test_chave_falhando_nao_bloqueia(caminho, uid, monkeypatch, ia_fora):
 
     def _quebra(*_a, **_k):
         raise RuntimeError("banco piscou")
-    monkeypatch.setattr(ps, "dashboard_v2_enabled", _quebra)
+    monkeypatch.setattr(ps, "dashboard_v2_beta", _quebra)
     antes = escritas(uid)
     resposta = CAMINHOS[caminho][1](uid)
     assert escritas(uid) != antes, resposta
@@ -376,3 +376,33 @@ def test_todo_escritor_esta_classificado_e_os_da_trava_chamam_exigir():
                     chamam_exigir.add((path, fn.name))
     assert achados == set(ESCRITORES), (achados ^ set(ESCRITORES))
     assert {k for k, v in ESCRITORES.items() if v == TRAVA} <= chamam_exigir
+
+
+# ── DASHBOARD_V2_TODOS não acompanha o Q36 (só a lista beta) ─────────────────
+
+@pytest.mark.parametrize("caminho", sorted(CAMINHOS))
+def test_todos_nao_trava_quem_esta_fora_da_lista(caminho, uid, chave, ia_fora, monkeypatch):
+    """Com a env geral ligada e o usuário FORA da lista, todo caminho grava como sem a chave.
+    Negativo: `fonte_unica` de volta a `dashboard_v2_enabled` deixa este grupo vermelho; o
+    `test_com_a_chave_recusa_e_nao_grava` (usuário na lista) é o positivo."""
+    caso, agir = CAMINHOS[caminho]
+    chave(usuario_pagante())
+    monkeypatch.setenv("DASHBOARD_V2_TODOS", "1")
+    antes = escritas(uid)
+    resposta = agir(uid)
+    assert MENSAGENS[caso] not in resposta, resposta
+    assert escritas(uid) != antes, resposta
+
+
+def test_todos_conversa_investe_grava_e_dinheiro_vivo_grava_fora_da_lista(uid, chave, ia_fora, monkeypatch):
+    """Pela conversa, com a env geral e o usuário FORA da lista: "investi 1000 no CDB" e
+    "gastei 50 em dinheiro no café" gravam (o mesmo usuário NA lista é recusado no investimento:
+    `test_conversa_investe_recusa_e_dinheiro_vivo_grava`)."""
+    chave(usuario_pagante())
+    monkeypatch.setenv("DASHBOARD_V2_TODOS", "1")
+    antes = escritas(uid)
+    r = manda(uid, "investi 1000 no CDB")
+    assert MENSAGENS["investimento"] not in r and escritas(uid) != antes, r
+    antes = escritas(uid)
+    r = manda(uid, "gastei 50 em dinheiro no café")
+    assert escritas(uid)[2] == antes[2] + 1, r

@@ -1,6 +1,6 @@
 """Q36 no painel antigo: Open Finance é a fonte única para quem tem a chave do v2.
 
-Para quem está em `dashboard_v2_enabled`, as funções de escrita que todo canal
+Para quem está em `dashboard_v2_beta` (a lista beta, não a env geral), as funções de escrita que todo canal
 chama (`/app`, WhatsApp, IA) recusam investimento manual (criar e aportar),
 importação de extrato (OFX/CSV/PDF), importação de fatura OFX e compra manual
 no cartão. Resgatar e apagar investimento, caixinha e carteira seguem livres.
@@ -49,14 +49,15 @@ class FonteUnicaOF(ValueError):
 
 
 def recusa(user_id: int, caso: str) -> str | None:
-    """O texto da recusa se `user_id` tem a chave do v2; senão None.
+    """O texto da recusa se `user_id` está na lista beta do v2 (não a env geral
+    DASHBOARD_V2_TODOS, ADR 0006); senão None.
 
     Fail-open: a checagem falhando não bloqueia ninguém. É uma trava de produto
     num beta de um usuário — recusar a escrita legítima de todo mundo porque o
     banco piscou seria pior que deixar o dono gravar um investimento manual."""
     try:
-        from core.services.plan_service import dashboard_v2_enabled
-        bloqueado = dashboard_v2_enabled(int(user_id))
+        from core.services.plan_service import dashboard_v2_beta
+        bloqueado = dashboard_v2_beta(int(user_id))
     except Exception:
         logger.warning("fonte_unica: chave do v2 falhou, liberando user=%s", user_id, exc_info=True)
         return None

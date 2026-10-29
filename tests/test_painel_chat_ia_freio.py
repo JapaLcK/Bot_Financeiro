@@ -110,3 +110,13 @@ def test_guia_passo_piggy_real_so_com_o_freio_ligado(uid, monkeypatch):
     outros = Guia.model_validate(_get(uid, "/api/v2/guia")).model_dump()["passos"]
     outros = [p for p in outros if p["id"] != PIGGY["id"]]
     assert outros and all(p["dado"] == "real" for p in outros)  # os outros passos não mudam
+
+
+def test_todos_abre_para_qualquer_um_e_desligar_fecha(monkeypatch):
+    monkeypatch.delenv(ENV, raising=False)
+    monkeypatch.setenv("PAINEL_CHAT_IA_TODOS", "1")
+    assert painel_chat_ia(7) is True
+    monkeypatch.setenv("PAINEL_CHAT_IA_TODOS", "0")
+    assert painel_chat_ia(7) is False
+    monkeypatch.setenv(ENV, "7")  # a lista segue valendo com a env desligada
+    assert painel_chat_ia(7) is True and painel_chat_ia(8) is False
