@@ -173,7 +173,7 @@ if(PB_MFA)history.replaceState(null,'',location.pathname+location.search);
         if(!rf.ok)return;
         r=await fetch('/auth/validate',{credentials:'same-origin'});
       }
-      if(r.ok)goDash(nextParam()||postAuth());
+      if(r.ok)goDash(nextParam()||postAuth(await payload(r)));
     }catch(_){/* sem rede ou sem sessão: fica no login */}
   })();
 

@@ -178,6 +178,7 @@ from frontend.routes.shared import (
     limiter,
     make_jwt as _make_jwt,
     months_pt as _months_pt,
+    painel_como_destino,
     parse_date_param as _parse_date_param,
     raise_if_account_scheduled_for_deletion as _raise_if_account_scheduled_for_deletion,
     _resolve_page_user_id,
@@ -3046,14 +3047,15 @@ def _dashboard_url(path: str = "/app", view: str | None = None) -> str:
     return url
 
 
-def _post_login_url(user_id: int | None = None) -> str:
+def _post_login_url(user_id: int | None = None, request: Request | None = None) -> str:
     """URL para a qual o usuário deve ser direcionado logo após login.
     O campo `dashboard_url` nas respostas de auth aponta para cá.
 
     Cadastro novo (ou quem ainda não escolheu plano) vai DIRETO pra /precos —
     só entra no dashboard depois de escolher um plano — que hoje é sempre pago,
     o Grátis saiu da /precos — e concluir o pagamento. Sem assinatura ativa
-    (paywall ligado), idem."""
+    (paywall ligado), idem. Fora disso: /painel no navegador com a chave do v2
+    (`painel_como_destino`), senão /home."""
     if user_id is not None:
         from core.services.plan_service import has_app_access, needs_plan_selection
         if needs_plan_selection(int(user_id)):
@@ -3063,6 +3065,8 @@ def _post_login_url(user_id: int | None = None) -> str:
             # pernas pedem a MESMA coisa (assinar), e `escolha=1` é o marcador
             # que o `nav-auth.js` reconhece para calar os CTAs de marketing.
             return f"{DASHBOARD_URL}/precos?escolha=1"
+        if request is not None and painel_como_destino(request, int(user_id)):
+            return _dashboard_url("/painel")
     return _dashboard_url("/home")
 
 
@@ -3244,6 +3248,8 @@ async def auth_validate(request: Request, response: Response):
         "user_id": user_id,
         "show_mfa_onboarding": show_onboarding,
         "bank_list_ui": bank_list_ui,
+        # Aditivo: para onde o /login e o onboarding mandam quem já tem sessão.
+        "dashboard_url": "/painel" if await asyncio.to_thread(painel_como_destino, request, int(user_id)) else "/home",
     }
 
 
@@ -3528,7 +3534,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
         "email": body.email.strip().lower(),
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": _post_login_url(user_id),
+        "dashboard_url": _post_login_url(user_id, request),
         **credenciais,
     }
 
@@ -3666,7 +3672,7 @@ async def _concluir_login(
         "plan": plan,
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": _post_login_url(user_id),
+        "dashboard_url": _post_login_url(user_id, request),
         **credenciais,
     }
 
@@ -4341,7 +4347,7 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         "plan": user.get("plan", "free"),
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": _post_login_url(user_id),
+        "dashboard_url": _post_login_url(user_id, request),
         **credenciais,
     }
 
@@ -4628,7 +4634,7 @@ async def auth_dashboard_token(response: Response, request: Request, user_id: in
     auth_payload = getattr(request.state, "auth_payload", {}) or {}
     return {
         "email": auth_payload.get("email"),
-        "dashboard_url": _post_login_url(user_id),
+        "dashboard_url": _post_login_url(user_id, request),
         "expires_in": int(DASHBOARD_SESSION_HOURS * 3600),
     }
 
@@ -4652,7 +4658,7 @@ async def auth_dashboard_link(response: Response, request: Request, body: Dashbo
     auth_payload = getattr(request.state, "auth_payload", {}) or {}
     return {
         "email": auth_payload.get("email"),
-        "dashboard_url": _post_login_url(user_id),
+        "dashboard_url": _post_login_url(user_id, request),
         "expires_in": int(DASHBOARD_SESSION_HOURS * 3600),
     }
 
@@ -4944,7 +4950,7 @@ async def auth_google_callback(
         # Login bem-sucedido (web) → cookies + redirect pra home
         jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
         success_response = RedirectResponse(
-            url=next_url or _post_login_url(user_id),
+            url=next_url or _post_login_url(user_id, request),
             status_code=302,
         )
         _clear_google_oauth_cookies(success_response)
@@ -5093,7 +5099,7 @@ async def _completar_cadastro_social(
         "email": email,
         "link_code": result["link_code"],
         "whatsapp_link": wa_link,
-        "dashboard_url": _post_login_url(user_id),
+        "dashboard_url": _post_login_url(user_id, request),
         **credenciais,
     }
 
@@ -7563,7 +7569,8 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
     else:
         target_view = view if view in {"overview", "investments", "open-finance"} else None
         redirect_url = "/settings?view=open-finance" if target_view == "open-finance" else (
-            f"/app?view={urllib.parse.quote(target_view)}" if target_view else "/app"
+            f"/app?view={urllib.parse.quote(target_view)}" if target_view else
+            ("/painel" if painel_como_destino(request, int(user_id)) else "/app")
         )
     from db import get_auth_user
 

@@ -968,7 +968,7 @@ def test_google_callback_de_conta_existente_retorna_para_compra(monkeypatch):
     monkeypatch.setattr(dashboard, "_set_dashboard_cookie", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(dashboard, "maybe_record_login_from_new_ip", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(dashboard, "log_auth_login_event", noop_log)
-    monkeypatch.setattr(dashboard, "_post_login_url", lambda _uid: "/home")
+    monkeypatch.setattr(dashboard, "_post_login_url", lambda _uid, _request=None: "/home")
 
     client = TestClient(dashboard.app)
     client.cookies.set(dashboard.GOOGLE_OAUTH_STATE_COOKIE, "state-valido")

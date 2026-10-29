@@ -38,7 +38,7 @@ const UPDATED = { institution_name: "Nubank", ui: { state: "updated", label: "At
  * devolve `stamped: true`. `calls.conv`: Pixel e GA4, mesmo após ir ao /home.
  */
 async function abrir(viewport, { step, snapshot = () => json({ ok: true, connections: [] }),
-                                saveStatus = () => 200, concluido = false, estado = {} } = {}) {
+                                saveStatus = () => 200, concluido = false, estado = {}, validate = {}, refresh = null } = {}) {
   const page = await browser.newPage({ viewport });
   await page.clock.install();
   const calls = { of: 0, posts: [], conv: [] };
@@ -60,6 +60,16 @@ async function abrir(viewport, { step, snapshot = () => json({ ok: true, connect
                     body: readFileSync(join(FRONTEND, "static", "auth-refresh.js"), "utf8") }));
   await page.route("**/auth/dashboard-profile", (route) =>
     route.fulfill(json({ user_id: 1, display_name: "Lucas", plan: "free" })));
+  // "expirado": 1º validate 401 + WWW-Authenticate (access de 15 min vencido), depois /painel; `refresh: "pendura"` não responde.
+  let validates = 0;
+  await page.route("**/auth/validate", (route) => {
+    if (validate === "pendura") return null;
+    if (validate !== "expirado") return route.fulfill(json(validate));
+    return ++validates === 1 ? route.fulfill({ ...json({ detail: "x" }, 401), headers: { "WWW-Authenticate": "Bearer" } })
+                             : route.fulfill(json({ dashboard_url: "/painel" }));
+  });
+  await page.route("**/auth/refresh", (route) => (refresh === "pendura" ? null : route.fulfill(json({ ok: true }))));
+  await page.route("**/painel", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<p>painel</p>" }));
   await page.route("**/onboarding/state", async (route) => {
     if (route.request().method() === "GET") return route.fulfill(json({ step, completed: concluido, total_steps: 5, ...estado }));
     const body = route.request().postDataJSON();
@@ -285,6 +295,45 @@ for (const vp of [VIEWPORTS[0]]) {
     await Promise.all([page.waitForURL("**/home"), page.click('[data-action="finish"]')]);
     assert.deepEqual(calls.conv, CONVERSAO, "o Finish não pode repetir a conversão");
     await page.close();
+  });
+
+  test(`${tag} Finish vai ao destino do /auth/validate (/painel); os demais casos, sem o campo, vão ao /home`, async () => {
+    // Negativo: voltar o goHome ao "/home" fixo deixa este caso vermelho; o /home abaixo é o positivo.
+    const { page } = await abrir(vp, { step: 5, concluido: true, validate: { dashboard_url: "/painel" } });
+    await page.waitForSelector('[data-role="done-ok"]:not([hidden])');
+    await Promise.all([page.waitForURL("**/painel"), page.click('[data-action="finish"]')]);
+    await page.close();
+  });
+
+  for (const evil of ["//evil.com", "/\t/evil.com", "/\n/evil.com"]) {
+    test(`${tag} Finish ignora destino que sai do site (${JSON.stringify(evil)}) e cai no /home`, async () => {
+      // Negativo: o regex antigo /^\/[^/\\]/ aceita "/\t/evil.com" (o parser tira o tab) e este caso fica vermelho.
+      const { page } = await abrir(vp, { step: 5, concluido: true, validate: { dashboard_url: evil } });
+      await page.waitForSelector('[data-role="done-ok"]:not([hidden])');
+      await Promise.all([page.waitForURL("**/home"), page.click('[data-action="finish"]')]);
+      await page.close();
+    });
+  }
+
+  test(`${tag} Finish com o /auth/validate pendurado cai no /home dentro do prazo`, async () => {
+    // O prazo do Promise.race do goHome leva ao /home; o controle negativo é o do caso seguinte (tirar o `prazo`).
+    const { page } = await abrir(vp, { step: 5, concluido: true, validate: "pendura" });
+    await page.waitForSelector('[data-role="done-ok"]:not([hidden])');
+    await Promise.all([page.waitForURL("**/home", { timeout: 7000 }), page.click('[data-action="finish"]')]);
+    await page.close();
+  });
+
+  test(`${tag} Finish com validate 401 e /auth/refresh pendurado cai no /home em ~4 s; com refresh 200 vai ao /painel`, async () => {
+    // Negativo: sem o Promise.race no goHome o invólucro de fetch espera o refresh (sem signal) e o waitForURL estoura.
+    let r = await abrir(vp, { step: 5, concluido: true, validate: "expirado", refresh: "pendura" });
+    await r.page.waitForSelector('[data-role="done-ok"]:not([hidden])');
+    await Promise.all([r.page.waitForURL("**/home", { timeout: 8000 }), r.page.click('[data-action="finish"]')]);
+    await r.page.close();
+    // Positivo: o refresh responde, o validate repetido devolve o destino.
+    r = await abrir(vp, { step: 5, concluido: true, validate: "expirado" });
+    await r.page.waitForSelector('[data-role="done-ok"]:not([hidden])');
+    await Promise.all([r.page.waitForURL("**/painel", { timeout: 3000 }), r.page.click('[data-action="finish"]')]);
+    await r.page.close();
   });
 
   test(`${tag} revisita ao passo 5 com a conclusão já gravada não dispara a conversão de novo`, async () => {

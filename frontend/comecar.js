@@ -379,7 +379,27 @@
   async function goHome() {
     if (state.conversion) await state.conversion;
     if (window.PBPurchaseIntent) window.PBPurchaseIntent.clearCompleted();
-    window.location.replace("/home");
+    // Destino vem do servidor (/painel para quem tem a chave no navegador); qualquer falha = /home.
+    let dest = "/home";
+    // Prazo de 4 s, corrido por Promise.race E com abort (AbortController, não AbortSignal.timeout: o alvo do app
+    // é iOS 14). Só o abort não basta: num 401 o invólucro de auth-refresh.js chama /auth/refresh sem signal.
+    const ctrl = new AbortController();
+    let timer;
+    const prazo = new Promise((r) => { timer = setTimeout(() => { ctrl.abort(); r(null); }, 4000); });
+    try {
+      const d = await Promise.race([
+        fetch("/auth/validate", { credentials: "same-origin", signal: ctrl.signal })
+          .then((res) => (res.ok ? res.json() : null)),
+        prazo,
+      ]);
+      if (d && typeof d.dashboard_url === "string") {
+        // Compara a ORIGEM resolvida: o parser de URL tira tab/newline ("/\t/evil.com" vira //evil.com).
+        const u = new URL(d.dashboard_url, window.location.origin);
+        if (u.origin === window.location.origin) dest = u.pathname + u.search + u.hash;
+      }
+    } catch (_) { /* sem validate (falha): segue para o /home */ }
+    clearTimeout(timer);
+    window.location.replace(dest);
   }
 
   async function skipAll(button) {

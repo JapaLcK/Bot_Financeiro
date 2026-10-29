@@ -25,19 +25,19 @@ after(async () => { await browser?.close(); server?.kill(); });
 const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 const TELAS = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 } };
 
-async function abre(tela, caminho, { verify, validate = 401 } = {}) {
+async function abre(tela, caminho, { verify, validate = 401, validateBody = {} } = {}) {
   const page = await browser.newPage({ viewport: TELAS[tela] });
   const chamadas = [];
   page.validates = 0;                       // quantas vezes o login.html consultou a sessão
   await page.context().addCookies([{ name: 'csrf_token', value: 'csrf-local', url: origin }]);
-  await page.route('**/auth/validate', route => { page.validates++; return json(route, {}, validate); });
+  await page.route('**/auth/validate', route => { page.validates++; return json(route, validateBody, validate); });
   await page.route('**/auth/refresh', route => json(route, {}, 401));
   await page.route('**/auth/mfa/verify-login', route => {
     chamadas.push(route.request().postDataJSON());
     return json(route, verify ?? { dashboard_url: '/destino-padrao' });
   });
   // Os destinos não existem no servidor de arquivos: só o caminho importa.
-  await page.route(url => /^\/(destino-padrao|continuar-compra|precos|conta|app|settings)$/.test(url.pathname),
+  await page.route(url => /^\/(destino-padrao|continuar-compra|precos|conta|app|painel|home|settings)$/.test(url.pathname),
     route => route.fulfill({ contentType: 'text/html', body: '<h1>Destino</h1>' }));
   await page.goto(`${origin}${caminho}`);
   return { page, chamadas };
@@ -122,6 +122,20 @@ for (const destino of ['/continuar-compra', '/precos', '/conta', '/app', '/app?v
     await page.fill('#mfa-code', '123456');
     await page.click('#btn-mfa');
     await page.waitForURL(url => url.pathname + url.search === destino);
+    await page.close();
+  });
+}
+
+// Sessão viva sem ?next: o destino vem do /auth/validate (/painel); sem o campo, /home (como antes).
+// ?next= segue vencendo. Negativo: voltar a `postAuth()` sem o payload deixa o primeiro caso vermelho.
+for (const [caminho, corpo, destino] of [
+  ['/login.html', { dashboard_url: '/painel' }, '/painel'],
+  ['/login.html?next=/settings', { dashboard_url: '/painel' }, '/settings'],
+  ['/login.html', {}, '/home'],
+]) {
+  test(`sessão viva em ${caminho} com validate ${JSON.stringify(corpo)} vai a ${destino}`, async () => {
+    const { page } = await abre('desktop', caminho, { validate: 200, validateBody: corpo });
+    await page.waitForURL(url => url.pathname === destino);
     await page.close();
   });
 }

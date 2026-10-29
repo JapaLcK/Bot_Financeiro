@@ -201,3 +201,19 @@ def test_freio_dos_agentes_mantem_a_allowlist(monkeypatch, user_id):
     monkeypatch.setenv("AGENTS_BETA_USER_IDS", str(user_id))
     r = get_com_cookie(sessao(user_id)["dashboard"])
     assert (r.status_code, r.json()) == (200, {"plan_tier": "plus", "agents_ui_enabled": True, "chat_ia": False})
+
+
+def test_todos_libera_qualquer_um_e_a_lista_beta_ignora_a_env(monkeypatch):
+    from core.services.plan_service import dashboard_v2_beta, dashboard_v2_enabled
+
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", "")
+    for valor in ("1", " TRUE ", "on"):
+        monkeypatch.setenv("DASHBOARD_V2_TODOS", valor)
+        assert dashboard_v2_enabled(9, "qualquer@x.com")
+        assert not dashboard_v2_beta(9, "qualquer@x.com")
+    for valor in ("0", "", "nao"):
+        monkeypatch.setenv("DASHBOARD_V2_TODOS", valor)
+        assert not dashboard_v2_enabled(9, "qualquer@x.com")
+    monkeypatch.delenv("DASHBOARD_V2_TODOS")
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", "9")
+    assert dashboard_v2_enabled(9, "q@x.com") and dashboard_v2_beta(9, "q@x.com")
