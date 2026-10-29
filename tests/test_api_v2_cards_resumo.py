@@ -52,7 +52,7 @@ def llm_nunca_real(monkeypatch):
 
 
 def _conta_geracoes(monkeypatch, pausa=0.0):
-    """Troca a geração (as consultas dos 6 detectores) por uma que conta e, com `pausa`, demora."""
+    """Troca a geração (as consultas dos detectores) por uma que conta e, com `pausa`, demora."""
     import time
     geracoes = []
 
