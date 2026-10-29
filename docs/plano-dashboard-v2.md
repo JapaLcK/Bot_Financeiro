@@ -20,7 +20,8 @@ marca na seção 8 o que concluiu.
 - **Chave por usuário** `dashboard_v2_enabled`, no padrão das listas de liberados de
   `core/services/plan_service.py`, chegando ao navegador pelo `/auth/me` (Q11). A chave
   vale no servidor, e nos dois lugares: `/painel` manda para `/app` quem não está
-  liberado, e a `/api/v2` recusa quem não está (no padrão de `_require_agents_beta`, em
+  liberado (`DASHBOARD_V2_TODOS=1` abre para todos, 2026-10-28; a Q36 segue só na lista beta e a Q37 é limite
+  aceito: base antiga vê manual antigo + Open Finance, sem tela de confirmação), e a `/api/v2` recusa quem não está (no padrão de `_require_agents_beta`, em
   `frontend/routes/agents.py`) — senão a API furaria a liberação gradual. O app novo terá a
   sua própria liberação quando chegar.
 - **O app atual (Capacitor) nunca mostra o v2** (Q10). Ele carrega o site ao vivo, então

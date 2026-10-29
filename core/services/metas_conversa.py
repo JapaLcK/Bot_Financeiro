@@ -61,8 +61,8 @@ def ler(uid: int) -> dict:
 
 
 def metas_ligadas(uid: int) -> bool:
-    # ponytail: só quem tem a chave do /painel novo (P1-b). Quando ela abrir para todos isto vira
-    # True; com criação de meta no app, `or` a pessoa já tem meta.
+    # Abre pela chave do /painel: DASHBOARD_V2_TODOS=1 liga para todos (freio = desligar a env).
+    # ponytail: com criação de meta no app, `or` a pessoa já tem meta.
     from core.services.plan_service import dashboard_v2_enabled
     return dashboard_v2_enabled(uid)
 

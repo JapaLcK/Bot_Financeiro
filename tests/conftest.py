@@ -442,6 +442,17 @@ def _declaracao_banco_desligada(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _desliga_abertura_geral(monkeypatch):
+    """As chaves de abertura geral do /painel e do chat IA nascem DESLIGADAS: um `.env` com elas ligadas não vira os testes de lista beta.
+
+    O NOME importa: o pytest ordena os autouse pelo nome, e um nome antes de `_auto_cleanup_orphan_users` faria o
+    `monkeypatch` subir antes dele e ser desfeito depois, então a limpeza do banco rodaria com o patch do teste ainda
+    valendo (`test_pix_recompra` troca o `_get_pool`). Depois de `_declaracao_banco_desligada`, que já pede o `monkeypatch`."""
+    monkeypatch.delenv("DASHBOARD_V2_TODOS", raising=False)
+    monkeypatch.delenv("PAINEL_CHAT_IA_TODOS", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _zera_rate_limit_em_memoria():
     """Storage do slowapi zerado por teste — ele é EM MEMÓRIA e vale pela sessão
     inteira do pytest, então teto de rota vaza de um arquivo para o outro.
