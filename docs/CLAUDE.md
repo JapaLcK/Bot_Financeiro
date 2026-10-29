@@ -2257,7 +2257,9 @@ outros saem e o `motivo` vai nulo, nunca `sem_destaques`; `ai_patterns.motivo_va
 `category_spike` segue a P1-B (PL-06 B1): o mês corrente inteiro contra o anterior inteiro (`escolher_janelas` e
 `resumo_mes.categorias`), warning a partir de +30% e critical a partir de +60%, os dois meses >= R$ 50, sem portão de dia
 do mês, "sem categoria" fora e corte pelo histórico do plano. O `bill_due` (PL-06 B2, família `vencimento`) é a conta a
-pagar pendente pela leitura da agenda (`db.bills.ler_instancias`), com gate `recurring_expenses` além de `insights`: info
+pagar pendente pela leitura da agenda (`db.bills.ler_instancias`), com gate `recurring_expenses` além de `insights`, conferido também NA LEITURA do cache
+(`insights_contrato.RECURSO_POR_TIPO`, `projetar(..., recursos_ok)`, antes do corte em 6), então quem perde o recurso
+dentro do TTL não vê o item: info
 de D-7 a D-4, warning de D-3 a D-1, critical em D-0 e vencida de D+1 a D+7 (uma por recorrente, a mais recente), primeiro
 no laço (no empate de gravidade vem antes; dentro do tipo, as que ainda vencem, da mais próxima, e depois as vencidas, da
 mais recente); chave `bill_due:id:AAAA-MM-DD` (vencida: `id:vencida`), então a dispensa

@@ -581,13 +581,15 @@ def ler_insights(user_id: int) -> list[dict] | None:
 
 
 def _projetar(user_id: int, itens: list[dict]) -> list[dict]:
-    # O plano e as dispensas valem na LEITURA: o cache guarda `impacto`/`acoes` e quem caiu do Pro dentro das 6 h
-    # não os vê; dispensar não invalida o cache.
-    from core.services.insights_contrato import projetar
+    # O plano e as dispensas valem na LEITURA: o cache guarda `impacto`/`acoes` e os tipos de `RECURSO_POR_TIPO`, e
+    # quem caiu do Pro (ou perdeu o recurso) dentro do TTL não os vê; dispensar não invalida o cache.
+    from core.services.insights_contrato import RECURSO_POR_TIPO, projetar
     from core.services.plan_service import plan_gate_ok
     from db.insight_estado import dispensadas
+    recursos = {RECURSO_POR_TIPO[it["type"]] for it in itens if it.get("type") in RECURSO_POR_TIPO}  # só os presentes
     return projetar(itens, acoes_ok=plan_gate_ok(user_id, "insights_acoes"),
-                    dispensadas=dispensadas(user_id, [it.get("key") for it in itens]))
+                    dispensadas=dispensadas(user_id, [it.get("key") for it in itens]),
+                    recursos_ok={rec: plan_gate_ok(user_id, rec) for rec in recursos})
 
 
 # ─────────────────────────────────────────────────────────────────────────────

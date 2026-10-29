@@ -9,9 +9,10 @@ Controles negativos medidos à mão no PR (mutação numa cópia da árvore, um 
 `dias < ALERTA` e `JANELA` 6 → caso 1; sem o corte inferior → caso 2; sem o `continue` da vencida repetida do
 recorrente → caso 2; escada achatada e vencida sem `:vencida` → caso 3; número de dias dentro da chave da vencida
 (`f"{id}:vencida:{-dias}"`) → casos 2 e 3 (a dispensa da vencida respeitada, P1); join sem `r.user_id` em
-`ler_instancias` → caso 4; dia pelo UTC → caso 10; sem o gate T1 → caso 11; detector no fim do laço → caso 12;
-ordem `(due_date, id)` dentro do tipo → caso 2b; sem o `reserva="Conta"` (ou reserva ignorada) → caso 8; TTL fixo
-de 6 h no `ler_insights` → caso 14, na leitura da rota → caso 14b, no `motivo_vazio` → caso 14c.
+`ler_instancias` → caso 4; dia pelo UTC → caso 10; sem o gate T1 na geração E na leitura → caso 11; sem o filtro de
+recurso na leitura, ou filtro depois do corte → caso 11b; detector no fim do laço → caso 12; ordem `(due_date, id)`
+dentro do tipo → caso 2b; sem o `reserva="Conta"` (ou reserva ignorada) → caso 8; TTL fixo de 6 h no `ler_insights` →
+caso 14, na leitura da rota → caso 14b, no `motivo_vazio` → caso 14c.
 Positivos: casos 3 (o dispensado não volta à toa), 5 (aparece antes de pagar), 6 (o Pro vê `acoes`), 11 (Pro legado vê).
 """
 from __future__ import annotations
@@ -29,6 +30,7 @@ from core.services import insights_detectores as detectores
 from db.bills import create_boleto, delete_boleto, ensure_bill_instance, list_bills
 from db.recurring import create_recurring_expense
 from test_insights_contrato import _usuario, llm  # noqa: F401
+from test_api_app_sessao import completo
 from test_insights_estado import _put
 from tests._patrimonio_helpers import q
 from utils_date import _tz, day_tz, now_tz
@@ -251,13 +253,37 @@ def test_11_legado_gratis_nao_ve_e_pro_legado_ve(llm, monkeypatch):
     assert [i["type"] for i in ai_patterns.generate_ai_insights(pro, force=True)] == ["bill_due"]
 
 
+def test_11b_quem_perde_o_recurso_com_o_cache_quente_nao_ve_e_o_teto_e_preenchido(llm, monkeypatch):
+    """Legado: o Pro grava o cache com a conta de hoje e cai para Grátis dentro do TTL. A leitura (rota e card) tira o
+    `bill_due` ANTES do corte em 6, sem recalcular: o 6º orçamento entra no lugar."""
+    monkeypatch.setenv("PLANS_V2_ENABLED", "0")
+    uid = completo(usuario_pagante("pro"))
+    _seis_orcamentos_estourados(uid)
+    create_boleto(uid, "Luz", 180, day_tz(now_tz()))
+    ai_patterns.generate_ai_insights(uid, force=True)
+
+    def feed():
+        return [i["type"] for i in _http(uid).get(f"/insights/{uid}/current").json()["insights"]]
+    assert feed() == ["bill_due"] + ["budget_warning"] * 5  # positivo: com o recurso, a conta aparece
+    recalculos = []
+    monkeypatch.setattr("db.compute_active_insights", lambda *a: recalculos.append(a) or ([], []))
+    promote_to_pro(uid, "free")
+    assert feed() == ["budget_warning"] * 6
+    assert [i["type"] for i in ai_patterns.ler_insights(uid)] == ["budget_warning"] * 6  # o card `piggy`
+    assert recalculos == []  # veio do cache
+
+
 # ── 12. teto de 6: no empate de gravidade, a conta vem antes (P3) ─────────────────
 
-def test_12_conta_de_hoje_fica_no_feed_com_6_orcamentos_estourados(llm):
-    uid = _usuario("pro_max")
+def _seis_orcamentos_estourados(uid):
     for cat in ("mercado", "lazer", "transporte", "saude", "educacao", "restaurante"):
         db.upsert_budget(uid, cat, 100)
         db.add_launch_and_update_balance(uid, "despesa", 120, f"Loja {cat}", None, categoria=cat)
+
+
+def test_12_conta_de_hoje_fica_no_feed_com_6_orcamentos_estourados(llm):
+    uid = _usuario("pro_max")
+    _seis_orcamentos_estourados(uid)
     create_boleto(uid, "Luz", 180, day_tz(now_tz()))
     feed = _http(uid).get(f"/insights/{uid}/current").json()["insights"]
     assert len(feed) == 6 and {i["severity"] for i in feed} == {"critical"}

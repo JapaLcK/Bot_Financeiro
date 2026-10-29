@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.services.insights_contrato import dinheiro, montar_item, navegar, nome, periodo_dia
+from core.services.insights_contrato import RECURSO_POR_TIPO, dinheiro, montar_item, navegar, nome, periodo_dia
 from utils_date import day_tz, now_tz
 from utils_text import fmt_brl
 
@@ -30,11 +30,12 @@ def detect_bill_due(user_id: int) -> list[dict[str, Any]]:
     em D-0 e vencida (D+1 a D+N_VENCIDA, uma por recorrente: a mais recente). Paga ou apagada sai da leitura.
     Chave `bill_due:id:vencimento` (vencida: `id:vencida`), então a dispensa volta só quando a faixa piora (D4).
     Fora: faturas de cartão, gastos fixos automáticos e o envio. O Carteiro avisa a mesma conta no feed de agentes:
-    a duplicidade no app é aceita (Q2d). Sem plano de gastos fixos (`recurring_expenses`, T1) não há aviso."""
+    a duplicidade no app é aceita (Q2d). Sem plano de gastos fixos (`recurring_expenses`, T1) não há aviso: na geração
+    e de novo na leitura do cache (`insights_contrato.RECURSO_POR_TIPO`), para quem perde o plano dentro do TTL."""
     from core.services.plan_service import plan_gate_ok
     from db.bills import ler_instancias
     from db.connection import get_conn
-    if not plan_gate_ok(user_id, "recurring_expenses"):
+    if not plan_gate_ok(user_id, RECURSO_POR_TIPO["bill_due"]):  # poupa a consulta; a leitura do cache confere de novo
         return []
     hoje = day_tz(now_tz())
     with get_conn() as conn, conn.cursor() as cur:

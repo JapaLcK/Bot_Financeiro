@@ -33,6 +33,9 @@ TIPOS: dict[str, tuple[str, dict[str, Any]]] = {
     "bill_due": ("vencimento", {"base": "contas_a_pagar", "cartao": None, "origem": "suas contas a pagar"}),
 }
 SO_PRO = ("impacto", "acoes")
+# Recurso de plano que o tipo exige além de `insights`, conferido NA LEITURA (`projetar`): o cache é um só para todos
+# os planos, e quem perde o recurso dentro do TTL não pode seguir vendo o item (plano-b, B3).
+RECURSO_POR_TIPO = {"bill_due": "recurring_expenses"}
 GRAVIDADE = {"info": 0, "warning": 1, "critical": 2}  # a ordem do feed e a régua do "piorou" (D4)
 LIMITE = 6
 CHAVE_MAX = 160
@@ -173,11 +176,13 @@ def piorou(item: dict, sev_dispensada: str, valor_dispensado: Decimal | None) ->
 
 def projetar(itens: list[dict], *, acoes_ok: bool,
              dispensadas: Mapping[str, tuple[str, Decimal | None]] | None = None,
-             limite: int = LIMITE) -> list[dict]:
+             recursos_ok: Mapping[str, bool] | None = None, limite: int = LIMITE) -> list[dict]:
     """O que o usuário recebe do cache: sem o dispensado que não piorou (chave -> referência da dispensa,
-    `db.insight_estado.dispensadas`), sem `impacto`/`acoes` fora do Pro, e só então cortado em `limite`."""
-    d = dispensadas or {}
+    `db.insight_estado.dispensadas`), sem o tipo cujo recurso (`RECURSO_POR_TIPO`) não está em `recursos_ok`
+    (ausente = sem acesso), sem `impacto`/`acoes` fora do Pro, e só então cortado em `limite`."""
+    d, r = dispensadas or {}, recursos_ok or {}
     out = [it for it in itens if it.get("key") not in d or piorou(it, *d[it["key"]])]
+    out = [it for it in out if it.get("type") not in RECURSO_POR_TIPO or r.get(RECURSO_POR_TIPO[it["type"]])]
     if not acoes_ok:
         out = [{k: v for k, v in it.items() if k not in SO_PRO} for it in out]
     return out[:limite]
