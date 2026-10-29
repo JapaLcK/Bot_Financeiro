@@ -562,20 +562,22 @@ def _gerar_insights(user_id: int, kind: str) -> list[dict]:
 
 
 def motivo_vazio(user_id: int) -> str | None:
-    """Por que a lista PROJETADA saiu vazia (só se chama assim): `dispensados` se o cache tem itens (todos
-    dispensados), senão `sem_dados`/`sem_destaques`. Sem cache (um detector falhou) = None: não é "nada a apontar"."""
+    """Por que a lista PROJETADA saiu vazia (só se chama assim): `dispensados` se o cache tem itens que o plano mostra
+    (todos dispensados), senão `sem_dados`/`sem_destaques`. Sem cache (um detector falhou) = None: não é "nada a
+    apontar"."""
+    from core.services.insights_contrato import projetar
     itens = _get_cached(user_id, _cache_kind("insights"), _ttl_insights())
     if itens is None:
         return None
-    if itens:
+    if projetar(itens, acoes_ok=True, recursos_ok=_recursos_ok(user_id, itens)):  # o mesmo corte por recurso da leitura
         return "dispensados"
     from db.insights import motivo_sem_insights
     return motivo_sem_insights(user_id)
 
 
 def ler_insights(user_id: int) -> list[dict] | None:
-    """O cache (até 6 h ou até a meia-noite de Brasília) com a mesma projeção da rota, sem gerar (o card `piggy` do chat). None = sem cache.
-    Quem chama já passou no gate `insights`."""
+    """O cache (até 6 h ou até a meia-noite de Brasília) com a mesma projeção da rota, sem gerar (o card `piggy` do
+    chat). None = sem cache. Quem chama já passou no gate `insights`."""
     itens = _get_cached(user_id, _cache_kind("insights"), _ttl_insights())
     return None if itens is None else _projetar(user_id, itens)
 
@@ -583,13 +585,20 @@ def ler_insights(user_id: int) -> list[dict] | None:
 def _projetar(user_id: int, itens: list[dict]) -> list[dict]:
     # O plano e as dispensas valem na LEITURA: o cache guarda `impacto`/`acoes` e os tipos de `RECURSO_POR_TIPO`, e
     # quem caiu do Pro (ou perdeu o recurso) dentro do TTL não os vê; dispensar não invalida o cache.
-    from core.services.insights_contrato import RECURSO_POR_TIPO, projetar
+    from core.services.insights_contrato import projetar
     from core.services.plan_service import plan_gate_ok
     from db.insight_estado import dispensadas
-    recursos = {RECURSO_POR_TIPO[it["type"]] for it in itens if it.get("type") in RECURSO_POR_TIPO}  # só os presentes
     return projetar(itens, acoes_ok=plan_gate_ok(user_id, "insights_acoes"),
                     dispensadas=dispensadas(user_id, [it.get("key") for it in itens]),
-                    recursos_ok={rec: plan_gate_ok(user_id, rec) for rec in recursos})
+                    recursos_ok=_recursos_ok(user_id, itens))
+
+
+def _recursos_ok(user_id: int, itens: list[dict]) -> dict[str, bool]:
+    """O plano de cada recurso de `RECURSO_POR_TIPO` presente nos itens (sem consulta para os ausentes)."""
+    from core.services.insights_contrato import RECURSO_POR_TIPO
+    from core.services.plan_service import plan_gate_ok
+    return {rec: plan_gate_ok(user_id, rec) for rec in {RECURSO_POR_TIPO[it["type"]] for it in itens
+                                                         if it.get("type") in RECURSO_POR_TIPO}}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

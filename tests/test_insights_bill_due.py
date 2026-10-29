@@ -10,15 +10,17 @@ Controles negativos medidos à mão no PR (mutação numa cópia da árvore, um 
 recorrente → caso 2; escada achatada e vencida sem `:vencida` → caso 3; número de dias dentro da chave da vencida
 (`f"{id}:vencida:{-dias}"`) → casos 2 e 3 (a dispensa da vencida respeitada, P1); join sem `r.user_id` em
 `ler_instancias` → caso 4; dia pelo UTC → caso 10; sem o gate T1 na geração E na leitura → caso 11; sem o filtro de
-recurso na leitura, ou filtro depois do corte → caso 11b; detector no fim do laço → caso 12; ordem `(due_date, id)`
-dentro do tipo → caso 2b; sem o `reserva="Conta"` (ou reserva ignorada) → caso 8; TTL fixo de 6 h no `ler_insights` →
-caso 14, na leitura da rota → caso 14b, no `motivo_vazio` → caso 14c.
+recurso na leitura, ou filtro depois do corte → caso 11b; sem ele no `motivo_vazio` → caso 11c; detector no fim do
+laço → caso 12; ordem `(due_date, id)` dentro do tipo → caso 2b; sem o `reserva="Conta"` (ou reserva ignorada) → caso 8;
+TTL fixo de 6 h no `ler_insights` → caso 14, na leitura da rota → caso 14b, no `motivo_vazio` → caso 14c.
 Positivos: casos 3 (o dispensado não volta à toa), 5 (aparece antes de pagar), 6 (o Pro vê `acoes`), 11 (Pro legado vê).
 """
 from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
+
+import pytest
 
 import db
 from _cards_apoio import _http
@@ -271,6 +273,27 @@ def test_11b_quem_perde_o_recurso_com_o_cache_quente_nao_ve_e_o_teto_e_preenchid
     assert feed() == ["budget_warning"] * 6
     assert [i["type"] for i in ai_patterns.ler_insights(uid)] == ["budget_warning"] * 6  # o card `piggy`
     assert recalculos == []  # veio do cache
+
+
+def test_11c_motivo_de_quem_perde_o_recurso_e_sem_destaques_e_nao_dispensados(llm, monkeypatch):
+    """Legado, só a conta no cache: quem cai para Grátis recebe a lista vazia com `sem_destaques` (há dados, nada a
+    mostrar), não `dispensados` (ele não dispensou nada). Positivo: quem dispensou de fato segue com `dispensados`."""
+    monkeypatch.setenv("PLANS_V2_ENABLED", "0")
+    caiu, dispensou = completo(usuario_pagante("pro")), completo(usuario_pagante("pro"))
+    for uid in (caiu, dispensou):
+        db.add_launch_and_update_balance(uid, "despesa", 30, "Padaria", None, categoria="mercado")
+        create_boleto(uid, "Luz", 180, day_tz(now_tz()))
+        ai_patterns.generate_ai_insights(uid, force=True)
+
+    def feed(uid):
+        r = _http(uid).get(f"/insights/{uid}/current").json()
+        return [i["type"] for i in r["insights"]], r["motivo"]
+    (it,) = ai_patterns.ler_insights(dispensou)
+    assert _put(dispensou, chave=it["key"], dispensado=True, severidade=it["severity"]).status_code == 200
+    monkeypatch.setattr("db.compute_active_insights", lambda *a: pytest.fail("recalculou"))
+    promote_to_pro(caiu, "free")
+    assert feed(caiu) == ([], "sem_destaques")
+    assert feed(dispensou) == ([], "dispensados")
 
 
 # ── 12. teto de 6: no empate de gravidade, a conta vem antes (P3) ─────────────────
