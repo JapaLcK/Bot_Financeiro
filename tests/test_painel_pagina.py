@@ -188,7 +188,7 @@ def test_auth_me_devolve_a_chave(monkeypatch, user_id):
     assert get("/auth/me", auth=s["access"]).json()["dashboard_v2_enabled"] is False
     libera(monkeypatch, user_id)
     assert get("/auth/me", auth=s["access"]).json()["dashboard_v2_enabled"] is True
-    # A chave é pura: o UA do app não a muda (quem esconde o link no app é o /app).
+    # A chave é pura: o UA do app não a muda (quem manda o app ao /app é o servidor).
     assert get("/auth/me", auth=s["access"], ua=UA_APP).json()["dashboard_v2_enabled"] is True
 
 
