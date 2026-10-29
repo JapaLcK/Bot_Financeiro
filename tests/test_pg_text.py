@@ -7,11 +7,12 @@ esconder o outro.
 """
 import json
 import signal
+from types import SimpleNamespace
 
 import pytest
 
 import core.pg_text as pg_text
-from core.pg_text import limpa_para_pg
+from core.pg_text import limpa_para_pg, quadros_da_cadeia
 
 
 @pytest.mark.parametrize("entrada,esperado", [
@@ -121,3 +122,98 @@ def test_limpa_para_pg_nao_reprocessa_o_mesmo_no(monkeypatch):
 
     # 2 chaves × 18 dicts distintos + as 2 folhas do dict mais fundo.
     assert len(chamadas) == 38, len(chamadas)
+
+
+# ── quadros_da_cadeia: a pilha da cadeia inteira, sem a mensagem de nenhum elo ──
+# A mensagem dos elos é `_DETALHE`, por NOME no `raise`: o quadro mostra o código-fonte,
+# então o literal no `raise` apareceria e o "segredo" daria falso vermelho.
+
+_DETALHE = "DETAIL: Key (id)=(42) segredo"
+
+
+class _ComSqlstate(Exception):
+    def __init__(self, msg, sqlstate):
+        super().__init__(msg)
+        self.sqlstate = sqlstate
+
+
+def _banco(sqlstate="23505"):
+    raise _ComSqlstate(_DETALHE, sqlstate)
+
+
+def _capturada(f) -> BaseException:
+    try:
+        f()
+    except Exception as e:  # noqa: BLE001
+        return e
+    raise AssertionError("não levantou")
+
+
+def _implicito():
+    try:
+        _banco()
+    except Exception:
+        raise RuntimeError(_DETALHE)  # sem `from`: o caso mais comum, `__context__`
+
+
+def _from_none():
+    try:
+        _banco()
+    except Exception:
+        raise RuntimeError(_DETALHE) from None
+
+
+def _dois_sqlstates():
+    try:
+        _banco("23505")
+    except Exception as e:
+        raise _ComSqlstate(_DETALHE, "40001") from e
+
+
+def _causa_explicita():
+    causa = _capturada(_banco)
+    try:
+        raise KeyError(_DETALHE)
+    except KeyError:
+        raise RuntimeError(_DETALHE) from causa  # `__cause__` (o banco) != `__context__` (o KeyError)
+
+
+@pytest.mark.parametrize("fonte,quadro_do_banco,sqlstate", [
+    (_implicito, True, "23505"),        # o contexto implícito é seguido
+    (_from_none, False, None),          # `from None` para a cadeia
+    (_dois_sqlstates, True, "40001"),   # vale o sqlstate do PRIMEIRO elo (o de fora)
+    (_causa_explicita, True, "23505"),  # `__cause__` antes de `__context__`, como o Python
+])
+def test_quadros_da_cadeia(fonte, quadro_do_banco, sqlstate):
+    quadros, achado = quadros_da_cadeia(_capturada(fonte))
+    assert ("in _banco" in quadros) == quadro_do_banco and achado == sqlstate, (quadros, achado)
+    assert f"in {fonte.__name__}" in quadros, quadros
+    assert "segredo" not in quadros and "DETAIL" not in quadros, quadros
+
+
+@pytest.mark.skipif(
+    not hasattr(signal, "SIGALRM"), reason="SIGALRM é POSIX-only (não existe no Windows)"
+)
+def test_quadros_da_cadeia_termina_em_ciclo():
+    """Sem a guarda de vistos o laço não termina: o alarme vira o travamento em erro (o
+    `except` interno o engole e devolve vazio, e o assert abaixo acusa)."""
+    def _estourou(*_):
+        raise AssertionError("quadros_da_cadeia não retornou: laço infinito")
+
+    a, b = ValueError(_DETALHE), KeyError(_DETALHE)
+    a.__context__, b.__context__ = b, a
+    anterior = signal.signal(signal.SIGALRM, _estourou)
+    signal.setitimer(signal.ITIMER_REAL, 1)
+    try:
+        quadros, sqlstate = quadros_da_cadeia(a)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, anterior)
+    assert quadros == "\nCausado por KeyError:\n" and sqlstate is None, quadros
+
+
+def test_quadros_da_cadeia_nunca_levanta(monkeypatch):
+    def quebra(_tb):
+        raise RuntimeError(_DETALHE)
+    monkeypatch.setattr(pg_text, "traceback", SimpleNamespace(format_tb=quebra))  # só o de pg_text
+    assert quadros_da_cadeia(_capturada(_implicito)) == ("", None)

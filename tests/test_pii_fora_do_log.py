@@ -128,8 +128,10 @@ def test_botao_de_opt_out_com_falha_sem_telefone_cru(botao, user_id, monkeypatch
 
 
 def test_handle_incoming_failed_nao_leva_o_texto(user_id, monkeypatch, caplog):
+    detalhe = "boom DETAIL: Key (id)=(42) segredo"  # fora da linha do `raise`: o quadro mostra o código-fonte
+
     def explode(*a, **kw):
-        raise RuntimeError("boom")
+        raise RuntimeError(detalhe)
 
     monkeypatch.setattr(hi, "_paywall_gate", explode)  # 1º passo do try
     eventos: list[dict] = []
@@ -142,7 +144,8 @@ def test_handle_incoming_failed_nao_leva_o_texto(user_id, monkeypatch, caplog):
     details = eventos[0]["details"]
     assert "Açaí" not in json.dumps(details, ensure_ascii=False), details
     assert details["chars"] == len(TEXTO) and details["platform"] == "whatsapp", details
-    assert "RuntimeError" in details["traceback"], details
+    # P2 (c) da #657: os quadros da pilha (onde quebrou) ficam; a linha final do erro, com o DETAIL, não.
+    assert "in explode" in details["traceback"] and "segredo" not in details["traceback"], details
 
     linhas = [r for r in caplog.records if r.getMessage().startswith("handle_incoming FAILED")]
     assert len(linhas) == 1, [r.getMessage() for r in caplog.records]
