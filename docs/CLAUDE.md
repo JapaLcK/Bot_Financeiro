@@ -2775,7 +2775,11 @@ caem; o mesmo job reescreve as linhas de `EVENTOS_FALHA_DELETE` com mensagem fix
 e o texto cru da exceção já trouxe corpo de resposta da Pluggy; os escritores ainda gravam
 esse texto, até a fatia C; dedup novo com janela maior que `RETENCAO_MINIMA_DIAS` entra em
 `EVENTOS_PERMANENTES` e no §6 de `frontend/privacy.html`, senão
-`tests/test_eventos_permanentes_guarda.py` ou `tests/test_politica_retencao.py` reprova), e a
+`tests/test_eventos_permanentes_guarda.py` ou `tests/test_politica_retencao.py` reprova), a
+retenção de 180 dias de `pii_access_log` (`purge_pii_access_log`, mesmo módulo e mesmo
+`apagar_em_lotes`; global por data; nada decide comportamento com base em linha antiga, e o
+painel `/admin/api/pii-access` e o `admin.py audit --days` passam a mostrar no máximo 180
+dias), e a
 entrega do e-book da `/assinar`
 (`_ebook_worker` → `core/services/ebook_entrega.entregar_pendentes`, a cada 5 min, a
 1ª volta sem delay; inerte sem `STRIPE_SECRET_KEY` no ambiente), o e-mail trocado em
@@ -2960,6 +2964,10 @@ de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda) ·
 `SYSTEM_EVENT_LOGS_RETENTION_DAYS` (default 90; `<= 0` desliga só a retenção de
 `system_event_logs`; 1 a 89 sobe para o piso de 90; inválido cai no 90; o §6 de
 `frontend/privacy.html` promete 90 dias, então mudar o valor exige mudar a política, e
+nenhum teste vê o valor do Railway) ·
+`PII_ACCESS_LOG_RETENTION_DAYS` (default 180; `<= 0` desliga só a retenção de
+`pii_access_log`; 1 a 179 sobe para o piso de 180, base legal da DP5; inválido cai no 180;
+o §6 de `frontend/privacy.html` promete 180 dias, então mudar o valor exige mudar a política, e
 nenhum teste vê o valor do Railway).
 
 ---
@@ -2972,7 +2980,9 @@ nenhum teste vê o valor do Railway).
 - Modelo Pydantic para todo body de POST.
 - `ensure_user()` antes de operação de banco para usuário novo.
 - Import dentro da função nos endpoints, quando necessário para evitar import circular.
-- PII cifrada (`core/crypto.py`) e acesso registrado (`pii_access_log`, `core/audit.py`).
+- PII cifrada (`core/crypto.py`) e acesso registrado (`pii_access_log`, `core/audit.py`);
+  acesso em nome do titular usa `actor=ATOR_TITULAR` (`user:self`), nunca o uid no texto: o
+  titular vai só em `subject_user_id`, que a exclusão anula.
 - Nunca passe segredo em `details` de auditoria (senha, TOTP, código de backup).
 
 ---

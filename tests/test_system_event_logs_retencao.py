@@ -28,6 +28,7 @@ from _billing_grants_helpers import garantir_system_event_logs
 from core.observability import recent_event_exists
 from core.services import log_retention
 from core.services.log_retention import (
+    RETENCAO_MINIMA_DIAS,
     TEXTO_FALHA_DELETE,
     _dias,
     apagar_em_lotes,
@@ -234,7 +235,7 @@ def test_teto_de_lotes_para_e_a_proxima_volta_continua(chave):
 ])
 def test_dias_cai_no_90_com_aviso(monkeypatch, capsys, valor, esperado, avisa):
     monkeypatch.setenv("SYSTEM_EVENT_LOGS_RETENTION_DAYS", valor)
-    assert _dias() == esperado
+    assert _dias("SYSTEM_EVENT_LOGS_RETENTION_DAYS", RETENCAO_MINIMA_DIAS) == esperado
     assert ("SYSTEM_EVENT_LOGS_RETENTION_DAYS" in capsys.readouterr().err) is avisa
 
 

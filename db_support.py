@@ -14,6 +14,7 @@ import psycopg
 from utils_phone import normalize_phone_e164, phone_lookup_candidates
 
 from core.crypto import (
+    ATOR_TITULAR,
     PiiAccessContext,
     decrypt_pii_optional,
     encrypt_pii_optional,
@@ -298,7 +299,7 @@ def list_identities_by_user_impl(get_conn, user_id: int) -> list[dict]:
                             enc,
                             ctx=PiiAccessContext(
                                 purpose="list_identities",
-                                actor=f"user:{user_id}",
+                                actor=ATOR_TITULAR,
                                 subject_user_id=user_id,
                                 field=f"{provider}_id",
                             ),
@@ -617,19 +618,19 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
     if row.get("email_enc"):
         row["email"] = decrypt_pii_optional(
             row["email_enc"],
-            ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
+            ctx=PiiAccessContext(purpose="get_auth_user", actor=ATOR_TITULAR,
                                  subject_user_id=user_id, field="email"),
         )
     if row.get("phone_enc"):
         row["phone_e164"] = decrypt_pii_optional(
             row["phone_enc"],
-            ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
+            ctx=PiiAccessContext(purpose="get_auth_user", actor=ATOR_TITULAR,
                                  subject_user_id=user_id, field="phone"),
         )
     if row.get("display_name_enc"):
         row["display_name"] = decrypt_pii_optional(
             row["display_name_enc"],
-            ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
+            ctx=PiiAccessContext(purpose="get_auth_user", actor=ATOR_TITULAR,
                                  subject_user_id=user_id, field="name"),
         )
     now = lido_em
