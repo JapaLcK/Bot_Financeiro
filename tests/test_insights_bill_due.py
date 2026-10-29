@@ -13,7 +13,8 @@ recorrente → caso 2; escada achatada e vencida sem `:vencida` → caso 3; núm
 recurso na leitura, ou filtro depois do corte → caso 11b; sem ele no `motivo_vazio` → caso 11c; detector no fim do
 laço → caso 12; ordem `(due_date, id)` dentro do tipo → caso 2b; sem o `reserva="Conta"` (ou reserva ignorada) → caso 8;
 TTL fixo de 6 h no `ler_insights` → caso 14, na leitura da rota → caso 14b, no `motivo_vazio` → caso 14c.
-Positivos: casos 3 (o dispensado não volta à toa), 5 (aparece antes de pagar), 6 (o Pro vê `acoes`), 11 (Pro legado vê).
+Positivos: casos 3 (o dispensado não volta à toa), 5 (aparece antes de pagar), 6 (o Pro vê `acoes`), 11 (Pro legado vê),
+11b (com o recurso, a conta aparece) e 11c (quem dispensou segue `dispensados`).
 """
 from __future__ import annotations
 

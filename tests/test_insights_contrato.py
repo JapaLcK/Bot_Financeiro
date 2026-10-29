@@ -274,3 +274,11 @@ def test_todo_action_view_dos_detectores_e_uma_view_do_painel():
     assert {"budgets", "analytics", "fixed"} < emitidas and {"goals", "budgets"} <= views  # leu de fato
     assert emitidas <= views, emitidas - views                               # o card
     assert {mapa.get(v, v) for v in emitidas} <= views                       # a lista
+
+
+def test_todo_recurso_por_tipo_e_uma_feature_do_plano():
+    """`plan_gate_ok` lê `FEATURE_MIN_TIER_V2.get(recurso, "essencial")`: recurso com typo viraria Essencial calado.
+    O modo legado não tem mapa (é `is_pro` para tudo fora de `insights`/`financial_comparison`/`weekly_report`)."""
+    from core.services.insights_contrato import RECURSO_POR_TIPO
+    from core.services.plan_service import FEATURE_MIN_TIER_V2
+    assert set(RECURSO_POR_TIPO.values()) - set(FEATURE_MIN_TIER_V2) == set()
