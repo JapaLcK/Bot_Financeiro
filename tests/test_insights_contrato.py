@@ -268,9 +268,17 @@ def test_todo_action_view_dos_detectores_e_uma_view_do_painel():
     js = (raiz / "frontend/dashboard.js").read_text()
     views = set(re.findall(r'"([\w-]+)"', re.search(r"const DASH_VIEWS = \[(.*?)\];", js, re.S).group(1)))
     mapa = dict(re.findall(r"(\w+):\s*\"([\w-]+)\"", re.search(r"const _INSIGHT_VIEW_MAP = \{(.*?)\};", js, re.S).group(1)))
-    arvore = ast.parse((raiz / "db/insights.py").read_text())
-    emitidas = {k.value.value for k in ast.walk(arvore) if isinstance(k, ast.keyword) and k.arg == "action_view"
-                and isinstance(k.value, ast.Constant) and k.value.value}
+    emitidas = {k.value.value for f in ("db/insights.py", "core/services/insights_detectores.py")
+                for k in ast.walk(ast.parse((raiz / f).read_text())) if isinstance(k, ast.keyword)
+                and k.arg == "action_view" and isinstance(k.value, ast.Constant) and k.value.value}
     assert {"budgets", "analytics", "fixed"} < emitidas and {"goals", "budgets"} <= views  # leu de fato
     assert emitidas <= views, emitidas - views                               # o card
     assert {mapa.get(v, v) for v in emitidas} <= views                       # a lista
+
+
+def test_todo_recurso_por_tipo_e_uma_feature_do_plano():
+    """`plan_gate_ok` lê `FEATURE_MIN_TIER_V2.get(recurso, "essencial")`: recurso com typo viraria Essencial calado.
+    O modo legado não tem mapa (é `is_pro` para tudo fora de `insights`/`financial_comparison`/`weekly_report`)."""
+    from core.services.insights_contrato import RECURSO_POR_TIPO
+    from core.services.plan_service import FEATURE_MIN_TIER_V2
+    assert set(RECURSO_POR_TIPO.values()) - set(FEATURE_MIN_TIER_V2) == set()

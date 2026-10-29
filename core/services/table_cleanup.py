@@ -12,6 +12,7 @@ rodar como tarefa de fundo do próprio app, no lifespan:
   db/demo_funnel.py       esquecer_numeros_antigos        → demo_sessions (zera wa_hash > 30 dias; não apaga linha)
   core/services/log_retention.py  purge_system_event_logs → system_event_logs (90 dias, exceto EVENTOS_PERMANENTES)
   core/services/log_retention.py  limpar_texto_das_falhas_de_remocao → system_event_logs (texto fixo; não apaga linha)
+  core/services/log_retention.py  purge_pii_access_log → pii_access_log (RETENCAO_PII_DIAS)
 
 Uma fonte de verdade, dois consumidores: `run_table_cleanup` é chamada pelo loop
 daqui (`_table_cleanup` no lifespan) e por `scripts/cleanup_job.py` (execução
@@ -35,10 +36,11 @@ acontece em horário arbitrário 24×/dia.
 Config (env, opcional):
   - TABLE_CLEANUP_INTERVAL_HOURS (default '24') — 0 (ou negativo) desliga o job.
   - SYSTEM_EVENT_LOGS_RETENTION_DAYS (default '90') — ver core/services/log_retention.py.
+  - PII_ACCESS_LOG_RETENTION_DAYS (default RETENCAO_PII_DIAS) — ver core/services/log_retention.py.
 
 ponytail: tetos conhecidos, não implementados (P2/P3 do Tester) — sem
-`lock_timeout` no DELETE das quatro primeiras (a de `system_event_logs` tem,
-via `apagar_em_lotes`), sem cancelar a thread do `to_thread` quando a task cai,
+`lock_timeout` no DELETE das quatro primeiras (as de `system_event_logs` e
+`pii_access_log` têm, via `apagar_em_lotes`), sem cancelar a thread do `to_thread` quando a task cai,
 e sem validar a env (valor não-inteiro cai no default 24, negativo desliga como
 0). Intervalo FRACIONÁRIO não sai de validação nenhuma: o `int()` de
 `_interval_hours` é quem trunca, e quem pedir 0,5h troca esse `int` por
@@ -99,6 +101,7 @@ def _cleanups() -> list[tuple[str, object]]:
     from db.mfa import cleanup_expired_challenges
     from core.services.log_retention import (
         limpar_texto_das_falhas_de_remocao,
+        purge_pii_access_log,
         purge_system_event_logs,
     )
 
@@ -109,6 +112,7 @@ def _cleanups() -> list[tuple[str, object]]:
         ("demo_sessions", esquecer_numeros_antigos),
         ("system_event_logs", purge_system_event_logs),
         ("system_event_logs_falha_delete", limpar_texto_das_falhas_de_remocao),
+        ("pii_access_log", purge_pii_access_log),
     ]
 
 

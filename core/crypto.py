@@ -201,11 +201,12 @@ def encrypt_pii_optional(plain: str | None) -> str | None:
 # Descifragem + audit log
 # ──────────────────────────────────────────────────────────────────────────────
 
+ATOR_TITULAR = "user:self"  # acesso em nome do próprio titular: o uid fica só em subject_user_id (#665)
 @dataclass(frozen=True, slots=True)
 class PiiAccessContext:
     """Contexto registrado a cada decrypt_pii. Vai pra pii_access_log."""
     purpose: str          # 'login', 'send_email', 'render_admin', 'bot_message', etc
-    actor: str            # 'system', 'admin:lucas', 'user:88648360', 'webhook:stripe'
+    actor: str            # 'system', 'admin:lucas', 'user:self', 'webhook:stripe'
     subject_user_id: int | None  # de quem são os dados; None = ainda desconhecido
     field: str = "?"      # 'email', 'phone', 'discord_id', 'name', etc
     endpoint: str | None = None

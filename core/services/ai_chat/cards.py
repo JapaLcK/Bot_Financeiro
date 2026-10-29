@@ -254,8 +254,8 @@ def registro() -> dict[str, Card]:
         return [(None, {"renda": {"ok": True, "evolution": compute_evolution(uid, n), "months": n}})]
 
     def piggy(uid, a):
-        # ponytail: SÓ o cache de 6 h (gerar aqui fica para decisão do dono: seriam as consultas dos
-        # 6 detectores com a trava do turno na mão). O /insights do painel segue gerando.
+        # ponytail: SÓ o cache de até 6 h (ou até a meia-noite; gerar aqui fica para decisão do dono: seriam as consultas dos
+        # detectores com a trava do turno na mão). O /insights do painel segue gerando.
         itens = ler_insights(uid)  # a mesma projeção por plano e o mesmo envelope da rota
         if itens is None:
             raise CardIndisponivel(piggy_pendente)

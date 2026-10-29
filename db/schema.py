@@ -2100,7 +2100,7 @@ def init_db():
         create table if not exists pii_access_log (
           id bigserial primary key,
           purpose text not null,                   -- 'login' | 'send_email' | 'render_admin' | 'bot_message' | ...
-          actor text not null,                     -- 'system' | 'system:<componente>' | 'admin:<user>' | 'user:<id>' | 'webhook:<provider>'
+          actor text not null,                     -- 'system' | 'system:<componente>' | 'admin:<user>' | 'user:self' | 'webhook:<provider>'
           subject_user_id bigint references users(id) on delete set null,
           field text not null,                     -- 'email' | 'phone' | 'discord_id' | 'whatsapp_id' | 'name'
           endpoint text,

@@ -53,8 +53,9 @@ _USER_FK_SET_NULL_TABLES: frozenset[str] = frozenset({
     # acesso —, então CASCADE apagaria a trilha justamente de quem pediu
     # exclusão, destruindo a prova de que o acesso foi legítimo. O
     # `db/privacy.py` não apaga esta tabela (nem no reset, nem no
-    # delete_user_data): a linha sobrevive anonimizada, com subject_user_id
-    # nulo.
+    # delete_user_data): a linha sobrevive anonimizada (`subject_user_id` nulo;
+    # o `actor` do titular é `ATOR_TITULAR`, sem uid) até a retenção de
+    # `RETENCAO_PII_DIAS` (`core/services/log_retention.py`).
     "pii_access_log",
 })
 

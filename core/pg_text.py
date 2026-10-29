@@ -28,6 +28,7 @@ dois. A escolha real é gravar saneado ou não gravar nada.
 """
 
 import re
+import traceback
 
 import psycopg
 
@@ -214,6 +215,30 @@ def redigir_failing_row(valor):
     if isinstance(valor, list):
         return [redigir_failing_row(v) for v in valor]
     return valor
+
+
+def quadros_da_cadeia(exc: BaseException) -> tuple[str, str | None]:
+    """(os quadros da pilha de toda a cadeia `__cause__`/`__context__`, o 1º sqlstate dela).
+
+    SEM a linha final de cada exceção: a do psycopg traz o `DETAIL: Key (…)=(…)` com dado do
+    usuário (P2 c da #657). Cada elo é separado por uma linha só com o tipo. A causa entra porque
+    `raise X from e` (db/accounts.py) e o contexto implícito escondem o quadro do banco e o sqlstate.
+
+    Nunca levanta: roda no `except` de último recurso da conversa, e levantar ali tira a resposta
+    amigável e a linha do log, e devolve o DETAIL pelo `logger.exception` do worker."""
+    partes: list[str] = []
+    sqlstate, vistos, e = None, set(), exc
+    try:
+        while e is not None and id(e) not in vistos:
+            vistos.add(id(e))
+            if partes:
+                partes.append(f"\nCausado por {type(e).__name__}:\n")
+            partes.append("".join(traceback.format_tb(e.__traceback__)))
+            sqlstate = sqlstate or getattr(e, "sqlstate", None)
+            e = e.__cause__ if e.__cause__ is not None else (None if e.__suppress_context__ else e.__context__)
+    except Exception:  # noqa: BLE001
+        return "", None
+    return "".join(partes), sqlstate
 
 
 if __name__ == "__main__":  # pragma: no cover - autocheck

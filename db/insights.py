@@ -441,10 +441,12 @@ def compute_active_insights(user_id: int) -> tuple[list[dict[str, Any]], list[st
 
     Detector que quebra não derruba os outros: os itens deles saem, e o nome dele vai em `falhas`.
     """
+    from core.services.insights_detectores import detect_bill_due
     ensure_user(user_id)
     out: list[dict[str, Any]] = []
     falhas: list[str] = []
     for detector in (
+        detect_bill_due,  # primeiro: no empate de gravidade a conta (prazo de horas) vem antes (P3)
         _detect_budget_warnings,
         _detect_recurring_increase,
         _detect_of_bill_increase,
