@@ -211,3 +211,92 @@ def test_build_do_painel_emite_apenas_assets_com_rotas():
 
 def test_robots_esconde_o_painel():
     assert "Disallow: /painel" in get("/robots.txt").text.splitlines()
+
+
+# ── DASHBOARD_V2_TODOS: a chave abre para todos e o login segue ela ──────────
+
+SENHA = "Senha-forte-1234"
+
+
+def _nova_conta():
+    import uuid
+    return int(db.register_auth_user(f"todos-{uuid.uuid4().hex[:10]}@example.com", SENHA)["user_id"])
+
+
+def _conta_pronta():
+    """Conta real com senha, plano e wizard feito, FORA da lista beta."""
+    uid = _nova_conta()
+    promote_to_pro(uid)
+    db.mark_onboarding_completed(uid)
+    return uid
+
+
+def _login(uid, ua=None):
+    email = db.get_auth_user(uid)["email"]
+    return TestClient(dashboard.app).post(
+        "/auth/login", json={"email": email, "password": SENHA}, headers={"User-Agent": ua} if ua else {})
+
+
+def _d(uid, ua=None, query=""):
+    return TestClient(dashboard.app).get(
+        f"/d/{db.create_dashboard_session(uid)}{query}", headers={"User-Agent": ua} if ua else {},
+        follow_redirects=False)
+
+
+def test_todos_serve_o_painel_a_quem_esta_fora_da_lista(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_V2_TODOS", "1")
+    s = sessao_de(_conta_pronta())
+    serve_a_pagina(get(auth=s["access"], dash=s["dashboard"]))
+
+
+def test_todos_o_login_no_navegador_vai_ao_painel_e_no_app_ao_home(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_V2_TODOS", "1")
+    uid = _conta_pronta()
+    r = _login(uid)
+    assert r.status_code == 200, r.text
+    assert r.json()["dashboard_url"].endswith("/painel")
+    assert _login(uid, UA_APP).json()["dashboard_url"].endswith("/home")
+
+
+def test_todos_o_link_do_bot_vai_ao_painel_e_o_app_segue_no_app(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_V2_TODOS", "1")
+    uid = _conta_pronta()
+    vai_para(_d(uid), "/painel")
+    vai_para(_d(uid, UA_APP), "/app")
+    vai_para(_d(uid, query="?next=/settings"), "/settings")
+
+
+def test_todos_validate_diz_o_destino(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_V2_TODOS", "1")
+    s = sessao_de(_conta_pronta())
+    c = TestClient(dashboard.app)
+    c.cookies.set(DASHBOARD_COOKIE_NAME, s["dashboard"])
+    assert c.get("/auth/validate").json()["dashboard_url"] == "/painel"
+    assert c.get("/auth/validate", headers={"User-Agent": UA_APP}).json()["dashboard_url"] == "/home"
+
+
+def test_sem_a_chave_e_fora_da_lista_tudo_como_hoje():
+    uid = _conta_pronta()
+    s = sessao_de(uid)
+    vai_para(get(auth=s["access"], dash=s["dashboard"]), "/app")
+    assert _login(uid).json()["dashboard_url"].endswith("/home")
+    vai_para(_d(uid), "/app")
+    c = TestClient(dashboard.app)
+    c.cookies.set(DASHBOARD_COOKIE_NAME, s["dashboard"])
+    assert c.get("/auth/validate").json()["dashboard_url"] == "/home"
+
+
+def test_sem_a_env_quem_esta_na_lista_beta_vai_ao_painel_no_navegador(monkeypatch):
+    """Negativo: um destino que olhe só a env DASHBOARD_V2_TODOS deixa vermelho; fora da lista, /home."""
+    monkeypatch.delenv("DASHBOARD_V2_TODOS", raising=False)
+    uid = _conta_pronta()
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", str(uid))
+    assert _login(uid).json()["dashboard_url"].endswith("/painel")
+    vai_para(_d(uid), "/painel")
+    assert _login(uid, UA_APP).json()["dashboard_url"].endswith("/home")
+
+
+def test_todos_quem_ainda_nao_escolheu_plano_vai_aos_precos(monkeypatch):
+    """Positivo: o /precos vence o /painel."""
+    monkeypatch.setenv("DASHBOARD_V2_TODOS", "1")
+    assert _login(_nova_conta()).json()["dashboard_url"].endswith("/precos?escolha=1")

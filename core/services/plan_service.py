@@ -329,12 +329,15 @@ _chat_ia_avisado: str | None = None  # a env ruim que já foi avisada: o aviso s
 
 
 def painel_chat_ia(user_id: int) -> bool:
-    """Freio do chat com a IA no /painel: só os user_id listados em PAINEL_CHAT_IA_USER_IDS
+    """Freio do chat com a IA no /painel: PAINEL_CHAT_IA_TODOS=1 abre para todos (teto = cota
+    mensal por plano); senão só os user_id listados em PAINEL_CHAT_IA_USER_IDS
     (ids separados por vírgula, lida a cada chamada). Ausente, vazia ou sem nenhum id válido =
     NINGUÉM (desligado por padrão, ao contrário do `agents_ui_enabled`). Token que não é inteiro
     ASCII de até 18 dígitos é ignorado, com um aviso (uma vez por valor da env) que diz só quantos,
     nunca o valor. O limite de 18 evita o ValueError do `int()` em dígitos demais (/me e /guia viravam 500)."""
     global _chat_ia_avisado
+    if (os.getenv("PAINEL_CHAT_IA_TODOS") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
     raw = os.getenv("PAINEL_CHAT_IA_USER_IDS") or ""
     ids, ruins = set(), 0
     for tok in raw.split(","):
@@ -433,7 +436,18 @@ def dashboard_v2_enabled(user_id: int, email: str | None = None) -> bool:
     de teste do beta de Agentes; definida e vazia = ninguém) OU id em
     DASHBOARD_V2_BETA_USER_IDS. Sem e-mail, busca o da conta pelo
     `get_auth_user` (cache de 10 s), não pelo `get_user_email`, que decifra PII a
-    cada chamada."""
+    cada chamada.
+
+    DASHBOARD_V2_TODOS=1 abre para todos (antes de buscar e-mail); desligar a env
+    é o freio. A lista beta fica em `dashboard_v2_beta`."""
+    if (os.getenv("DASHBOARD_V2_TODOS") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    return dashboard_v2_beta(user_id, email)
+
+
+def dashboard_v2_beta(user_id: int, email: str | None = None) -> bool:
+    """Só a lista beta (DASHBOARD_V2_BETA_EMAILS/USER_IDS), IGNORANDO DASHBOARD_V2_TODOS.
+    Coorte do Q36 (`fonte_unica`), que não acompanha a abertura geral (ADR 0006)."""
     if email is None:
         email = (get_auth_user(int(user_id)) or {}).get("email")
     return _na_lista_beta(user_id, email, "DASHBOARD_V2_BETA_EMAILS",

@@ -332,3 +332,19 @@ def test_mensagem_falha_da_leitura_vira_texto_humano(monkeypatch):
 def test_mensagem_e_o_resumo_da_conversa_sem_recalcular(chave):
     k = com_meta(chave)
     assert mc.para_conversa(mc.ler(k))["metas"][0]["resumo"] in mc.texto_whatsapp(k)
+
+
+# ── DASHBOARD_V2_TODOS abre as metas para quem está fora da lista ────────────
+
+def test_todos_conversa_gastei_e_minhas_metas_respondem_metas_fora_da_lista(chave, tier3, monkeypatch):
+    """Pela conversa: com a env, K fora da lista recebe a resposta de metas; sem ela, a de hoje (N).
+    Negativo: tirar o ramo da env em `dashboard_v2_enabled` deixa o primeiro `assert` vermelho."""
+    chave()
+    u = usuario_pagante(plan="pro_max")
+    nova(u, "Viagem A", "1000", "300")
+    diga(u, "gastei 50 no mercado")
+    (sem,) = diga(u, "minhas metas")
+    assert "Suas metas" not in sem
+    monkeypatch.setenv("DASHBOARD_V2_TODOS", "1")
+    (com,) = diga(u, "minhas metas")
+    assert "🎯 *Suas metas*" in com and "*Viagem A*" in com  # "Cancelei a pergunta anterior" pode abrir

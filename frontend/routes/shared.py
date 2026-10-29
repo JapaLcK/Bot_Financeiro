@@ -1081,6 +1081,30 @@ def _is_pigbank_app(request: Request) -> bool:
     return "PigBankApp" in (request.headers.get("user-agent") or "")
 
 
+def painel_no_navegador(request: Request, user_id: int) -> bool:
+    """True se este usuário, neste cliente, usa o /painel: navegador (não o UA do app)
+    COM a chave do v2. Chave que falha = False (fechado). Serve ao /painel e ao destino
+    pós-login."""
+    try:
+        from core.services.plan_service import dashboard_v2_enabled
+        return not _is_pigbank_app(request) and dashboard_v2_enabled(user_id)
+    except Exception:
+        logging.getLogger(__name__).warning("dashboard_v2_enabled falhou", exc_info=True)
+        return False
+
+
+def painel_como_destino(request: Request, user_id: int) -> bool:
+    """Destino pós-autenticação: `painel_no_navegador` E conta com credencial. Conta só de
+    link mágico (sem senha nem Google/Apple) vai ao /home, onde mora o "Crie sua senha":
+    o /painel não o carrega e a /api/v2 responde 403 password_required. Falha = False."""
+    try:
+        from db import conta_sem_credencial
+        return painel_no_navegador(request, user_id) and not conta_sem_credencial(user_id)
+    except Exception:
+        logging.getLogger(__name__).warning("painel_como_destino falhou", exc_info=True)
+        return False
+
+
 def signup_source_from_request(request: Request, *, provedor: str | None = None) -> str:
     """Origem do cadastro, gravada em auth_accounts.signup_source. Distingue web
     de app (WebView iOS e app nativo iOS/Android) pro painel de admin, e SÓ
