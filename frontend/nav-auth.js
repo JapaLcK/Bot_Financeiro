@@ -156,7 +156,7 @@
   // Atalhos do usuário logado (mesma lista do app PWA).
   const ACCOUNT_LINKS = [
     { icon: '<i class="ph ph-house" aria-hidden="true"></i>', label: "Início", href: "/home" },
-    { icon: '<i class="ph ph-chart-bar" aria-hidden="true"></i>', label: "Dashboard", href: "/app" },
+    { icon: '<i class="ph ph-chart-bar" aria-hidden="true"></i>', label: "Dashboard", href: "/painel" },
     { icon: '<i class="ph ph-whatsapp-logo" aria-hidden="true"></i>', label: "Conectar WhatsApp", action: connectWhatsApp },
     { icon: '<i class="ph ph-gear" aria-hidden="true"></i>', label: "Configurações", href: "/settings?view=security" },
     { icon: '<i class="ph ph-credit-card" aria-hidden="true"></i>', label: "Gerenciar assinatura", href: "/conta" },
@@ -261,9 +261,9 @@
       // 3) CTAs de cadastro no corpo (hero, seções finais) → dashboard.
       //    Um CTA pode declarar destino/rótulo próprios pra logado via
       //    data-app-href / data-app-text (ex.: /agents manda pra aba de
-      //    agentes do painel). Sem eles, cai no padrão "/app".
+      //    agentes do painel). Sem eles, cai no padrão "/painel" (o servidor manda ao /app quem não tem a chave).
       document.querySelectorAll('a[href="/cadastro"]').forEach(function (a) {
-        a.setAttribute("href", a.getAttribute("data-app-href") || "/app");
+        a.setAttribute("href", a.getAttribute("data-app-href") || "/painel");
         a.textContent = a.getAttribute("data-app-text") || "Ir para o dashboard";
       });
     })

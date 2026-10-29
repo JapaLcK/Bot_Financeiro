@@ -201,7 +201,7 @@ TABELA = {
     # ── HTML autenticado ──
     ("GET", "/app"): (L, "casca; o overlay sobe"), ("GET", "/home"): (L, "casca; o overlay sobe"),
     ("GET", "/settings"): (L, "saída; sem overlay"),
-    ("GET", "/painel"): (L, "resíduo declarado"), ("GET", "/onboarding"): (L, "resíduo declarado"),
+    ("GET", "/painel"): (L, "manda ao /app"), ("GET", "/onboarding"): (L, "resíduo declarado"),
     ("GET", "/changelog"): (L, "conteúdo público do Pro"), ("GET", "/blog/{slug}"): (L, "conteúdo"),
 }
 

@@ -207,7 +207,7 @@ que não se sabe aparece como "sem comparação", "a conferir", "desatualizado" 
 - **Plano real** pelo `GET /api/v2/me` tipado (decisão do dono, 2026-09-26). O bundle
   nunca lê a URL; só o protótipo (`dashboard-v2/index.html`, sem backend) define
   `window.PIGBANK_DEMO_PLAN` pelo `?plano=` dele. O `/auth/me` só leva
-  `dashboard_v2_enabled`, para o link do `/app`.
+  `dashboard_v2_enabled`, por contrato aditivo (o link do `/app` que o usava saiu).
 - **Tipos** gerados do OpenAPI da `/api/v2` por um gerador próprio
   (`scripts/gerar_tipos_api_v2.py` → `webapp/src/dashboard/lib/api-v2.gen.ts`), e não pelo
   `openapi-typescript`: ele exige typescript@^5 e o webapp usa o TS 7 nativo, sem a API
@@ -401,7 +401,7 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - PR 1 (#632, mergeado): esqueleto da `/api/v2` (`usuario_atual`, envelope de erro,
     `GET /api/v2/me`, varredura de rotas).
   - PR 2a: a página `/painel` (gate de sessão, chave, UA do app e os gates do `/app`),
-    `dashboard_v2_enabled` no `/auth/me`, links "Painel novo (beta)" no `/app` e "Painel
+    `dashboard_v2_enabled` no `/auth/me`, links "Painel novo (beta)" no `/app` (removido depois: os links "Dashboard" apontam ao `/painel`) e "Painel
     antigo" no v2, e o bundle servido de `frontend/dashboard-app.*` com gate no CI. O v2
     ainda não chama a API e o `?plano=` continua.
   - PR 2b (feito): contrato OpenAPI → TS, TanStack Query, fim do `?plano=`, erros,

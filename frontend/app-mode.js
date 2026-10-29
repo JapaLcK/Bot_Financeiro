@@ -56,6 +56,7 @@
   const PAGES = {
     "/home":         "home",
     "/app":          "app",
+    "/painel":       "app", // aba Dashboard aponta ao /painel; o servidor devolve ao /app quem não tem a chave
     "/comandos-app": "comandos",
     "/changelog":    "changelog",
     "/settings":     "settings",
@@ -91,7 +92,7 @@
   const TABS = [
     { href: "/home", label: "Início", icon:
       '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>' },
-    { href: "/app", label: "Dashboard", icon:
+    { href: "/painel", label: "Dashboard", icon:
       '<svg viewBox="0 0 24 24" width="24" height="24"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>' },
     { href: "/comandos-app", label: "O que pedir", icon:
       '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 8.9 8.9 0 0 1-3.7-.8L3 20l1.1-4.1a8 8 0 0 1-1.1-4.4A8.4 8.4 0 0 1 11.5 3.2 8.4 8.4 0 0 1 21 11.5z"/></svg>' },

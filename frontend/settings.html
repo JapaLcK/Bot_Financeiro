@@ -1205,7 +1205,7 @@ body.balance-hidden .account-balance {
     </div>
     <div class="top-actions">
       <a class="btn-topbar" href="/home" id="account-link">Minha conta</a>
-      <a class="btn-topbar" id="dashboard-link" href="/app">Dashboard →</a>
+      <a class="btn-topbar" id="dashboard-link" href="/painel">Dashboard →</a>
       <button class="btn-topbar logout" type="button" id="logout-link" onclick="logoutSettings()">Sair</button>
     </div>
   </div>
@@ -4173,7 +4173,6 @@ async function initSettings() {
   OF_COBRANCA_EM_ATRASO = !!(me && me.cobranca_em_atraso);
   applyOfConnectButton();
 
-  document.getElementById("dashboard-link").href = "/app";
   const allowedViews = ["security", "notifications", "data", "legal"];
   if (ofUiEnabled) allowedViews.push("open-finance");
   showSettingsSection(allowedViews.includes(params.get("view")) ? params.get("view") : "security");

@@ -1055,12 +1055,12 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - Chave: `DASHBOARD_V2_BETA_EMAILS` (sem a env = os e-mails de teste do beta de
   Agentes; definida e vazia = ninguém) e `DASHBOARD_V2_BETA_USER_IDS`.
   **`DASHBOARD_V2_TODOS=1`** (1/true/yes/on) abre a chave para todos (decisão do dono, 2026-10-28; desligar a
-  env é o freio): a tela `/painel`, a `/api/v2`, o link no `/app` e as metas (Piggy e WhatsApp). A lista beta fica
+  env é o freio): a tela `/painel`, a `/api/v2` e as metas (Piggy e WhatsApp). Os links "Dashboard" dos menus são fixos em `/painel`; a env (ou a lista) decide se o servidor serve o `/painel` ou manda para o `/app`. A lista beta fica
   em `dashboard_v2_beta` (`core/services/plan_service.py`), que ignora a env. No navegador (UA que não é
   `PigBankApp`) o destino pós-login passa a ser o `/painel` para quem tem a chave (env OU lista beta): `dashboard_url`
   do login/MFA/Google, o `/d/{code}` (sem `?next=`/`?view=`; MFA leva `next=/painel`) e o campo aditivo
   `/auth/validate.dashboard_url` (que o `/login` e o fim do onboarding usam). O Capacitor segue em `/home` e `/app`.
-  `/precos?escolha=1` vence. Conta sem senha nem Google/Apple (`conta_sem_credencial`, só link mágico) NÃO vai ao `/painel` por esses destinos (`painel_como_destino`, `frontend/routes/shared.py`): fica no `/home` (e no `/app` pelo `/d/`), onde mora o "Crie sua senha"; o `serve_painel` em si não mudou.
+  `/precos?escolha=1` vence. Conta sem senha nem Google/Apple (`conta_sem_credencial`, só link mágico) NÃO vai ao `/painel` por esses destinos (`painel_como_destino`, `frontend/routes/shared.py`): fica no `/home` (e no `/app` pelo `/d/`), onde mora o "Crie sua senha"; o `serve_painel` também usa `painel_como_destino`, então o GET direto ao `/painel` (os links "Dashboard") leva essa conta ao `/app`.
 - **Q36 fora do v2: Open Finance é a fonte única para quem tem a chave**
   (`core/services/fonte_unica.py`). Vale em todos os canais (`/app`, WhatsApp, IA do chat
   e do WhatsApp), porque a trava (`exigir`) está nas funções de escrita que todos chamam:
@@ -1099,9 +1099,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - A página é `/painel` (`frontend/painel.html` + o artefato `frontend/dashboard-app.*`,
   de `webapp/src/dashboard`): sessão por `auth_token` ou `dashboard_token`
   (`_resolve_page_user_id`), senão `/login?next=/painel`; UA do app ou fora da chave
-  (ou a chave falhando) vai para `/app`; depois os gates de plano e onboarding do `/app`.
-  O `/auth/me` devolve `dashboard_v2_enabled`, que revela o link no menu do `/app`
-  (fora do app). O `/painel` carrega o `/static/auth-refresh.js` antes do bundle: o 401
+  (ou a chave falhando) ou conta sem credencial vai para `/app`; depois os gates de plano e
+  onboarding do `/app`. O `/auth/me` ainda devolve `dashboard_v2_enabled` (contrato
+  aditivo: o servidor só acrescenta campo), mas nenhum código de `frontend/` nem de
+  `webapp/src` o lê: o link "Painel novo (beta)" do `/app` saiu. O `/painel` carrega o `/static/auth-refresh.js` antes do bundle: o 401
   de autenticação da `/api/v2` (só aceita `dashboard_token`/Bearer) é renovado e repetido
   por ele.
 - **Erro no cliente** (`webapp/src/dashboard/parts/Entrada.tsx`): nada do painel monta
