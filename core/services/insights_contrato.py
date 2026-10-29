@@ -1,5 +1,5 @@
-"""PigBank Insights, contrato v1 (PL-06): o item rastreável que os 6 detectores de `db/insights.py`
-emitem e que `/insights/{uid}/current` e o card `piggy` do chat leem.
+"""PigBank Insights, contrato v1 (PL-06): o item rastreável que os detectores (`db/insights.py` e
+`core/services/insights_detectores.py`) emitem e que `/insights/{uid}/current` e o card `piggy` do chat leem.
 
 Puro: sem banco e sem relógio (`calculado_em` é carimbado por quem gera, `ai_patterns.generate_ai_insights`).
 Os números saem daqui em `Decimal` de 2 casas e viram número JSON uma vez, por
@@ -30,6 +30,7 @@ TIPOS: dict[str, tuple[str, dict[str, Any]]] = {
     "of_bill_increase": ("assinatura", {"base": "open_finance", "cartao": None,
                                         "origem": "lançamentos do Open Finance"}),
     "goal_behind": ("meta", {"base": "caixinhas", "cartao": None, "origem": "depósitos e saques da caixinha"}),
+    "bill_due": ("vencimento", {"base": "contas_a_pagar", "cartao": None, "origem": "suas contas a pagar"}),
 }
 SO_PRO = ("impacto", "acoes")
 GRAVIDADE = {"info": 0, "warning": 1, "critical": 2}  # a ordem do feed e a régua do "piorou" (D4)
@@ -63,10 +64,11 @@ def tem_pii(texto: str | None) -> bool:
     return any(p.search(texto or "") for p in _PII)
 
 
-def nome(texto: str | None) -> str:
-    """Nome do usuário (categoria, caixinha, estabelecimento) em uma linha, sem marcação, teto 40."""
+def nome(texto: str | None, reserva: str = "outros") -> str:
+    """Nome do usuário (categoria, caixinha, estabelecimento, conta) em uma linha, sem marcação, teto 40.
+    Vazio depois da limpeza vira `reserva`."""
     from core.reports.weekly import _categoria_em_uma_linha
-    return _categoria_em_uma_linha(texto or "", 40)
+    return _categoria_em_uma_linha(texto or "", 40, reserva)
 
 
 def periodo_mes(d: date) -> dict[str, Any]:
@@ -110,6 +112,8 @@ def chave(tipo: str, sujeito, periodo: str) -> str:
       do OF no mesmo mês;
     - o período é o mês (orçamento, spike, ritmo, meta, conta do OF pelo mês da cobrança) ou a data do
       reajuste (recorrente: reajuste novo é fato novo).
+    - conta a pagar (`bill_due`): o período é o dia do vencimento; a faixa info/warning/critical é piora do mesmo
+      fato e fica fora; `vencida` entra no sujeito (`id:vencida`), como na meta.
     O sujeito pode ter `:` (`merchant_key` não tira; a meta usa `id:estado`): a chave é opaca, comparada
     inteira. Nunca faça `split(":")` dela.
     Sujeito textual entra por `sujeito()`, que troca por hash o nome com dado pessoal.

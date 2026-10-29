@@ -148,12 +148,12 @@ async def insights_current_route(request: Request, user_id: int):
     """Insights acionáveis do Piggy, sem LLM (D12 do PL-06).
 
     Contrato v1 (`core/services/insights_contrato.py`): os fatos e o texto vêm dos
-    detectores (`compute_active_insights`); até 6 itens por severidade, cache 6h por
+    detectores (`compute_active_insights`); até 6 itens por severidade, cache de até 6h (ou até a meia-noite) por
     user. `impacto`/`acoes` só no Pro (`insights_acoes`). O dispensado que não piorou
     (`PUT .../estado`) sai antes do corte em 6. Lista vazia traz `motivo`
     (`sem_dados`/`sem_destaques`/`dispensados`), ou nulo se um detector falhou.
 
-    Segurança: cada cálculo roda as consultas dos 6 detectores. Rate-limit por IP +
+    Segurança: cada cálculo roda as consultas dos detectores. Rate-limit por IP +
     o `force` (bypass de cache) NÃO é exposto ao cliente — senão dava pra chamar
     `?force=true` em loop e martelar o banco.
     """

@@ -52,13 +52,13 @@ def _variacao(atual: Decimal, anterior: Decimal, com_pct: bool = True) -> dict:
             **({"pct": _pct(atual - anterior, anterior, 1)} if com_pct else {})}
 
 
-def _categoria_em_uma_linha(nome: str, limite: int = 40) -> str:
+def _categoria_em_uma_linha(nome: str, limite: int = 40, reserva: str = "outros") -> str:
     """Só para apresentação: o nome é texto do usuário e vai dentro de uma variável de uma linha
-    (sem quebra, sem marcação do WhatsApp, com teto)."""
+    (sem quebra, sem marcação do WhatsApp, com teto). Vazio depois da limpeza vira `reserva`."""
     # Cf/Cc (ZWSP, BOM, RLO, ZWJ…) saem, menos o espaço em branco, que vira espaço no split.
     # ponytail: tirar o ZWJ quebra emoji composto (cosmético).
     sem_ctrl = "".join(c for c in (nome or "") if c.isspace() or unicodedata.category(c) not in ("Cf", "Cc"))
-    t = " ".join(re.sub(r"[*_~`]", "", sem_ctrl).split()) or "outros"
+    t = " ".join(re.sub(r"[*_~`]", "", sem_ctrl).split()) or reserva
     return t if len(t) <= limite else t[: limite - 1].rstrip() + "…"
 
 
