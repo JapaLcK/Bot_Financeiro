@@ -21,7 +21,7 @@ from __future__ import annotations
 from .connection import get_conn
 
 # Fontes válidas da coluna `source`. 'pix' e as tabelas do Asaas chegam no PR 1b.
-GRANT_SOURCES = ("stripe", "pix", "legacy", "admin")
+GRANT_SOURCES = ("stripe", "pix", "legacy", "admin", "family")
 
 # §6 — evento com versão MENOR OU IGUAL nunca reescreve uma concessão, e
 # NENHUM evento reescreve grant de outro dono.
@@ -175,6 +175,14 @@ def upsert_grant(
                  starts_at, ends_at, int(event_version), last_event_id),
             )
             row = cur.fetchone()
+            if row and source in ("stripe", "pix", "admin"):
+                # Plano Família: pagamento/concessão NOVA aplicada do titular encerra a suspensão dos membros
+                # (ponto único de invoice.paid, checkout e Pix; o grant de admin é INSERT direto e não passa
+                # aqui). Stripe: só se o evento for MAIS NOVO que o que suspendeu — payment_failed não avança a
+                # versão do grant, então um invoice.paid de ciclo anterior, reentregue, passa pelo gate acima.
+                cur.execute("update family_groups set members_suspended_at = null where owner_user_id = %s"
+                            " and (%s <> 'stripe' or members_suspended_at < to_timestamp(%s::double precision))",
+                            (int(user_id), source, int(event_version)))
             # A supersessão fica AQUI, amarrada ao `returning` do upsert, e NÃO
             # à reclassificação abaixo: `_SUPERSEDE_LEGACY` não tem guarda de
             # versão, então rodá-la na reentrega revogaria o `legacy` com uma
@@ -340,11 +348,11 @@ def list_grants(user_id: int) -> list[dict]:
 
 def e_primeira_assinatura(user_id: int, source: str, external_ref: str) -> bool:
     """True se a conta não tem grant NENHUM além deste `(source, external_ref)`,
-    em qualquer status. Cortesia do admin (`source='admin'`) não conta como
-    assinatura (decisão do dono); `legacy` conta. É a trava do e-mail do
+    em qualquer status. Cortesia do admin e acesso de família (`source` 'admin' e 'family')
+    não contam como assinatura; `legacy` conta. É a trava do e-mail do
     fundador (`email_service.send_founder_email_once`)."""
     sql = ("select not exists (select 1 from plan_grants where user_id = %s"
-           " and source <> 'admin' and not (source = %s and external_ref = %s)) as ok")
+           " and source not in ('admin', 'family') and not (source = %s and external_ref = %s)) as ok")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (int(user_id), source, external_ref))

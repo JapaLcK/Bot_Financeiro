@@ -101,7 +101,7 @@ end $$
 #
 # Constante no módulo (e não string solta na lista) para o teste do resync
 # executar EXATAMENTE o SQL que sobe em produção, sem uma segunda cópia.
-RESYNC_LEGACY_GRANTS_SQL = """
+_RESYNC_LEGACY_GRANTS_SQL = """
 insert into plan_grants (user_id, source, external_ref, plan_stored,
                          starts_at, ends_at, status, event_version)
 select distinct on (a.user_id)
@@ -113,9 +113,13 @@ select distinct on (a.user_id)
    and a.plan_expires_at > now()
    and coalesce(a.last_payment_status, '') <> 'grandfathered'
    and not exists (select 1 from plan_grants g where g.user_id = a.user_id)
+   {filtro}
  order by a.user_id, a.plan_expires_at desc, a.id desc
 on conflict (source, external_ref) do nothing
 """
+RESYNC_LEGACY_GRANTS_SQL = _RESYNC_LEGACY_GRANTS_SQL.format(filtro="")
+# Mesma SQL para UM usuário (%s = user_id): o Plano Família materializa o legado antes do 1º grant family.
+RESYNC_LEGACY_GRANT_USER_SQL = _RESYNC_LEGACY_GRANTS_SQL.format(filtro="and a.user_id = %s")
 
 
 def init_db():
@@ -2640,7 +2644,7 @@ def init_db():
         create table if not exists plan_grants (
           id bigserial primary key,
           user_id bigint not null references users(id) on delete cascade,
-          source text not null,                     -- stripe | pix | legacy | admin
+          source text not null,                     -- stripe | pix | legacy | admin | family
           external_ref text not null,               -- sub id | pix_charges.id | legacy:<uid> | admin:<uid>
           plan_stored text not null,
           starts_at timestamptz not null,
@@ -3229,6 +3233,8 @@ def init_db():
           created_at timestamptz not null default now()
         )
         """,
+        # Membros suspensos na hora (cancelamento agendado, pagamento falho): sobrevive ao recompute do titular.
+        """alter table family_groups add column if not exists members_suspended_at timestamptz""",
         """
         create table if not exists family_members (
           id bigserial primary key,

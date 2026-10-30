@@ -7067,6 +7067,13 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             )
         elif user_id:
             await asyncio.to_thread(set_payment_status, user_id, "past_due")
+            # Plano Família: o titular segue até o fim do período, os membros perdem agora.
+            # ... EXCETO se outro grant dele (ex.: Pix vigente) ainda cobre; `desde` = instante do evento.
+            # A ordem importa: o past_due acima é o que faz `_cobertura` recusar o próprio Stripe em
+            # atraso (com _sub_id vazio, todo grant stripe conta como "outro" em `encerrando`).
+            from core.services.family_access import encerrando  # noqa: PLC0415
+            await asyncio.to_thread(encerrando, int(user_id), "stripe", str(_sub_id or ""),
+                                    "family_payment_failed", _event_version(event))
             # Relógio da inadimplência (core/services/billing_dunning).
             # Idempotente no SQL: a Stripe manda um payment_failed por smart
             # retry e reentrega o mesmo evento em cima de 5xx — nenhum dos dois
@@ -7147,6 +7154,28 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 )
             except Exception as exc:
                 print(f"[billing] admin notify payment_failed falhou user={user_id}: {exc}")
+
+    elif event["type"] == "customer.subscription.updated":
+        # Só o Plano Família escuta este evento. O estado vem do `retrieve` (o payload pode chegar fora de
+        # ordem); falha transitória propaga e vira 5xx (a Stripe reentrega), assinatura inexistente não.
+        obj = event["data"]["object"]
+        user_id = await _resolve_user(obj)
+        from db.family import active_members  # noqa: PLC0415
+        if user_id and _g(obj, "id") and await asyncio.to_thread(active_members, int(user_id)):
+            from core.services.billing_dunning import PAST_DUE_PAYMENT_STATUSES  # noqa: PLC0415
+            from core.services.family_access import encerrando, retomar  # noqa: PLC0415
+            try:
+                _atual = await asyncio.to_thread(stripe.Subscription.retrieve, _g(obj, "id"))
+            except Exception as exc:
+                if getattr(exc, "code", None) != "resource_missing":
+                    raise
+                _atual = None  # sumiu de vez: o `deleted` dela decide, reentregar não muda nada
+            _st = (_g(_atual, "status") or "").strip().lower() if _atual else ""
+            if _atual and (_g(_atual, "cancel_at_period_end") or _st in PAST_DUE_PAYMENT_STATUSES):
+                await asyncio.to_thread(encerrando, int(user_id), "stripe", _g(obj, "id"),
+                                        "family_assinatura_encerrando")
+            elif _st in ("active", "trialing"):
+                await asyncio.to_thread(retomar, int(user_id))
 
     elif event["type"] == "customer.subscription.deleted":
         obj     = event["data"]["object"]

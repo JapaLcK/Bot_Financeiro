@@ -1540,6 +1540,9 @@ def set_account_plan(
         if row:
             from db_support import invalidate_auth_user_cache
             invalidate_auth_user_cache(row["user_id"])
+            # Plano Família: esta escrita não passa por recompute_entitlement, então alinha os membros aqui.
+            from core.services.family_access import sync_from_owner
+            sync_from_owner(int(row["user_id"]))
         return dict(row) if row else None
 
 
@@ -1579,7 +1582,7 @@ def _gravar_grant_do_admin(cur, user_id: int, plan: str, months: int) -> None:
         "   set status='revoked', revoked_reason='admin_override',"
         "       revoked_at=now(), event_version=extract(epoch from now())::bigint,"
         "       updated_at=now()"
-        " where user_id = %s and status = 'active'",
+        " where user_id = %s and status = 'active' and source <> 'family'",  # acesso de família não é do admin
         (user_id,),
     )
     if plan == "free":

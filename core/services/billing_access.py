@@ -458,6 +458,14 @@ def recompute_entitlement(user_id: int, *, origem: str = "evento") -> dict | Non
     if grant_vigente(grants, agora, sources=("pix",)):
         set_payment_status(user_id, "active")
 
+    # Plano Família: o entitlement do titular mudou aqui, então os membros se alinham AQUI (um ponto só
+    # para webhook, Pix e admin). Sem membros é uma query; membro não é titular, então não recorre.
+    from core.services.family_access import sync_from_owner
+    try:  # a família nunca derruba o entitlement (nem o webhook de pagamento) do titular
+        sync_from_owner(user_id)
+    except Exception as exc:
+        print(f"[billing_access] family sync falhou user={user_id}: {exc}")
+
     return {"plan": plano, "plan_expires_at": expira}
 
 

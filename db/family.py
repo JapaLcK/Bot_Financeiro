@@ -6,6 +6,7 @@ transação do insert: dois aceites na última vaga se serializam.
 """
 import hashlib
 import secrets
+import time
 
 from psycopg import errors as pgerr
 
@@ -24,6 +25,128 @@ class FamilyError(Exception):
 
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def event_version_now() -> int:
+    """Versão (µs) de toda escrita de grant `family`: precisa vencer a revogação anterior da mesma
+    linha (o upsert exige versão estritamente maior), e o relógio é o do app nas duas pontas."""
+    return time.time_ns() // 1000
+
+
+def _revoke_family_grants(cur, group_id: int, motivo: str, user_id: int | None = None) -> list[int]:
+    """Revoga o grant `family` dos membros do grupo (ou só o de `user_id`), na transação do chamador.
+    Casa por `external_ref` E por `user_id`: nunca toca grant de outro dono nem grant individual."""
+    cur.execute(
+        """update plan_grants g set status = 'revoked', revoked_reason = %s, revoked_at = now(),
+                  event_version = %s, updated_at = now()
+             from family_members m
+            where m.group_id = %s and g.user_id = m.user_id and g.source = 'family'
+              and g.external_ref = 'family_member:' || m.id and g.status <> 'revoked'
+              and (%s::bigint is null or m.user_id = %s)
+        returning g.user_id""",
+        (motivo, event_version_now(), group_id, user_id, user_id),
+    )
+    return [r["user_id"] for r in cur.fetchall()]
+
+
+def set_suspended(owner_user_id: int, suspended: bool, desde: int | None = None) -> None:
+    """Liga/desliga a suspensão dos membros do titular (sem grupo é no-op). `desde` (epoch s) é o instante
+    do EVENTO que suspendeu: só um evento Stripe mais novo que ele devolve os membros (upsert_grant)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update family_groups set members_suspended_at ="
+                    " case when %s then coalesce(to_timestamp(%s::double precision), now()) end"
+                    " where owner_user_id = %s", (suspended, desde, owner_user_id))
+        conn.commit()
+
+
+def is_suspended(owner_user_id: int) -> bool:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select members_suspended_at is not null as s from family_groups where owner_user_id = %s",
+                    (owner_user_id,))
+        row = cur.fetchone()
+        return bool(row and row["s"])
+
+
+def recompute_users(user_ids) -> None:
+    from core.services.billing_access import recompute_entitlement
+    for uid in user_ids:
+        recompute_entitlement(uid)
+
+
+def active_members(owner_user_id: int) -> list[dict]:
+    """Membros (não o titular) ativos do grupo do titular, mais antigos primeiro. Traz o `id` da linha,
+    que é a chave do grant `family`."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """select m.id, m.user_id, m.joined_at from family_members m
+                 join family_groups g on g.id = m.group_id
+                where g.owner_user_id = %s and m.role = 'member' and m.left_at is null
+                order by m.joined_at, m.id""",
+            (owner_user_id,),
+        )
+        return cur.fetchall()
+
+
+def _revoke_owner_grants(cur, owner_user_id: int, motivo: str) -> list[int]:
+    cur.execute("select id from family_groups where owner_user_id = %s", (owner_user_id,))
+    row = cur.fetchone()
+    return _revoke_family_grants(cur, row["id"], motivo) if row else []
+
+
+def revoke_owner_grants(owner_user_id: int, motivo: str) -> list[int]:
+    """Revoga os grants `family` de todos os membros do titular. Devolve os user_ids revogados."""
+    with get_conn() as conn, conn.cursor() as cur:
+        uids = _revoke_owner_grants(cur, owner_user_id, motivo)
+        conn.commit()
+        return uids
+
+
+def release_user(cur, user_id: int, motivo: str) -> list[int]:
+    """Conta que vai sumir (exclusão, merge), na transação do chamador: os membros dela perdem o grant
+    `family` (o cascade apagaria `family_members` e nada mais os alcançaria) e o grant `family` que ela
+    mesma recebe não segue para outra conta. Devolve os membros a recalcular DEPOIS do commit."""
+    uids = _revoke_owner_grants(cur, user_id, motivo)
+    cur.execute("delete from plan_grants where user_id = %s and source = 'family'", (user_id,))
+    return uids
+
+
+def over_capacity(owner_user_id: int) -> list[int]:
+    """user_ids a cortar para o grupo caber na capacidade: os membros mais recentes (LIFO por joined_at)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select id from family_groups where owner_user_id = %s", (owner_user_id,))
+        row = cur.fetchone()
+        if not row:
+            return []
+        cur.execute("select count(*) as n from family_members where group_id = %s and left_at is null", (row["id"],))
+        excesso = cur.fetchone()["n"] - _capacity(cur, row["id"])
+        if excesso <= 0:
+            return []
+        cur.execute(
+            """select user_id from family_members where group_id = %s and role = 'member' and left_at is null
+                order by joined_at desc, id desc limit %s""",
+            (row["id"], excesso),
+        )
+        return [r["user_id"] for r in cur.fetchall()]
+
+
+def set_seat_status(source: str, external_ref: str, status: str, event_version: int) -> bool:
+    """Muda o status de uma vaga extra (evento mais antigo que o gravado não se aplica) e, se o grupo
+    ficou acima da capacidade, corta os membros mais recentes. O webhook que chama isto é do PR 7."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """update family_seat_purchases p set status = %s, event_version = %s
+                 from family_groups g
+                where g.id = p.group_id and p.source = %s and p.external_ref = %s and p.event_version <= %s
+            returning g.owner_user_id""",
+            (status, event_version, source, external_ref, event_version),
+        )
+        row = cur.fetchone()
+        conn.commit()
+    if not row:
+        return False
+    from core.services.family_access import enforce_capacity
+    enforce_capacity(row["owner_user_id"])
+    return True
 
 
 def _lock_group(cur, owner_user_id: int):
@@ -115,7 +238,10 @@ def remove_member(owner_user_id: int, user_id: int, reason: str = "removed") -> 
             "where group_id = %s and member_user_id = %s and revoked_at is null",
             (group_id, user_id),
         )
+        # Só o grant `family`: o individual do membro nunca é tocado; o recompute escolhe o maior.
+        revogados = _revoke_family_grants(cur, group_id, f"family_{reason}", user_id)
         conn.commit()
+    recompute_users(revogados)
 
 
 def list_members(owner_user_id: int) -> list[dict]:
@@ -181,7 +307,10 @@ def accept_invite(token: str, user_id: int) -> int:
             raise FamilyError("invite_invalid")
         _insert_member(cur, group_id, user_id, "member")  # erro aqui desfaz o "used" (rollback)
         conn.commit()
-        return group_id
+        owner_id = row["owner_user_id"]
+    from core.services.family_access import grant_member
+    grant_member(owner_id, user_id)  # no-op se o titular não tem cobertura ativa
+    return group_id
 
 
 def _lock_member_group(cur, member_user_id: int) -> tuple[int, int]:
@@ -285,6 +414,11 @@ def log_read(group_id: int, viewer_user_id: int, member_user_id: int, scope: str
 def dissolve_group(owner_user_id: int) -> bool:
     """Apaga na hora a casa inteira (cascade); o log sobrevive com group_id NULL."""
     with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select id from family_groups where owner_user_id = %s for update", (owner_user_id,))
+        row = cur.fetchone()
+        revogados = _revoke_family_grants(cur, row["id"], "family_dissolved") if row else []
         cur.execute("delete from family_groups where owner_user_id = %s", (owner_user_id,))
+        apagou = cur.rowcount == 1
         conn.commit()
-        return cur.rowcount == 1
+    recompute_users(revogados)
+    return apagou
