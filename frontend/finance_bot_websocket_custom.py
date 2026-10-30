@@ -3521,19 +3521,17 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
         raise HTTPException(status_code=400, detail=detalhe_seguro(e))
 
     user_id    = result["user_id"]
-    link_code  = result["link_code"]
     credenciais = await _sessao_de_conta_nova(
         request, response, background_tasks, user_id=int(user_id),
         email=body.email.strip().lower(), origem_url=f"{DASHBOARD_URL}/cadastro",
     )
 
-    wa_link = link_whatsapp(f"vincular {link_code}")
-
+    # Só /auth/link-code gera código (token forte); as chaves ficam vazias por contrato.
     return {
         "user_id": user_id,
         "email": body.email.strip().lower(),
-        "link_code": link_code,
-        "whatsapp_link": wa_link,
+        "link_code": "",
+        "whatsapp_link": "",
         "dashboard_url": _post_login_url(user_id, request),
         **credenciais,
     }
@@ -3632,8 +3630,6 @@ async def _concluir_login(
 ) -> dict:
     """Final comum de `/auth/login`, `/auth/google/exchange` e `/auth/apple/exchange`, depois de a
     identidade estar provada: exclusão agendada → desafio de MFA → sessão."""
-    from db import create_link_code
-
     _raise_if_account_scheduled_for_deletion(user_id)
 
     # Se o usuario tem MFA ativado, emite challenge token e retorna 200 com
@@ -3647,7 +3643,6 @@ async def _concluir_login(
             "email": email,
         }
 
-    link_code  = create_link_code(user_id, minutes_valid=15)
     token, jti, refresh = _issue_session_token(user_id, email, request)
     credenciais = _entrega_sessao(
         request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
@@ -3664,14 +3659,12 @@ async def _concluir_login(
         user_agent=request.headers.get("user-agent"),
     )
 
-    wa_link = link_whatsapp(f"vincular {link_code}")
-
     return {
         "user_id": user_id,
         "email": email,
         "plan": plan,
-        "link_code": link_code,
-        "whatsapp_link": wa_link,
+        "link_code": "",
+        "whatsapp_link": "",
         "dashboard_url": _post_login_url(user_id, request),
         **credenciais,
     }
@@ -4276,7 +4269,6 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         mfa_reserve_login_challenge_attempt,
         mfa_consume_login_challenge_with_code,
         get_auth_user,
-        create_link_code,
     )
 
     # Desafio morto é 400, nunca 401: 401 é "renove a sessão" no interceptor.
@@ -4322,7 +4314,6 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
-    link_code = await asyncio.to_thread(create_link_code, user_id, 15)
     token, jti, refresh = _issue_session_token(user_id, user["email"], request)
     credenciais = _entrega_sessao(
         request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
@@ -4340,13 +4331,12 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         user_agent=request.headers.get("user-agent"),
     )
 
-    wa_link = link_whatsapp(f"vincular {link_code}")
     return {
         "user_id": user_id,
         "email": user["email"],
         "plan": user.get("plan", "free"),
-        "link_code": link_code,
-        "whatsapp_link": wa_link,
+        "link_code": "",
+        "whatsapp_link": "",
         "dashboard_url": _post_login_url(user_id, request),
         **credenciais,
     }
@@ -5092,13 +5082,11 @@ async def _completar_cadastro_social(
         user_agent=request.headers.get("user-agent"),
     )
 
-    wa_link = link_whatsapp(f"vincular {result['link_code']}")
-
     return {
         "user_id": user_id,
         "email": email,
-        "link_code": result["link_code"],
-        "whatsapp_link": wa_link,
+        "link_code": "",
+        "whatsapp_link": "",
         "dashboard_url": _post_login_url(user_id, request),
         **credenciais,
     }

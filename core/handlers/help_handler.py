@@ -244,13 +244,13 @@ def _account_contextual_fallback(norm: str) -> str:
         return (
             "🔗 Para gerar um código de vinculação entre plataformas, use:\n"
             "• `link`\n\n"
-            "Depois, cole o código na outra plataforma com `link 123456`."
+            "Depois, cole o código na outra plataforma com `link <código>`."
         )
 
     return (
         "🔗 Para vincular suas contas entre plataformas, use:\n"
         "• `link` para gerar um código\n"
-        "• `link 123456` na outra plataforma para concluir"
+        "• `link <código>` na outra plataforma para concluir"
     )
 
 

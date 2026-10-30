@@ -82,7 +82,7 @@ def test_sem_senha_nao_liga_nem_grava_e_com_senha_liga(enviadas):
     _manda(wa_id, "gastei 50 mercado")
     # PR-5: depois da senha o telefone digitado AINDA não liga (V3); recebe o convite do código.
     assert _dono_do_numero(wa_id) != uid and _gastos(uid) == 0, enviadas
-    assert wr.PRECISA_SENHA_WA not in enviadas and "vincular 123456" in enviadas[0], enviadas
+    assert wr.PRECISA_SENHA_WA not in enviadas and "vincular <código>" in enviadas[0], enviadas
 
     enviadas.clear()
     _manda(wa_id, f"vincular {db.create_link_code(uid)}")  # só o código liga

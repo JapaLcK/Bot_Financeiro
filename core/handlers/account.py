@@ -1,5 +1,7 @@
 # core/handlers/account.py
 from __future__ import annotations
+import logging
+
 import db
 from core.crypto import hash_pii
 from core.observability import log_system_event_sync
@@ -7,14 +9,16 @@ from core.services.email_service import SUPPORT_EMAIL
 from db.rate_limits import rate_limit_estourado
 from utils_phone import mask_phone
 
+logger = logging.getLogger(__name__)
+
 # Uma só para `link` e `vincular`, por plataforma. O código pode vir do site OU do `link` sem código
 # na outra plataforma (que não exige conta no site), então o texto cobre os dois caminhos.
 _CODIGO_INVALIDO_WHATSAPP = (
-    "❌ Código inválido ou expirado. Gere um novo e me mande: *vincular 123456*. "
+    "❌ Código inválido ou expirado. Gere um novo e me mande: *vincular <código>*. "
     "Se a conta é do site, toque em *Conectar WhatsApp* lá; se veio de outra plataforma, envie *link* nela."
 )
 _CODIGO_INVALIDO = (
-    "❌ Código inválido ou expirado. Gere um novo e me mande: *link 123456*. "
+    "❌ Código inválido ou expirado. Gere um novo e me mande: *link <código>*. "
     "Se a conta é do site, gere o código lá; se veio de outra plataforma, envie *link* nela."
 )
 
@@ -56,10 +60,10 @@ _RECUSA_POR_MOTIVO = {
     ),
 }
 
-# #722 (D3): o código tem 6 dígitos e vale 15 min; sem teto, um número varre os
-# 10^6. Conta TODA tentativa com código, inclusive a certa: um UPSERT antes do
+# #722 (D3): o código vale 15 min (token de 128 bits); o teto por número é defesa extra
+# contra varredura. Conta TODA tentativa com código, inclusive a certa: um UPSERT antes do
 # consumo, sem segundo passo. Quem tem o código certo acerta na 1ª.
-# ponytail: teto por número; quem troca de número a cada 5 escapa. Teto global depois.
+# O teto global só alerta (log `link_code_global_ceiling` em db.users.consume_link_code).
 _TETO_CODIGO = (5, 15 * 60)
 _MUITAS_TENTATIVAS = "Muitas tentativas de código. Espere 15 minutos e gere um código novo (no site ou com *link* na outra plataforma)."
 
@@ -81,6 +85,31 @@ def _registrar_vinculo(platform: str, external_id: str, user_id: int) -> None:
             user_id=user_id,
             details={"wa_id": mask_phone(external_id)},
         )
+        _avisar_dono_da_conta(external_id, user_id)
+
+
+def _avisar_dono_da_conta(external_id: str, user_id: int) -> None:
+    """Aviso de segurança (e-mail + push do app) de que um WhatsApp foi ligado à conta. Só o
+    número mascarado. Falha aqui nunca desfaz o vínculo."""
+    mascarado = mask_phone(external_id)
+    try:
+        email = (db.get_auth_user(user_id) or {}).get("email")
+        if email:
+            from core.services.email_service import send_whatsapp_linked_notice
+
+            send_whatsapp_linked_notice(email, mascarado)
+    except Exception as exc:
+        logger.warning("aviso de vínculo por e-mail falhou: %s", type(exc).__name__, extra={"user_id": user_id})
+    try:
+        from core.services.push_service import send_push_to_user
+
+        send_push_to_user(
+            user_id, "WhatsApp vinculado",
+            f"O número {mascarado} foi ligado à sua conta. Não foi você? Fale com o suporte.",
+            collapse_id="wa-vinculado",
+        )
+    except Exception as exc:
+        logger.warning("aviso de vínculo por push falhou: %s", type(exc).__name__, extra={"user_id": user_id})
 
 
 def link(platform: str, external_id: str, code: str | None) -> str:
@@ -93,7 +122,7 @@ def link(platform: str, external_id: str, code: str | None) -> str:
         link_code = db.create_link_code(uid, minutes_valid=10)
         return (
             f"🔗 Código de link: **{link_code}**\n"
-            "Digite *link 123456* na outra plataforma para vincular (expira em 10 min)."
+            f"Digite *link {link_code}* na outra plataforma para vincular (expira em 10 min)."
         )
 
     # consome código e vincula

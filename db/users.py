@@ -454,17 +454,22 @@ def get_or_create_canonical_user(provider: str, external_id: str) -> int:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def create_link_code(user_id: int, minutes_valid: int = 10) -> str:
-    code = f"{secrets.randbelow(1_000_000):06d}"
+    """Token `pbl` + 128 bits (hex: sobrevive ao _normalize do classificador, que troca `-`/`_`)."""
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_valid)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "insert into link_codes(code, user_id, expires_at) values (%s,%s,%s) "
-                "on conflict (code) do update set user_id=excluded.user_id, expires_at=excluded.expires_at",
-                (code, user_id, expires_at),
-            )
-        conn.commit()
-    return code
+    for _ in range(5):
+        code = "pbl" + secrets.token_hex(16)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "insert into link_codes(code, user_id, expires_at) values (%s,%s,%s) "
+                    "on conflict (code) do nothing returning code",
+                    (code, user_id, expires_at),
+                )
+                ok = cur.fetchone()
+            conn.commit()
+        if ok:
+            return code
+    raise RuntimeError("Falha ao criar link_code (colisão repetida)")
 
 
 def create_platform_onboarding_token(user_id: int, provider: str, minutes_valid: int = 15) -> str:
@@ -503,20 +508,35 @@ def consume_platform_onboarding_token(token: str, provider: str) -> int | None:
     return int(row["user_id"]) if row else None
 
 
+_TETO_GLOBAL_CODIGO = ("link-code-global", "*", 50, 15 * 60)
+
+
 def consume_link_code(code: str) -> int | None:
-    now = datetime.now(timezone.utc)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select user_id, expires_at from link_codes where code=%s", (code,))
+            cur.execute(
+                "delete from link_codes where code=%s and expires_at > now() returning user_id",
+                (code,),
+            )
             row = cur.fetchone()
-            if not row:
-                return None
-            if row["expires_at"] < now:
-                cur.execute("delete from link_codes where code=%s", (code,))
-                return None
-            user_id = int(row["user_id"])
-            cur.execute("delete from link_codes where code=%s", (code,))
-            return user_id
+        conn.commit()
+    if row:
+        return int(row["user_id"])
+    # Só ALERTA (decisão do dono): bloquear global viraria DoS. Bloqueio é por número.
+    from core.observability import log_system_event_sync
+    from .rate_limits import rate_limit_tentativas
+
+    try:
+        # só na transição (tentativa = teto+1): uma vez por janela, sem inundar system_event_logs
+        if rate_limit_tentativas(*_TETO_GLOBAL_CODIGO[:2], _TETO_GLOBAL_CODIGO[3]) == _TETO_GLOBAL_CODIGO[2] + 1:
+            log_system_event_sync(
+                "warning", "link_code_global_ceiling",
+                "Muitos códigos de vínculo errados na janela (possível varredura).",
+                source="account",
+            )
+    except Exception:
+        logger.exception("teto global de link_code falhou")
+    return None
 
 
 def bind_identity(provider: str, external_id: str, user_id: int) -> None:

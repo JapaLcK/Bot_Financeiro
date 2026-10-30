@@ -91,7 +91,7 @@ def test_codigo_invalido_nao_liga(enviadas):
     dono = _dono_do_numero(n)  # o usuário só-WhatsApp que o número acabou de criar
 
     enviadas.clear()
-    _manda(n, "vincular 000000")
+    _manda(n, "vincular pbl00000000000000000000000000000000")
     assert enviadas[0].startswith("❌ Código inválido"), enviadas
     assert _dono_do_numero(n) == dono
 
@@ -266,7 +266,7 @@ def test_teto_de_tentativas(enviadas, verbo):
     n = _numero_novo()
 
     for _ in range(5):
-        _manda(n, verbo.format("000000"))
+        _manda(n, verbo.format("pbl00000000000000000000000000000000"))
     assert all(e.startswith("❌ Código inválido") for e in enviadas), enviadas
     enviadas.clear()
     _manda(n, verbo.format(code))

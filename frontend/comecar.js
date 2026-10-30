@@ -138,7 +138,7 @@
    *
    * Lê `identities` (as identidades da conta, `/settings/{id}/security`): a
    * fonte única de "este WhatsApp está ligado a esta conta", seja qual for o
-   * caminho que o ligou (`vincular 123456` → link_platform_identity, em
+   * caminho que o ligou (`vincular <código>` → link_platform_identity, em
    * db/users.py). Não depende do carimbo `whatsapp_verified_at`.
    */
   function isWhatsAppLinked(security) {
@@ -708,7 +708,7 @@
   }
 
   function renderWaCode() {
-    // O bot só vincula com "vincular 123456" (o deeplink já leva essa mesma
+    // O bot só vincula com "vincular pbl…" (o deeplink já leva essa mesma
     // mensagem); ela aparece inteira aqui, pronta pra copiar, em vez de só o número.
     text(el("wa-code"), state.waCode ? "vincular " + state.waCode : "—");
     const link = el("wa-link");

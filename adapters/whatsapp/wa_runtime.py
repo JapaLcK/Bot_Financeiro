@@ -36,7 +36,7 @@ from adapters.whatsapp.wa_commands_menu import (
 )
 from core.handle_incoming import handle_incoming, _consulta_de_previsao
 from core.help_text import HELP_TRIGGERS
-from core.intent_classifier import contains_comparative_question
+from core.intent_classifier import LINK_CODE_PATTERN, contains_comparative_question
 from core.intent_router import abandona_pergunta_de_valor
 from core.secure_compare import constant_time_eq
 from core.handlers import report as h_report
@@ -538,13 +538,13 @@ PARAR_LEAD_WA = "Pronto, não vou mais te mandar mensagens por aqui. Se mudar de
 # O opt-out (botão ou digitado) não conseguiu gravar: dizer isso, nunca ficar em silêncio.
 OPT_OUT_FALHOU_WA = "Não consegui registrar agora. Tenta mandar PARAR de novo em instantes."
 
-# Tentativa de vincular por código ("link 123456" / "vincular 123456"). Espelha
+# Tentativa de vincular por código ("link <token>" / "vincular <token>"). Espelha
 # os padrões do intent_classifier (account.link / account.vincular). Um número
 # SEM conta usa exatamente esse fluxo pra se vincular, então não pode ser barrado
 # pelo aviso de "crie sua conta". Usa o MESMO _normalize do classificador (que
-# troca pontuação por espaço) — senão "link: 123456" ou "link 123456." casariam
+# troca pontuação por espaço) — senão "link: <código>" ou "link <código>." casariam
 # como vínculo lá no handle_incoming mas seriam barrados aqui, engolindo o código.
-_LINK_CODE_RE = re.compile(r"^(?:link|vincular)\s+\d{6}$")
+_LINK_CODE_RE = re.compile(rf"^(?:link|vincular)\s+{LINK_CODE_PATTERN}$")
 
 
 def _is_link_code_attempt(text: str) -> bool:
@@ -569,7 +569,7 @@ def _send_no_account_notice(reply_to: str, auto_link_result: dict[str, Any], use
         (
             "🐷 Oi! Ainda não tenho uma conta ligada a este número de WhatsApp.\n\n"
             "Já tem conta no PigBank? Entre no site, toque em *Conectar WhatsApp* e me mande "
-            "o código que aparecer, assim: *vincular 123456*. O código vale 15 minutos.\n\n"
+            "o código que aparecer, assim: *vincular <código>*. O código vale 15 minutos.\n\n"
             f"Ainda não tem? Crie sua conta grátis: {_signup_url()}\n"
             "Depois, toque em *Conectar WhatsApp* e me mande o código."
         ),
@@ -806,7 +806,7 @@ def process_message(message: InboundMessage) -> None:
             len(message.attachments or []),
         )
         # "Testar o Piggy": desvio ANTES de qualquer coisa que grave (usuário
-        # canônico, vínculo, ai_messages). Número com conta, `vincular 123456`
+        # canônico, vínculo, ai_messages). Número com conta, `vincular <código>`
         # e quem não é do demo seguem o fluxo normal (decidir devolve None). A
         # dedupe é própria e só roda depois de decidir que a mensagem é do demo:
         # marcá-la antes faria a mensagem cair no fluxo normal e ser descartada.
@@ -834,7 +834,7 @@ def process_message(message: InboundMessage) -> None:
         pid, ancora = _pergunta_da_ia(uid)
 
         # Não liga mais pelo telefone (PR-5, D1(c)): só classifica o número. Quem liga é o
-        # código (`vincular 123456`), no `handle_incoming`.
+        # código (`vincular <código>`), no `handle_incoming`.
         auto_link_result = attempt_whatsapp_phone_link(message.wa_id, current_user_id=uid)
         if auto_link_result["status"] == "already_linked":
             resolved_uid = int(auto_link_result.get("user_id") or uid)

@@ -782,7 +782,7 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     ele mesmo. Ver o comentário da isenção lá embaixo.
 
     Não corre o risco de barrar quem ia vincular: o código de vínculo
-    (`vincular 123456`) tem isenção própria (`isencao_do_barrado`, "codigo"), e é a
+    (`vincular <código>`) tem isenção própria (`isencao_do_barrado`, "codigo"), e é a
     única coisa que liga um número a uma conta (o telefone digitado não liga mais;
     `attempt_whatsapp_phone_link` só classifica o número).
 

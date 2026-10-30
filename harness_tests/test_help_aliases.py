@@ -22,9 +22,9 @@ class HelpAliasesTests(unittest.TestCase):
             "meu link não funciona",
         )
         self.assertIn("dashboard", painel.lower())
-        self.assertIn("link 123456", comando.lower())
-        self.assertIn("link 123456", nao_consigo.lower())
-        self.assertIn("link 123456", nao_funciona.lower())
+        self.assertIn("link <código>", comando.lower())
+        self.assertIn("link <código>", nao_consigo.lower())
+        self.assertIn("link <código>", nao_funciona.lower())
 
     def test_assuntos_externos_com_as_mesmas_palavras_continuam_fora(self) -> None:
         texts = (

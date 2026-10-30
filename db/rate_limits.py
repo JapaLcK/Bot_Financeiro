@@ -28,9 +28,14 @@ RATE_LIMIT_UPSERT_SQL = """
 
 def rate_limit_estourado(bucket: str, identifier: str, max_attempts: int, window_seconds: int) -> bool:
     """Conta esta tentativa e diz se ela passou do teto da janela."""
+    return rate_limit_tentativas(bucket, identifier, window_seconds) > max_attempts
+
+
+def rate_limit_tentativas(bucket: str, identifier: str, window_seconds: int) -> int:
+    """Conta esta tentativa e devolve o total da janela."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(RATE_LIMIT_UPSERT_SQL, (bucket, identifier, window_seconds, window_seconds))
             row = cur.fetchone()
         conn.commit()
-    return int(row["attempts"] or 0) > max_attempts
+    return int(row["attempts"] or 0)
