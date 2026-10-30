@@ -144,10 +144,10 @@ def e_resposta(texto: str) -> str | None:
     return BANCO if banco else DINHEIRO
 
 
-def _no_cartao(resposta: str) -> bool:
-    """"cartão", "crédito", "cartão de crédito" — não "cartão de débito"."""
+def _no_cartao(resposta: str, debito: bool = False) -> bool:
+    """"cartão", "crédito", "cartão de crédito" — não "cartão de débito" (com `debito`, também “cartão de débito”: a fila (`resolve_multi_launch_value`), a resposta à pergunta de forma (`resolver`) e o pedaço sem marca no `rotear_partes`, rodadas 10 e 11)."""
     palavras = normalize_text(resposta or "").split()
-    return bool({"cartao", "credito"} & set(palavras)) and "debito" not in palavras
+    return bool({"cartao", "credito"} & set(palavras)) and (debito or "debito" not in palavras)
 
 
 # ── textos ──────────────────────────────────────────────────────────────────
@@ -246,18 +246,26 @@ def resolver(user_id: int, text: str, pending: dict) -> str | None:
     # cartão", e o `add()` decide — cartão manual vai para a fatura; sem ele, o
     # OF traz. Com só a forma BANCO, o cartão manual ficaria sem a compra.
     no_cartao = forma == BANCO and _no_cartao(text)
+    # Rodada 10 (#1310): "cartão de débito" o `e_resposta` lê como débito, mas o cartão vence: T8, sem declarar nem ir
+    # para a fatura (com a flag; sem ela, como antes). Só a resposta: a frase digitada segue no `_no_cartao` de sempre.
+    from core.handlers.declaracao_banco import declara
+    so_t8 = forma == BANCO and not no_cartao and _no_cartao(text, debito=True) and declara(user_id, decidir(user_id, BANCO))
     if fluxo == "texto":
         # Sem `restore_pending_on_error`: o multi-lançamento grava item a item,
         # e devolver a pergunta depois de um item gravado gravaria em dobro.
         from core.handlers import launches as h_launches
         texto, plat = payload.get("text") or "", payload.get("platform") or "whatsapp"
-        if no_cartao:
+        if no_cartao or so_t8:
             # Pedaço a pedaço, fora do multi. O pulo fica: "recebi mais que 5 mil?"
             # não é compra, a guarda do crédito (#568) não o vê; o predicado é o mesmo.
             from core.intent_classifier import is_comparative_question
             partes = h_launches.split_financial_transactions(texto) or [texto]
+            # Opção A (rodada 9): o "débito" do pedaço tira o cartão do D8 (`_no_cartao`) e o pedaço declararia; a resposta
+            # "cartão" vence e ele recebe T8, sem declarar nem ir para a fatura.
+            t8 = declara(user_id, decidir(user_id, BANCO))
             return "\n\n".join(
-                [h_launches.add(user_id, f"{p} no cartão", {}, plat, forma_pagamento=BANCO)
+                [declaracao_banco_textos.CARTAO if t8 and (so_t8 or not _no_cartao(f"{p} no cartão"))
+                 else h_launches.add(user_id, f"{p} no cartão", {}, plat, forma_pagamento=BANCO)
                  for p in partes if not is_comparative_question(p)]
                 + [h_launches.aviso_pergunta_pulada(p)
                    for p in partes if is_comparative_question(p)])
@@ -270,24 +278,26 @@ def resolver(user_id: int, text: str, pending: dict) -> str | None:
         from core.types import IncomingMessage
         plat = payload.get("platform") or "whatsapp"
         partes, resultados = payload.get("partes") or [], None
-        if no_cartao:
-            # Só o gasto/receita ganha o "no cartão" (a classificação é a da
-            # pergunta, `handle_incoming`): a conta segue como na resposta "pix".
+        if no_cartao or so_t8:
+            # Só o gasto/receita (com valor ou sem: `r` None) ganha o "no cartão"
+            # (a classificação é a da pergunta, `handle_incoming`); o resto segue
+            # como na resposta "pix". O `rotear_partes` lê a marca: nada declara.
             from core.intent_classifier import classify
             from parsers import describe_valueless_launch
             resultados = [None if describe_valueless_launch(p) else classify(p, user_id=user_id)
                           for p in partes]
-            partes = [f"{p} no cartão" if r and r.intent == "launches.add" else p
-                      for p, r in zip(partes, resultados)]
+            partes = [f"{p} no cartão" if no_cartao and (r is None or r.intent == "launches.add") else p
+                      for p, r in zip(partes, resultados)]  # sem a marca (`so_t8`), o `rotear_partes` dá T8
         corpo, _ = rotear_partes(user_id, partes,
                                  IncomingMessage(platform=plat, user_id=user_id, text=""),
-                                 plat, forma, resultados)
+                                 plat, forma, resultados, resposta_cartao=no_cartao or so_t8)
         return corpo
     if fluxo == "entities":
+        # Recibo (OCR) e tool da IA: sem o texto do usuário, o leitor estrito (`declaracao_valor`) não roda. Quem confere
+        # o valor é a própria pergunta ("Esse R$ X foi…"), e no recibo também o "sim" da prévia (ADR 0006, DP-10).
         ents = dict(payload.get("entities") or {})
-        from core.handlers.declaracao_banco import declara
-        if forma == BANCO and (no_cartao or not declara(user_id, BANCO)):  # cartão nunca declara
-            return msg_banco(user_id, ents.get("tipo"), ents.get("valor"), cartao=no_cartao)
+        if forma == BANCO and (no_cartao or so_t8 or not declara(user_id, BANCO)):  # cartão nunca declara
+            return msg_banco(user_id, ents.get("tipo"), ents.get("valor"), cartao=no_cartao or so_t8)
         from datetime import datetime
         from core.handlers.launches import add_from_entities
         if ents.get("criado_em"):

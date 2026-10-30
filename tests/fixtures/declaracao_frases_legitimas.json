@@ -1,0 +1,1217 @@
+[
+ {
+  "frase": "gastei 50 no mercado pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei mais 30 no uber pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei 20 a mais no posto pelo banco",
+  "valores": [
+   20.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei 40 no almoço mais 15 no café pelo banco",
+  "valores": [
+   40.0,
+   15.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "gastei 500 no ifood e mais 800 no mercado pelo banco",
+  "valores": [
+   500.0,
+   800.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "gastei mais 30 que o combinado no uber pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei mais ou menos 50 no mercado pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E2: valor aproximado (T17)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "gastei mais ou menos cinquenta no mercado pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E2: valor aproximado (T17)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "gastei mais trinta no uber pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "recebi mais 200 do freela pelo banco",
+  "valores": [
+   200.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "recebi mais 1.500 esse mes pelo banco",
+  "valores": [
+   1500.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "paguei mais R$ 40 de taxa pelo banco",
+  "valores": [
+   40.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei mais r$30 no uber pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei muito 50 no mercado pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei muito hoje no mercado, uns 200 pelo banco",
+  "valores": [
+   200.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E2: valor aproximado (T17)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "gastei demais no rolê, 150 no bar pelo banco",
+  "valores": [
+   150.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "paguei muito caro na gasolina 250 pelo banco",
+  "valores": [
+   250.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "comprei um tênis de 300 mais barato que o normal pelo banco",
+  "valores": [
+   300.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei mais de 100 no mercado pelo banco",
+  "valores": [
+   100.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E2: valor aproximado (T17)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "caiu mais ou menos 3 mil de salário pelo banco",
+  "valores": [
+   3000.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E2: valor aproximado (T17)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "recebi 1500 de salário pelo banco",
+  "valores": [
+   1500.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei mais ou menos uns 50 no mercado pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E2: valor aproximado (T17)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "gastei mais ou menos umas 40 pila no bar pelo banco",
+  "valores": [
+   40.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E2: valor aproximado (T17)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "paguei mais ou menos no uber 30 pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E2: valor aproximado (T17), o marcador em qualquer posição (rodada 4)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "caiu mais um pix de 50 que o joao mandou pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "mandei mais um pix de 50 pro joao que tava devendo pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei muito no bar que fui ontem 80 pelo banco",
+  "valores": [
+   80.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "recebi mais uma parcela de 800 do seguro que eu tinha pedido pelo banco",
+  "valores": [
+   800.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei demais no fds que passou 100 no bar e 50 no uber pelo banco",
+  "valores": [
+   100.0,
+   50.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "gastei 2025 no notebook pelo banco",
+  "valores": [
+   2025.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei 1200 no aluguel pelo banco",
+  "valores": [
+   1200.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "paguei mais 2024 de ipva pelo banco",
+  "valores": [
+   2024.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei mais 2000 no carro pelo banco",
+  "valores": [
+   2000.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "paguei acima de 100 no mercado pelo banco",
+  "valores": [
+   100.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E2: valor aproximado (T17)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "paguei 20 a mais que o normal na luz pelo banco",
+  "valores": [
+   20.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "paguei acima do normal 200 na luz pelo banco",
+  "valores": [
+   200.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei mais no uber vs taxi 30 pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei 30% a mais no uber pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "percentual colado é medida, não valor (T12)",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "torrei 80 conto no bar pelo banco",
+  "valores": [],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "dia 20 paguei 300 pelo banco",
+  "valores": [],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "paguei a conta 150 pelo banco",
+  "valores": [
+   150.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "paguei a conta 1200 pelo banco",
+  "valores": [
+   1200.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "café 49,90 às 15:30 pelo banco",
+  "valores": [],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "desconto de 10% em 200 pelo banco",
+  "valores": [],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "paguei uma pizza de 40 pelo banco",
+  "valores": [
+   40.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "comprei no cartão 3000 em 3x pelo banco",
+  "valores": [
+   3000.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "parcelado (T14); no `add` o cartão responde T8 antes",
+  "recusa_texto": "T14"
+ },
+ {
+  "frase": "gastei 2200 no mercado pelo banco",
+  "valores": [
+   2200.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei 12,90 no mercado pelo banco",
+  "valores": [
+   12.9
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei vinte e cinco no mercado pelo banco",
+  "valores": [
+   25.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei duzentos e cinquenta no mercado pelo banco",
+  "valores": [
+   250.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei dois mil e quinhentos no mercado pelo banco",
+  "valores": [
+   2500.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei 20 no mercado e 30 na padaria pelo banco",
+  "valores": [
+   20.0,
+   30.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "gastei 25 no uber e 15 no mercado pelo banco",
+  "valores": [
+   25.0,
+   15.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "gastei 80 pro joao e 20 pro pedro pelo banco",
+  "valores": [
+   80.0,
+   20.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "paguei luz 120 e paguei internet 100 pelo banco",
+  "valores": [
+   120.0,
+   100.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "gastei 10 de gorjeta pelo banco",
+  "valores": [
+   10.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "paguei 30 de gasolina pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei 80 no 99 pop pelo banco",
+  "valores": [
+   80.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 50 no mercado 24h pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "paguei luz 2026 pelo banco",
+  "valores": [
+   2026.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei 30 com 2 amigos pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 25 na 25 de março pelo banco",
+  "valores": [
+   25.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei 50 no mercado dia 5 e 30 na padaria pelo banco",
+  "valores": [
+   50.0,
+   30.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "gastei 30 em arroz 5 kg pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei 10 km de uber pelo banco",
+  "valores": [
+   10.0
+  ],
+  "categoria": "das_suites",
+  "recusa_aceita": "medida (10 km) não é valor (T12)",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 1,5 mil na padaria pelo banco",
+  "valores": [
+   1500.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei 50,12 no mercado pelo banco",
+  "valores": [
+   50.12
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei 1,1 mil no aluguel pelo banco",
+  "valores": [
+   1100.0
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "gastei R$ 1.234,56 no mercado pelo banco",
+  "valores": [
+   1234.56
+  ],
+  "categoria": "das_suites"
+ },
+ {
+  "frase": "50 uber pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "atalho"
+ },
+ {
+  "frase": "uber 23,90 pelo banco",
+  "valores": [],
+  "categoria": "atalho"
+ },
+ {
+  "frase": "77,90 mercado pelo banco",
+  "valores": [
+   77.9
+  ],
+  "categoria": "atalho"
+ },
+ {
+  "frase": "R$ 1.234,56 aluguel pelo banco",
+  "valores": [
+   1234.56
+  ],
+  "categoria": "atalho"
+ },
+ {
+  "frase": "ifood 45 pelo banco",
+  "valores": [],
+  "categoria": "atalho"
+ },
+ {
+  "frase": "35 lanche pelo banco",
+  "valores": [
+   35.0
+  ],
+  "categoria": "atalho"
+ },
+ {
+  "frase": "mercado 120 pelo banco",
+  "valores": [],
+  "categoria": "atalho"
+ },
+ {
+  "frase": "pix de 30 pro joão pelo banco",
+  "valores": [],
+  "categoria": "atalho"
+ },
+ {
+  "frase": "12 pastel pelo banco",
+  "valores": [
+   12.0
+  ],
+  "categoria": "atalho"
+ },
+ {
+  "frase": "netflix 55,90 pelo banco",
+  "valores": [],
+  "categoria": "atalho"
+ },
+ {
+  "frase": "gastei 18 no açaí pelo banco",
+  "valores": [
+   18.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "paguei 90 na academia pelo banco",
+  "valores": [
+   90.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "gastei 35 no ifood pelo banco",
+  "valores": [
+   35.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "paguei 60 de internet pelo banco",
+  "valores": [
+   60.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "gastei 22 no uber pelo banco",
+  "valores": [
+   22.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "paguei 150 de luz pelo banco",
+  "valores": [
+   150.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "gastei 40 na farmácia pelo banco",
+  "valores": [
+   40.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "recebi 300 de freela pelo banco",
+  "valores": [
+   300.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "ganhei 50 da minha vó pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "mandei 25 pra minha mãe pelo banco",
+  "valores": [
+   25.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "gastei 12 reais no pão pelo banco",
+  "valores": [
+   12.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "paguei 1.200 de aluguel pelo banco",
+  "valores": [
+   1200.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "gastei 70 conto na balada pelo banco",
+  "valores": [
+   70.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "paguei 45 pila no corte de cabelo pelo banco",
+  "valores": [
+   45.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "comprei um fone de 150 pelo banco",
+  "valores": [
+   150.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "comprei um tênis por 350 pelo banco",
+  "valores": [
+   350.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "gastei 9,90 no spotify pelo banco",
+  "valores": [
+   9.9
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "paguei R$ 89,90 no plano do celular pelo banco",
+  "valores": [
+   89.9
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "gastei 15 no bandejão pelo banco",
+  "valores": [
+   15.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "recebi 2 mil de salário pelo banco",
+  "valores": [
+   2000.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "caiu 1.800 do estágio pelo banco",
+  "valores": [
+   1800.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "gastei uns 30 no bar pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "verbo_preposicao",
+  "recusa_aceita": "E2: valor aproximado (T17)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "gastei 60 no rolê de ontem pelo banco",
+  "valores": [
+   60.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "paguei 200 na matrícula da academia pelo banco",
+  "valores": [
+   200.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "gastei 45 no cinema com a mina pelo banco",
+  "valores": [
+   45.0
+  ],
+  "categoria": "verbo_preposicao"
+ },
+ {
+  "frase": "gastei trinta e cinco no uber pelo banco",
+  "valores": [
+   35.0
+  ],
+  "categoria": "extenso_audio"
+ },
+ {
+  "frase": "gastei cinquenta no mercado pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "extenso_audio"
+ },
+ {
+  "frase": "paguei cento e vinte de luz pelo banco",
+  "valores": [
+   120.0
+  ],
+  "categoria": "extenso_audio"
+ },
+ {
+  "frase": "recebi mil e quinhentos de salário pelo banco",
+  "valores": [
+   1500.0
+  ],
+  "categoria": "extenso_audio",
+  "recusa_aceita": "o parser lê só o 'mil' (T11, igual à main)",
+  "recusa_texto": "T11"
+ },
+ {
+  "frase": "gastei vinte reais no lanche pelo banco",
+  "valores": [
+   20.0
+  ],
+  "categoria": "extenso_audio"
+ },
+ {
+  "frase": "paguei dois mil de aluguel pelo banco",
+  "valores": [
+   2000.0
+  ],
+  "categoria": "extenso_audio"
+ },
+ {
+  "frase": "gastei quinze no açaí pelo banco",
+  "valores": [
+   15.0
+  ],
+  "categoria": "extenso_audio"
+ },
+ {
+  "frase": "gastei cem reais no mercado pelo banco",
+  "valores": [
+   100.0
+  ],
+  "categoria": "extenso_audio"
+ },
+ {
+  "frase": "paguei oitenta de internet pelo banco",
+  "valores": [
+   80.0
+  ],
+  "categoria": "extenso_audio"
+ },
+ {
+  "frase": "gastei quarenta e cinco na farmácia pelo banco",
+  "valores": [
+   45.0
+  ],
+  "categoria": "extenso_audio"
+ },
+ {
+  "frase": "gastei 15 no 99 pelo banco",
+  "valores": [
+   15.0
+  ],
+  "categoria": "numero_na_descricao",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 25 na loja 3 pelo banco",
+  "valores": [
+   25.0
+  ],
+  "categoria": "numero_na_descricao",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 40 no 7 eleven pelo banco",
+  "valores": [
+   40.0
+  ],
+  "categoria": "numero_na_descricao",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "paguei 30 no bar do 21 pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "numero_na_descricao",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 50 no mercado da rua 5 pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "numero_na_descricao",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 120 na ps5 pelo banco",
+  "valores": [
+   120.0
+  ],
+  "categoria": "numero_na_descricao"
+ },
+ {
+  "frase": "paguei 60 do iphone 13 pelo banco",
+  "valores": [
+   60.0
+  ],
+  "categoria": "numero_na_descricao",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei R$ 15 no 99 pelo banco",
+  "valores": [
+   15.0
+  ],
+  "categoria": "numero_na_descricao",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 15 reais no 99 pelo banco",
+  "valores": [
+   15.0
+  ],
+  "categoria": "numero_na_descricao",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "recebi R$ 200 da 99 pelo banco",
+  "valores": [
+   200.0
+  ],
+  "categoria": "numero_na_descricao",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 35 no forever 21 pelo banco",
+  "valores": [
+   35.0
+  ],
+  "categoria": "numero_na_descricao",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "comprei 2 camisetas por 80 pelo banco",
+  "valores": [
+   80.0
+  ],
+  "categoria": "quantidade_preco",
+  "recusa_aceita": "D3: quantidade antes do preço (T12); a main grava R$ 2",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "comprei 3 pizzas por 90 pelo banco",
+  "valores": [
+   90.0
+  ],
+  "categoria": "quantidade_preco",
+  "recusa_aceita": "D3: quantidade antes do preço (T12); a main grava R$ 3",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei R$ 80 em 2 camisetas pelo banco",
+  "valores": [
+   80.0
+  ],
+  "categoria": "quantidade_preco",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 50 em 2 ingressos pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "quantidade_preco",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "paguei 2 cervejas 20 pelo banco",
+  "valores": [
+   20.0
+  ],
+  "categoria": "quantidade_preco",
+  "recusa_aceita": "D3: quantidade antes do preço (T12); a main grava R$ 2",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 30 com 2 amigos no bar pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "quantidade_preco",
+  "recusa_aceita": "E3: outro número solto além do valor (T12); colado a letras (99pop) grava",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "paguei 12x de 99 pelo banco",
+  "valores": [
+   99.0
+  ],
+  "categoria": "quantidade_preco",
+  "recusa_aceita": "D5: parcelado, “N x de” (T14); a main grava R$ 12",
+  "recusa_texto": "T14"
+ },
+ {
+  "frase": "comprei 1 pizza por 45 pelo banco",
+  "valores": [
+   45.0
+  ],
+  "categoria": "quantidade_preco",
+  "recusa_aceita": "D3: quantidade antes do preço (T12); a main grava R$ 1",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 20 no uber e 15 no café pelo banco",
+  "valores": [
+   20.0,
+   15.0
+  ],
+  "categoria": "dois_gastos",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "paguei 100 de luz e 80 de água pelo banco",
+  "valores": [
+   100.0,
+   80.0
+  ],
+  "categoria": "dois_gastos",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "gastei 30 no mercado e mais 20 na padaria pelo banco",
+  "valores": [
+   30.0,
+   20.0
+  ],
+  "categoria": "dois_gastos",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "gastei 50 uber, 30 café pelo banco",
+  "valores": [
+   50.0,
+   30.0
+  ],
+  "categoria": "dois_gastos",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "recebi 100 da vó e 50 do tio pelo banco",
+  "valores": [
+   100.0,
+   50.0
+  ],
+  "categoria": "dois_gastos",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "gastei 40 no bar e paguei 25 no uber pelo banco",
+  "valores": [
+   40.0,
+   25.0
+  ],
+  "categoria": "dois_gastos",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "gastei 10 no pão e 5 no leite pelo banco",
+  "valores": [
+   10.0,
+   5.0
+  ],
+  "categoria": "dois_gastos",
+  "recusa_aceita": "E1: um gasto por mensagem (T16)",
+  "recusa_texto": "T16"
+ },
+ {
+  "frase": "gastei 50 no mercado ontem pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "data"
+ },
+ {
+  "frase": "gastei 30 no uber hoje pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "data"
+ },
+ {
+  "frase": "paguei 100 de luz dia 10 pelo banco",
+  "valores": [
+   100.0
+  ],
+  "categoria": "data"
+ },
+ {
+  "frase": "gastei 45 no ifood 05/10 pelo banco",
+  "valores": [
+   45.0
+  ],
+  "categoria": "data"
+ },
+ {
+  "frase": "paguei 1200 de aluguel dia 5 pelo banco",
+  "valores": [
+   1200.0
+  ],
+  "categoria": "data"
+ },
+ {
+  "frase": "gastei 80 no mercado às 18h pelo banco",
+  "valores": [
+   80.0
+  ],
+  "categoria": "data"
+ },
+ {
+  "frase": "recebi 500 dia 20 de outubro pelo banco",
+  "valores": [
+   500.0
+  ],
+  "categoria": "data"
+ },
+ {
+  "frase": "gastei 200 em 10 litros de gasolina pelo banco",
+  "valores": [
+   200.0
+  ],
+  "categoria": "medida"
+ },
+ {
+  "frase": "gastei 30 no açaí de 500 ml pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "medida"
+ },
+ {
+  "frase": "paguei 60 no uber de 20 km pelo banco",
+  "valores": [
+   60.0
+  ],
+  "categoria": "medida"
+ },
+ {
+  "frase": "gastei 25 no estacionamento 2h pelo banco",
+  "valores": [
+   25.0
+  ],
+  "categoria": "medida"
+ },
+ {
+  "frase": "paguei 40 no futebol que jogo 2x na semana pelo banco",
+  "valores": [
+   40.0
+  ],
+  "categoria": "falso_positivo_aceito",
+  "recusa_aceita": "rodada 5, “2x na semana” lido como parcelado: falso positivo aceito (limite no ADR; a #1315 resolve a classe)",
+  "recusa_texto": "T14"
+ },
+ {
+  "frase": "gastei 50 no mercado por aí no centro pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "falso_positivo_aceito",
+  "recusa_aceita": "rodada 5, “por aí” é marcador livre em qualquer posição: falso positivo aceito (limite no ADR; a #1315 resolve a classe)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "gastei 30 no lanche e pouco depois fui pra casa pelo banco",
+  "valores": [
+   30.0
+  ],
+  "categoria": "falso_positivo_aceito",
+  "recusa_aceita": "rodada 5, “e pouco” logo depois do valor: falso positivo aceito (limite no ADR; a #1315 resolve a classe)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "paguei 80 na academia que é mais ou menos perto de casa pelo banco",
+  "valores": [
+   80.0
+  ],
+  "categoria": "falso_positivo_aceito",
+  "recusa_aceita": "rodada 5, “mais ou menos” é marcador livre em qualquer posição: falso positivo aceito (limite no ADR; a #1315 resolve a classe)",
+  "recusa_texto": "T17"
+ },
+ {
+  "frase": "paguei R$ 120 de internet que pago cada mês pelo banco",
+  "valores": [
+   120.0
+  ],
+  "categoria": "falso_positivo_aceito",
+  "recusa_aceita": "rodada 6, qualquer “cada” no pedaço do valor: falso positivo aceito (limite no ADR; a #1315 resolve a classe)",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "gastei 50 no bar e cada um pagou o seu pelo banco",
+  "valores": [
+   50.0
+  ],
+  "categoria": "falso_positivo_aceito",
+  "recusa_aceita": "rodada 6, qualquer “cada” no pedaço do valor: falso positivo aceito (limite no ADR; a #1315 resolve a classe)",
+  "recusa_texto": "T12"
+ },
+ {
+  "frase": "paguei R$ 120 de internet que vence cada dia 10 pelo banco",
+  "valores": [
+   120.0
+  ],
+  "categoria": "falso_positivo_aceito",
+  "recusa_aceita": "rodada 6, qualquer “cada” no pedaço do valor: falso positivo aceito (limite no ADR; a #1315 resolve a classe)",
+  "recusa_texto": "T12"
+ }
+]

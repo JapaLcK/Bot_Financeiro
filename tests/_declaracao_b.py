@@ -3,7 +3,7 @@
 Ana tem o Nubank conectado (1 conta BANK/BRL) e Carteira de R$ 200,00. Toda mensagem entra pelo `handle_incoming`
 (`manda_wamid`: wamid ÚNICO por mensagem; o `manda()` fixa "1" e esconderia a colisão da chave de idempotência).
 `PORTAS` é a tabela porta x flag do plano (seção 3.2): cada porta que "banco" destrava, com o número de declarações
-que ela cria com a flag ligada. Os mesmos passos rodam desligados (`test_declaracao_b_flag_desligada`) e ligados
+que ela cria com a flag ligada (0 = mensagem com dois gastos, que a declaração recusa com T16: E1 da #1310). Os mesmos passos rodam desligados (`test_declaracao_b_flag_desligada`) e ligados
 (`test_declaracao_b_conversa`): a diferença entre os dois é a flag, não o roteiro.
 """
 from __future__ import annotations
@@ -81,12 +81,12 @@ def _imagem(uid, m):
 # nome -> (roteiro(uid, monkeypatch) -> respostas, declarações que cria com a flag ligada)
 PORTAS = {
     "texto_forma_dita": (lambda u, m: manda_wamid(u, "gastei 50 no mercado no pix"), 1),
-    "texto_duas_frases": (lambda u, m: manda_wamid(u, "gastei 50 no mercado e 30 na padaria no pix"), 2),
+    "texto_duas_frases": (lambda u, m: manda_wamid(u, "gastei 50 no mercado e 30 na padaria no pix"), 0),
     "pergunta_e_banco": (lambda u, m: manda_wamid(u, "gastei 50 no mercado") + manda_wamid(u, "banco"), 1),
     "audio_uma_frase": (lambda u, m: fala(m, u, "gastei 50 no mercado no pix"), 1),
-    "audio_duas_frases_com_forma": (lambda u, m: fala(m, u, "gastei 50 no mercado no pix e 30 na padaria no pix"), 2),
+    "audio_duas_frases_com_forma": (lambda u, m: fala(m, u, "gastei 50 no mercado no pix e 30 na padaria no pix"), 0),
     "audio_pergunta_e_banco": (
-        lambda u, m: fala(m, u, "gastei 50 no mercado e 30 na padaria") + manda_wamid(u, "banco"), 2),
+        lambda u, m: fala(m, u, "gastei 50 no mercado e 30 na padaria") + manda_wamid(u, "banco"), 0),
     "audio_pedaco_sem_valor_e_fila": (
         lambda u, m: fala(m, u, "gastei 50 no mercado no pix e paguei o aluguel") + manda_wamid(u, "1500"), 2),
     "clarification_descricao": (

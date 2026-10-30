@@ -269,14 +269,18 @@ def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessag
 
 
 def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: str,
-                  forma: str | None = None, resultados: list | None = None) -> tuple[str, bool]:
+                  forma: str | None = None, resultados: list | None = None,
+                  resposta_cartao: bool = False) -> tuple[str, bool]:
     """Roteia os pedaços de um áudio, cada um no seu fluxo; devolve (corpo,
     pediu_valor). `forma`: a forma declarada para o áudio inteiro (Q40, banco
     conectado — também a resposta à pergunta de forma do áudio, em
     `core/handlers/forma_pagamento.py`); None = cada pedaço pela própria frase.
-    `resultados`: as classificações já feitas, alinhadas com `parts`."""
+    `resultados`: as classificações já feitas, alinhadas com `parts`.
+    `resposta_cartao`: a forma veio da resposta "cartão" (opção A da rodada 9)."""
+    from core.handlers import declaracao_banco_textos as tx
     from core.handlers import forma_pagamento as fp
-    from core.handlers.declaracao_banco import declara, recusa_valor
+    from core.handlers.credit import e_compra_no_debito
+    from core.handlers.declaracao_banco import declara, recusa_valor, tem_cartao
     from core.handlers.declaracao_valor import reunir
     is_multi = len(parts) > 1
     responses = []
@@ -291,11 +295,18 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
     puladas: list[str] = []
     if is_multi:
         from parsers import describe_valueless_launch
-        from core.handlers.launches import aviso_pergunta_pulada, register_if_recurring
+        from core.handlers.launches import add, aviso_pergunta_pulada, register_if_recurring
     declarando = is_multi and bool(forma) and fp.decidir(uid, forma) == fp.BANCO and declara(uid, fp.BANCO)
-    if declarando:
-        if (recusa := recusa_valor(reunir([p for p in parts if not is_comparative_question(p)]))):
-            return str(recusa), False  # "2 reais e 50" partido em dois: não grava nenhum pedaço (T10/T11)
+    # D8: com cartão nenhum pedaço declara (T8 ou fatura), nem o sem valor. A resposta "cartão de débito" (rodada 10) não
+    # marca os pedaços (`resolver`), mas também é cartão.
+    cartao = declarando and (resposta_cartao or tem_cartao(parts))
+    if declarando and (recusa := recusa_valor(reunir([p for p in parts if not is_comparative_question(p)]))):
+        # "2 reais e 50" partido em dois: não grava nenhum pedaço (T10/T11). Com cartão (B1) só o T10/T11/T15 recusa, antes
+        # da fatura ler "1,5k" como R$ 1,50 (rodadas 9 e 10); o T16 de dois gastos não, esses vão para T8 ou fatura.
+        # Prefixo antes do "{": T10/T11 levam o trecho; o T15 não tem campo, o prefixo é o texto inteiro.
+        if not cartao or str(recusa).startswith(tuple(t.split("{")[0] for t in (tx.VALOR_ABREVIADO, tx.VALOR_AMBIGUO,
+                                                                                    tx.LONGA))):
+            return str(recusa), False
     for i, part in enumerate(parts):
         if is_multi and is_comparative_question(part):
             puladas.append(part)  # igual ao texto
@@ -305,6 +316,13 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
                 fp.limpar(part, banco=declarando) if forma == fp.DINHEIRO or declarando else part)
             if info:
                 tipo, desc = info
+                if cartao and resposta_cartao and not fp._no_cartao(part, debito=True):  # sem a marca: T8, nem fatura
+                    responses.append(format_for_platform(tx.CARTAO, platform))
+                    continue
+                if cartao:  # o `add` de "paguei o aluguel no cartão" (T8, ou "não achei o valor" do cartão manual); sem fila
+                    texto = f"{fp.limpar(part, banco=True)} no cartão"
+                    responses.append(format_for_platform(add(uid, texto, {}, platform, forma_pagamento=forma), platform))
+                    continue
                 if forma and fp.decidir(uid, forma) == fp.BANCO and not declarando:
                     responses.append(format_for_platform(fp.msg_banco(uid, tipo, None), platform))
                     continue
@@ -320,8 +338,13 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
                 else:
                     missing.append({"tipo": tipo, "desc": desc, "forma_pagamento": f})
                 continue
-        result_text = _process_audio_transaction(uid, part, msg, platform, forma,
-                                                 resultados[i] if resultados else None)
+        r = resultados[i] if resultados else None
+        # Opção A: o "débito" do gasto perde para a resposta (o roteador manda "cartão de débito" do cartão para o gasto).
+        if declarando and resposta_cartao and r is not None and not fp._no_cartao(part) and (
+                r.intent == "launches.add" or (r.intent == "credit.handle" and e_compra_no_debito(part))):
+            responses.append(format_for_platform(tx.CARTAO, platform))
+            continue
+        result_text = _process_audio_transaction(uid, part, msg, platform, forma, r)
         # A quebra em múltiplos lançamentos (_split_audio_transactions) pode
         # separar um pedaço real ("comprei 550 de pão doce") de um pedaço que
         # é só ruído da fala ("fala pig, sei que lá, sei que lá,"). O pedaço
