@@ -3593,7 +3593,42 @@ async def _vincular_se_permitido(user_id: int, sub: str, email: str, provider: s
 
     if await asyncio.to_thread(is_account_scheduled_for_deletion, user_id) or await _mfa_ligado(user_id):
         return
+    if not await _revogar_sessoes_do_quiz(user_id):
+        return
     await asyncio.to_thread(link_google_identity, user_id, sub, email, provider or PROVIDER_GOOGLE)
+
+
+def _sobrou_sessao_ou_refresh(user_id: int) -> bool:
+    from db.connection import get_conn
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select exists(select 1 from auth_sessions where user_id = %s and revoked_at is null)"
+            " or exists(select 1 from auth_refresh_tokens where user_id = %s and revoked_at is null) as sobrou",
+            (int(user_id), int(user_id)),
+        )
+        return bool(cur.fetchone()["sobrou"])
+
+
+async def _revogar_sessoes_do_quiz(user_id: int) -> bool:
+    """Conta sem credencial (a do quiz) cujo e-mail o dono prova agora por Google/Apple:
+    quem a criou pode ser outro, com sessão e refresh na mão. O vínculo tira o
+    `exigir_credencial` do caminho, então a sessão do criador herdaria os dados
+    do dono. Revoga tudo ANTES de gravar a identidade (a sessão deste login é emitida
+    depois, em `_concluir_login`). As revogações engolem erro e devolvem 0: confere
+    no banco e, se sobrou algo, devolve False — quem chama não vincula."""
+    from core.refresh_tokens import revoke_user_refresh_tokens
+    from core.sessions import revoke_other_sessions
+    from db import conta_sem_credencial
+
+    if not await asyncio.to_thread(conta_sem_credencial, user_id):
+        return True
+    await asyncio.to_thread(revoke_other_sessions, int(user_id), None)
+    await asyncio.to_thread(revoke_user_refresh_tokens, int(user_id))
+    if await asyncio.to_thread(_sobrou_sessao_ou_refresh, user_id):
+        logging.getLogger(__name__).error("vinculo social: sessão/refresh sobrou, sem vincular", extra={"user_id": user_id})
+        return False
+    return True
 
 
 async def _desafio_mfa(request: Request, user_id: int, email: str) -> str | None:
