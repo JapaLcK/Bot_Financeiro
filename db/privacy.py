@@ -393,6 +393,12 @@ def _fetch_rows(cur, name: str, sql: str, params: tuple) -> tuple[str, list[dict
     return name, [dict(row) for row in cur.fetchall()]
 
 
+# A9 (dono, 2026-10-29): chaves de topo de `system_event_logs.details` que não vão para o ZIP do
+# titular. A pilha mostra o NOSSO código (caminho, linha, trecho), não é dado dele; o banco e o painel
+# admin continuam com ela. Só o nível de cima: nenhum gravador aninha `traceback`.
+_DETAILS_FORA_DA_EXPORTACAO = frozenset({"traceback"})
+
+
 def build_user_export_zip(user_id: int) -> bytes:
     datasets: dict[str, list[dict]] = {}
 
@@ -554,6 +560,11 @@ def build_user_export_zip(user_id: int) -> bytes:
             table_name = sql.split(" from ", 1)[-1].split()[0].strip()
             if _table_exists(cur, table_name):
                 datasets[name] = _fetch_rows(cur, name, sql, params)[1]
+
+    for evento in datasets.get("eventos_sistema", []):
+        if isinstance(evento["details"], dict):
+            evento["details"] = {k: v for k, v in evento["details"].items()
+                                 if k not in _DETAILS_FORA_DA_EXPORTACAO}
 
     manifest = {
         "generated_at": datetime.now(timezone.utc),
