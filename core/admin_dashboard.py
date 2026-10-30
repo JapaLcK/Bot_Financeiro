@@ -1543,6 +1543,12 @@ def set_account_plan(
             # Plano Família: esta escrita não passa por recompute_entitlement, então alinha os membros aqui.
             from core.services.family_access import sync_from_owner
             sync_from_owner(int(row["user_id"]))
+            # Membro: a escrita direta em auth_accounts rebaixou a coluna; o grant family segue valendo,
+            # então reprojeta (quem não tem grant family não passa por aqui: o reparo do admin fica como está).
+            from core.services.billing_access import recompute_entitlement
+            from db.plan_grants import list_grants
+            if any(g["source"] == "family" and g["status"] == "active" for g in list_grants(int(row["user_id"]))):
+                recompute_entitlement(int(row["user_id"]))
         return dict(row) if row else None
 
 

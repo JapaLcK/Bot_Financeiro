@@ -464,7 +464,7 @@ def recompute_entitlement(user_id: int, *, origem: str = "evento") -> dict | Non
     try:  # a família nunca derruba o entitlement (nem o webhook de pagamento) do titular
         sync_from_owner(user_id)
     except Exception as exc:
-        print(f"[billing_access] family sync falhou user={user_id}: {exc}")
+        print(f"[billing_access] family sync falhou user={user_id} causa={type(exc).__name__}")
 
     return {"plan": plano, "plan_expires_at": expira}
 

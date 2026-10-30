@@ -7069,11 +7069,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             await asyncio.to_thread(set_payment_status, user_id, "past_due")
             # Plano Família: o titular segue até o fim do período, os membros perdem agora.
             # ... EXCETO se outro grant dele (ex.: Pix vigente) ainda cobre; `desde` = instante do evento.
-            # A ordem importa: o past_due acima é o que faz `_cobertura` recusar o próprio Stripe em
-            # atraso (com _sub_id vazio, todo grant stripe conta como "outro" em `encerrando`).
-            from core.services.family_access import encerrando  # noqa: PLC0415
-            await asyncio.to_thread(encerrando, int(user_id), "stripe", str(_sub_id or ""),
-                                    "family_payment_failed", _event_version(event))
+            # A ordem importa: o past_due acima é o que faz `_cobertura` recusar o próprio Stripe em atraso.
+            # Só a falha DA ASSINATURA tira a família: fatura avulsa (sem _sub_id) com assinatura saudável não.
+            if _sub_id:
+                from core.services.family_access import encerrando  # noqa: PLC0415
+                await asyncio.to_thread(encerrando, int(user_id), "stripe", str(_sub_id),
+                                        "family_payment_failed", _event_version(event))
             # Relógio da inadimplência (core/services/billing_dunning).
             # Idempotente no SQL: a Stripe manda um payment_failed por smart
             # retry e reentrega o mesmo evento em cima de 5xx — nenhum dos dois
@@ -7160,8 +7161,9 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         # ordem); falha transitória propaga e vira 5xx (a Stripe reentrega), assinatura inexistente não.
         obj = event["data"]["object"]
         user_id = await _resolve_user(obj)
-        from db.family import active_members  # noqa: PLC0415
-        if user_id and _g(obj, "id") and await asyncio.to_thread(active_members, int(user_id)):
+        from db.family import get_group  # noqa: PLC0415
+        # Condiciona ao GRUPO, não aos membros: a suspensão vale também para quem ainda vai entrar.
+        if user_id and _g(obj, "id") and await asyncio.to_thread(get_group, int(user_id)):
             from core.services.billing_dunning import PAST_DUE_PAYMENT_STATUSES  # noqa: PLC0415
             from core.services.family_access import encerrando, retomar  # noqa: PLC0415
             try:

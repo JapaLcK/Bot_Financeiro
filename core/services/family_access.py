@@ -14,12 +14,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from core.services.billing_access import _ler_conta, recompute_entitlement
+from core.services.billing_access import _ler_conta, grant_vigente, recompute_entitlement
 from core.services.billing_dunning import PAST_DUE_PAYMENT_STATUSES
 from db import family as fam
+from db import family_grants as fg
 from db.connection import get_conn
 from db.schema import RESYNC_LEGACY_GRANT_USER_SQL
-from db.plan_grants import list_grants, upsert_grant
+from db.plan_grants import list_grants, upsert_grant_cur
 
 
 log = logging.getLogger(__name__)
@@ -40,8 +41,7 @@ def _cobertura(owner_id: int):
         return None
     if (conta.get("last_payment_status") or "").lower() in PAST_DUE_PAYMENT_STATUSES:
         # atraso é do Stripe: um grant não-Stripe vigente (Pix) segue cobrindo
-        if not any(g["status"] == "active" and g["source"] in _COBERTURA_INDEPENDENTE
-                   and g["ends_at"] and g["ends_at"] > datetime.now(timezone.utc) for g in list_grants(owner_id)):
+        if not grant_vigente(list_grants(owner_id), datetime.now(timezone.utc), sources=_COBERTURA_INDEPENDENTE):
             return None
     return plano, fim
 
@@ -49,18 +49,26 @@ def _cobertura(owner_id: int):
 def grant_member(owner_id: int, member_user_id: int) -> bool:
     """Concede (ou renova, idempotente pela unique source+external_ref) o grant do membro."""
     cob = _cobertura(owner_id)
-    if fam.is_suspended(owner_id):  # cancelamento agendado / pagamento falho: só volta com `retomar`
+    if not cob or fg.is_suspended(owner_id):  # suspensão (cancelamento agendado / pagamento falho): só volta com `retomar`
         return False
-    membro = next((m for m in fam.active_members(owner_id) if m["user_id"] == member_user_id), None)
-    if not cob or not membro:
-        return False
-    # Plano pago legado sem nenhum grant: sem materializá-lo, o 1º grant family faria `recompute` tratá-lo
-    # como "tem grants" e, ao sair, rebaixá-lo. A SQL é a do backfill (só age se não há grant algum).
+    # Lock do grupo (mesma ordem de remove_member) e vínculo revalidado NA MESMA transação do upsert: sem isso,
+    # uma saída que commita entre a leitura e o upsert tinha o grant recriado (a versão nova vence a revogação).
     with get_conn() as conn, conn.cursor() as cur:
+        try:
+            group_id = fam._lock_group(cur, owner_id)
+        except fam.FamilyError:
+            return False
+        cur.execute("select id from family_members where group_id = %s and user_id = %s and role = 'member'"
+                    " and left_at is null", (group_id, member_user_id))
+        membro = cur.fetchone()
+        if not membro:
+            return False
+        # Plano pago legado sem nenhum grant: sem materializá-lo, o 1º grant family faria `recompute` tratá-lo
+        # como "tem grants" e, ao sair, rebaixá-lo. A SQL é a do backfill (só age se não há grant algum).
         cur.execute(RESYNC_LEGACY_GRANT_USER_SQL, (member_user_id,))
+        upsert_grant_cur(cur, member_user_id, "family", f"family_member:{membro['id']}", cob[0],
+                         datetime.now(timezone.utc), cob[1], fg.event_version_now())
         conn.commit()
-    upsert_grant(member_user_id, "family", f"family_member:{membro['id']}", cob[0],
-                 datetime.now(timezone.utc), cob[1], fam.event_version_now())
     recompute_entitlement(member_user_id)
     return True
 
@@ -71,17 +79,18 @@ def sync_from_owner(owner_id: int) -> int:
         _revogar(owner_id, "family_owner_sem_cobertura")
         return 0
     n = 0
-    for m in fam.active_members(owner_id):
+    for m in fg.active_members(owner_id):
         try:  # um membro quebrado não derruba o recompute do titular nem os outros membros
             n += grant_member(owner_id, m["user_id"])
-        except Exception:
-            log.exception("family: grant do membro %s (titular %s) falhou", m["user_id"], owner_id)
+        except Exception as exc:
+            log.warning("family: grant do membro %s (titular %s) falhou causa=%s sqlstate=%s", m["user_id"], owner_id,
+                        type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": owner_id})
     return n
 
 
 def retomar(owner_id: int) -> int:
     """O titular voltou (assinatura ativa sem cancelamento agendado): fim da suspensão e membros realinhados."""
-    fam.set_suspended(owner_id, False)
+    fg.set_suspended(owner_id, False)
     return sync_from_owner(owner_id)
 
 
@@ -89,9 +98,8 @@ def encerrando(owner_id: int, source: str, external_ref: str, motivo: str, desde
     """Assinatura `(source, external_ref)` do titular está acabando (cancelamento agendado, atraso): os
     membros perdem agora, EXCETO se outro grant dele ainda cobre — aí o estado (sync) decide."""
     agora = datetime.now(timezone.utc)
-    outro = any(g["status"] == "active" and g["source"] in (*_COBERTURA_INDEPENDENTE, "stripe") and g["ends_at"] and g["ends_at"] > agora
-                and (g["source"], g["external_ref"]) != (source, external_ref)
-                for g in list_grants(owner_id))
+    outro = grant_vigente([g for g in list_grants(owner_id) if (g["source"], g["external_ref"]) != (source, external_ref)],
+                          agora, sources=(*_COBERTURA_INDEPENDENTE, "stripe"))
     if outro:
         sync_from_owner(owner_id)
     else:
@@ -99,19 +107,20 @@ def encerrando(owner_id: int, source: str, external_ref: str, motivo: str, desde
 
 
 def _revogar(owner_id: int, motivo: str) -> int:
-    uids = fam.revoke_owner_grants(owner_id, motivo)
+    uids = fg.revoke_owner_grants(owner_id, motivo)
     for uid in uids:
         try:  # a falha de um membro não impede os outros nem o pagamento do titular
             recompute_entitlement(uid)
-        except Exception:
-            log.exception("family: recompute do membro %s (titular %s) falhou", uid, owner_id)
+        except Exception as exc:
+            log.warning("family: recompute do membro %s (titular %s) falhou causa=%s sqlstate=%s", uid, owner_id,
+                        type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": owner_id})
     return len(uids)
 
 
 def revoke_members(owner_id: int, motivo: str, desde: int | None = None) -> int:
     """Os membros perdem o acesso AGORA e ASSIM FICAM (suspensão persistida: o recompute do titular não os
     religa) até `retomar` ou um pagamento novo aplicado. Devolve quantos foram revogados."""
-    fam.set_suspended(owner_id, True, desde)
+    fg.set_suspended(owner_id, True, desde)
     return _revogar(owner_id, motivo)
 
 

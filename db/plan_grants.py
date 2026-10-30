@@ -143,9 +143,20 @@ def upsert_grant(
     três caminhos que a v4 deixava abertos: grant `stripe` que ENCURTA, de tier
     MENOR, e assinatura que lapsa sem `deleted` (`unpaid`).
     """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            res = upsert_grant_cur(cur, user_id, source, external_ref, plan_stored,
+                                   starts_at, ends_at, event_version, last_event_id)
+        conn.commit()
+    return res
+
+
+def upsert_grant_cur(cur, user_id, source, external_ref, plan_stored, starts_at, ends_at,
+                     event_version, last_event_id=None) -> int | None:
+    """`upsert_grant` na transação do chamador (cursor dele, sem commit): o Plano Família precisa
+    do upsert na MESMA transação que segura o lock do grupo. Contrato de retorno idêntico."""
     if source not in GRANT_SOURCES:
         raise ValueError(f"source inválido: {source!r}")
-
     conflito = (
         "on conflict (source, external_ref) do nothing"
         if source == "pix"
@@ -162,39 +173,35 @@ def upsert_grant(
             + _GUARDA_VERSAO
         )
     )
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "insert into plan_grants (user_id, source, external_ref, plan_stored,"
-                "                         starts_at, ends_at, status, event_version, last_event_id)"
-                " values (%s, %s, %s, %s, %s, %s, 'active', %s, %s) "
-                + conflito
-                + " returning id",
-                (int(user_id), source, external_ref, plan_stored,
-                 starts_at, ends_at, int(event_version), last_event_id),
-            )
-            row = cur.fetchone()
-            if row and source in ("stripe", "pix", "admin"):
-                # Plano Família: pagamento/concessão NOVA aplicada do titular encerra a suspensão dos membros
-                # (ponto único de invoice.paid, checkout e Pix; o grant de admin é INSERT direto e não passa
-                # aqui). Stripe: só se o evento for MAIS NOVO que o que suspendeu — payment_failed não avança a
-                # versão do grant, então um invoice.paid de ciclo anterior, reentregue, passa pelo gate acima.
-                cur.execute("update family_groups set members_suspended_at = null where owner_user_id = %s"
-                            " and (%s <> 'stripe' or members_suspended_at < to_timestamp(%s::double precision))",
-                            (int(user_id), source, int(event_version)))
-            # A supersessão fica AQUI, amarrada ao `returning` do upsert, e NÃO
-            # à reclassificação abaixo: `_SUPERSEDE_LEGACY` não tem guarda de
-            # versão, então rodá-la na reentrega revogaria o `legacy` com uma
-            # `event_version` MENOR que a do grant vigente (caso 14 do §16).
-            if row and source == "stripe":
-                cur.execute(_SUPERSEDE_LEGACY, (int(event_version), int(user_id)))
-            if row is None:
-                cur.execute(_NAO_E_EVENTO_VELHO,
-                            (int(user_id), source, external_ref,
-                             int(event_version)))
-                row = cur.fetchone()
-        conn.commit()
+    cur.execute(
+        "insert into plan_grants (user_id, source, external_ref, plan_stored,"
+        "                         starts_at, ends_at, status, event_version, last_event_id)"
+        " values (%s, %s, %s, %s, %s, %s, 'active', %s, %s) "
+        + conflito
+        + " returning id",
+        (int(user_id), source, external_ref, plan_stored,
+         starts_at, ends_at, int(event_version), last_event_id),
+    )
+    row = cur.fetchone()
+    if row and source in ("stripe", "pix", "admin"):
+        # Plano Família: pagamento/concessão NOVA aplicada do titular encerra a suspensão dos membros
+        # (ponto único de invoice.paid, checkout e Pix; o grant de admin é INSERT direto e não passa
+        # aqui). Stripe: só se o evento for MAIS NOVO que o que suspendeu — payment_failed não avança a
+        # versão do grant, então um invoice.paid de ciclo anterior, reentregue, passa pelo gate acima.
+        cur.execute("update family_groups set members_suspended_at = null where owner_user_id = %s"
+                    " and (%s <> 'stripe' or members_suspended_at < to_timestamp(%s::double precision))",
+                    (int(user_id), source, int(event_version)))
+    # A supersessão fica AQUI, amarrada ao `returning` do upsert, e NÃO
+    # à reclassificação abaixo: `_SUPERSEDE_LEGACY` não tem guarda de
+    # versão, então rodá-la na reentrega revogaria o `legacy` com uma
+    # `event_version` MENOR que a do grant vigente (caso 14 do §16).
+    if row and source == "stripe":
+        cur.execute(_SUPERSEDE_LEGACY, (int(event_version), int(user_id)))
+    if row is None:
+        cur.execute(_NAO_E_EVENTO_VELHO,
+                    (int(user_id), source, external_ref,
+                     int(event_version)))
+        row = cur.fetchone()
     return int(row["id"]) if row else None
 
 
