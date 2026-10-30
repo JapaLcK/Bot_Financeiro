@@ -3217,6 +3217,114 @@ def init_db():
         """create index if not exists idx_demo_sessions_wa_hash
            on demo_sessions (wa_hash, opened_at desc) where wa_hash is not null""",
         """create index if not exists idx_demo_sessions_opened_at on demo_sessions (opened_at)""",
+
+        # -----------------------------
+        # Plano Família (db/family.py; teto de pessoas = FAMILY_BASE_SEATS/FAMILY_MAX_SEATS lá)
+        # -----------------------------
+        """
+        create table if not exists family_groups (
+          id bigserial primary key,
+          owner_user_id bigint not null unique references users(id) on delete cascade,
+          tier text not null default 'familia',
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create table if not exists family_members (
+          id bigserial primary key,
+          group_id bigint not null references family_groups(id) on delete cascade,
+          user_id bigint not null references users(id) on delete cascade,
+          role text not null check (role in ('owner', 'member')),
+          joined_at timestamptz not null default now(),
+          left_at timestamptz,
+          left_reason text
+        )
+        """,
+        # Uma família ativa por pessoa.
+        """create unique index if not exists uq_family_members_active_user
+           on family_members (user_id) where left_at is null""",
+        """create index if not exists idx_family_members_group on family_members (group_id)""",
+        """
+        create table if not exists family_invites (
+          id bigserial primary key,
+          group_id bigint not null references family_groups(id) on delete cascade,
+          token_hash text not null unique,
+          expires_at timestamptz not null,
+          used_at timestamptz,
+          used_by_user_id bigint references users(id) on delete set null,
+          revoked_at timestamptz
+        )
+        """,
+        """create index if not exists idx_family_invites_group on family_invites (group_id)""",
+        # Uma linha = uma vaga extra paga.
+        """
+        create table if not exists family_seat_purchases (
+          id bigserial primary key,
+          group_id bigint not null references family_groups(id) on delete cascade,
+          source text not null check (source in ('stripe', 'pix')),
+          external_ref text not null,
+          amount_cents bigint not null check (amount_cents >= 0),
+          status text not null check (status in ('pending', 'paid', 'refunded', 'canceled')),
+          valid_from timestamptz not null default now(),
+          valid_until timestamptz,
+          event_version bigint not null default 0,
+          unique (source, external_ref)
+        )
+        """,
+        """create index if not exists idx_family_seat_purchases_group on family_seat_purchases (group_id)""",
+        """
+        create table if not exists family_consents (
+          id bigserial primary key,
+          group_id bigint not null references family_groups(id) on delete cascade,
+          member_user_id bigint not null references users(id) on delete cascade,
+          viewer_user_id bigint not null references users(id) on delete cascade,
+          scope text not null check (scope in ('aggregates', 'transactions')),
+          granted_at timestamptz not null default now(),
+          revoked_at timestamptz,
+          check (member_user_id <> viewer_user_id)
+        )
+        """,
+        """create unique index if not exists uq_family_consents_active
+           on family_consents (group_id, member_user_id, viewer_user_id, scope)
+           where revoked_at is null""",
+        # Só insert; sobrevive à dissolução (group_id vira NULL). Some com a conta do membro.
+        """
+        create table if not exists family_access_log (
+          id bigserial primary key,
+          group_id bigint references family_groups(id) on delete set null,
+          viewer_user_id bigint not null references users(id) on delete cascade,
+          member_user_id bigint not null references users(id) on delete cascade,
+          scope text not null check (scope in ('aggregates', 'transactions')),
+          recurso text not null,
+          at timestamptz not null default now()
+        )
+        """,
+        """create index if not exists idx_family_access_log_member on family_access_log (member_user_id, at desc)""",
+        # Espaço da casa: pertence ao grupo, não a quem criou (individuais ficam em metas/category_budgets).
+        """
+        create table if not exists family_budgets (
+          id bigserial primary key,
+          group_id bigint not null references family_groups(id) on delete cascade,
+          created_by_user_id bigint references users(id) on delete set null,
+          categoria text not null,
+          limite_cents bigint not null check (limite_cents >= 0),
+          created_at timestamptz not null default now()
+        )
+        """,
+        """create index if not exists idx_family_budgets_group on family_budgets (group_id)""",
+        """
+        create table if not exists family_goals (
+          id bigserial primary key,
+          group_id bigint not null references family_groups(id) on delete cascade,
+          created_by_user_id bigint references users(id) on delete set null,
+          nome text not null,
+          alvo_cents bigint not null check (alvo_cents > 0),
+          guardado_cents bigint not null default 0 check (guardado_cents >= 0),
+          prazo date,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """create index if not exists idx_family_goals_group on family_goals (group_id)""",
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks
