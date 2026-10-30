@@ -31,11 +31,13 @@ TIPOS: dict[str, tuple[str, dict[str, Any]]] = {
                                         "origem": "lançamentos do Open Finance"}),
     "goal_behind": ("meta", {"base": "caixinhas", "cartao": None, "origem": "depósitos e saques da caixinha"}),
     "bill_due": ("vencimento", {"base": "contas_a_pagar", "cartao": None, "origem": "suas contas a pagar"}),
+    "month_projection": ("projecao", {"base": "previsao", "cartao": None,
+                                      "origem": "saldo de hoje e o que está previsto até o fim do mês"}),
 }
 SO_PRO = ("impacto", "acoes")
 # Recurso de plano que o tipo exige além de `insights`, conferido NA LEITURA (`projetar`): o cache é um só para todos
 # os planos, e quem perde o recurso dentro do TTL não pode seguir vendo o item (plano-b, B3).
-RECURSO_POR_TIPO = {"bill_due": "recurring_expenses"}
+RECURSO_POR_TIPO = {"bill_due": "recurring_expenses", "month_projection": "forecast"}
 GRAVIDADE = {"info": 0, "warning": 1, "critical": 2}  # a ordem do feed e a régua do "piorou" (D4)
 LIMITE = 6
 CHAVE_MAX = 160
@@ -117,6 +119,7 @@ def chave(tipo: str, sujeito, periodo: str) -> str:
       reajuste (recorrente: reajuste novo é fato novo).
     - conta a pagar (`bill_due`): o período é o dia do vencimento; a faixa info/warning/critical é piora do mesmo
       fato e fica fora; `vencida` entra no sujeito (`id:vencida`), como na meta.
+    - previsão do mês (`month_projection`): sujeito fixo `saldo`, período o mês; warning × critical é piora.
     O sujeito pode ter `:` (`merchant_key` não tira; a meta usa `id:estado`): a chave é opaca, comparada
     inteira. Nunca faça `split(":")` dela.
     Sujeito textual entra por `sujeito()`, que troca por hash o nome com dado pessoal.
