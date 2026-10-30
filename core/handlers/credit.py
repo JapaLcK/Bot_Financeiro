@@ -976,10 +976,11 @@ def add_credit_from_entities(
         # expira sozinho se não for consumido.
         try:
             set_pending_action(user_id, "delete_credit_purchase", {"tx_id": int(tx_id)})
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "falha ao salvar pending delete_credit_purchase (user %s, tx %s) — botão Apagar não vai aparecer",
-                user_id, tx_id, exc_info=True,
+                "falha ao salvar pending delete_credit_purchase (user %s, tx %s) — botão Apagar não vai aparecer"
+                " causa=%s sqlstate=%s",
+                user_id, tx_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id},
             )
         return _format_credit_purchase_success(card_label, float(valor), purchased_at, float(due), int(tx_id))
     except Exception as e:

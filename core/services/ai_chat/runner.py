@@ -421,12 +421,13 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
         # Parar só conta na cota se a OpenAI já foi chamada; antes disso a vaga volta.
         completed, final_text = bool((_ESTADO.get() or {}).get("llm")), _INTERROMPIDA
         return None
-    except Exception:
+    except Exception as exc:
         _cancela_pendencia_do_turno(user_id)
         if not ia_primeiro:
             raise
         # Aqui, e não no chamador: o `finally` zera a marca de escrita.
-        logger.exception("ai_chat ia_primeiro falhou pra user %s", user_id)
+        logger.error("ai_chat ia_primeiro falhou pra user %s causa=%s sqlstate=%s", user_id,
+                     type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         if _TURN_WRITE_ATTEMPTED.get():
             return ERROR_MSG
         return _desiste(user_id)
@@ -473,16 +474,18 @@ def _cancela_pendencia_do_turno(user_id: int) -> None:
     _PENDENCIA_DO_TURNO.set(None)
     try:
         db.ai_consume_pending_action(user_id, armada)
-    except Exception:
-        logger.error("falha ao cancelar a pendência do turno pra user %s", user_id, exc_info=True)
+    except Exception as exc:
+        logger.error("falha ao cancelar a pendência do turno pra user %s causa=%s sqlstate=%s", user_id,
+                     type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
 
 
 def _desiste(user_id: int) -> None:
     """Modo ia_primeiro sem escrita: fecha o turno no histórico e devolve None."""
     try:
         db.ai_append_message(user_id, "system", _ATENDIDA_FORA)
-    except Exception:
-        logger.warning("falha ao fechar o turno da IA pra user %s", user_id, exc_info=True)
+    except Exception as exc:
+        logger.warning("falha ao fechar o turno da IA pra user %s causa=%s sqlstate=%s", user_id,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
     return None
 
 
@@ -605,7 +608,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
         if streaming.cancelado():  # (a) topo da volta: a rodada anterior já está inteira
             raise streaming.Interrompido()
         if ia_primeiro and time.monotonic() > prazo:
-            logger.warning("ai_chat ia_primeiro: prazo do turno estourado pra user %s", user_id)
+            logger.warning("ai_chat ia_primeiro: prazo do turno estourado pra user %s", user_id, extra={"user_id": user_id})
             _cancela_pendencia_do_turno(user_id)
             return None
         # ia_primeiro: a chamada não passa do prazo do turno (timeout por
@@ -640,14 +643,14 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
         # A resposta chegou depois do prazo: nenhuma tool call dela roda (nem
         # é persistida). Texto sem tool call segue — não escreve nada.
         if tool_calls and ia_primeiro and time.monotonic() > prazo:
-            logger.warning("ai_chat ia_primeiro: resposta depois do prazo pra user %s", user_id)
+            logger.warning("ai_chat ia_primeiro: resposta depois do prazo pra user %s", user_id, extra={"user_id": user_id})
             _cancela_pendencia_do_turno(user_id)
             return None
 
         if not tool_calls:
             final = strip_markdown_headers((msg.content or "").strip())
             if _json_cru(final):  # vale como resposta vazia: ERROR_MSG, nada gravado, cota devolvida
-                logger.warning("ai_chat: resposta final em JSON cru pra user %s", user_id)
+                logger.warning("ai_chat: resposta final em JSON cru pra user %s", user_id, extra={"user_id": user_id})
                 final = ""
             _log_unsupported_claims(user_id, final, messages[inicio_do_turno:])
             if not final:
@@ -757,7 +760,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                 raise streaming.Interrompido()
             return terminal_msg
 
-    logger.warning("MAX_TOOL_LOOPS atingido pra user %s", user_id)
+    logger.warning("MAX_TOOL_LOOPS atingido pra user %s", user_id, extra={"user_id": user_id})
     _cancela_pendencia_do_turno(user_id)
     return ERROR_MSG
 

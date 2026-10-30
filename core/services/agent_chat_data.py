@@ -15,8 +15,9 @@ def _investido(user_id: int) -> dict:
     from core.services.ai_chat.tools.investments import _get_investment_summary
     try:
         return _get_investment_summary(user_id, {})
-    except Exception:  # sem o total dos bancos a conversa segue só com os recortes
-        logger.exception("agent_chat: investido.ler falhou user_id=%s", user_id)
+    except Exception as exc:  # sem o total dos bancos a conversa segue só com os recortes
+        logger.error("agent_chat: investido.ler falhou user_id=%s causa=%s sqlstate=%s", user_id,
+                     type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return {"indisponivel": True}
 
 

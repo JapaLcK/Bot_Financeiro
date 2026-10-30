@@ -178,8 +178,9 @@ def texto_whatsapp(uid: int) -> str:
         d = ler(uid)
         c = para_conversa(d)
         blocos, total = [bloco(m) for m in c["metas"]], len(d["metas"])
-    except Exception:
-        logger.exception("minhas metas falhou uid=%s", uid)
+    except Exception as exc:
+        logger.error("minhas metas falhou uid=%s causa=%s sqlstate=%s", uid,
+                     type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
         return "Não consegui ler suas metas agora. Tenta de novo daqui a pouco."
     if c["sem_metas"]:
         return f"Você ainda não tem metas. {ONDE_CRIAR}"

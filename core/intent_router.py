@@ -871,8 +871,9 @@ def route(result: IntentResult, msg: IncomingMessage, *,
             try:
                 if db.consume_pending_action(user_id, c):
                     return _AVISO_PERGUNTA_CANCELADA + r
-            except Exception:
-                logger.exception("R2: falha ao consumir a clarification do user %s", user_id)
+            except Exception as exc:
+                logger.error("R2: falha ao consumir a clarification do user %s causa=%s sqlstate=%s", user_id,
+                             type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return r
 
     # Desempate do #281 armado no turno anterior. ANTES DE TUDO, inclusive do
@@ -1807,8 +1808,9 @@ def _alvos_existentes(user_id: int, intent: str) -> list[str]:
             nomes += [p.get("name") or "" for p in (db.list_pockets(user_id) or [])]
         if intent in ("investments.deposit", "investments.withdraw", "funds.withdraw"):
             nomes += [i.get("name") or "" for i in (db.accrue_all_investments(user_id) or [])]
-    except Exception:
-        logger.exception("falha ao listar alvos do usuario %s", user_id)
+    except Exception as exc:
+        logger.error("falha ao listar alvos do usuario %s causa=%s sqlstate=%s", user_id,
+                     type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
     return [n for n in nomes if n]
 
 
