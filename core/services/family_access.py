@@ -49,7 +49,7 @@ def _cobertura(owner_id: int):
 def grant_member(owner_id: int, member_user_id: int) -> bool:
     """Concede (ou renova, idempotente pela unique source+external_ref) o grant do membro."""
     cob = _cobertura(owner_id)
-    if not cob or fg.is_suspended(owner_id):  # suspensão (cancelamento agendado / pagamento falho): só volta com `retomar`
+    if not cob:
         return False
     # Lock do grupo (mesma ordem de remove_member) e vínculo revalidado NA MESMA transação do upsert: sem isso,
     # uma saída que commita entre a leitura e o upsert tinha o grant recriado (a versão nova vence a revogação).
@@ -57,6 +57,11 @@ def grant_member(owner_id: int, member_user_id: int) -> bool:
         try:
             group_id = fam._lock_group(cur, owner_id)
         except fam.FamilyError:
+            return False
+        # suspensão (cancelamento agendado / pagamento falho): só volta com `retomar`. Lida DEPOIS do lock: o
+        # set_suspended faz UPDATE nesta mesma linha, então um revoke em voo não é vencido por este grant.
+        cur.execute("select members_suspended_at is not null as s from family_groups where id = %s", (group_id,))
+        if cur.fetchone()["s"]:
             return False
         cur.execute("select id from family_members where group_id = %s and user_id = %s and role = 'member'"
                     " and left_at is null", (group_id, member_user_id))

@@ -388,7 +388,11 @@ def users_com_grant_na_janela(desde) -> list[int]:
     """
     sql = "select distinct user_id from plan_grants where status = 'active'"
     params: tuple = ()
-    if desde is not None:
+    if desde is None:
+        # Plano Família: o recompute do membro que falhou depois de a revogação commitar só se repara aqui
+        # (o grant revogado não é mais 'active'). 2 dias = a varredura diária tem uma retentativa de folga.
+        sql += " or (source = 'family' and status = 'revoked' and revoked_at > now() - interval '2 days')"
+    else:
         sql += " and (starts_at between %s and now() or ends_at between %s and now())"
         params = (desde, desde)
     with get_conn() as conn:

@@ -673,3 +673,31 @@ def test_admin_baixando_o_plano_individual_do_membro_nao_tira_a_familia():
     outro = _u("essencial", 30, "active")
     set_account_plan("free", 1, user_id=outro)
     assert _plano(outro) == "free"                               # positivo: quem não é membro rebaixa normal
+
+
+def test_suspensao_que_commita_durante_o_grant_em_voo_vence_o_grant(monkeypatch):
+    import threading, time
+    owner = _titular("pro_max")
+    m = _entra(owner)
+    fa._revogar(owner, "preparo")                                # sem grant, ainda não suspenso: grant_member vai criar
+    t = threading.Thread(target=lambda: fa.grant_member(owner, m))
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select id from family_groups where owner_user_id = %s for update", (owner,))
+        t.start(); time.sleep(0.5)                               # o grant passou da cobertura e espera o lock
+        cur.execute("update family_groups set members_suspended_at = now() where owner_user_id = %s", (owner,))
+        conn.commit()
+    t.join()
+    assert fg.is_suspended(owner) and not _fam(m) and _plano(m) == "free"
+
+
+def test_recompute_do_membro_que_falhou_na_revogacao_e_corrigido_pela_varredura(monkeypatch):
+    from core.services.billing_access import reprojetar_grants_recentes
+    owner = _titular("pro_max")
+    m = _entra(owner)
+    real = fa.recompute_entitlement
+    monkeypatch.setattr(fa, "recompute_entitlement", lambda uid, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    fa.revoke_members(owner, "teste")                            # revogou o grant, o recompute caiu
+    assert _plano(m) == "pro_max"
+    monkeypatch.setattr(fa, "recompute_entitlement", real)
+    reprojetar_grants_recentes(None)                             # varredura diária
+    assert _plano(m) == "free"
