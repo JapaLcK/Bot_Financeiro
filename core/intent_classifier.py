@@ -312,6 +312,9 @@ VERBOS_DE_LANCAMENTO = frozenset(_VERBOS_SAIDA_SOLTA + _VERBOS_ENTRADA)
 # Tier 2 — Regex / alias (normalizado)
 # ---------------------------------------------------------------------------
 
+# Token de vínculo (db.users.create_link_code): `pbl` + 32 hex. Fonte única; o wa_runtime importa.
+LINK_CODE_PATTERN = r"pbl[0-9a-f]{32}"
+
 _ALIAS_PATTERNS: list[tuple[str, str]] = [
     # saudações — captura qualquer variação antes de chegar na IA
     (r"^(oi+e*|ol[aá]+|al[oô]+|hello+|hey+|e ?ai+|opa+|eai+)\b",
@@ -545,9 +548,9 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "report.monthly"),
 
     # vinculação de contas
-    (r"^link(\s+\d{6})?$",
+    (rf"^link(\s+{LINK_CODE_PATTERN})?$",
      "account.link"),
-    (r"^vincular\s+\d{6}$",
+    (rf"^vincular\s+{LINK_CODE_PATTERN}$",
      "account.vincular"),
 
     # ajuda com seção
@@ -1067,12 +1070,12 @@ def _try_alias(norm: str, original: str) -> IntentResult | None:
                     entities["minute"] = int(mh.group(2)) if mh.group(2) else 0
 
             elif intent == "account.link":
-                m = re.search(r"link\s+(\d{6})", norm)
+                m = re.search(rf"link\s+({LINK_CODE_PATTERN})", norm)
                 if m:
                     entities["code"] = m.group(1)
 
             elif intent == "account.vincular":
-                m = re.search(r"vincular\s+(\d{6})", norm)
+                m = re.search(rf"vincular\s+({LINK_CODE_PATTERN})", norm)
                 if m:
                     entities["code"] = m.group(1)
 

@@ -180,7 +180,7 @@ def test_numero_sem_conta_com_codigo_de_vinculo_passa_pro_handler(monkeypatch):
     process_message(
         InboundMessage(
             wa_id="5511988887777",
-            text="link 123456",
+            text="link pbl0123456789abcdef0123456789abcdef",
             timestamp="123",
             attachments=[],
             raw={"id": "wamid.link-code", "type": "text"},
@@ -188,7 +188,7 @@ def test_numero_sem_conta_com_codigo_de_vinculo_passa_pro_handler(monkeypatch):
     )
 
     assert len(handled) == 1
-    assert handled[0].text == "link 123456"
+    assert handled[0].text == "link pbl0123456789abcdef0123456789abcdef"
     assert replies == [("5511988887777", "✅ WhatsApp vinculado!", 111)]
 
 
@@ -197,12 +197,12 @@ def test_is_link_code_attempt_espelha_normalizacao_do_classificador():
     passar pela exceção — pontuação e caixa não podem barrar o código."""
     from adapters.whatsapp.wa_runtime import _is_link_code_attempt
 
-    for ok in ("link 123456", "vincular 123456", "link: 123456",
-               "link 123456.", "LINK 123456", "  vincular   123456  ", "Vincular: 123456"):
+    for ok in ("link pbl0123456789abcdef0123456789abcdef", "vincular pbl0123456789abcdef0123456789abcdef", "link: pbl0123456789abcdef0123456789abcdef",
+               "link pbl0123456789abcdef0123456789abcdef.", "LINK pbl0123456789abcdef0123456789abcdef", "  vincular   pbl0123456789abcdef0123456789abcdef  ", "Vincular: pbl0123456789abcdef0123456789abcdef"):
         assert _is_link_code_attempt(ok) is True, ok
 
     for no in ("gastei 50 no mercado", "link", "vincular", "link 12345",
-               "linkar 123456", "link 123456 agora", "oi"):
+               "linkar pbl0123456789abcdef0123456789abcdef", "link pbl0123456789abcdef0123456789abcdef agora", "oi"):
         assert _is_link_code_attempt(no) is False, no
 
 

@@ -16,7 +16,7 @@ from core.crypto import encrypt_pii_optional, hash_pii_optional
 from core.pg_text import tem_veneno
 
 from .connection import get_conn
-from .users import create_link_code, get_or_create_canonical_user
+from .users import get_or_create_canonical_user
 
 
 PROVIDER_GOOGLE = "google"
@@ -309,9 +309,7 @@ def consume_pending_google_signup(
         conn.commit()
     invalidate_auth_user_cache(user_id)
 
-    link_code = create_link_code(user_id, minutes_valid=15)
-
-    return {"user_id": user_id, "email": email, "link_code": link_code}
+    return {"user_id": user_id, "email": email, "link_code": ""}  # só /auth/link-code gera código
 
 
 def cleanup_expired_pending_signups() -> int:

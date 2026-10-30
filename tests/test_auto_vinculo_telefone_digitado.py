@@ -4,7 +4,7 @@ B (com login) digita no site o número n de outra pessoa. Antes, a mensagem segu
 quem era dono de n rodava `merge_users` pelo telefone: os dados iam para B (V1, #711), o
 login de A sumia (V2, #630) e um número novo e vazio virava B (V3: C mandava "oi" e B
 passava a ler tudo). Grupo 7, PR-5 (D1(c), dono): o auto-vínculo por telefone foi
-desligado por completo; só o código (`vincular 123456`) liga. O telefone continua LIDO só
+desligado por completo; só o código (`vincular <código>`) liga. O telefone continua LIDO só
 para a conta sem credencial (`precisa_senha`, opt-out do lead), nos testes de
 `test_senha_obrigatoria_whatsapp.py` e `test_wa_parar.py`.
 
@@ -59,7 +59,7 @@ def _telefone_de(uid: int):
 
 def _convite(texto: str) -> bool:
     """O convite do `no_match`: ensina o código e não promete ligar pelo telefone."""
-    return ("Ainda não tenho uma conta ligada" in texto and "vincular 123456" in texto
+    return ("Ainda não tenho uma conta ligada" in texto and "vincular <código>" in texto
             and "me manda um *oi*" not in texto)
 
 
@@ -481,13 +481,13 @@ def test_sucesso_do_vincular_ensina_exemplos_e_registra_o_evento(enviadas):
 def test_codigo_invalido_orienta_site_e_link_na_outra_plataforma(verbo, plataforma):
     from core.handlers import account
     ext = _numero_novo() if plataforma == "whatsapp" else f"d{secrets.randbelow(10**12)}"
-    texto = getattr(account, verbo)(plataforma, ext, "000000")
+    texto = getattr(account, verbo)(plataforma, ext, "pbl00000000000000000000000000000000")
     assert texto.startswith("❌ Código inválido"), texto
     assert "envie *link* nela" in texto and "site" in texto, texto  # o caminho de quem não tem conta no site
     if plataforma == "discord":
-        assert "WhatsApp" not in texto and "vincular 123456" not in texto, texto
+        assert "WhatsApp" not in texto and "vincular <código>" not in texto, texto
     else:
-        assert "Conectar WhatsApp" in texto and "*vincular 123456*" in texto, texto
+        assert "Conectar WhatsApp" in texto and "*vincular <código>*" in texto, texto
 
 
 # A5: o marcador é auxiliar. Se ele explode DEPOIS do merge e do bind, o vínculo segue como
@@ -527,6 +527,6 @@ def test_falha_no_marcador_no_ramo_do_numero_ja_ligado(enviadas, monkeypatch):
 def test_codigo_invalido_diz_a_mesma_coisa_nos_dois_verbos(enviadas, verbo):
     _manda(_numero_novo(), "oi")
     enviadas.clear()
-    _manda(_numero_novo(), f"{verbo} 000000")
+    _manda(_numero_novo(), f"{verbo} pbl00000000000000000000000000000000")
     assert len(enviadas) == 1 and enviadas[0].startswith("❌ Código inválido"), enviadas
-    assert "vincular 123456" in enviadas[0] and "Envie *link*" not in enviadas[0], enviadas
+    assert "vincular <código>" in enviadas[0] and "Envie *link*" not in enviadas[0], enviadas

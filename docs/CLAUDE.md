@@ -1324,7 +1324,7 @@ WhatsApp; o telefone é lido no mesmo SELECT só para devolver o `target_user_id
 lead), `remetente_com_dados` (o mesmo, com remetente só-WhatsApp que tem dados: o turno segue na conta dele) e
 `no_match`, que é todo o resto, inclusive o telefone de conta COM senha. Nenhum caminho do telefone grava
 identidade nem mescla; `JA_E_CONTA_WA` e `NAO_JUNTEI_WA` saíram. `no_match` recebe o convite
-(`_send_no_account_notice`: "Conectar WhatsApp" no site e `vincular 123456`) em toda mensagem que
+(`_send_no_account_notice`: "Conectar WhatsApp" no site e `vincular pbl…`) em toda mensagem que
 não é tentativa de código, e a tentativa de código passa também no `precisa_senha` (senão o dono do telefone
 digitado por outra conta ficava trancado). `merge_users` e as recusas (`apagaria_login`, #970) não mudam: o
 código passa por elas. `link_platform_identity` (por onde `link` e `vincular` passam) é agora o ÚNICO
@@ -2314,7 +2314,7 @@ grava o clique em `demo_sessions` (utms) e abre o WhatsApp com "Quero testar o P
 fictícios de exemplo (`core/services/demo/`), sem ferramentas; o Piggy fala em 2ª pessoa ("seu saldo"), nunca em 3ª nem com nome de persona, e se perguntarem da conta real esclarece que é exemplo. O demo não grava conta, lançamento nem texto; o único rastro é `demo_sessions`
 (contador, carimbos e hash do número por 30 dias): não toca em users / user_identities / launches /
 ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone de conta sem credencial, que ainda produz `precisa_senha`; `vincular CODIGO` ou outro canal) nunca
-entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`, com os mesmos `candidatos_simetricos` e o mesmo `db.google_auth.SEM_CREDENCIAL_SQL`; telefone de conta com senha não conta, o telefone não liga mais); `vincular 123456` segue o fluxo
+entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`, com os mesmos `candidatos_simetricos` e o mesmo `db.google_auth.SEM_CREDENCIAL_SQL`; telefone de conta com senha não conta, o telefone não liga mais); `vincular pbl…` segue o fluxo
 normal. Da 1ª à 7ª resposta vai o convite "Cria sua conta" e, na 8ª, o FIM; os dois levam o link `/t/{code}`, que carimba `checkout_at` no 1º clique (desde 2026-10-23 pode ser em qualquer resposta, não só no fim: o "clicaram_checkout" do `/admin/funil` não se compara com a série anterior) e manda para `/precos?origem=teste` (destino fixo,
 `Cache-Control: no-store`, `shared_limit`). Interruptor e teto: `DEMO_DAILY_MAX` (padrão 0 = desligado; sessões
 abertas por 24h; `<= 0` desliga, lida a cada chamada). Retenção: 1 teste por número a cada 30 dias e o
