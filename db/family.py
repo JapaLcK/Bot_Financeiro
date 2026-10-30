@@ -10,6 +10,7 @@ import secrets
 from psycopg import errors as pgerr
 
 from .connection import get_conn
+from .family_grants import _revoke_family_grants, recompute_users
 
 FAMILY_BASE_SEATS = 3     # pessoas incluídas (titular conta)
 FAMILY_MAX_EXTRA = 3      # vagas extras pagas
@@ -24,6 +25,25 @@ class FamilyError(Exception):
 
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def over_capacity(owner_user_id: int) -> list[int]:
+    """user_ids a cortar para o grupo caber na capacidade: os membros mais recentes (LIFO por joined_at)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select id from family_groups where owner_user_id = %s", (owner_user_id,))
+        row = cur.fetchone()
+        if not row:
+            return []
+        cur.execute("select count(*) as n from family_members where group_id = %s and left_at is null", (row["id"],))
+        excesso = cur.fetchone()["n"] - _capacity(cur, row["id"])
+        if excesso <= 0:
+            return []
+        cur.execute(
+            """select user_id from family_members where group_id = %s and role = 'member' and left_at is null
+                order by joined_at desc, id desc limit %s""",
+            (row["id"], excesso),
+        )
+        return [r["user_id"] for r in cur.fetchall()]
 
 
 def _lock_group(cur, owner_user_id: int):
@@ -115,7 +135,10 @@ def remove_member(owner_user_id: int, user_id: int, reason: str = "removed") -> 
             "where group_id = %s and member_user_id = %s and revoked_at is null",
             (group_id, user_id),
         )
+        # Só o grant `family`: o individual do membro nunca é tocado; o recompute escolhe o maior.
+        revogados = _revoke_family_grants(cur, group_id, f"family_{reason}", user_id)
         conn.commit()
+    recompute_users(revogados)
 
 
 def list_members(owner_user_id: int) -> list[dict]:
@@ -181,7 +204,10 @@ def accept_invite(token: str, user_id: int) -> int:
             raise FamilyError("invite_invalid")
         _insert_member(cur, group_id, user_id, "member")  # erro aqui desfaz o "used" (rollback)
         conn.commit()
-        return group_id
+        owner_id = row["owner_user_id"]
+    from core.services.family_access import grant_member
+    grant_member(owner_id, user_id)  # no-op se o titular não tem cobertura ativa
+    return group_id
 
 
 def _lock_member_group(cur, member_user_id: int) -> tuple[int, int]:
@@ -285,6 +311,11 @@ def log_read(group_id: int, viewer_user_id: int, member_user_id: int, scope: str
 def dissolve_group(owner_user_id: int) -> bool:
     """Apaga na hora a casa inteira (cascade); o log sobrevive com group_id NULL."""
     with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select id from family_groups where owner_user_id = %s for update", (owner_user_id,))
+        row = cur.fetchone()
+        revogados = _revoke_family_grants(cur, row["id"], "family_dissolved") if row else []
         cur.execute("delete from family_groups where owner_user_id = %s", (owner_user_id,))
+        apagou = cur.rowcount == 1
         conn.commit()
-        return cur.rowcount == 1
+    recompute_users(revogados)
+    return apagou

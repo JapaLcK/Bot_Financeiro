@@ -54,7 +54,7 @@ def janela_de_acesso(cobranca) -> tuple[datetime, datetime]:
         inicio = max(agora, cobranca["stripe_period_end_at"] or agora)
     else:
         fins = [g["ends_at"] for g in list_grants(cobranca["user_id"])
-                if g["status"] == "active" and g["ends_at"]]
+                if g["status"] == "active" and g["ends_at"] and g["source"] != "family"]
         inicio = max([agora] + fins)
     return inicio, inicio + timedelta(days=int(cobranca["duration_days"]))
 

@@ -14,7 +14,7 @@ from .connection import get_conn
 # nulo), Pix pago cujo dreno falhou antes do grant. Plano pago = a lista do `plan_service`
 # (vigente ou vencido); status e Pix = só os que existem depois de haver pagamento (`_params`).
 _JA_COMPROU_SQL = """(
-  exists (select 1 from plan_grants where user_id = %(uid)s)
+  exists (select 1 from plan_grants where user_id = %(uid)s and source <> 'family')
   or exists (select 1 from checkout_funnel_events where user_id = %(uid)s and kind = 'completed')
   or exists (select 1 from pix_charges where user_id = %(uid)s and status = any(%(pix_pagos)s))
   or exists (select 1 from auth_accounts where user_id = %(uid)s

@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 import secrets
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,8 @@ from core.pg_text import tem_veneno
 
 from .connection import get_conn
 from .users import _check_password, ensure_user_tx
+
+logger = logging.getLogger(__name__)
 
 
 # Conta criada só via Google não tem password_hash: NENHUMA senha funciona, e
@@ -1237,6 +1240,8 @@ def delete_user_data(
                 # os ciclos com `accrue_*` seguem fechados só pela ordem pai → lote.
                 from .bank_movements import _lock_user
                 _lock_user(cur, user_id)
+                from .family_grants import release_user
+                familia_afetada = release_user(cur, user_id, "family_owner_deleted")
                 for table in user_owned_tables:
                     if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
                         cur.execute(f"delete from {table} where user_id = %s", (user_id,))
@@ -1332,6 +1337,13 @@ def delete_user_data(
                     swept_sink.extend(pluggy_items_swept)
 
             conn.commit()
+
+        from .family_grants import recompute_users
+        try:  # a conta já foi apagada e commitada: falhar aqui não pode virar erro; a varredura alinha depois
+            recompute_users(familia_afetada)  # membros do titular excluído voltam ao plano próprio
+        except Exception as exc:
+            logger.warning("privacy: recompute pós-exclusão dos membros falhou user=%s causa=%s sqlstate=%s", user_id,
+                           type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
 
         # O recipiente já foi preenchido lá em cima, DENTRO da transação: o 2º
         # passe remoto roda no CHAMADOR, depois do retorno, e tudo entre um ponto
