@@ -99,7 +99,7 @@ def _avisar_dono_da_conta(external_id: str, user_id: int) -> None:
 
             send_whatsapp_linked_notice(email, mascarado)
     except Exception as exc:
-        logger.warning("aviso de vínculo por e-mail falhou user=%s: %s", user_id, type(exc).__name__)
+        logger.warning("aviso de vínculo por e-mail falhou: %s", type(exc).__name__, extra={"user_id": user_id})
     try:
         from core.services.push_service import send_push_to_user
 
@@ -109,7 +109,7 @@ def _avisar_dono_da_conta(external_id: str, user_id: int) -> None:
             collapse_id="wa-vinculado",
         )
     except Exception as exc:
-        logger.warning("aviso de vínculo por push falhou user=%s: %s", user_id, type(exc).__name__)
+        logger.warning("aviso de vínculo por push falhou: %s", type(exc).__name__, extra={"user_id": user_id})
 
 
 def link(platform: str, external_id: str, code: str | None) -> str:
