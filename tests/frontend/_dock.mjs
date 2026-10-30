@@ -41,6 +41,7 @@ export async function abrir(browser, pagina, cache, me) {
     // com prefetch em voo recebia o JSON genérico `{}` do ramo seguinte e o
     // DOMParser via lixo. Produção serve o mesmo comandos-app.html nos dois
     // caminhos (routes/static_pages.py); replicamos isso aqui.
+    if (url.pathname === "/app") return r.fulfill({ path: join(FRONTEND, "dashboard.html") });
     if (url.pathname === "/home") return r.fulfill({ path: join(FRONTEND, "home.html") });
     if (url.pathname === "/comandos-app") return r.fulfill({ path: join(FRONTEND, "comandos-app.html") });
     if (!/\.[a-z0-9]+$/i.test(url.pathname)) return r.fulfill(json({}));

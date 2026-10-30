@@ -1083,8 +1083,7 @@ def _is_pigbank_app(request: Request) -> bool:
 
 def painel_no_navegador(request: Request, user_id: int) -> bool:
     """True se este usuário, neste cliente, usa o /painel: navegador (não o UA do app)
-    COM a chave do v2. Chave que falha = False (fechado). Serve ao /painel e ao destino
-    pós-login."""
+    COM a chave do v2. Chave que falha = False (fechado). Base de `painel_como_destino`."""
     try:
         from core.services.plan_service import dashboard_v2_enabled
         return not _is_pigbank_app(request) and dashboard_v2_enabled(user_id)
@@ -1094,9 +1093,10 @@ def painel_no_navegador(request: Request, user_id: int) -> bool:
 
 
 def painel_como_destino(request: Request, user_id: int) -> bool:
-    """Destino pós-autenticação: `painel_no_navegador` E conta com credencial. Conta só de
-    link mágico (sem senha nem Google/Apple) vai ao /home, onde mora o "Crie sua senha":
-    o /painel não o carrega e a /api/v2 responde 403 password_required. Falha = False."""
+    """Portão do /painel e destino pós-autenticação: `painel_no_navegador` E conta com
+    credencial. Conta só de link mágico (sem senha nem Google/Apple) fica no /home ou no
+    /app, onde mora o "Crie sua senha": o /painel não o carrega e a /api/v2 responde 403
+    password_required. Falha = False."""
     try:
         from db import conta_sem_credencial
         return painel_no_navegador(request, user_id) and not conta_sem_credencial(user_id)

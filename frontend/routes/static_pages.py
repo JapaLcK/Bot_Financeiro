@@ -26,7 +26,7 @@ from frontend.routes.shared import (
     html_file,
     inject_tracking,
     limiter,
-    painel_no_navegador,
+    painel_como_destino,
     public_site_url,
     stamp_asset_versions,
 )
@@ -91,6 +91,10 @@ async def serve_dashboard(request: Request):
 def serve_painel(request: Request):
     """Dashboard v2, só para quem a chave libera. Fora dela, o painel é o /app.
 
+    Conta sem credencial (só link mágico) também vai ao /app: é lá que existe o
+    overlay "Crie sua senha", o /painel não tem. Os links "Dashboard" do site
+    apontam fixo para cá e é este portão que decide.
+
     `def` e não `async def`: sessão, chave e gates são banco síncrono, e o
     FastAPI roda rota síncrona no threadpool em vez de travar o event loop
     (mesma escolha de `api/v2/sessao.usuario_atual`).
@@ -106,7 +110,7 @@ def serve_painel(request: Request):
     uid = _resolve_page_user_id(request)
     if uid is None:
         return RedirectResponse(url="/login?next=/painel", status_code=302)
-    if not painel_no_navegador(request, uid):
+    if not painel_como_destino(request, uid):
         return RedirectResponse(url="/app", status_code=302)
     # Mesma sequência do /app: plano primeiro, onboarding depois.
     gate = gate_plan_selection(request)

@@ -4059,8 +4059,8 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "history_earliest_date": earliest_history.isoformat() if earliest_history else None,
         "of_ui_enabled": of_ui_enabled,
         "agents_ui_enabled": agents_ui,
-        # A chave pura: o /app esconde o link no app (window.PB_IN_APP), e o
-        # /painel manda o app para o /app no servidor.
+        # A chave pura, mantida por contrato aditivo (nenhum leitor web hoje): os
+        # links "Dashboard" são fixos em /painel e o servidor manda o app ao /app.
         "dashboard_v2_enabled": dashboard_v2_enabled(user_id, user_dict.get("email")),
     }
 

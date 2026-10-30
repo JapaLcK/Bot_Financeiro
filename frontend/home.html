@@ -562,7 +562,7 @@ footer a:hover { color:var(--text); }
       <h1>PigBank</h1>
       <div class="nav-links">
         <a class="nav-link active" href="/home">Início</a>
-        <a class="nav-link" href="/app">Dashboard</a>
+        <a class="nav-link" href="/painel">Dashboard</a>
         <a class="nav-link" href="/comandos-app">O que pedir</a>
         <a class="nav-link" href="/settings">Configurações</a>
       </div>
@@ -583,7 +583,7 @@ footer a:hover { color:var(--text); }
             <span class="user-plan" id="user-plan">PLANO FREE</span>
           </div>
           <a class="dd-link" href="/home"><span class="dd-icon"><i class="ph ph-house" aria-hidden="true"></i></span>Início</a>
-          <a class="dd-link" href="/app"><span class="dd-icon"><i class="ph ph-chart-bar" aria-hidden="true"></i></span>Dashboard</a>
+          <a class="dd-link" href="/painel"><span class="dd-icon"><i class="ph ph-chart-bar" aria-hidden="true"></i></span>Dashboard</a>
           <button class="dd-link" type="button" onclick="connectWhatsAppFromHome(event)"><span class="dd-icon"><i class="ph ph-whatsapp-logo" aria-hidden="true"></i></span>Conectar WhatsApp</button>
           <a class="dd-link" href="/settings?view=security"><span class="dd-icon"><i class="ph ph-gear" aria-hidden="true"></i></span>Configurações</a>
           <a class="dd-link" href="/conta"><span class="dd-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span>Gerenciar assinatura</a>
@@ -660,7 +660,7 @@ footer a:hover { color:var(--text); }
         </div>
         <div class="action-arrow">→</div>
       </a>
-      <a class="action-card" href="/app">
+      <a class="action-card" href="/painel">
         <div class="action-icon-lg blue"><i class="ph ph-chart-bar" aria-hidden="true"></i></div>
         <div class="action-body">
           <div class="action-title">Ver dashboard</div>
@@ -1293,7 +1293,7 @@ function renderActivity(snapshot) {
     `;
   }).join("");
 
-  list.innerHTML = rows + `<a class="see-all-link" href="/app">Ver tudo no dashboard →</a>`;
+  list.innerHTML = rows + `<a class="see-all-link" href="/painel">Ver tudo no dashboard →</a>`;
 }
 
 function escapeHtml(s) {
