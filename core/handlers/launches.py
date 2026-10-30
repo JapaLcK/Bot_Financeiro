@@ -1620,6 +1620,21 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
             return None
 
         head, resto = queue[0], queue[1:]
+        from core.handlers import declaracao_banco as decl
+        from core.handlers import forma_pagamento as fp
+        forma = head.get("forma_pagamento", fp.DESCONHECIDA)
+        decisao = fp.decidir(user_id, forma)
+        if decl.declara(user_id, decisao) and fp._no_cartao(limpo, debito=True):
+            # Rodada 10 (#1310, opção A): valor com "cartão" (ou "cartão de débito") não declara (D8) nem vai à fatura
+            # por aqui. Recusa como o `perigo`: sem CAS, o MESMO item na frente e a pergunta repetida. O texto não diz
+            # "foi no cartão" (a resposta pode negar); quem tem cartão manual lança a compra pela frase inteira.
+            # Rodada 11: o texto da fatura só para despesa no crédito; débito com cartão e receita levam o neutro.
+            from core.handlers.credit import compra_fica_com_o_of
+            if head.get("tipo") == "receita" or not fp._no_cartao(limpo):
+                recusa = decl.tx.FILA_CARTAO_NEUTRO
+            else:
+                recusa = decl.tx.FILA_CARTAO_OF if compra_fica_com_o_of(user_id, limpo) else decl.tx.FILA_CARTAO_MANUAL
+            return f"{recusa}\n\n{_ask_value_question(head)}"
 
         # Tira o head da fila ANTES de registrar: é isso que impede a outra
         # thread de registrar o MESMO item. Fila vazia = apaga a pendência; o
@@ -1643,14 +1658,10 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
         #
         # Item sem forma que grave (Q40: de antes do deploy, ou do áudio, de
         # quem tem banco conectado) já saiu da fila pelo CAS e não é gravado.
-        from core.handlers import declaracao_banco as decl
-        from core.handlers import forma_pagamento as fp
-        forma = head.get("forma_pagamento", fp.DESCONHECIDA)
-        decisao = fp.decidir(user_id, forma)
         if decisao != fp.CARTEIRA and not decl.declara(user_id, decisao):
             resp = (f"🐷 Não registrei *{head.get('desc') or 'esse lançamento'}*: me manda "
                     "de novo dizendo se foi em dinheiro.")
-        elif decisao == fp.BANCO and (resp := decl.recusa_valor(limpo)):  # o item volta para a fila
+        elif decisao == fp.BANCO and (resp := decl.recusa_valor(limpo, valor)):  # confere o valor que grava; o item volta
             _devolve_head(user_id, head, platform)
         else:
             try:
@@ -1815,9 +1826,9 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
     if decisao == fp.MISTO:
         return decl.msg_misto(user_id)
     declara = decl.declara(user_id, decisao)
-    if declara and (recusa := decl.recusa_valor(text)):  # "2,2k" o parser lê como 2,2: não grava o palpite
+    cartao = declara and decl.tem_cartao(split_financial_transactions(text))  # cartão nunca declara (despesa ou receita): T8
+    if declara and not cartao and (recusa := decl.recusa_valor(text)):  # "2,2k" o parser lê como 2,2: não grava o palpite
         return recusa
-    cartao = declara and decl.tem_cartao(split_financial_transactions(text))  # cartão nunca declara (despesa ou receita)
     if declarada == fp.DINHEIRO or declara:  # a forma dita não entra no alvo
         text = fp.limpar(text, banco=declara)
     parts = split_financial_transactions(text)
@@ -1939,6 +1950,8 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
     valor = float(entities.get("valor", 0))
     if pergunta and valor > 0:
         return _pergunta(tipo, valor)
+    if declara and (recusa := decl.recusa_valor(text, valor)):  # o valor do classificador/LLM, conferido como o do parser
+        return recusa
     return add_from_entities(
         user_id,
         tipo=tipo,

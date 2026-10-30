@@ -49,9 +49,10 @@ def test_audio_com_forma_dita(com_extrato, monkeypatch):
     assert alvos(com_extrato) == [("mercado", True)]
 
 
-def test_duas_frases_com_a_forma_no_fim(com_extrato):
-    manda_wamid(com_extrato, "gastei 50 no mercado e 30 na padaria pelo banco")
-    assert [d["alvo"] for d in declaracoes(com_extrato)] == ["mercado", "padaria"]
+def test_duas_frases_com_a_forma_no_fim_recusam(com_extrato):
+    """E1 (#1310): um gasto por mensagem na declaração."""
+    assert "um gasto por mensagem" in manda_wamid(com_extrato, "gastei 50 no mercado e 30 na padaria pelo banco")[0]
+    assert declaracoes(com_extrato) == []
 
 
 def test_forma_sem_comercio_pergunta_o_que_foi_e_depois_casa(com_extrato):
