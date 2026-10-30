@@ -504,7 +504,7 @@ def _limpa_past_due(owner):
 
 
 def test_so_a_suspensao_segura_os_membros_com_o_titular_de_volta_a_active(wh):
-    # Discrimina a suspensão: a cobertura volta (status active, sem pagamento novo) e só `is_suspended` segura.
+    # Discrimina a suspensão: o status volta a active (sem pagamento novo) e só `is_suspended` segura.
     from core.services.billing_access import recompute_entitlement
     client, fake = wh
     owner = _titular("pro_max", sub="sub_f")
@@ -514,7 +514,7 @@ def test_so_a_suspensao_segura_os_membros_com_o_titular_de_volta_a_active(wh):
     assert fg.is_suspended(owner) and _plano(m) == "free"
     _limpa_past_due(owner)
     recompute_entitlement(owner)
-    assert fa._cobertura(owner) and _plano(m) == "free" and not _fam(m)
+    assert not fa._cobertura(owner) and _plano(m) == "free" and not _fam(m)  # a suspensão recusa o Stripe
 
 
 def test_invoice_paid_antigo_reentregue_nao_devolve_os_membros_mas_o_novo_sim(wh):
@@ -546,7 +546,7 @@ def test_payment_failed_mantem_membros_se_outro_grant_cobre_e_suspende_se_nao(wh
           subs={"sub_f": _sub_stripe("past_due")})
     _post(client, fake, _evt("invoice.payment_failed", sem, sub="sub_g", subscription="sub_g", attempt_count=1),
           subs={"sub_g": _sub_stripe("past_due")})
-    assert _plano(m1) == "pro_max" and not fg.is_suspended(com_pix)
+    assert _plano(m1) == "pro_max" and fg.is_suspended(com_pix)  # marcador: o Stripe encerra, o Pix cobre
     assert _plano(m2) == "free" and fg.is_suspended(sem)
 
 
@@ -563,7 +563,7 @@ def test_payment_failed_com_grant_legacy_suspende_e_com_admin_vigente_mantem(wh)
     _post(client, fake, _evt("invoice.payment_failed", adm, sub="sub_g", subscription="sub_g", attempt_count=1),
           subs={"sub_g": _sub_stripe("past_due")})
     assert _plano(m1) == "free" and fg.is_suspended(leg)
-    assert _plano(m2) == "pro_max" and not fg.is_suspended(adm)
+    assert _plano(m2) == "pro_max" and fg.is_suspended(adm)
 
 
 def test_membro_que_lanca_no_recompute_nao_derruba_titular_nem_os_outros(monkeypatch):
@@ -701,3 +701,22 @@ def test_recompute_do_membro_que_falhou_na_revogacao_e_corrigido_pela_varredura(
     monkeypatch.setattr(fa, "recompute_entitlement", real)
     reprojetar_grants_recentes(None)                             # varredura diária
     assert _plano(m) == "free"
+
+
+def test_cancelamento_agendado_com_pix_curto_cobrindo_mantem_e_ao_vencer_o_pix_os_membros_perdem(wh):
+    from core.services.billing_access import recompute_entitlement
+    client, fake = wh
+    owner = _titular("pro_max", sub="sub_f")
+    m = _entra(owner)
+    upsert_grant(owner, "pix", f"pix-{owner}", "pro_max", _agora() - timedelta(days=1), _agora() + timedelta(days=3), _v())
+    _post(client, fake, _evt("customer.subscription.updated", owner),
+          subs={"sub_f": _sub_stripe("active", cancel=True)})
+    assert _plano(m) == "pro_max"  # positivo: o Pix vigente segue cobrindo
+    _sql("update plan_grants set ends_at = now() - interval '1 minute' where user_id = %s and source = 'pix'", (owner,))
+    recompute_entitlement(owner)
+    assert _plano(owner) == "pro_max" and _plano(m) == "free"  # Stripe pago não volta a cobrir os membros
+    recompute_entitlement(owner)
+    assert _plano(m) == "free" and not _fam(m)
+    _post(client, fake, _evt("customer.subscription.updated", owner),
+          subs={"sub_f": _sub_stripe("active", cancel=False)})
+    assert _plano(m) == "pro_max"  # reativação devolve

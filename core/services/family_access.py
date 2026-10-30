@@ -39,11 +39,16 @@ def _cobertura(owner_id: int):
     fim = conta.get("plan_expires_at")
     if plano == "free" or fim is None or fim <= datetime.now(timezone.utc):
         return None
-    if (conta.get("last_payment_status") or "").lower() in PAST_DUE_PAYMENT_STATUSES:
-        # atraso é do Stripe: um grant não-Stripe vigente (Pix) segue cobrindo
-        if not grant_vigente(list_grants(owner_id), datetime.now(timezone.utc), sources=_COBERTURA_INDEPENDENTE):
+    if (conta.get("last_payment_status") or "").lower() in PAST_DUE_PAYMENT_STATUSES or fg.is_suspended(owner_id):
+        # atraso ou encerramento é do Stripe (a suspensão é o marcador, persistido mesmo com outro grant
+        # cobrindo): só um grant não-Stripe vigente (Pix/admin) segue cobrindo
+        if not _independente(owner_id):
             return None
     return plano, fim
+
+
+def _independente(owner_id: int) -> bool:
+    return bool(grant_vigente(list_grants(owner_id), datetime.now(timezone.utc), sources=_COBERTURA_INDEPENDENTE))
 
 
 def grant_member(owner_id: int, member_user_id: int) -> bool:
@@ -58,10 +63,11 @@ def grant_member(owner_id: int, member_user_id: int) -> bool:
             group_id = fam._lock_group(cur, owner_id)
         except fam.FamilyError:
             return False
-        # suspensão (cancelamento agendado / pagamento falho): só volta com `retomar`. Lida DEPOIS do lock: o
-        # set_suspended faz UPDATE nesta mesma linha, então um revoke em voo não é vencido por este grant.
+        # suspensão (cancelamento agendado / pagamento falho): só Pix/admin vigente cobre; o resto só volta com
+        # `retomar`. Lida DEPOIS do lock: o set_suspended faz UPDATE nesta mesma linha, então um revoke em voo
+        # não é vencido por este grant.
         cur.execute("select members_suspended_at is not null as s from family_groups where id = %s", (group_id,))
-        if cur.fetchone()["s"]:
+        if cur.fetchone()["s"] and not _independente(owner_id):
             return False
         cur.execute("select id from family_members where group_id = %s and user_id = %s and role = 'member'"
                     " and left_at is null", (group_id, member_user_id))
@@ -101,11 +107,15 @@ def retomar(owner_id: int) -> int:
 
 def encerrando(owner_id: int, source: str, external_ref: str, motivo: str, desde: int | None = None) -> None:
     """Assinatura `(source, external_ref)` do titular está acabando (cancelamento agendado, atraso): os
-    membros perdem agora, EXCETO se outro grant dele ainda cobre — aí o estado (sync) decide."""
+    membros perdem agora, EXCETO se outro grant dele ainda cobre. Outra assinatura Stripe cobrindo: o estado (sync)
+    decide. Só Pix/admin cobrindo: a suspensão é gravada MESMO ASSIM (é o marcador de que o Stripe encerra), e
+    quando eles acabam o recompute revoga os membros em vez de aceitar o período Stripe já pago."""
     agora = datetime.now(timezone.utc)
-    outro = grant_vigente([g for g in list_grants(owner_id) if (g["source"], g["external_ref"]) != (source, external_ref)],
-                          agora, sources=(*_COBERTURA_INDEPENDENTE, "stripe"))
-    if outro:
+    outros = [g for g in list_grants(owner_id) if (g["source"], g["external_ref"]) != (source, external_ref)]
+    if grant_vigente(outros, agora, sources=("stripe",)):
+        sync_from_owner(owner_id)
+    elif grant_vigente(outros, agora, sources=_COBERTURA_INDEPENDENTE):
+        fg.set_suspended(owner_id, True, desde)
         sync_from_owner(owner_id)
     else:
         revoke_members(owner_id, motivo, desde)
