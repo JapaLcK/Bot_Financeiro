@@ -3626,7 +3626,7 @@ async def _revogar_sessoes_do_quiz(user_id: int) -> bool:
     await asyncio.to_thread(revoke_other_sessions, int(user_id), None)
     await asyncio.to_thread(revoke_user_refresh_tokens, int(user_id))
     if await asyncio.to_thread(_sobrou_sessao_ou_refresh, user_id):
-        logging.getLogger(__name__).error("vinculo social: sessão/refresh sobrou (user %s), sem vincular", user_id)
+        logging.getLogger(__name__).error("vinculo social: sessão/refresh sobrou, sem vincular", extra={"user_id": user_id})
         return False
     return True
 
