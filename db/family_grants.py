@@ -2,9 +2,12 @@
 
 Parte de acesso do grupo (db/family.py guarda grupo, membros, convites e consentimento).
 """
+import logging
 import time
 
 from .connection import get_conn
+
+log = logging.getLogger(__name__)
 
 
 def event_version_now() -> int:
@@ -47,10 +50,16 @@ def is_suspended(owner_user_id: int) -> bool:
         return bool(row and row["s"])
 
 
-def recompute_users(user_ids) -> None:
+def recompute_users(user_ids, owner_id: int) -> None:
+    """Recalcula o acesso dos membros DEPOIS do commit da revogação/concessão. A falha de um não impede os
+    outros nem o chamador: o grant revogado recente é retentado como evento pela varredura."""
     from core.services.billing_access import recompute_entitlement
     for uid in user_ids:
-        recompute_entitlement(uid)
+        try:
+            recompute_entitlement(uid)
+        except Exception as exc:
+            log.warning("family: recompute do membro %s (titular %s) falhou causa=%s sqlstate=%s", uid, owner_id,
+                        type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": owner_id})
 
 
 def active_members(owner_user_id: int) -> list[dict]:
@@ -68,7 +77,9 @@ def active_members(owner_user_id: int) -> list[dict]:
 
 
 def _revoke_owner_grants(cur, owner_user_id: int, motivo: str) -> list[int]:
-    cur.execute("select id from family_groups where owner_user_id = %s", (owner_user_id,))
+    # Lock do grupo antes de revogar (mesma ordem de grant_member/remove_member): serializa com o grant em voo
+    # (que revalida a cobertura depois do lock) e evita o deadlock com o cascade.
+    cur.execute("select id from family_groups where owner_user_id = %s for update", (owner_user_id,))
     row = cur.fetchone()
     return _revoke_family_grants(cur, row["id"], motivo) if row else []
 
@@ -82,12 +93,10 @@ def revoke_owner_grants(owner_user_id: int, motivo: str) -> list[int]:
 
 
 def release_user(cur, user_id: int, motivo: str) -> list[int]:
-    """Conta que vai sumir (exclusão, merge), na transação do chamador: os membros dela perdem o grant
-    `family` (o cascade apagaria `family_members` e nada mais os alcançaria) e o grant `family` que ela
-    mesma recebe não segue para outra conta. Devolve os membros a recalcular DEPOIS do commit."""
-    uids = _revoke_owner_grants(cur, user_id, motivo)
-    cur.execute("delete from plan_grants where user_id = %s and source = 'family'", (user_id,))
-    return uids
+    """Conta que vai ser excluída, na transação do chamador: os membros dela perdem o grant `family` (o cascade
+    apagaria `family_members` e nada mais os alcançaria; o grant que ela mesma recebe cai com o cascade de
+    `users`). Devolve os membros a recalcular DEPOIS do commit."""
+    return _revoke_owner_grants(cur, user_id, motivo)
 
 
 def set_seat_status(source: str, external_ref: str, status: str, event_version: int) -> bool:

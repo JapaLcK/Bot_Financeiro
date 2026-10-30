@@ -30,25 +30,27 @@ log = logging.getLogger(__name__)
 _COBERTURA_INDEPENDENTE = ("pix", "admin")
 
 
-def _cobertura(owner_id: int):
-    """(plan_stored, ends_at) do titular, ou None se ele não tem cobertura que possa ser repassada."""
-    conta = _ler_conta(owner_id)
+def _decidir_cobertura(conta, suspenso: bool, grants):
+    """Regra única da cobertura (função pura): (plan_stored, ends_at) ou None. `conta` = linha de auth_accounts,
+    `grants` = função que devolve os grants do titular (só chamada se a regra precisa deles). Usada fora (`_cobertura`) e dentro da transação do grant_member."""
     if not conta:
         return None
+    agora = datetime.now(timezone.utc)
     plano = (conta.get("plan") or "free").lower()
     fim = conta.get("plan_expires_at")
-    if plano == "free" or fim is None or fim <= datetime.now(timezone.utc):
+    if plano == "free" or fim is None or fim <= agora:
         return None
-    if (conta.get("last_payment_status") or "").lower() in PAST_DUE_PAYMENT_STATUSES or fg.is_suspended(owner_id):
+    if (conta.get("last_payment_status") or "").lower() in PAST_DUE_PAYMENT_STATUSES or suspenso:
         # atraso ou encerramento é do Stripe (a suspensão é o marcador, persistido mesmo com outro grant
         # cobrindo): só um grant não-Stripe vigente (Pix/admin) segue cobrindo
-        if not _independente(owner_id):
+        if not grant_vigente(grants(), agora, sources=_COBERTURA_INDEPENDENTE):
             return None
     return plano, fim
 
 
-def _independente(owner_id: int) -> bool:
-    return bool(grant_vigente(list_grants(owner_id), datetime.now(timezone.utc), sources=_COBERTURA_INDEPENDENTE))
+def _cobertura(owner_id: int):
+    """(plan_stored, ends_at) do titular, ou None se ele não tem cobertura que possa ser repassada."""
+    return _decidir_cobertura(_ler_conta(owner_id), fg.is_suspended(owner_id), lambda: list_grants(owner_id))
 
 
 def grant_member(owner_id: int, member_user_id: int) -> bool:
@@ -63,11 +65,19 @@ def grant_member(owner_id: int, member_user_id: int) -> bool:
             group_id = fam._lock_group(cur, owner_id)
         except fam.FamilyError:
             return False
-        # suspensão (cancelamento agendado / pagamento falho): só Pix/admin vigente cobre; o resto só volta com
-        # `retomar`. Lida DEPOIS do lock: o set_suspended faz UPDATE nesta mesma linha, então um revoke em voo
-        # não é vencido por este grant.
+        # Cobertura revalidada DEPOIS do lock, na mesma transação (a lida antes pode ter sido vencida por uma
+        # revogação/suspensão que commitou no meio: ela faz UPDATE nesta linha do grupo ou na conta do titular).
+        cur.execute("select plan, plan_expires_at, last_payment_status from auth_accounts where user_id = %s",
+                    (owner_id,))
+        conta = cur.fetchone()
         cur.execute("select members_suspended_at is not null as s from family_groups where id = %s", (group_id,))
-        if cur.fetchone()["s"] and not _independente(owner_id):
+        suspenso = cur.fetchone()["s"]
+        def grants_do_titular():
+            cur.execute("select status, source, starts_at, ends_at from plan_grants where user_id = %s"
+                        " and status = 'active'", (owner_id,))
+            return cur.fetchall()
+        cob = _decidir_cobertura(conta, suspenso, grants_do_titular)
+        if not cob:
             return False
         cur.execute("select id from family_members where group_id = %s and user_id = %s and role = 'member'"
                     " and left_at is null", (group_id, member_user_id))
@@ -123,12 +133,7 @@ def encerrando(owner_id: int, source: str, external_ref: str, motivo: str, desde
 
 def _revogar(owner_id: int, motivo: str) -> int:
     uids = fg.revoke_owner_grants(owner_id, motivo)
-    for uid in uids:
-        try:  # a falha de um membro não impede os outros nem o pagamento do titular
-            recompute_entitlement(uid)
-        except Exception as exc:
-            log.warning("family: recompute do membro %s (titular %s) falhou causa=%s sqlstate=%s", uid, owner_id,
-                        type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": owner_id})
+    fg.recompute_users(uids, owner_id)
     return len(uids)
 
 

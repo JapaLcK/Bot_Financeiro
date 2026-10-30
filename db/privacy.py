@@ -1339,11 +1339,7 @@ def delete_user_data(
             conn.commit()
 
         from .family_grants import recompute_users
-        try:  # a conta já foi apagada e commitada: falhar aqui não pode virar erro; a varredura alinha depois
-            recompute_users(familia_afetada)  # membros do titular excluído voltam ao plano próprio
-        except Exception as exc:
-            logger.warning("privacy: recompute pós-exclusão dos membros falhou user=%s causa=%s sqlstate=%s", user_id,
-                           type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
+        recompute_users(familia_afetada, user_id)  # membros do titular excluído voltam ao plano próprio; não lança
 
         # O recipiente já foi preenchido lá em cima, DENTRO da transação: o 2º
         # passe remoto roda no CHAMADOR, depois do retorno, e tudo entre um ponto

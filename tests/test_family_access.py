@@ -25,7 +25,8 @@ from db.connection import get_conn
 from db.plan_grants import list_grants, upsert_grant
 from test_billing_webhook_lifecycle import _FakeStripe, _fake_sub, _post
 import frontend.finance_bot_websocket_custom as dashboard
-from core.services import family_access as fa
+from core.services import billing_access, family_access as fa
+from _billing_grants_helpers import FakeStripeSubs, set_customer
 
 _V = [1_700_000_000]
 
@@ -569,14 +570,15 @@ def test_payment_failed_com_grant_legacy_suspende_e_com_admin_vigente_mantem(wh)
 def test_membro_que_lanca_no_recompute_nao_derruba_titular_nem_os_outros(monkeypatch):
     owner = _titular("pro_max")
     m1, m2 = _entra(owner), _entra(owner)
-    real = fa.recompute_entitlement
+    real = billing_access.recompute_entitlement
 
     def quebra(uid, **kw):
         if uid == m1:
             raise RuntimeError("boom")
         return real(uid, **kw)
-    monkeypatch.setattr(fa, "recompute_entitlement", quebra)
-    assert fa.sync_from_owner(owner) == 1 and _plano(m2) == "pro_max"        # concessão
+    monkeypatch.setattr(fa, "recompute_entitlement", quebra)                  # concessão (grant_member)
+    monkeypatch.setattr(billing_access, "recompute_entitlement", quebra)      # revogação (recompute_users)
+    assert fa.sync_from_owner(owner) == 1 and _plano(m2) == "pro_max"
     assert fa.revoke_members(owner, "t") == 2 and _plano(m2) == "free"       # revogação
 
 
@@ -596,9 +598,9 @@ def test_exclusao_com_recompute_pos_commit_falhando_nao_lanca(monkeypatch):
     from db.privacy import delete_user_data
     owner, m = _membro()
 
-    def boom(_uids):
+    def boom(*_a, **_k):
         raise RuntimeError("boom")
-    monkeypatch.setattr(fam, "recompute_users", boom)
+    monkeypatch.setattr(billing_access, "recompute_entitlement", boom)
     delete_user_data(owner)   # não lança
     assert not _sql("select 1 from users where id = %s", (owner,))
 
@@ -640,6 +642,17 @@ def test_updated_em_grupo_sem_membros_suspende_e_a_reativacao_libera_os_convidad
     assert not fg.is_suspended(owner) and _plano(m) == "pro_max"
 
 
+def _espera_bloqueio_de_lock(timeout=10):
+    """Espera (poll) até existir um backend bloqueado em lock de linha: determinístico, sem sleep fixo."""
+    import time
+    fim = time.time() + timeout
+    while time.time() < fim:
+        if _sql("select 1 from pg_stat_activity where wait_event_type = 'Lock' and datname = current_database()"):
+            return
+        time.sleep(0.02)
+    raise AssertionError("nenhum backend bloqueado em lock")
+
+
 def test_saida_do_membro_no_meio_do_grant_nao_recria_o_grant(monkeypatch):
     import threading, time
     owner = _titular("pro_max")
@@ -656,7 +669,7 @@ def test_saida_do_membro_no_meio_do_grant_nao_recria_o_grant(monkeypatch):
             disparou.append(1)
             t = threading.Thread(target=lambda: fam.remove_member(owner, m2))
             t.start(); ts.append(t)
-            time.sleep(0.5)                                      # janela entre a leitura do vínculo e o upsert
+            _espera_bloqueio_de_lock()                           # a saída está parada no lock que este grant segura
         return real()
     monkeypatch.setattr(fg, "event_version_now", hook)
     fa.grant_member(owner, m2)
@@ -694,11 +707,11 @@ def test_recompute_do_membro_que_falhou_na_revogacao_e_corrigido_pela_varredura(
     from core.services.billing_access import reprojetar_grants_recentes
     owner = _titular("pro_max")
     m = _entra(owner)
-    real = fa.recompute_entitlement
-    monkeypatch.setattr(fa, "recompute_entitlement", lambda uid, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    real = billing_access.recompute_entitlement
+    monkeypatch.setattr(billing_access, "recompute_entitlement", lambda uid, **k: (_ for _ in ()).throw(RuntimeError("boom")))
     fa.revoke_members(owner, "teste")                            # revogou o grant, o recompute caiu
     assert _plano(m) == "pro_max"
-    monkeypatch.setattr(fa, "recompute_entitlement", real)
+    monkeypatch.setattr(billing_access, "recompute_entitlement", real)
     reprojetar_grants_recentes(None)                             # varredura diária
     assert _plano(m) == "free"
 
@@ -720,3 +733,189 @@ def test_cancelamento_agendado_com_pix_curto_cobrindo_mantem_e_ao_vencer_o_pix_o
     _post(client, fake, _evt("customer.subscription.updated", owner),
           subs={"sub_f": _sub_stripe("active", cancel=False)})
     assert _plano(m) == "pro_max"  # reativação devolve
+
+
+# ── revisão independente do PR 2: varredura como evento, ex_ref, ordem de lock, conexão fora do lock ─────────
+
+
+@pytest.mark.parametrize("recompute_cai", [True, False])
+def test_membro_com_stripe_proprio_mais_curto_que_sai_volta_ao_dele_pela_varredura(monkeypatch, recompute_cai):
+    """Sem a retentativa como evento, a varredura recusa encurtar a data e o membro fica com a família."""
+    owner = _titular("pro_max", 30)
+    m = _u("pro", 10, "active"); set_customer(m, f"cus_{m}")
+    fim = _agora() + timedelta(days=10)
+    upsert_grant(m, "stripe", f"sub_m{m}", "pro", _agora() - timedelta(days=20), fim, _v())
+    fam.accept_invite(fam.create_invite(owner), m)
+    assert _plano(m) == "pro_max"
+    real = billing_access.recompute_entitlement
+    if recompute_cai:
+        monkeypatch.setattr(billing_access, "recompute_entitlement",
+                            lambda uid, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    fam.remove_member(owner, m)                                  # o recompute imediato cai (ou não)
+    monkeypatch.setattr(billing_access, "recompute_entitlement", real)
+    assert _plano(m) == ("pro_max" if recompute_cai else "pro")
+    viva = {"id": f"sub_m{m}", "status": "active", "current_period_end": int(fim.timestamp()),
+            "items": {"data": [{"current_period_end": int(fim.timestamp())}]}}
+    monkeypatch.setitem(sys.modules, "stripe", FakeStripeSubs(ativa=viva))
+    billing_access.reprojetar_grants_recentes(None)
+    assert _plano(m) == "pro" and ler(m)["plan_expires_at"] <= fim + timedelta(seconds=5)
+
+
+def test_ex_membro_com_stripe_proprio_vivo_e_renovacao_perdida_e_reparado_pela_varredura(monkeypatch):
+    """A varredura precisa rodar ANTES do evento: só ela consulta o Stripe e repara o grant próprio vencido."""
+    owner = _titular("pro_max", 30)
+    m = _u("pro", 5, "active"); set_customer(m, f"cus_{m}")
+    upsert_grant(m, "stripe", f"sub_m{m}", "pro", _agora() - timedelta(days=25), _agora() + timedelta(days=5), _v())
+    fam.accept_invite(fam.create_invite(owner), m)
+    fam.remove_member(owner, m)
+    _sql("update plan_grants set ends_at = now() - interval '1 hour' where user_id = %s and source = 'stripe'", (m,))
+    _sql("update auth_accounts set plan = 'pro', plan_expires_at = now() + interval '1 hour' where user_id = %s", (m,))
+    fim = _agora() + timedelta(days=25)
+    viva = {"id": f"sub_m{m}", "status": "active", "current_period_end": int(fim.timestamp()),
+            "items": {"data": [{"current_period_end": int(fim.timestamp())}]}}
+    monkeypatch.setitem(sys.modules, "stripe", FakeStripeSubs(ativa=viva))
+    billing_access.reprojetar_grants_recentes(None)
+    assert _plano(m) == "pro" and ler(m)["plan_expires_at"] > _agora() + timedelta(days=24)
+
+
+def test_ex_membro_com_stripe_fora_do_ar_nao_e_rebaixado_pela_passada_de_evento(monkeypatch):
+    """Sem a consulta ao Stripe a varredura segura; a passada "evento" não pode reduzir por conta própria."""
+    owner = _titular("pro_max", 30)
+    m = _u("pro", 5, "active"); set_customer(m, f"cus_{m}")
+    upsert_grant(m, "stripe", f"sub_m{m}", "pro", _agora() - timedelta(days=25), _agora() + timedelta(days=5), _v())
+    fam.accept_invite(fam.create_invite(owner), m)
+    fam.remove_member(owner, m)
+    _sql("update plan_grants set ends_at = now() - interval '1 hour' where user_id = %s and source = 'stripe'", (m,))
+    _sql("update auth_accounts set plan = 'pro', plan_expires_at = now() + interval '1 hour' where user_id = %s", (m,))
+    monkeypatch.setitem(sys.modules, "stripe", FakeStripeSubs(erro=True))
+    billing_access.reprojetar_grants_recentes(None)
+    assert _plano(m) == "pro"
+
+
+def test_grant_member_revalida_a_cobertura_independente_depois_do_lock(monkeypatch):
+    """Invariante (também vale na main): Pix estornado antes do lock não cobre a família suspensa."""
+    owner = _titular("pro_max", 30); m = _entra(owner)
+    fa._revogar(owner, "preparo")
+    fg.set_suspended(owner, True)
+    upsert_grant(owner, "pix", f"pix-{owner}", "pro_max", _agora() - timedelta(days=1), _agora() + timedelta(days=5), _v())
+    real_lock = fam._lock_group
+
+    def lock(cur, o):                                            # Pix estornado entre a checagem de cobertura e o lock
+        _sql("update plan_grants set status = 'revoked', revoked_at = now() where user_id = %s and source = 'pix'", (o,))
+        return real_lock(cur, o)
+    monkeypatch.setattr(fam, "_lock_group", lock)
+    assert fa.grant_member(owner, m) is False and _plano(m) == "free" and not _fam(m)
+
+
+def test_dissolver_ou_suspender_a_nao_revoga_o_grant_do_ex_membro_que_esta_em_b():
+    a, b = _titular("pro_max", 30), _titular("pro_max", 30)
+    m = _entra(a)
+    fam.remove_member(a, m)
+    _entra(b, m)
+    assert _plano(m) == "pro_max" and len(_fam(m)) == 1
+    fa.revoke_members(a, "x")                                    # suspensão/revogação de A
+    assert _plano(m) == "pro_max" and len(_fam(m)) == 1
+    fam.dissolve_group(a)
+    assert _plano(m) == "pro_max" and len(_fam(m)) == 1
+    fam.dissolve_group(b)                                        # positivo: o grupo certo derruba
+    assert _plano(m) == "free" and not _fam(m)
+
+
+def _bloqueia_no_lock_do_grupo(owner, chamada):
+    """Segura o lock do grupo numa conexão, dispara `chamada` numa thread e devolve se ela esperou o lock."""
+    import threading
+    t = threading.Thread(target=chamada)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select id from family_groups where owner_user_id = %s for update", (owner,))
+        t.start()
+        try:  # determinístico: a thread aparece bloqueada em lock no Postgres, não "ainda viva após um sleep"
+            _espera_bloqueio_de_lock(timeout=5)
+            esperou = True
+        except AssertionError:
+            esperou = False
+        conn.commit()
+    t.join()
+    return esperou
+
+
+def test_revogar_os_grants_do_titular_espera_o_lock_do_grupo():
+    owner = _titular("pro_max"); _entra(owner)
+    assert _bloqueia_no_lock_do_grupo(owner, lambda: fg.revoke_owner_grants(owner, "t"))
+    # positivo: depois do lock a revogação acontece
+    assert not _sql("select 1 from plan_grants where source = 'family' and status = 'active'"
+                    " and external_ref in (select 'family_member:' || id from family_members where group_id ="
+                    " (select id from family_groups where owner_user_id = %s))", (owner,))
+
+
+def test_liberar_o_titular_excluido_espera_o_lock_do_grupo():
+    owner = _titular("pro_max"); _entra(owner)
+
+    def libera():
+        with get_conn() as conn, conn.cursor() as cur:
+            fg.release_user(cur, owner, "family_owner_deleted")
+            conn.commit()
+    assert _bloqueia_no_lock_do_grupo(owner, libera)
+
+
+def test_grant_em_voo_depois_da_revogacao_nao_concede(monkeypatch):
+    """A cobertura lida antes do lock é revalidada depois dele: titular que perdeu a cobertura e teve a revogação
+    commitada no meio não deixa o grant em voo ressuscitar o membro."""
+    owner = _titular("pro_max", 30)
+    m = _u()
+    real, feito = fa._cobertura, []
+
+    def cob(o):
+        c = real(o)
+        if o != owner or feito:
+            return c
+        feito.append(1)
+        _sql("update plan_grants set status='revoked', revoked_at=now() where user_id=%s", (o,))
+        _sql("update auth_accounts set plan='free', plan_expires_at=null where user_id=%s", (o,))
+        fa._revogar(o, "family_owner_sem_cobertura")
+        return c
+    monkeypatch.setattr(fa, "_cobertura", cob)
+    fam.accept_invite(fam.create_invite(owner), m)
+    assert not _fam(m) and _plano(m) == "free"
+
+
+def test_sem_grant_ex_membro_com_assinatura_viva_segue_pro(monkeypatch):
+    """Veredito `sem_grant` (assinatura Stripe viva sem grant nosso) segura: a passada "evento" dos revogados
+    family não pode rebaixar."""
+    owner = _titular("pro_max", 30)
+    m = _u("pro", 5, "active"); set_customer(m, f"cus_{m}")
+    upsert_grant(m, "stripe", f"sub_old{m}", "pro", _agora() - timedelta(days=25), _agora() + timedelta(days=5), _v())
+    fam.accept_invite(fam.create_invite(owner), m)
+    fam.remove_member(owner, m)
+    _sql("update plan_grants set ends_at = now() - interval '1 hour' where user_id = %s and source = 'stripe'", (m,))
+    _sql("update auth_accounts set plan = 'pro', plan_expires_at = now() + interval '1 hour' where user_id = %s", (m,))
+    fim = _agora() + timedelta(days=25)
+    viva = {"id": f"sub_new{m}", "status": "active", "current_period_end": int(fim.timestamp()),
+            "items": {"data": [{"current_period_end": int(fim.timestamp())}]}}
+    monkeypatch.setitem(sys.modules, "stripe", FakeStripeSubs(ativa=viva))
+    billing_access.reprojetar_grants_recentes(None)
+    assert _plano(m) == "pro"
+
+
+def test_grant_member_nao_abre_segunda_conexao_com_o_lock_do_grupo(monkeypatch):
+    owner = _titular("pro_max")
+    m = _entra(owner)
+    fa._revogar(owner, "preparo")
+    fg.set_suspended(owner, True)                                # suspenso: só Pix/admin cobre (precisa de list_grants)
+    upsert_grant(owner, "pix", f"pix-{owner}", "pro_max", _agora() - timedelta(days=1), _agora() + timedelta(days=5), _v())
+    em_lock, chamadas = [], []
+    real_lock, real_list = fam._lock_group, fa.list_grants
+
+    def lock(cur, o):
+        r = real_lock(cur, o); em_lock.append(1); return r
+    monkeypatch.setattr(fam, "_lock_group", lock)
+    monkeypatch.setattr(fa, "list_grants", lambda *a, **k: (chamadas.append(bool(em_lock)), real_list(*a, **k))[1])
+    assert fa.grant_member(owner, m) is True and em_lock       # positivo: o Pix cobre e o grant sai
+    assert chamadas and not any(chamadas)                        # nenhuma list_grants depois do lock
+
+
+def test_aceite_cujo_grant_lanca_depois_do_commit_nao_propaga_e_o_membro_fica(monkeypatch):
+    owner = _titular("pro_max")
+    m = _u()
+    monkeypatch.setattr(fa, "grant_member", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    gid = fam.accept_invite(fam.create_invite(owner), m)         # não lança
+    assert gid and [x["user_id"] for x in fam.list_members(owner) if x["user_id"] == m]
