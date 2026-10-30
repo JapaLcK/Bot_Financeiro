@@ -57,3 +57,16 @@ def nao_confirmada(cur, user_id, balance):
             return True
         total += delta
     return total != balance
+
+
+# Saldo inicial (onboarding), ajuste da tela (`adjust-balance` grava "ajuste") e o rótulo canônico do chat. Os três
+# escritores gravam interno; "ajuste" também é nome possível de categoria do usuário (`#ajuste`), que nasce não interna.
+CATEGORIAS_SALDO_INFORMADO = ("saldo_inicial", "ajuste", "ajuste_saldo")
+
+
+def saldo_informado(cur, user_id) -> bool:
+    """O usuário já disse quanto tem na Carteira alguma vez (saldo inicial ou ajuste). Sem isso, o saldo é o zero de
+    nascença somado aos gastos, e "Seu saldo está no vermelho" seria alarme falso (PL-06 B3, emenda 1)."""
+    cur.execute("select exists(select 1 from launches where user_id = %s and categoria = any(%s) "
+                "and is_internal_movement) as sim", (user_id, list(CATEGORIAS_SALDO_INFORMADO)))
+    return cur.fetchone()["sim"]

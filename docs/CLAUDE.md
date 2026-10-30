@@ -621,7 +621,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `orientacao` sempre `abster` (legado). O **veredito** (`core/services/veredito.py`, texto dos bloqueios em `TEXTO`) sai no `atual` e em
   cada cenário: `risco_identificado` ("não recomendo", com `data` e `valor` do pior dia no pior caso), `dados_insuficientes`,
   `dados_desatualizados` e `sem_risco_identificado` (não é "cabe": `cabe_nas_premissas` está no enum e nenhum caminho o produz). O pior caso
-  é `cashflow.pior_caso_do_risco` (sem a estimativa nem as saídas duvidosas); se o risco só existe contando as dúvidas, o estado é
+  é `cashflow.pior_caso_do_risco` (sem a estimativa nem as saídas duvidosas), com a regra da janela em
+  `cashflow.estruturais_com_janela`/`eventos_com_janela`, a mesma do insight do mês (`fechamento_pior_caso`); se o risco só existe contando as dúvidas, o estado é
   inconclusivo e os `bloqueios[].itens` listam o que perguntar. Se só a estimativa do dia a dia (com as dúvidas a favor) leva abaixo do limite, é
   `dados_insuficientes` com `gasto_do_dia_a_dia_estimado` (nunca `risco_identificado`), junto com as perguntas das dúvidas que decidem, se houver; a receita fixa prevista conta como certa. Janela de conferência (`JANELA_CONFERENCIA_DIAS`,
   `Snapshot.conferencia`, fora de `qualidade()`). Chave `SIMULADOR_VEREDITO_ENABLED` (padrão ligada, lida uma vez por pedido, `veredito.ligado`): desligada, `veredito` sai `null`. A tool `simulate_purchase` (3b) o lê e entrega `veredito_fala` (linhas prontas montadas no servidor; o prompt manda o Piggy repeti-las, nos três canais). a rota legada `POST /simulator/{user_id}` segue sem ele; as telas (3c) ainda não o leem. **Divergência declarada:** `check_cashflow`/`project()` não usam o veredito nem a janela de conferência, e se abstêm onde o simulador diria "não recomendo" (só para o lado conservador, nunca dizem "cabe"). **Com banco conectado o veredito é sempre
@@ -2235,7 +2236,7 @@ já enviado antes do PUT não é desfeito.
 
 **PigBank Insights, contrato v1 (PL-06 PR A1).** `/insights/{uid}/current` e o card `piggy` do chat
 devolvem os fatos dos detectores de `db/insights.py` e `core/services/insights_detectores.py` (`budget_warning`,
-`category_spike`, `recurring_increase`, `of_bill_increase`, `salary_burn_fast`, `goal_behind`, `bill_due`) no contrato de
+`category_spike`, `recurring_increase`, `of_bill_increase`, `salary_burn_fast`, `goal_behind`, `bill_due`, `month_projection`) no contrato de
 `core/services/insights_contrato.py`: os campos legados (`key`, `type`, `icon`, `title`, `message`,
 `severity`, `action_*`) mais `explicacao` (versao 1: `tipo`, `familia`, `detector`, `calculado_em`,
 `periodo` com `rotulo` e `parcial`, `fonte`, `referencia`, `atual`, `diferenca`, `amostra`), com dinheiro
@@ -2264,7 +2265,19 @@ em D-0 e vencida de D+1 a D+7 (uma por recorrente, a mais recente), primeiro no 
 antes; dentro do tipo, as que ainda vencem, da mais próxima, e depois as vencidas, da mais recente); chave
 `bill_due:id:AAAA-MM-DD` (vencida: `id:vencida`), então a dispensa volta só quando a faixa piora, e o "há N dias"
 mudando não gera alerta novo. O Carteiro avisa a mesma conta no feed de agentes: a duplicidade no app é aceita. Pagar
-a conta não invalida o cache (fica para o PR próprio do TTL).
+a conta não invalida o cache (fica para o PR próprio do TTL). O `month_projection` (PL-06 B3, família `projecao`) é o
+mês corrente que fecha negativo no pior caso do simulador lido no último dia do mês, nunca no pior dia
+(`cashflow.fechamento_pior_caso`: a mesma janela de conferência do veredito, sem a estimativa do dia a dia nem as
+saídas duvidosas): warning com o saldo de hoje >= 0, critical com ele < 0, nada com fechamento >= 0; chave
+`month_projection:saldo:AAAA-MM`, gate `forecast` (Plus) na geração e na leitura, só para quem já informou o saldo
+(`carteira_qualidade.saldo_informado`: um lançamento INTERNO `saldo_inicial`, `ajuste` ou `ajuste_saldo`; a categoria
+própria `#ajuste`, que nasce não interna, não conta; a Carteira nasce em 0 e o primeiro gasto de quem nunca a informou
+não é alarme), `impacto {falta_valor}` só no Pro, logo depois do `bill_due` no laço. Fica calado onde o simulador não
+conclui (banco conectado, fixo sem data, valor estimado, pedido pendente no chat). A receita fixa ainda não conferida,
+dentro da janela de conferência (`JANELA_CONFERENCIA_DIAS`), conta a favor e só cala o aviso quando cobre o déficit. O
+corpo termina sempre com a ressalva de que a Previsão mensal de Gastos fixos considera só recorrências e pode mostrar
+outro valor (`NOTA_GASTOS_FIXOS`; um teste trava que ela cabe no teto do `message` de `montar_item`). O
+`check_cashflow` do chat (`project()`, sem a janela) pode se abster no mesmo caso (issue #1326).
 
 **PigBank Insights, dispensar e útil (PL-06 PR A2).** Tabela `insight_estado` (PK `user_id, chave`;
 `db/insight_estado.py`): cada cálculo registra a chave com a severidade e a medida do ÚLTIMO cálculo

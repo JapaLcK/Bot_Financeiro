@@ -93,8 +93,7 @@ def _duvida(e: Ocorrencia) -> str:
 
 
 def veredito(snapshot: Snapshot, extra: list[Ocorrencia], reserva, dias: int) -> dict:
-    premissa = (f"Considerei que o previsto antes de {snapshot.conferencia_desde:%d/%m} já aconteceu."
-                if snapshot.conferencia_desde else None)
+    premissa = cashflow.premissa_da_janela(snapshot)
 
     def saida(estado, grupos=None, data=None, valor=None, **kw):
         return {"estado": estado, "data": data, "valor": valor, "premissa": premissa,
@@ -106,15 +105,12 @@ def veredito(snapshot: Snapshot, extra: list[Ocorrencia], reserva, dias: int) ->
 
     if snapshot.base["saldo"] is None:
         return saida("dados_insuficientes", {"saldo_indisponivel": []})
-    # A janela substitui `realizacao_passada_desconhecida` (continua bloqueando o `project()`).
-    # Motivos da janela (valor estimado de um fixo que só tem ocorrência nela) não vão a `snapshot.motivos`: só o veredito os lê.
-    estrutural = cashflow.estruturais([*snapshot.motivos, *(m for e in snapshot.conferencia for m in e.motivos)],
-                                      {"realizacao_passada_desconhecida"})
+    estrutural = cashflow.estruturais_com_janela(snapshot)  # a janela substitui `realizacao_passada_desconhecida`
     if estrutural:
         return falta({c: [] for c in dict.fromkeys(m.codigo for m in estrutural)})
 
     limite = centavos(reserva)
-    eventos = [*snapshot.ocorrencias, *snapshot.conferencia, *extra]
+    eventos = cashflow.eventos_com_janela(snapshot, extra)
     base, pior = cashflow.pior_caso_do_risco(snapshot, eventos)
     dia = trajetoria_com_hoje(snapshot.hoje, base, pior, dias, limite)["worst_day"]
     if dia is not None and dia["saldo_projetado"] < limite:
