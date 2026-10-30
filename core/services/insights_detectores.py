@@ -5,13 +5,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.services.insights_contrato import RECURSO_POR_TIPO, dinheiro, montar_item, navegar, nome, periodo_dia
+from core.services.insights_contrato import (
+    RECURSO_POR_TIPO, dinheiro, montar_item, navegar, nome, periodo_dia, periodo_mes,
+)
 from utils_date import day_tz, now_tz
 from utils_text import fmt_brl
 
 JANELA = 7     # dias antes do vencimento em que a conta entra (info até D-4)
 ALERTA = 3     # de D-3 a D-1: warning; D-0: critical
 N_VENCIDA = 7  # P1 do dono (2026-10-28): a vencida aparece de D+1 a D+7, critical
+# P6 da B3: a tela do botão ("Ver gastos fixos") calcula outra coisa; a ressalva nunca sai do texto por tamanho.
+NOTA_GASTOS_FIXOS = "A Previsão mensal de Gastos fixos considera só recorrências e pode mostrar outro valor."
 
 
 def _textos(nm: str, due, dias: int, valor, variavel: bool) -> tuple[str, str]:
@@ -67,3 +71,50 @@ def detect_bill_due(user_id: int) -> list[dict[str, Any]]:
             atual={"dias_para_vencer": dias}, diferenca=None, amostra=None,
             acoes=[navegar("Ver contas a pagar", "fixed", **({"conta_valor": valor} if valor else {}))]))
     return out
+
+
+def _textos_mes(per: dict, fecha, saldo) -> tuple[str, str, str]:
+    """(severidade, título, corpo) do `month_projection`: P3 (saldo de hoje < 0 = critical) e P6 da B3."""
+    prev = (f"Previsão para {per['fim']:%d/%m}: {fmt_brl(-fecha)} no negativo, sem contar os gastos do dia a dia. "
+            f"{NOTA_GASTOS_FIXOS}")
+    if saldo < 0:
+        return "critical", "Seu saldo está no vermelho", f"Seu saldo já está {fmt_brl(-saldo)} no negativo. {prev}"
+    mes = per["rotulo"].split(" de ")[0]
+    return "warning", f"{mes[:1].upper()}{mes[1:]} pode fechar no vermelho", prev
+
+
+def detect_month_projection(user_id: int) -> list[dict[str, Any]]:
+    """O mês corrente fecha negativo no pior caso do SIMULADOR (`veredito.py`), lido no último dia do mês e nunca no
+    pior dia: a mesma snapshot, a mesma janela de conferência (receita fixa não conferida dos últimos
+    `JANELA_CONFERENCIA_DIAS` dias conta a favor; antes dela, "já aconteceu"), sem a estimativa do dia a dia nem as
+    saídas duvidosas (`cashflow.fechamento_pior_caso`).
+    warning com o saldo de hoje >= 0, critical com ele < 0; fechamento >= 0 não avisa. Calado onde o simulador não
+    conclui: banco conectado, fixo sem data, valor estimado, pedido pendente no chat. A Previsão mensal de Gastos fixos
+    soma só recorrências e pode discordar: o texto avisa (`NOTA_GASTOS_FIXOS`). O chat (`check_cashflow`, sem a janela)
+    pode se abster no mesmo caso (P7, issue #1326). Gate `forecast` (Plus) aqui e na leitura (`RECURSO_POR_TIPO`).
+    Só para quem já informou o saldo (`carteira_qualidade.saldo_informado`, emenda 1): a Carteira nasce em 0, e o
+    primeiro gasto de quem nunca a informou não é "saldo no vermelho"."""
+    from core.services.cashflow import fechamento_pior_caso, premissa_da_janela
+    from core.services.cashflow_snapshot import carregar
+    from core.services.plan_service import plan_gate_ok
+    from db.carteira_qualidade import saldo_informado
+    from db.connection import get_conn
+    if not plan_gate_ok(user_id, RECURSO_POR_TIPO["month_projection"]):  # poupa a snapshot; a leitura confere de novo
+        return []
+    with get_conn() as conn, conn.cursor() as cur:
+        if not saldo_informado(cur, user_id):  # antes do `carregar`, que é a parte cara
+            return []
+    hoje = day_tz(now_tz())
+    per = periodo_mes(hoje)
+    snap = carregar(user_id, hoje, per["fim"])
+    fecha = fechamento_pior_caso(snap, per["fim"])
+    if fecha is None or fecha >= 0:
+        return []
+    saldo = dinheiro(snap.base["saldo"])
+    severity, title, message = _textos_mes(per, fecha, saldo)
+    return [montar_item(
+        "month_projection", "saldo", per, severity=severity, icon="📉", title=title, message=message,
+        action_label="Ver gastos fixos", action_view="fixed",
+        referencia={"estatistica": "previsao_pior_caso", "data_alvo": per["fim"], "saldo_hoje_valor": saldo,
+                    "premissa": premissa_da_janela(snap)},
+        atual={"valor": fecha}, diferenca=None, amostra=None, impacto={"falta_valor": -fecha})]

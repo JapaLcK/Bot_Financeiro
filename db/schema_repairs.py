@@ -57,6 +57,12 @@ _USER_FK_SET_NULL_TABLES: frozenset[str] = frozenset({
     # o `actor` do titular é `ATOR_TITULAR`, sem uid) até a retenção de
     # `RETENCAO_PII_DIAS` (`core/services/log_retention.py`).
     "pii_access_log",
+    # Itens da casa (Plano Família) pertencem ao GRUPO: quem criou pode excluir a conta e
+    # o orçamento/meta fica. Sem estas linhas o reparo converteria a FK para CASCADE.
+    "family_budgets",
+    "family_goals",
+    # Quem usou o convite: o convite morre com o grupo, não com quem o aceitou.
+    "family_invites",
 })
 
 
