@@ -37,8 +37,8 @@ def _lock_group(cur, owner_user_id: int):
 def _capacity(cur, group_id: int) -> int:
     cur.execute(
         """select count(*) as n from family_seat_purchases
-            where group_id = %s and status = 'paid' and valid_from <= now()
-              and (valid_until is null or valid_until > now())""",
+            where group_id = %s and status = 'paid' and valid_from <= clock_timestamp()
+              and (valid_until is null or valid_until > clock_timestamp())""",
         (group_id,),
     )
     return min(FAMILY_BASE_SEATS + cur.fetchone()["n"], FAMILY_MAX_SEATS)
@@ -172,7 +172,7 @@ def accept_invite(token: str, user_id: int) -> int:
             cur.execute(
                 """update family_invites set used_at = now(), used_by_user_id = %s
                     where token_hash = %s and group_id = %s and used_at is null
-                      and revoked_at is null and expires_at > now()""",
+                      and revoked_at is null and expires_at > clock_timestamp()""",
                 (user_id, th, group_id),
             )
         except pgerr.ForeignKeyViolation:  # used_by_user_id inexistente

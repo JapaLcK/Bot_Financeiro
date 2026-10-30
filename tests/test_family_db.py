@@ -448,3 +448,18 @@ def test_grupo_dissolvido_durante_a_espera_do_lock():
     b, _, (m,) = _casa(1)
     assert _segura_lock_e_mexe(b, lambda: fam.grant_consent(m, "aggregates"), lambda c: c.execute(
         "delete from family_groups where owner_user_id=%s", (b,))) == "not_member"
+
+
+def test_validade_conferida_no_relogio_depois_do_lock():
+    """`now()` congela no início da transação: convite e vaga que vencem durante a espera do lock
+    têm de valer como vencidos (clock_timestamp)."""
+    a, gid, _ = _casa(0)
+    tok = fam.create_invite(a)
+    _sql("update family_invites set expires_at = clock_timestamp() + interval '0.5 s' where group_id=%s", (gid,))
+    assert _segura_lock_e_mexe(a, lambda: fam.accept_invite(tok, _u()), lambda c: None) == "invite_invalid"
+
+    b, gid_b, _ = _casa(2)  # 3 pessoas: base cheia
+    _sql("insert into family_seat_purchases (group_id, source, external_ref, amount_cents, status, valid_until)"
+         " values (%s,'pix',%s,1000,'paid',clock_timestamp() + interval '0.5 s')", (gid_b, uuid.uuid4().hex))
+    tok_b = fam.create_invite(b)
+    assert _segura_lock_e_mexe(b, lambda: fam.accept_invite(tok_b, _u()), lambda c: None) == "full"
