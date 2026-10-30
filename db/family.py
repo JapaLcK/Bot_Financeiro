@@ -5,6 +5,7 @@ O teto de pessoas é checado sob `SELECT ... FOR UPDATE` na linha de family_grou
 transação do insert: dois aceites na última vaga se serializam.
 """
 import hashlib
+import logging
 import secrets
 
 from psycopg import errors as pgerr
@@ -17,6 +18,8 @@ FAMILY_MAX_EXTRA = 3      # vagas extras pagas
 FAMILY_MAX_SEATS = FAMILY_BASE_SEATS + FAMILY_MAX_EXTRA
 INVITE_DAYS = 7
 SCOPES = ("aggregates", "transactions")
+
+log = logging.getLogger(__name__)
 
 
 class FamilyError(Exception):
@@ -138,7 +141,7 @@ def remove_member(owner_user_id: int, user_id: int, reason: str = "removed") -> 
         # Só o grant `family`: o individual do membro nunca é tocado; o recompute escolhe o maior.
         revogados = _revoke_family_grants(cur, group_id, f"family_{reason}", user_id)
         conn.commit()
-    recompute_users(revogados)
+    recompute_users(revogados, owner_user_id)
 
 
 def list_members(owner_user_id: int) -> list[dict]:
@@ -206,7 +209,11 @@ def accept_invite(token: str, user_id: int) -> int:
         conn.commit()
         owner_id = row["owner_user_id"]
     from core.services.family_access import grant_member
-    grant_member(owner_id, user_id)  # no-op se o titular não tem cobertura ativa
+    try:  # o membro já entrou (commit acima): falhar aqui não pode virar erro; a varredura alinha depois
+        grant_member(owner_id, user_id)  # no-op se o titular não tem cobertura ativa
+    except Exception as exc:
+        log.warning("family: grant do convidado %s (titular %s) falhou causa=%s sqlstate=%s", user_id, owner_id,
+                    type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
     return group_id
 
 
@@ -317,5 +324,5 @@ def dissolve_group(owner_user_id: int) -> bool:
         cur.execute("delete from family_groups where owner_user_id = %s", (owner_user_id,))
         apagou = cur.rowcount == 1
         conn.commit()
-    recompute_users(revogados)
+    recompute_users(revogados, owner_user_id)
     return apagou

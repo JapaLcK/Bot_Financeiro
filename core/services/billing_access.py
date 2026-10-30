@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from db.connection import get_conn
-from db.plan_grants import list_grants, users_com_grant_na_janela
+from db.plan_grants import list_grants, users_com_grant_na_janela, users_family_revogados_recentes
 
 # §4.1 — dois grants nossos encostados podem ter alguns segundos de folga entre
 # `ends_at` de um e `starts_at` do outro. 120 s porque todo encadeamento que NÓS
@@ -327,7 +327,12 @@ def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) ->
     return "reparou"
 
 
-def recompute_entitlement(user_id: int, *, origem: str = "evento") -> dict | None:
+# Vereditos que autorizam escrever uma redução (a lista é de quem ESCREVE; o resto segura — ver R3-1 abaixo).
+_VEREDITOS_DE_ESCRITA = ("reduz", "reparou", "nao_reduz")
+
+
+def recompute_entitlement(user_id: int, *, origem: str = "evento",
+                          vereditos: list | None = None) -> dict | None:
     """Reprojeta `auth_accounts` a partir dos grants. Devolve o par escrito, ou
     None quando decidiu NÃO escrever.
 
@@ -350,6 +355,9 @@ def recompute_entitlement(user_id: int, *, origem: str = "evento") -> dict | Non
       acesso, CONSULTA O STRIPE: sem assinatura ativa reduz; assinatura viva
       mais longa que o grant repara o grant e mantém o acesso; Stripe fora do ar
       não escreve nada, loga e alerta.
+
+    `vereditos` (opcional): lista onde a consulta ao Stripe anexa o veredito, para o chamador saber se
+    ela respondeu. Quem não passa não percebe diferença.
     """
     conta = _ler_conta(user_id)
     if not conta:
@@ -377,6 +385,8 @@ def recompute_entitlement(user_id: int, *, origem: str = "evento") -> dict | Non
     if origem == "varredura" and (_e_reducao(plano_atual, expira_atual, plano, expira)
                                   or _queda_de_tier(plano_atual, plano)):
         veredito = _reparar_grant_pelo_stripe(user_id, conta, grants)
+        if vereditos is not None:
+            vereditos.append(veredito)
         if veredito == "reparou":
             # O reparo esticou um grant: reprojeta e julga o resultado dele.
             grants = list_grants(user_id)
@@ -397,7 +407,7 @@ def recompute_entitlement(user_id: int, *, origem: str = "evento") -> dict | Non
         # Quem segura: `indisponivel` (não lemos o Stripe, células 2 e 4) e
         # `sem_grant` (lemos, e a assinatura VIVA não tem grant ativo nosso —
         # célula 5, ou um `esticar_grant` que não casou linha).
-        if veredito not in ("reduz", "reparou", "nao_reduz"):
+        if veredito not in _VEREDITOS_DE_ESCRITA:
             _alertar_reducao_nao_confirmada(user_id, plano_atual, veredito)
             return None                      # falha na direção reparável
 
@@ -543,12 +553,21 @@ def reprojetar_grants_recentes(desde: datetime | None) -> int:
 
     Devolve quantos usuários foram reprojetados.
     """
-    uids = users_com_grant_na_janela(desde)
+    # Revogação explícita de grant `family` é um EVENTO, não relógio: a retentativa projeta como evento
+    # (senão o congelamento da varredura segura o tier da família até o fim do período do titular).
+    revogados = users_family_revogados_recentes() if desde is None else []
+    uids = revogados + [u for u in users_com_grant_na_janela(desde) if u not in revogados]
     for uid in uids:
         try:
             # `origem="varredura"`: aqui não há evento nenhum, só o relógio —
             # nenhuma redução de acesso sai daqui sem o Stripe confirmar.
-            recompute_entitlement(uid, origem="varredura")
+            # Revogado: a varredura vai antes (consulta o Stripe e repara o grant próprio); o evento depois,
+            # para a revogação encurtar até a cobertura própria real.
+            vereditos: list = []
+            recompute_entitlement(uid, origem="varredura", vereditos=vereditos)
+            # O "evento" reduz sem consultar o Stripe: só roda se a varredura chegou a um veredito de escrita.
+            if uid in revogados and (not vereditos or vereditos[-1] in _VEREDITOS_DE_ESCRITA):
+                recompute_entitlement(uid, origem="evento")
         except Exception as exc:                              # pragma: no cover
             print(f"[billing_access] reprojecao falhou user={uid}: {exc}")
     return len(uids)
