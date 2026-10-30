@@ -21,7 +21,7 @@ from __future__ import annotations
 from .connection import get_conn
 
 # Fontes válidas da coluna `source`. 'pix' e as tabelas do Asaas chegam no PR 1b.
-GRANT_SOURCES = ("stripe", "pix", "legacy", "admin")
+GRANT_SOURCES = ("stripe", "pix", "legacy", "admin", "family")
 
 # §6 — evento com versão MENOR OU IGUAL nunca reescreve uma concessão, e
 # NENHUM evento reescreve grant de outro dono.
@@ -143,9 +143,20 @@ def upsert_grant(
     três caminhos que a v4 deixava abertos: grant `stripe` que ENCURTA, de tier
     MENOR, e assinatura que lapsa sem `deleted` (`unpaid`).
     """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            res = upsert_grant_cur(cur, user_id, source, external_ref, plan_stored,
+                                   starts_at, ends_at, event_version, last_event_id)
+        conn.commit()
+    return res
+
+
+def upsert_grant_cur(cur, user_id, source, external_ref, plan_stored, starts_at, ends_at,
+                     event_version, last_event_id=None) -> int | None:
+    """`upsert_grant` na transação do chamador (cursor dele, sem commit): o Plano Família precisa
+    do upsert na MESMA transação que segura o lock do grupo. Contrato de retorno idêntico."""
     if source not in GRANT_SOURCES:
         raise ValueError(f"source inválido: {source!r}")
-
     conflito = (
         "on conflict (source, external_ref) do nothing"
         if source == "pix"
@@ -162,31 +173,35 @@ def upsert_grant(
             + _GUARDA_VERSAO
         )
     )
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "insert into plan_grants (user_id, source, external_ref, plan_stored,"
-                "                         starts_at, ends_at, status, event_version, last_event_id)"
-                " values (%s, %s, %s, %s, %s, %s, 'active', %s, %s) "
-                + conflito
-                + " returning id",
-                (int(user_id), source, external_ref, plan_stored,
-                 starts_at, ends_at, int(event_version), last_event_id),
-            )
-            row = cur.fetchone()
-            # A supersessão fica AQUI, amarrada ao `returning` do upsert, e NÃO
-            # à reclassificação abaixo: `_SUPERSEDE_LEGACY` não tem guarda de
-            # versão, então rodá-la na reentrega revogaria o `legacy` com uma
-            # `event_version` MENOR que a do grant vigente (caso 14 do §16).
-            if row and source == "stripe":
-                cur.execute(_SUPERSEDE_LEGACY, (int(event_version), int(user_id)))
-            if row is None:
-                cur.execute(_NAO_E_EVENTO_VELHO,
-                            (int(user_id), source, external_ref,
-                             int(event_version)))
-                row = cur.fetchone()
-        conn.commit()
+    cur.execute(
+        "insert into plan_grants (user_id, source, external_ref, plan_stored,"
+        "                         starts_at, ends_at, status, event_version, last_event_id)"
+        " values (%s, %s, %s, %s, %s, %s, 'active', %s, %s) "
+        + conflito
+        + " returning id",
+        (int(user_id), source, external_ref, plan_stored,
+         starts_at, ends_at, int(event_version), last_event_id),
+    )
+    row = cur.fetchone()
+    if row and source == "stripe":
+        # Plano Família: pagamento Stripe NOVO aplicado encerra a suspensão dos membros (ponto único de
+        # invoice.paid e checkout). Só se o evento for MAIS NOVO que o que suspendeu: payment_failed não avança a
+        # versão do grant, então um invoice.paid de ciclo anterior, reentregue, passa pelo gate acima. Pix/admin
+        # NÃO limpam: a suspensão marca que o Stripe encerra; Pix/admin vigente cobre os membros por si só.
+        cur.execute("update family_groups set members_suspended_at = null where owner_user_id = %s"
+                    " and members_suspended_at < to_timestamp(%s::double precision)",
+                    (int(user_id), int(event_version)))
+    # A supersessão fica AQUI, amarrada ao `returning` do upsert, e NÃO
+    # à reclassificação abaixo: `_SUPERSEDE_LEGACY` não tem guarda de
+    # versão, então rodá-la na reentrega revogaria o `legacy` com uma
+    # `event_version` MENOR que a do grant vigente (caso 14 do §16).
+    if row and source == "stripe":
+        cur.execute(_SUPERSEDE_LEGACY, (int(event_version), int(user_id)))
+    if row is None:
+        cur.execute(_NAO_E_EVENTO_VELHO,
+                    (int(user_id), source, external_ref,
+                     int(event_version)))
+        row = cur.fetchone()
     return int(row["id"]) if row else None
 
 
@@ -340,11 +355,11 @@ def list_grants(user_id: int) -> list[dict]:
 
 def e_primeira_assinatura(user_id: int, source: str, external_ref: str) -> bool:
     """True se a conta não tem grant NENHUM além deste `(source, external_ref)`,
-    em qualquer status. Cortesia do admin (`source='admin'`) não conta como
-    assinatura (decisão do dono); `legacy` conta. É a trava do e-mail do
+    em qualquer status. Cortesia do admin e acesso de família (`source` 'admin' e 'family')
+    não contam como assinatura; `legacy` conta. É a trava do e-mail do
     fundador (`email_service.send_founder_email_once`)."""
     sql = ("select not exists (select 1 from plan_grants where user_id = %s"
-           " and source <> 'admin' and not (source = %s and external_ref = %s)) as ok")
+           " and source not in ('admin', 'family') and not (source = %s and external_ref = %s)) as ok")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (int(user_id), source, external_ref))
@@ -373,7 +388,11 @@ def users_com_grant_na_janela(desde) -> list[int]:
     """
     sql = "select distinct user_id from plan_grants where status = 'active'"
     params: tuple = ()
-    if desde is not None:
+    if desde is None:
+        # Plano Família: o recompute do membro que falhou depois de a revogação commitar só se repara aqui
+        # (o grant revogado não é mais 'active'). 2 dias = a varredura diária tem uma retentativa de folga.
+        sql += " or (source = 'family' and status = 'revoked' and revoked_at > now() - interval '2 days')"
+    else:
         sql += " and (starts_at between %s and now() or ends_at between %s and now())"
         params = (desde, desde)
     with get_conn() as conn:

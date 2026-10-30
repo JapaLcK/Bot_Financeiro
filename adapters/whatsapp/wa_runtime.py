@@ -4,9 +4,9 @@ import hashlib
 import hmac
 import logging
 import re
+import sys
 import threading
 import time
-import traceback
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,14 +36,14 @@ from adapters.whatsapp.wa_commands_menu import (
 )
 from core.handle_incoming import handle_incoming, _consulta_de_previsao
 from core.help_text import HELP_TRIGGERS
-from core.intent_classifier import contains_comparative_question
+from core.intent_classifier import LINK_CODE_PATTERN, contains_comparative_question
 from core.intent_router import abandona_pergunta_de_valor
 from core.secure_compare import constant_time_eq
 from core.handlers import report as h_report
 from core.observability import log_system_event_sync
 from core.response_formatter import wrap_wa_markup
 from core.types import IncomingMessage
-from core.pg_text import MSG_VALOR_WHATSAPP, violacao_finito
+from core.pg_text import MSG_VALOR_WHATSAPP, quadros_da_cadeia, violacao_finito
 from db import (
     attempt_whatsapp_phone_link,
     claim_pending_action,
@@ -232,7 +232,8 @@ def _bloqueado_pelo_corte(uid: int, reply_to: str, texto: str = "") -> bool:
             "whatsapp",
         )
     except Exception as exc:
-        logger.warning("WA gate do corte falhou uid=%s: %s", uid, exc)
+        logger.warning("WA gate do corte falhou uid=%s causa=%s sqlstate=%s", uid,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
         return False
     if not gated:
         return False
@@ -278,7 +279,8 @@ def _ajuda_do_cortado(uid: int, reply_to: str) -> bool:
             "whatsapp",
         )
     except Exception as exc:
-        logger.warning("WA gate da ajuda falhou uid=%s: %s", uid, exc)
+        logger.warning("WA gate da ajuda falhou uid=%s causa=%s sqlstate=%s", uid,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
         return False
     if not gated:
         return False
@@ -536,13 +538,13 @@ PARAR_LEAD_WA = "Pronto, não vou mais te mandar mensagens por aqui. Se mudar de
 # O opt-out (botão ou digitado) não conseguiu gravar: dizer isso, nunca ficar em silêncio.
 OPT_OUT_FALHOU_WA = "Não consegui registrar agora. Tenta mandar PARAR de novo em instantes."
 
-# Tentativa de vincular por código ("link 123456" / "vincular 123456"). Espelha
+# Tentativa de vincular por código ("link <token>" / "vincular <token>"). Espelha
 # os padrões do intent_classifier (account.link / account.vincular). Um número
 # SEM conta usa exatamente esse fluxo pra se vincular, então não pode ser barrado
 # pelo aviso de "crie sua conta". Usa o MESMO _normalize do classificador (que
-# troca pontuação por espaço) — senão "link: 123456" ou "link 123456." casariam
+# troca pontuação por espaço) — senão "link: <código>" ou "link <código>." casariam
 # como vínculo lá no handle_incoming mas seriam barrados aqui, engolindo o código.
-_LINK_CODE_RE = re.compile(r"^(?:link|vincular)\s+\d{6}$")
+_LINK_CODE_RE = re.compile(rf"^(?:link|vincular)\s+{LINK_CODE_PATTERN}$")
 
 
 def _is_link_code_attempt(text: str) -> bool:
@@ -567,7 +569,7 @@ def _send_no_account_notice(reply_to: str, auto_link_result: dict[str, Any], use
         (
             "🐷 Oi! Ainda não tenho uma conta ligada a este número de WhatsApp.\n\n"
             "Já tem conta no PigBank? Entre no site, toque em *Conectar WhatsApp* e me mande "
-            "o código que aparecer, assim: *vincular 123456*. O código vale 15 minutos.\n\n"
+            "o código que aparecer, assim: *vincular <código>*. O código vale 15 minutos.\n\n"
             f"Ainda não tem? Crie sua conta grátis: {_signup_url()}\n"
             "Depois, toque em *Conectar WhatsApp* e me mande o código."
         ),
@@ -600,7 +602,8 @@ def _autolink_warning_already_sent(user_id: int, status: str) -> bool:
                 )
                 return cur.fetchone() is not None
     except Exception as exc:
-        logger.warning("WA autolink warning lookup failed uid=%s status=%s error=%s", user_id, status, exc)
+        logger.warning("WA autolink warning lookup failed uid=%s status=%s causa=%s sqlstate=%s", user_id, status,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return False
 
 
@@ -634,7 +637,8 @@ def _lead_sem_compra(conta: int) -> bool:
         from db.remarketing import ja_comprou
         return not ja_comprou(conta)
     except Exception as exc:
-        logger.warning("WA ja_comprou falhou uid=%s: %s", conta, exc)
+        logger.warning("WA ja_comprou falhou uid=%s causa=%s sqlstate=%s", conta,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": conta})
         return False
 
 
@@ -674,12 +678,14 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
                 texto = h_report.disable(u)
             _send_reply(reply_to, texto)
         except Exception as e:
-            logger.exception("WA daily_report_disable button error wa_id=%s: %s", mask_phone(reply_to), e)
+            logger.error("WA daily_report_disable button error wa_id=%s causa=%s sqlstate=%s", mask_phone(reply_to),
+                         type(e).__name__, getattr(e, "sqlstate", None), extra={"user_id": uid})
             log_system_event_sync(
                 "warning",
                 "whatsapp_daily_report_disable_button_error",
-                f"Erro ao processar botão de desligar report diário: {e}",
+                f"Erro ao processar botão de desligar report diário: {type(e).__name__}",
                 source="wa_runtime",
+                details={"sqlstate": getattr(e, "sqlstate", None)},
                 user_id=uid,
             )
         return True
@@ -690,12 +696,14 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
                 texto = h_report.disable_weekly(u)
             _send_reply(reply_to, texto)
         except Exception as e:
-            logger.exception("WA weekly_report_disable button error wa_id=%s: %s", mask_phone(reply_to), e)
+            logger.error("WA weekly_report_disable button error wa_id=%s causa=%s sqlstate=%s", mask_phone(reply_to),
+                         type(e).__name__, getattr(e, "sqlstate", None), extra={"user_id": uid})
             log_system_event_sync(
                 "warning",
                 "whatsapp_weekly_report_disable_button_error",
-                f"Erro ao processar botão de desligar resumo semanal: {e}",
+                f"Erro ao processar botão de desligar resumo semanal: {type(e).__name__}",
                 source="wa_runtime",
+                details={"sqlstate": getattr(e, "sqlstate", None)},
                 user_id=uid,
             )
         return True
@@ -706,12 +714,14 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
                 texto = h_report.disable_monthly(u)
             _send_reply(reply_to, texto)
         except Exception as e:
-            logger.exception("WA monthly_report_disable button error wa_id=%s: %s", mask_phone(reply_to), e)
+            logger.error("WA monthly_report_disable button error wa_id=%s causa=%s sqlstate=%s", mask_phone(reply_to),
+                         type(e).__name__, getattr(e, "sqlstate", None), extra={"user_id": uid})
             log_system_event_sync(
                 "warning",
                 "whatsapp_monthly_report_disable_button_error",
-                f"Erro ao processar botão de desligar resumo mensal: {e}",
+                f"Erro ao processar botão de desligar resumo mensal: {type(e).__name__}",
                 source="wa_runtime",
+                details={"sqlstate": getattr(e, "sqlstate", None)},
                 user_id=uid,
             )
         return True
@@ -725,12 +735,14 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
                 set_whatsapp_updates_opt_out(u, True)
             except Exception as e:
                 falhou = True
-                logger.exception("WA updates disable button error wa_id=%s uid=%s: %s", mask_phone(reply_to), u, e)
+                logger.error("WA updates disable button error wa_id=%s uid=%s causa=%s sqlstate=%s", mask_phone(reply_to), u,
+                             type(e).__name__, getattr(e, "sqlstate", None), extra={"user_id": u})
                 log_system_event_sync(
                     "warning",
                     "whatsapp_updates_disable_button_error",
-                    f"Erro ao processar botão de parar atualizações: {e}",
+                    f"Erro ao processar botão de parar atualizações: {type(e).__name__}",
                     source="wa_runtime",
+                    details={"sqlstate": getattr(e, "sqlstate", None)},
                     user_id=u,
                 )
         # PARAR encerra também as confirmações pendentes (as do bot e as da IA), senão um "sim"
@@ -742,12 +754,14 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
             ai_clear_pending_action(rem)
         except Exception as e:
             falhou = True
-            logger.exception("WA updates disable pending error wa_id=%s uid=%s: %s", mask_phone(reply_to), rem, e)
+            logger.error("WA updates disable pending error wa_id=%s uid=%s causa=%s sqlstate=%s", mask_phone(reply_to), rem,
+                         type(e).__name__, getattr(e, "sqlstate", None), extra={"user_id": rem})
             log_system_event_sync(
                 "warning",
                 "whatsapp_updates_disable_button_error",
-                f"Erro ao encerrar pendências no PARAR: {e}",
+                f"Erro ao encerrar pendências no PARAR: {type(e).__name__}",
                 source="wa_runtime",
+                details={"sqlstate": getattr(e, "sqlstate", None)},
                 user_id=rem,
             )
         try:
@@ -792,7 +806,7 @@ def process_message(message: InboundMessage) -> None:
             len(message.attachments or []),
         )
         # "Testar o Piggy": desvio ANTES de qualquer coisa que grave (usuário
-        # canônico, vínculo, ai_messages). Número com conta, `vincular 123456`
+        # canônico, vínculo, ai_messages). Número com conta, `vincular <código>`
         # e quem não é do demo seguem o fluxo normal (decidir devolve None). A
         # dedupe é própria e só roda depois de decidir que a mensagem é do demo:
         # marcá-la antes faria a mensagem cair no fluxo normal e ser descartada.
@@ -820,7 +834,7 @@ def process_message(message: InboundMessage) -> None:
         pid, ancora = _pergunta_da_ia(uid)
 
         # Não liga mais pelo telefone (PR-5, D1(c)): só classifica o número. Quem liga é o
-        # código (`vincular 123456`), no `handle_incoming`.
+        # código (`vincular <código>`), no `handle_incoming`.
         auto_link_result = attempt_whatsapp_phone_link(message.wa_id, current_user_id=uid)
         if auto_link_result["status"] == "already_linked":
             resolved_uid = int(auto_link_result.get("user_id") or uid)
@@ -894,12 +908,14 @@ def process_message(message: InboundMessage) -> None:
                 try:
                     handle_tutorial_button(reply_to, tut_bid)
                 except Exception as e:
-                    logger.exception("WA tutorial button error id=%s: %s", tut_bid, e)
+                    logger.error("WA tutorial button error id=%s causa=%s sqlstate=%s", tut_bid,
+                                 type(e).__name__, getattr(e, "sqlstate", None), extra={"user_id": uid})
                     log_system_event_sync(
                         "warning",
                         "whatsapp_tutorial_button_error",
-                        f"Erro ao processar botao do tutorial no WhatsApp: {e}",
+                        f"Erro ao processar botao do tutorial no WhatsApp: {type(e).__name__}",
                         source="wa_runtime",
+                        details={"sqlstate": getattr(e, "sqlstate", None)},
                         user_id=uid,
                     )
                 return
@@ -915,12 +931,14 @@ def process_message(message: InboundMessage) -> None:
                 try:
                     send_help_section(reply_to, help_id)
                 except Exception as e:
-                    logger.exception("WA help menu error id=%s: %s", help_id, e)
+                    logger.error("WA help menu error id=%s causa=%s sqlstate=%s", help_id,
+                                 type(e).__name__, getattr(e, "sqlstate", None), extra={"user_id": uid})
                     log_system_event_sync(
                         "warning",
                         "whatsapp_help_menu_error",
-                        f"Erro ao processar menu de ajuda no WhatsApp: {e}",
+                        f"Erro ao processar menu de ajuda no WhatsApp: {type(e).__name__}",
                         source="wa_runtime",
+                        details={"sqlstate": getattr(e, "sqlstate", None)},
                         user_id=uid,
                     )
                 return
@@ -940,12 +958,14 @@ def process_message(message: InboundMessage) -> None:
                 try:
                     send_commands_section(reply_to, cmds_id)
                 except Exception as e:
-                    logger.exception("WA commands menu error id=%s: %s", cmds_id, e)
+                    logger.error("WA commands menu error id=%s causa=%s sqlstate=%s", cmds_id,
+                                 type(e).__name__, getattr(e, "sqlstate", None), extra={"user_id": uid})
                     log_system_event_sync(
                         "warning",
                         "whatsapp_commands_menu_error",
-                        f"Erro ao processar menu de comandos no WhatsApp: {e}",
+                        f"Erro ao processar menu de comandos no WhatsApp: {type(e).__name__}",
                         source="wa_runtime",
+                        details={"sqlstate": getattr(e, "sqlstate", None)},
                         user_id=uid,
                     )
                 return
@@ -1466,14 +1486,19 @@ def process_message(message: InboundMessage) -> None:
             _send_reply(reply_to, _DELIVERY_FAILURE_MESSAGE)
     except Exception as exc:
         mantem_pergunta = True
-        logger.error("WA message processing failed wa_id=%s error=%s", mask_phone(message.wa_id), exc)
+        # Só os quadros (P2 c): a linha final da exceção traz o `DETAIL: Key (…)=(…)` do psycopg.
+        quadros, sqlstate = quadros_da_cadeia(exc)
+        # `uid` é None se a falha veio antes de resolver o usuário: coluna nula, só o mask_phone (D5).
+        logger.error("WA message processing failed wa_id=%s causa=%s sqlstate=%s", mask_phone(message.wa_id),
+                     type(exc).__name__, sqlstate, extra={"user_id": uid})
         try:
             log_system_event_sync(
                 "error",
                 "whatsapp_message_processing_failed",
-                f"Falha no processamento da mensagem do WhatsApp: {exc}",
+                f"Falha no processamento da mensagem do WhatsApp: {type(exc).__name__}",
                 source="wa_runtime",
-                details={"wa_id": mask_phone(message.wa_id)},
+                user_id=uid,
+                details={"wa_id": mask_phone(message.wa_id), "sqlstate": sqlstate},
             )
         except Exception as log_exc:
             logger.error(
@@ -1481,7 +1506,7 @@ def process_message(message: InboundMessage) -> None:
                 mask_phone(message.wa_id),
                 log_exc,
             )
-        traceback.print_exc()
+        print(quadros, file=sys.stderr, end="")
         try:
             failure_message = (
                 _PROCESSING_FAILURE_MESSAGE

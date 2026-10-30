@@ -124,6 +124,34 @@ def pior_caso_do_risco(snapshot: Snapshot, eventos: list[Ocorrencia]) -> tuple[d
     return base, [e for e in eventos if e.fonte != FONTE_VARIAVEL and not saida_duvidosa(e)]
 
 
+JANELA_SUBSTITUI = frozenset({'realizacao_passada_desconhecida'})
+
+
+def estruturais_com_janela(snapshot: Snapshot) -> list[Motivo]:
+    """Motivos estruturais quando a janela de conferência substitui `realizacao_passada_desconhecida` (o simulador e o
+    insight do mês). Motivos da janela (valor estimado de um fixo que só tem ocorrência nela) não vão a
+    `snapshot.motivos`: só quem usa a janela os lê. O `project()` segue com `estruturais(snapshot.motivos)`, sem ela."""
+    return estruturais([*snapshot.motivos, *(m for e in snapshot.conferencia for m in e.motivos)], JANELA_SUBSTITUI)
+
+
+def eventos_com_janela(snapshot: Snapshot, extra=()) -> list[Ocorrencia]:
+    return [*snapshot.ocorrencias, *snapshot.conferencia, *extra]
+
+
+def premissa_da_janela(snapshot: Snapshot) -> str | None:
+    return (f"Considerei que o previsto antes de {snapshot.conferencia_desde:%d/%m} já aconteceu."
+            if snapshot.conferencia_desde else None)
+
+
+def fechamento_pior_caso(snapshot: Snapshot, alvo: date) -> Decimal | None:
+    """Saldo no `alvo` pelo pior caso do simulador (sem a estimativa nem as saídas duvidosas, receita da janela a favor).
+    None = sem veredito: sem saldo, alvo passado ou motivo estrutural. Lê só o alvo, nunca o pior dia."""
+    if snapshot.base['saldo'] is None or alvo < snapshot.hoje or estruturais_com_janela(snapshot):
+        return None
+    base, pior = pior_caso_do_risco(snapshot, eventos_com_janela(snapshot))
+    return _projection(snapshot.hoje, base, pior, alvo)['projetado']
+
+
 def _risco(snapshot: Snapshot, target: date, extra=Decimal(0)) -> str:
     """Aplica direções ao mesmo cálculo: risco precisa sobreviver às dúvidas."""
     if snapshot.base['saldo'] is None or target < snapshot.hoje or estruturais(snapshot.motivos):
@@ -154,4 +182,4 @@ def project(user_id: int, target_date: date, extra_amount=0, *, percurso=False) 
     return legado(result)
 
 
-__all__ = ['project']
+__all__ = ['project', 'fechamento_pior_caso']

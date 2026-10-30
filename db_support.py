@@ -14,6 +14,7 @@ import psycopg
 from utils_phone import normalize_phone_e164, phone_lookup_candidates
 
 from core.crypto import (
+    ATOR_TITULAR,
     PiiAccessContext,
     decrypt_pii_optional,
     encrypt_pii_optional,
@@ -298,7 +299,7 @@ def list_identities_by_user_impl(get_conn, user_id: int) -> list[dict]:
                             enc,
                             ctx=PiiAccessContext(
                                 purpose="list_identities",
-                                actor=f"user:{user_id}",
+                                actor=ATOR_TITULAR,
                                 subject_user_id=user_id,
                                 field=f"{provider}_id",
                             ),
@@ -495,7 +496,7 @@ def register_auth_user_impl(
         conn.commit()
     invalidate_auth_user_cache(user_id)
 
-    link_code = create_link_code(user_id, minutes_valid=15)
+    link_code = ""  # só /auth/link-code gera código (token forte)
 
     try:
         from core.services.email_service import send_welcome_email
@@ -617,19 +618,19 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
     if row.get("email_enc"):
         row["email"] = decrypt_pii_optional(
             row["email_enc"],
-            ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
+            ctx=PiiAccessContext(purpose="get_auth_user", actor=ATOR_TITULAR,
                                  subject_user_id=user_id, field="email"),
         )
     if row.get("phone_enc"):
         row["phone_e164"] = decrypt_pii_optional(
             row["phone_enc"],
-            ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
+            ctx=PiiAccessContext(purpose="get_auth_user", actor=ATOR_TITULAR,
                                  subject_user_id=user_id, field="phone"),
         )
     if row.get("display_name_enc"):
         row["display_name"] = decrypt_pii_optional(
             row["display_name_enc"],
-            ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
+            ctx=PiiAccessContext(purpose="get_auth_user", actor=ATOR_TITULAR,
                                  subject_user_id=user_id, field="name"),
         )
     now = lido_em
@@ -906,7 +907,7 @@ def inserir_conta_nova(cur, *, user_id: int, email: str, password_hash: str | No
 
 def boas_vindas(create_link_code, email: str, user_id: int) -> str:
     """Depois de a conta nascer: o `link_code` do WhatsApp e o e-mail de boas-vindas."""
-    link_code = create_link_code(user_id, minutes_valid=15)
+    link_code = ""  # só /auth/link-code gera código (token forte)
     try:
         from core.services.email_service import send_welcome_email
 
@@ -1095,7 +1096,7 @@ def attempt_whatsapp_phone_link_impl(
 ) -> dict:
     """Classifica o número que escreve. NÃO LIGA MAIS NADA (Grupo 7, PR-5, D1(c)): o
     telefone digitado no site não prova que o número é de quem digitou (V3: B digita o
-    número de C, C manda "oi" e virava B). Só o código (`vincular 123456`) liga.
+    número de C, C manda "oi" e virava B). Só o código (`vincular <código>`) liga.
 
     O telefone continua LIDO, e só para uma coisa: reconhecer a conta paga que ainda não
     criou a senha (`precisa_senha`), cujo número tem de receber o texto dela e o opt-out

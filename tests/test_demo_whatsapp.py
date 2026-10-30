@@ -225,7 +225,7 @@ def test_vincular_em_sessao_segue_o_fluxo_normal(mundo):
     n = _numero()
     _abre(n)
     mundo.saida.clear()
-    _manda(n, "vincular 123456")
+    _manda(n, "vincular pbl00000000000000000000000000000000")
     assert mundo.chamadas == [] and mundo.demo() == []
     assert any("Código inválido" in c for _, _, c in mundo.normal()), mundo.saida
     assert _sessao(n)["msgs_used"] == 0
@@ -436,7 +436,7 @@ def test_textos_do_demo_nunca_dizem_que_nao_guardamos_nada():
     assert "não é salvo no PigBank, só vai para a IA que responde" in wa_demo.BOAS_VINDAS
     assert "fica salvo" not in wa_demo.BOAS_VINDAS
     assert "não é salvo no PigBank, só vai para a IA que responde" in conversa.PROMPT
-    assert "vincular 123456" in wa_demo.FIM and "vincular 123456" in wa_demo.LOTOU
+    assert "vincular <código>" in wa_demo.FIM and "vincular <código>" in wa_demo.LOTOU
     assert "amanhã" not in wa_demo.LOTOU, "o teto é janela móvel de 24h, não calendário"
     # coladas à resposta do modelo (que já abre com 🐷): sem emoji duplicado
     assert not wa_demo.FIM.startswith("🐷") and not wa_demo.ULTIMA.startswith("🐷")

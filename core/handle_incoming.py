@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import re
-import traceback
 
 import db
 from core.types import IncomingMessage, OutgoingMessage
@@ -32,7 +31,7 @@ from core.services.media_service import (
     analyze_image,
 )
 from core.observability import log_system_event_sync
-from core.pg_text import MSG_VALOR_WHATSAPP, violacao_finito
+from core.pg_text import MSG_VALOR_WHATSAPP, quadros_da_cadeia, violacao_finito
 from core.services.fonte_unica import FonteUnicaOF
 from core.services.plan_limits import PlanLimitExceeded
 from core.services.ai_chat_commands import MANTEM, ENCERRA, aviso_de_cota, pergunta_no_turno
@@ -420,7 +419,8 @@ def _resposta_da_ia(uid: int, text: str, platform: str, rotulo: str,
             pergunta_no_turno.set(None)
             return format_for_platform(aviso, platform)
     except Exception as exc:
-        logger.warning("%s falhou pra user %s: %s", rotulo, uid, exc)
+        logger.warning("%s falhou pra user %s causa=%s sqlstate=%s", rotulo, uid,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
         if erro_se_falhar:
             pergunta_no_turno.set(MANTEM)
             from core.services.ai_chat.runner import ERROR_MSG
@@ -440,8 +440,9 @@ def _ia_primeiro(uid: int, text: str):
         return None
     try:
         pend = db.get_pending_action(uid)
-    except Exception:
-        logger.warning("ia_primeiro: leitura da pendência falhou pra user %s", uid, exc_info=True)
+    except Exception as exc:
+        logger.warning("ia_primeiro: leitura da pendência falhou pra user %s causa=%s sqlstate=%s", uid,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
         return None
     if pend is not None and not db.eh_oferta_de_conveniencia(pend.get("action_type")):
         return None
@@ -457,7 +458,8 @@ def _ia_primeiro(uid: int, text: str):
     except TurnoOcupado:
         reply, motivo = None, "a IA estava terminando a resposta anterior"
     except Exception as exc:
-        logger.warning("ia_primeiro: a IA levantou pra user %s: %s", uid, exc)
+        logger.warning("ia_primeiro: a IA levantou pra user %s causa=%s sqlstate=%s", uid,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
         reply, motivo = None, f"a IA levantou {type(exc).__name__}"
     if reply is not None:
         return reply
@@ -511,10 +513,10 @@ def _handle_audio(msg: IncomingMessage, platform: str,
                     "Dá uma olhada nos planos: https://pigbankai.com/precos"
                 )
             )]
-    except Exception:
+    except Exception as exc:
         logger.warning(
-            "gate Pro do áudio falhou pro user %s — seguindo fail-open (transcrição liberada)",
-            uid, exc_info=True,
+            "gate Pro do áudio falhou pro user %s — seguindo fail-open (transcrição liberada) causa=%s sqlstate=%s",
+            uid, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid},
         )
 
     if not data:
@@ -673,10 +675,10 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
                     "Dá uma olhada nos planos: https://pigbankai.com/precos"
                 )
             )]
-    except Exception:
+    except Exception as exc:
         logger.warning(
-            "gate Pro da leitura de imagem falhou pro user %s — seguindo fail-open (OCR liberado)",
-            uid, exc_info=True,
+            "gate Pro da leitura de imagem falhou pro user %s — seguindo fail-open (OCR liberado) causa=%s sqlstate=%s",
+            uid, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid},
         )
 
     if not data:
@@ -803,7 +805,7 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     ele mesmo. Ver o comentário da isenção lá embaixo.
 
     Não corre o risco de barrar quem ia vincular: o código de vínculo
-    (`vincular 123456`) tem isenção própria (`isencao_do_barrado`, "codigo"), e é a
+    (`vincular <código>`) tem isenção própria (`isencao_do_barrado`, "codigo"), e é a
     única coisa que liga um número a uma conta (o telefone digitado não liga mais;
     `attempt_whatsapp_phone_link` só classifica o número).
 
@@ -1366,35 +1368,39 @@ def handle_incoming(msg: IncomingMessage, *,
             logger.warning("handle_incoming: valor fora do limite barrado pelo banco "
                            "(constraint=%s platform=%s)", finito, msg.platform)
             return [OutgoingMessage(text=format_for_platform(MSG_VALOR_WHATSAPP, msg.platform))]
-        tb = traceback.format_exc()
+        # Só os quadros da pilha: a linha final da exceção traz o `DETAIL: Key (…)=(…)` do psycopg (P2 c).
+        tb, sqlstate = quadros_da_cadeia(exc)
+        uid_for_log = None
+        try:
+            uid_for_log = int(_normalize_user_id(msg))
+        except Exception:
+            pass
         logger.error(
-            "handle_incoming FAILED platform=%s user_id=%s chars=%s error=%s",
+            "handle_incoming FAILED platform=%s user_id=%s chars=%s causa=%s sqlstate=%s",
             msg.platform,
-            getattr(msg, "user_id", "?"),
+            uid_for_log,
             len(msg.text or ""),
-            exc,
+            type(exc).__name__, sqlstate,
+            extra={"user_id": uid_for_log},
         )
         # Registra no banco para aparecer no dashboard de monitoramento
         try:
-            uid_for_log = None
-            try:
-                uid_for_log = int(_normalize_user_id(msg))
-            except Exception:
-                pass
             log_system_event_sync(
                 "error",
                 "message_processing_failed",
-                f"Falha ao processar mensagem ({msg.platform}): {exc}",
+                f"Falha ao processar mensagem ({msg.platform}): {type(exc).__name__}",
                 source=f"handle_incoming/{msg.platform}",
                 user_id=uid_for_log,
                 details={
                     "chars": len(msg.text or ""),
                     "platform": msg.platform,
+                    "sqlstate": sqlstate,
                     "traceback": tb[-1500:],
                 },
             )
         except Exception as log_exc:
-            logger.error("Falha ao registrar erro no banco: %s", log_exc)
+            logger.error("Falha ao registrar erro no banco: causa=%s sqlstate=%s",
+                         type(log_exc).__name__, getattr(log_exc, "sqlstate", None), extra={"user_id": uid_for_log})
 
         # Retorna mensagem amigável ao usuário em vez de silêncio
         return [OutgoingMessage(

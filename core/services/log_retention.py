@@ -1,16 +1,21 @@
 """
-core/services/log_retention.py — Retenção de `system_event_logs` (#318, #799).
+core/services/log_retention.py — Retenção de `system_event_logs` (#318, #799) e de
+`pii_access_log` (#665).
 
-Dois passos do job de poda (`core/services/table_cleanup.py::_cleanups`):
+Três passos do job de poda (`core/services/table_cleanup.py::_cleanups`):
   - `purge_system_event_logs` apaga linha com mais de SYSTEM_EVENT_LOGS_RETENTION_DAYS
     dias, exceto `EVENTOS_PERMANENTES`;
   - `limpar_texto_das_falhas_de_remocao` tira o texto cru (exceção, uid) dos de
-    `EVENTOS_FALHA_DELETE`, que não caem nunca.
+    `EVENTOS_FALHA_DELETE`, que não caem nunca;
+  - `purge_pii_access_log` apaga linha com mais de PII_ACCESS_LOG_RETENTION_DAYS dias.
 
 Config (env, opcional):
   - SYSTEM_EVENT_LOGS_RETENTION_DAYS (default 90). `<= 0` desliga só a poda; 1 a 89
     sobe para 90 (piso: a maior janela de dedup não permanente é 90, ver a guarda);
     valor não inteiro cai no 90 (com aviso em stderr, como o piso).
+  - PII_ACCESS_LOG_RETENTION_DAYS (default RETENCAO_PII_DIAS). `<= 0` desliga só esta
+    poda; abaixo de RETENCAO_PII_DIAS sobe para ele (piso legal: 6 meses do art. 15 do
+    Marco Civil, DP5); valor não inteiro cai no default (com aviso em stderr).
 
 Síncronas, devolvem `int` e PROPAGAM erro, como as outras podas:
 `run_table_cleanup` registra a falha e o painel recebe `cleanup_job` nível error.
@@ -29,6 +34,7 @@ LOTE = 5000
 TETO_LOTES = 200
 LOCK_TIMEOUT = "2s"
 RETENCAO_MINIMA_DIAS = 90  # default do env e piso (DP1, decisão B)
+RETENCAO_PII_DIAS = 180  # default do env e piso de PII_ACCESS_LOG_RETENTION_DAYS (DP5: 6 meses do art. 15 do Marco Civil)
 
 # Eventos que a poda NUNCA apaga: alguém lê a linha sem janela, ou com janela
 # maior que a retenção. Saem com a conta quando têm `user_id` na COLUNA (cascata),
@@ -84,16 +90,16 @@ def apagar_em_lotes(tabela: str, onde: str, params: tuple, *,
     return total
 
 
-def _dias() -> int:
-    bruto = os.getenv("SYSTEM_EVENT_LOGS_RETENTION_DAYS", str(RETENCAO_MINIMA_DIAS))
+def _dias(env: str, piso: int) -> int:
+    bruto = os.getenv(env, str(piso))
     try:
         dias = int(bruto)
     except ValueError:
         dias = None
-    if dias is None or 0 < dias < RETENCAO_MINIMA_DIAS:
-        print(f"[log_retention] SYSTEM_EVENT_LOGS_RETENTION_DAYS={bruto!r} inválido ou abaixo"
-              f" do piso; usando {RETENCAO_MINIMA_DIAS}", file=sys.stderr, flush=True)
-        return RETENCAO_MINIMA_DIAS
+    if dias is None or 0 < dias < piso:
+        print(f"[log_retention] {env}={bruto!r} inválido ou abaixo do piso; usando {piso}",
+              file=sys.stderr, flush=True)
+        return piso
     return dias
 
 
@@ -106,7 +112,7 @@ def _tabela_existe() -> bool:
 
 
 def purge_system_event_logs() -> int:
-    dias = _dias()
+    dias = _dias("SYSTEM_EVENT_LOGS_RETENTION_DAYS", RETENCAO_MINIMA_DIAS)
     if dias <= 0 or not _tabela_existe():
         return 0
     return apagar_em_lotes(
@@ -114,6 +120,18 @@ def purge_system_event_logs() -> int:
         "created_at < now() - make_interval(days => %s) and event_type <> all(%s)",
         (dias, list(EVENTOS_PERMANENTES)),
     )
+
+
+def purge_pii_access_log() -> int:
+    """Apaga linha de `pii_access_log` com mais de PII_ACCESS_LOG_RETENTION_DAYS dias (#665).
+    Global por data, de propósito: é retenção da trilha inteira, não consulta de dado de
+    usuário (a linha pode nem ter titular: `subject_user_id` nulo depois da exclusão).
+    Sem `_tabela_existe`: a tabela nasce no `init_db` (db/schema.py), não no startup."""
+    dias = _dias("PII_ACCESS_LOG_RETENTION_DAYS", RETENCAO_PII_DIAS)
+    if dias <= 0:
+        return 0
+    return apagar_em_lotes(
+        "pii_access_log", "created_at < now() - make_interval(days => %s)", (dias,))
 
 
 # Depois da limpeza, cada evento de `EVENTOS_FALHA_DELETE` fica com este texto fixo

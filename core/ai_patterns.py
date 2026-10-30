@@ -4,10 +4,10 @@ core/ai_patterns.py — Sprint 7. Padrões proativos via LLM (OpenAI) e o cache 
 Estratégia dos padrões: backend agrega dados estruturados, manda pra o modelo com
 prompt específico, recebe JSON validado, cacheia em `ai_proactive_cache`. Os insights
 usam o mesmo cache, mas NÃO passam pelo LLM (D12 do PL-06): saem dos detectores de
-`db/insights.py`, com o texto deles.
+`db/insights.py` e `core/services/insights_detectores.py`, com o texto deles.
 
 Cache TTL por kind:
-- `insights`: 6h (estado financeiro muda rápido — orçamento, salário)
+- `insights`: até 6h ou até a meia-noite de Brasília (estado financeiro muda rápido — orçamento, salário, vencimento)
 - `patterns`: 24h (padrões comportamentais são estáveis)
 
 Fallback: se LLM falha (sem API key, erro de rede, JSON inválido), os padrões
@@ -31,6 +31,7 @@ import threading
 from typing import Any
 
 from core.services.modelo_openai import CHAT_MODEL, completion_options
+from utils_date import now_tz
 
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,14 @@ PATTERNS_CACHE_TTL_SECONDS = 24 * 3600    # 24h
 # Bumpe quando mudar o prompt/payload dos padrões ou o CONTRATO dos itens de insights
 # (`core/services/insights_contrato.py`). Cache antigo vira miss (kind diferente).
 _PROMPT_VERSION_PATTERNS = 8
-_PROMPT_VERSION_INSIGHTS = 11
+_PROMPT_VERSION_INSIGHTS = 13
+
+
+def _ttl_insights() -> int:
+    """6 h ou até a meia-noite de Brasília, o que vier antes (P4 do PL-06 B2): o `bill_due` muda de texto por dia."""
+    agora = now_tz()
+    return min(INSIGHTS_CACHE_TTL_SECONDS, int((agora - agora.replace(hour=0, minute=0, second=0, microsecond=0))
+                                               .total_seconds()))
 
 
 def _cache_kind(base: str) -> str:
@@ -511,7 +519,7 @@ def generate_ai_patterns(user_id: int, *, force: bool = False) -> list[dict]:
 
 
 def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
-    """Insights do PigBank (contrato v1, `core/services/insights_contrato.py`). Cache 6h.
+    """Insights do PigBank (contrato v1, `core/services/insights_contrato.py`). Cache: `_ttl_insights`.
 
     Gate de plano -> cache -> (miss) fatos dos detectores, com o texto deles -> cache completo -> projeção
     por plano. Sem LLM (D12 do PL-06); o nome ficou pelos chamadores (rota, agendador, card, testes).
@@ -522,15 +530,15 @@ def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
     if not plan_gate_ok(user_id, "insights"):
         return []
     kind = _cache_kind("insights")
-    itens = None if force else _get_cached(user_id, kind, INSIGHTS_CACHE_TTL_SECONDS)
+    itens = None if force else _get_cached(user_id, kind, _ttl_insights())
     if itens is None:
-        # Uma geração por usuário em voo: o cache só é gravado DEPOIS das consultas dos 6 detectores, então pedidos
+        # Uma geração por usuário em voo: o cache só é gravado DEPOIS das consultas dos detectores, então pedidos
         # concorrentes (2 abas, StrictMode) repetiriam todas. Quem espera relê o cache que o primeiro gravou (com
         # detector em falha não há cache, e o próximo da fila recalcula).
         # ponytail: trava por processo; com mais de uma réplica cada uma pode gerar 1x. Advisory lock do Postgres
         # prenderia 1 conexão do pool por espera.
         with _INSIGHTS_LOCKS.setdefault(user_id, threading.Lock()):
-            itens = None if force else _get_cached(user_id, kind, INSIGHTS_CACHE_TTL_SECONDS)
+            itens = None if force else _get_cached(user_id, kind, _ttl_insights())
             if itens is None:
                 itens = _gerar_insights(user_id, kind)
     return _projetar(user_id, itens)
@@ -543,7 +551,6 @@ def _gerar_insights(user_id: int, kind: str) -> list[dict]:
     """Os fatos dos detectores, carimbados; o cache só é gravado se nenhum detector falhou."""
     from db import compute_active_insights
     from db.insight_estado import registrar
-    from utils_date import now_tz
     itens, falhas = compute_active_insights(user_id)
     agora = now_tz().isoformat(timespec="seconds")
     for it in itens:
@@ -555,32 +562,43 @@ def _gerar_insights(user_id: int, kind: str) -> list[dict]:
 
 
 def motivo_vazio(user_id: int) -> str | None:
-    """Por que a lista PROJETADA saiu vazia (só se chama assim): `dispensados` se o cache tem itens (todos
-    dispensados), senão `sem_dados`/`sem_destaques`. Sem cache (um detector falhou) = None: não é "nada a apontar"."""
-    itens = _get_cached(user_id, _cache_kind("insights"), INSIGHTS_CACHE_TTL_SECONDS)
+    """Por que a lista PROJETADA saiu vazia (só se chama assim): `dispensados` se o cache tem itens que o plano mostra
+    (todos dispensados), senão `sem_dados`/`sem_destaques`. Sem cache (um detector falhou) = None: não é "nada a
+    apontar"."""
+    from core.services.insights_contrato import projetar
+    itens = _get_cached(user_id, _cache_kind("insights"), _ttl_insights())
     if itens is None:
         return None
-    if itens:
+    if projetar(itens, acoes_ok=True, recursos_ok=_recursos_ok(user_id, itens)):  # o mesmo corte por recurso da leitura
         return "dispensados"
     from db.insights import motivo_sem_insights
     return motivo_sem_insights(user_id)
 
 
 def ler_insights(user_id: int) -> list[dict] | None:
-    """O cache de 6 h com a mesma projeção da rota, sem gerar (o card `piggy` do chat). None = sem cache.
-    Quem chama já passou no gate `insights`."""
-    itens = _get_cached(user_id, _cache_kind("insights"), INSIGHTS_CACHE_TTL_SECONDS)
+    """O cache (até 6 h ou até a meia-noite de Brasília) com a mesma projeção da rota, sem gerar (o card `piggy` do
+    chat). None = sem cache. Quem chama já passou no gate `insights`."""
+    itens = _get_cached(user_id, _cache_kind("insights"), _ttl_insights())
     return None if itens is None else _projetar(user_id, itens)
 
 
 def _projetar(user_id: int, itens: list[dict]) -> list[dict]:
-    # O plano e as dispensas valem na LEITURA: o cache guarda `impacto`/`acoes` e quem caiu do Pro dentro das 6 h
-    # não os vê; dispensar não invalida o cache.
+    # O plano e as dispensas valem na LEITURA: o cache guarda `impacto`/`acoes` e os tipos de `RECURSO_POR_TIPO`, e
+    # quem caiu do Pro (ou perdeu o recurso) dentro do TTL não os vê; dispensar não invalida o cache.
     from core.services.insights_contrato import projetar
     from core.services.plan_service import plan_gate_ok
     from db.insight_estado import dispensadas
     return projetar(itens, acoes_ok=plan_gate_ok(user_id, "insights_acoes"),
-                    dispensadas=dispensadas(user_id, [it.get("key") for it in itens]))
+                    dispensadas=dispensadas(user_id, [it.get("key") for it in itens]),
+                    recursos_ok=_recursos_ok(user_id, itens))
+
+
+def _recursos_ok(user_id: int, itens: list[dict]) -> dict[str, bool]:
+    """O plano de cada recurso de `RECURSO_POR_TIPO` presente nos itens (sem consulta para os ausentes)."""
+    from core.services.insights_contrato import RECURSO_POR_TIPO
+    from core.services.plan_service import plan_gate_ok
+    return {rec: plan_gate_ok(user_id, rec) for rec in {RECURSO_POR_TIPO[it["type"]] for it in itens
+                                                         if it.get("type") in RECURSO_POR_TIPO}}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

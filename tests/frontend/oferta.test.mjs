@@ -234,14 +234,14 @@ test("nav deslogado: o link Entrar está no markup, visível e aponta para /logi
   await ctx.close();
 });
 
-test("nav logado: o menu da conta troca o Entrar e leva ao Dashboard (/app) e ao Início (/home)", async () => {
+test("nav logado: o menu da conta troca o Entrar e leva ao Dashboard (/painel) e ao Início (/home)", async () => {
   const { page, ctx, erros } = await abrir({ logado: true });
   await page.waitForSelector("#pb-acct-btn", { state: "visible" });
   assert.equal(await page.locator('.nav .nav-right a[href="/login"]').count(), 0);
   await page.waitForFunction(() => document.getElementById("pb-acct-lbl").textContent === "Ana Beatriz");
   await page.click("#pb-acct-btn");
   assert.ok(await page.locator("#pb-acct-dd").isVisible());
-  assert.equal((await page.locator('#pb-acct-dd a[href="/app"]').textContent()).trim(), "Dashboard");
+  assert.equal((await page.locator('#pb-acct-dd a[href="/painel"]').textContent()).trim(), "Dashboard");
   assert.equal(await page.locator('#pb-acct-dd a[href="/home"]').count(), 1);
   assert.deepEqual(erros, []);
   await ctx.close();

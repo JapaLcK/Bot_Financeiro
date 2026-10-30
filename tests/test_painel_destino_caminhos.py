@@ -152,3 +152,15 @@ def test_conta_com_senha_vai_ao_painel_pelo_d_e_pelo_validate():
     assert r.headers["location"] == "/painel"
     c, _ = _logado(uid)
     assert c.get("/auth/validate").json()["dashboard_url"] == "/painel"
+
+
+def test_get_painel_de_conta_sem_senha_vai_ao_app(monkeypatch):
+    # O link "Dashboard" aponta fixo ao /painel: o portão é quem manda a conta sem credencial ao /app.
+    monkeypatch.setenv("DASHBOARD_V2_TODOS", "1")
+    r = _logado(_sem_senha())[0].get("/painel", follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (302, "/app")
+
+
+def test_get_painel_de_conta_com_senha_abre(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_V2_TODOS", "1")
+    assert _logado(_conta()[0])[0].get("/painel", follow_redirects=False).status_code == 200

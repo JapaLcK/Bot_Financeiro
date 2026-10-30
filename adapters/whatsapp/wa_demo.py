@@ -60,7 +60,7 @@ PERGUNTAS = {f"{PREFIXO}{i}": q for i, q in enumerate(_LISTA, 1)}
 # Textos do Piggy (masculino). Nunca "não guardamos nada" nem "nada fica salvo":
 # o texto vai à IA que responde. O que vale é "não é salvo no PigBank, só vai
 # para a IA que responde".
-_JA_TEM_CONTA = "Já tem conta? Manda *vincular 123456* com o código do site."
+_JA_TEM_CONTA = "Já tem conta? Manda *vincular <código>* com o código do site."
 _CONVITE = "Ou escreva a sua 👇"
 BOAS_VINDAS = (
     "🐷 Oi! Eu sou o Piggy, o assistente de dinheiro do PigBank no WhatsApp. "

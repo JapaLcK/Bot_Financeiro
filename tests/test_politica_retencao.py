@@ -1,9 +1,11 @@
 """A política de privacidade (`frontend/privacy.html`, §6) repete o prazo da
 retenção de `system_event_logs` e nomeia cada exceção de `EVENTOS_PERMANENTES`
-(core/services/log_retention.py). HTML estático não importa Python, então este
-teste compara as duas fontes (CLAUDE.md §0.7, precedente: test_phosphor_subset.py).
+(core/services/log_retention.py), e o prazo de `pii_access_log` (`RETENCAO_PII_DIAS`).
+HTML estático não importa Python, então este teste compara as duas fontes
+(CLAUDE.md §0.7, precedente: test_phosphor_subset.py).
 
-Cego para: o valor de SYSTEM_EVENT_LOGS_RETENTION_DAYS em produção (só a constante)
+Cego para: os valores de SYSTEM_EVENT_LOGS_RETENTION_DAYS e PII_ACCESS_LOG_RETENTION_DAYS
+em produção (só as constantes)
 e a VERDADE do texto em volta do trecho (isso é revisão humana).
 """
 from __future__ import annotations
@@ -11,12 +13,18 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from core.services.log_retention import EVENTOS_PERMANENTES, RETENCAO_MINIMA_DIAS
+from core.services.log_retention import (
+    EVENTOS_PERMANENTES,
+    RETENCAO_MINIMA_DIAS,
+    RETENCAO_PII_DIAS,
+)
 
 POLITICA = Path(__file__).resolve().parent.parent / "frontend" / "privacy.html"
 
 _PIX = "registro de pagamento Pix recebido com valor diferente do devido"
 _PLUGGY = "registro de falha ao remover uma conexão de Open Finance no provedor"
+TRECHO_PII = (f"Esse registro de acesso é apagado automaticamente {RETENCAO_PII_DIAS} dias"
+              " depois de gravado")
 
 # evento permanente -> trecho do §6 que o nomeia
 TRECHO_DA_POLITICA = {
@@ -52,8 +60,15 @@ def test_toda_excecao_da_retencao_esta_nomeada_na_politica():
 
 def test_todo_prazo_da_retencao_na_politica_e_o_da_constante():
     """O prazo também aparece no §1 e no parágrafo do teste do Piggy (§6)."""
-    texto = " ".join(POLITICA.read_text(encoding="utf-8").split())
+    texto = " ".join(POLITICA.read_text(encoding="utf-8").split()).replace(TRECHO_PII, "")
     prazos = re.findall(r"apagad[oa]s? automaticamente (\d+) dias depois de gravad", texto)
     assert len(prazos) >= 3 and set(prazos) == {str(RETENCAO_MINIMA_DIAS)}, (
         f"prazos na política: {prazos}; atualize frontend/privacy.html para "
         f"{RETENCAO_MINIMA_DIAS} dias em todas as ocorrências")
+
+
+def test_prazo_da_trilha_de_acesso_a_pii_e_o_da_constante():
+    """O prazo de `pii_access_log` aparece uma vez, e só no §6."""
+    html = " ".join(POLITICA.read_text(encoding="utf-8").split())
+    assert _secao_6().count(TRECHO_PII) == 1 and html.count(TRECHO_PII) == 1, (
+        "RETENCAO_PII_DIAS mudou ou o trecho saiu do §6: atualize frontend/privacy.html")

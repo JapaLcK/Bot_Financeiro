@@ -29,6 +29,7 @@ Insights são barrados antes de cache ou geração, inclusive no pré-processame
 O Plus recebe a explicação de cada insight (período, fonte, referência) e o link de
 navegação; o Pro recebe também `impacto` e `acoes` (feature `insights_acoes`), calculados em código.
 O cache é um só e o plano vale na leitura: a rota e o card `piggy` do chat passam pela mesma projeção.
+O insight do mês no vermelho (`month_projection`) exige também `forecast` (Plus), na geração e na leitura.
 `PUT /insights/{uid}/estado` (dispensar/útil) passa pelo mesmo gate `insights` antes de ler ou gravar.
 O dashboard Essencial mantém as análises básicas e não solicita os endpoints
 avançados. O resumo semanal é conferido na ativação e em cada envio automático;
