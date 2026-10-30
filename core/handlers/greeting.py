@@ -132,10 +132,10 @@ def _greeting_with_ai(text: str, greeting_type: str, name: str | None = None, us
             from core.services.plan_service import is_pro
             if not is_pro(int(user_id)):
                 return None
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "gate Pro do greeting IA falhou pro user %s — seguindo fail-open (chamada IA liberada)",
-                user_id, exc_info=True,
+                "gate Pro do greeting IA falhou pro user %s — seguindo fail-open (chamada IA liberada) causa=%s sqlstate=%s",
+                user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id},
             )
 
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()

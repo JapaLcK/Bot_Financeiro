@@ -603,9 +603,9 @@ def create_user_category(
         from core.services.category_service import reconciliar_regras_com_categoria
 
         reconciliar_regras_com_categoria(user_id, norm)
-    except Exception:
-        log.warning("reconciliacao de regras falhou para user=%s categoria=%r",
-                    user_id, norm, exc_info=True)
+    except Exception as exc:
+        log.warning("reconciliacao de regras falhou para user=%s causa=%s sqlstate=%s",
+                    user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
     return get_user_category(user_id, new_id)
 
 
@@ -674,9 +674,9 @@ def update_user_category(
             from core.services.category_service import reconciliar_regras_com_categoria
 
             reconciliar_regras_com_categoria(user_id, next_name)
-        except Exception:
-            log.warning("reconciliacao pos-rename falhou para user=%s categoria=%r",
-                        user_id, next_name, exc_info=True)
+        except Exception as exc:
+            log.warning("reconciliacao pos-rename falhou para user=%s causa=%s sqlstate=%s",
+                        user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
     return get_user_category(user_id, cat_id)
 
 
@@ -824,10 +824,11 @@ def user_category_display_map(user_id: int, *, strict: bool = False) -> dict[str
                     (user_id,),
                 )
                 rows = cur.fetchall() or []
-    except Exception:
+    except Exception as exc:
         if strict:
             raise
-        log.warning("user_category_display_map falhou user=%s", user_id, exc_info=True)
+        log.warning("user_category_display_map falhou user=%s causa=%s sqlstate=%s", user_id,
+                    type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return {}
     return {normalize_text(r["name"]): r["name"] for r in rows if (r["name"] or "").strip()}
 
@@ -954,5 +955,6 @@ def ensure_user_category(user_id: int, name: str, *, exigir_plano: bool = True) 
         create_user_category(user_id, name)
     except ValueError:
         pass  # CATEGORIA_DUPLICADA/INVALIDA: corrida ou nome vazio
-    except Exception:
-        log.warning("ensure_user_category falhou user=%s name=%r", user_id, name, exc_info=True)
+    except Exception as exc:
+        log.warning("ensure_user_category falhou user=%s causa=%s sqlstate=%s", user_id,
+                    type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})

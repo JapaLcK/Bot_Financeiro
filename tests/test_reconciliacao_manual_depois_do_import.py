@@ -259,7 +259,9 @@ def test_conta_paga_leitura_do_aviso_falha_nao_afirma_em_dia(monkeypatch, caplog
 
     assert resp.endswith("lançado e categorizado."), resp
     assert "em dia" not in resp and "a conferir" not in resp, resp
-    assert any("aviso a conferir falhou" in r.getMessage() and r.exc_info
+    # #657 D6: a causa no texto e o dono na coluna, sem a pilha (o texto cru da exceção).
+    assert any("aviso a conferir falhou" in r.getMessage() and "causa=RuntimeError" in r.getMessage()
+               and r.exc_info is None and getattr(r, "user_id", None) == 1
                for r in caplog.records)
 
 
