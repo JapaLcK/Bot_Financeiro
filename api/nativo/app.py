@@ -7,7 +7,7 @@ mesmos contratos, motores e guardas por substituição da dependência de sessã
 from fastapi import HTTPException, Request
 
 from api.v2.app import criar_app
-from api.v2.sessao import usuario_assinante, usuario_atual
+from api.v2.sessao import usuario_assinante, usuario_atual, usuario_logado, usuario_sessao
 from db.open_finance_onboarding import get_open_finance_onboarding
 
 from . import mes_detalhes
@@ -29,4 +29,5 @@ def usuario_do_app(request: Request) -> int:
 # revalida por foco/foreground e não oferece esse contrato de eventos web.
 app = criar_app("/api/app", com_eventos=False)
 app.dependency_overrides[usuario_atual] = usuario_do_app
+app.dependency_overrides[usuario_logado] = usuario_sessao  # o app não usa a allowlist da v2 (como usuario_do_app)
 app.include_router(mes_detalhes.router)

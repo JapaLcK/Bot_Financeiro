@@ -197,6 +197,14 @@ TABELA = {
     ("POST", "/api/app/orcamentos-categoria"): (B, "usuario_do_app"),
     ("POST", "/api/app/orcamentos-categoria/apagar"): (B, "usuario_do_app"),
     ("POST", "/api/app/gastos-fixos"): (B, "usuario_do_app"),
+    # ── Plano Família (api/v2/familia.py, nos dois prefixos) ──
+    **{(m, f"{pre}{p}"): (B, gate) for pre, gate in (("/api/v2", "usuario_atual"), ("/api/app", "usuario_do_app"))
+       for m, p in (("POST", "/familia"), ("POST", "/familia/convites"),
+                    ("DELETE", "/familia/convites"), ("DELETE", "/familia/membros/{ref}"),
+                    ("GET", "/familia/dissolucao"), ("POST", "/familia/dissolucao"))},
+    # sem gate de plano (quem não tem plano aceita, vê e sai), COM a perna da senha: `usuario_logado`/`usuario_sessao`
+    **{(m, f"{pre}{p}"): (B, "usuario_logado (sem assinatura, com credencial)") for pre in ("/api/v2", "/api/app")
+       for m, p in (("GET", "/familia"), ("POST", "/familia/sair"), ("POST", "/familia/convites/aceitar"))},
     ("WS", "/ws/{user_id}"): (B, "close 4403"),
     # ── HTML autenticado ──
     ("GET", "/app"): (L, "casca; o overlay sobe"), ("GET", "/home"): (L, "casca; o overlay sobe"),
@@ -365,7 +373,7 @@ def _cadeia_de_sessao(fn, vistos=None):
     vistos.add(fn)
     yield fn
     for nome, _ in _chamadas(fn):
-        if nome == "usuario_assinante":
+        if nome in ("usuario_assinante", "usuario_sessao"):
             helper = fn.__globals__.get(nome)
             if inspect.isroutine(helper):
                 yield from _cadeia_de_sessao(helper, vistos)

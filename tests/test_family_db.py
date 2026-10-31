@@ -1,6 +1,7 @@
 """Plano Família, PR 1 — schema e db/family.py contra Postgres real (sem mock de db)."""
 import threading
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -8,11 +9,13 @@ import db
 from db import family as fam
 from db import get_conn
 from db.schema import init_db
+from _billing_grants_helpers import conta
 
 
 def _u() -> int:
     uid = int(uuid.uuid4().int % 10_000_000_000)
     db.ensure_user(uid)
+    conta(uid, "pro_max", datetime.now(timezone.utc) + timedelta(days=30), "active")  # titular precisa de cobertura p/ o aceite
     return uid
 
 
