@@ -2428,8 +2428,10 @@ def handle(user_id: int, text: str) -> str | None:
     if t_low in _PARCELAS_LIST_TRIGGERS or t_low.startswith("parcelamentos"):
         return _list_active_installments(user_id)
 
-    if t_low.startswith("parcelei "):
-        t_low = "parcelar " + t_low[len("parcelei "):]
+    # "parcelei"/"parcele": mesmos verbos que a limpeza da descrição já aceita.
+    m_verbo = re.match(r"parcel(?:ei|e)\s+", t_low)
+    if m_verbo:
+        t_low = "parcelar " + t_low[m_verbo.end():]
 
     if t_low.startswith("parcelar"):
         if (recusa := recusa_q36(user_id, "cartao")):
@@ -2454,7 +2456,10 @@ def handle(user_id: int, text: str) -> str | None:
             if parcela_valor is not None:
                 valor = round(parcela_valor * n, 2)
         if valor is None:
-            valor = parse_money(t_low)
+            # Tira a contagem antes: em "parcele em 5x no cartão X 1293,48" o 1º número é o 5.
+            valor = parse_money(re.sub(
+                r"\b(?:em\s+\d+\s*(?:x|vezes?|parcelas?)?|\d+\s*(?:x|vezes?|parcelas?))(?![\w.,])",
+                " ; ", t_low))  # separador: sem ele "600 em 3x bilhão" vira "600 bilhão"
         if valor is None:
             return "Use: parcelar 300 em 3x no cartao nubank"
         if not valor_valido(valor):  # antes de perguntar o nome: `inf` derrubava o fluxo
