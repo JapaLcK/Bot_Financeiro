@@ -141,7 +141,7 @@ class TestDeriveAccountStatus:
         # Webhook de renovação perdido: status diz active/trialing mas o plano
         # venceu — plan_service._paid_plan_active nega o entitlement, e o
         # painel tem de concordar
-        for pay in ("active", "trialing", "past_due"):
+        for pay in ("active", "trialing"):
             assert self._st(plan="pro", last_payment_status=pay,
                             stripe_customer_id="cus_x",
                             plan_expires_at=NOW - timedelta(hours=1)) == "canceled"
@@ -149,6 +149,17 @@ class TestDeriveAccountStatus:
         assert self._st(plan="pro", last_payment_status="active",
                         stripe_customer_id="cus_x",
                         plan_expires_at=NOW + timedelta(days=10)) == "paying"
+
+    def test_vencido_com_cobranca_em_retentativa_e_pagamento_pendente(self):
+        # Caso real: trial acabou, 1ª cobrança recusada, Stripe retentando. O
+        # painel dizia "Cancelado" para uma assinatura viva. 'unpaid' vencido
+        # segue Cancelado (pode ser o terminal).
+        assert self._st(plan="plus", last_payment_status="past_due",
+                        stripe_customer_id="cus_x",
+                        plan_expires_at=NOW - timedelta(hours=1)) == "past_due"
+        assert self._st(plan="plus", last_payment_status="unpaid",
+                        stripe_customer_id="cus_x",
+                        plan_expires_at=NOW - timedelta(hours=1)) == "canceled"
 
     def test_paying(self):
         assert self._st(plan="pro", last_payment_status="active",

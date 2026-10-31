@@ -98,6 +98,15 @@ IA_COTA_EM_CARENCIA_SEM_COTA = (
     "A cobrança da sua assinatura não passou. Pra atualizar o cartão: "
     "pigbankai.com/conta — as mensagens renovam no dia 1º."
 )
+# A carência que bate no teto de lançamentos do tier `free`. Diz O QUE aconteceu
+# (o pagamento falhou) em vez de nomear o "Grátis", que não existe mais, e manda
+# para o cartão pelo `/conta`, não para a /precos (409 para quem já assina).
+LANCAMENTOS_EM_CARENCIA = (
+    "⚠️ O pagamento da sua assinatura falhou: a última cobrança não foi aprovada "
+    "e a operadora vai tentar de novo. Enquanto isso sua conta fica limitada a "
+    "{cap} lançamentos no mês, e esse limite já foi atingido.\n\n"
+    "Pra ver o que aconteceu e atualizar o cartão: pigbankai.com/conta"
+)
 OPEN_FINANCE_EM_CARENCIA = (
     "A cobrança da sua assinatura não passou — o Open Finance volta quando ela "
     "entrar. Pra atualizar o cartão: /conta"
