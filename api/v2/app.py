@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.nativo import rendimento  # o app nativo e a v2 servem o mesmo contrato; o módulo mora onde nasceu
-from api.v2 import assinaturas, bancos, caixinhas, cartoes, categorias, comparacao, contas, contas_a_pagar, erros, eventos, gastos, gastos_fixos, guia, insights, investido, lancamentos, me, metas, orcamento_domestico, orcamentos_categoria, patrimonio, perfil, previsao, progresso_milhao, renda, resumo_mes, simulador
+from api.v2 import assinaturas, bancos, caixinhas, cartoes, categorias, comparacao, contas, contas_a_pagar, erros, eventos, familia, gastos, gastos_fixos, guia, insights, investido, lancamentos, me, metas, orcamento_domestico, orcamentos_categoria, patrimonio, perfil, previsao, progresso_milhao, renda, resumo_mes, simulador
 
 
 class _AppV2(FastAPI):
@@ -35,7 +35,7 @@ def criar_app(prefixo: str, *, com_eventos: bool = True) -> FastAPI:
     sub.add_exception_handler(Exception, erros.erro_interno)
     for modulo in (me, eventos, perfil, contas, assinaturas, resumo_mes, lancamentos,
                    categorias, gastos, gastos_fixos, guia, previsao, investido, metas, bancos, simulador, orcamento_domestico,
-                   orcamentos_categoria, progresso_milhao, contas_a_pagar, caixinhas, patrimonio, comparacao, cartoes, renda, insights, rendimento):
+                   orcamentos_categoria, progresso_milhao, contas_a_pagar, caixinhas, patrimonio, comparacao, cartoes, renda, insights, rendimento, familia):
         if modulo is not eventos or com_eventos:
             sub.include_router(modulo.router)
     return sub

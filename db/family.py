@@ -122,26 +122,39 @@ def seat_capacity(owner_user_id: int) -> int:
         return _capacity(cur, row["id"])
 
 
+def _remove_locked(cur, group_id: int, user_id: int, reason: str) -> list[int]:
+    """Marca a saída (left_at), revoga os consentimentos e o grant `family` dele; o grupo já está travado.
+    Devolve quem recomputar depois do commit. O grant individual do membro nunca é tocado."""
+    cur.execute(
+        """update family_members set left_at = now(), left_reason = %s
+            where group_id = %s and user_id = %s and role = 'member' and left_at is null""",
+        (reason, group_id, user_id),
+    )
+    if cur.rowcount == 0:
+        raise FamilyError("not_member")
+    cur.execute(
+        "update family_consents set revoked_at = now() "
+        "where group_id = %s and member_user_id = %s and revoked_at is null",
+        (group_id, user_id),
+    )
+    return _revoke_family_grants(cur, group_id, f"family_{reason}", user_id)
+
+
 def remove_member(owner_user_id: int, user_id: int, reason: str = "removed") -> None:
-    """Marca a saída (left_at) e revoga os consentimentos dele. O titular não sai por aqui."""
+    """O titular tira o membro. O titular não sai por aqui."""
     with get_conn() as conn, conn.cursor() as cur:
-        group_id = _lock_group(cur, owner_user_id)
-        cur.execute(
-            """update family_members set left_at = now(), left_reason = %s
-                where group_id = %s and user_id = %s and role = 'member' and left_at is null""",
-            (reason, group_id, user_id),
-        )
-        if cur.rowcount == 0:
-            raise FamilyError("not_member")
-        cur.execute(
-            "update family_consents set revoked_at = now() "
-            "where group_id = %s and member_user_id = %s and revoked_at is null",
-            (group_id, user_id),
-        )
-        # Só o grant `family`: o individual do membro nunca é tocado; o recompute escolhe o maior.
-        revogados = _revoke_family_grants(cur, group_id, f"family_{reason}", user_id)
+        revogados = _remove_locked(cur, _lock_group(cur, owner_user_id), user_id, reason)
         conn.commit()
     recompute_users(revogados, owner_user_id)
+
+
+def leave_family(user_id: int) -> None:
+    """O próprio membro sai (mesmo lock e mesma limpeza de remove_member). Titular/fora: not_member."""
+    with get_conn() as conn, conn.cursor() as cur:
+        gid, owner_id = _lock_member_group(cur, user_id)
+        revogados = _remove_locked(cur, gid, user_id, "left")
+        conn.commit()
+    recompute_users(revogados, owner_id)
 
 
 def list_members(owner_user_id: int) -> list[dict]:
@@ -194,6 +207,13 @@ def accept_invite(token: str, user_id: int) -> int:
             group_id = _lock_group(cur, row["owner_user_id"])
         except FamilyError:  # dissolvido entre a leitura e o lock
             raise FamilyError("invite_invalid") from None
+        cur.execute("select 1 from family_invites where token_hash = %s and group_id = %s and used_at is null "
+                    "and revoked_at is null and expires_at > clock_timestamp() for update", (th, group_id))
+        if not cur.fetchone():  # vivo antes da cobertura: token morto não revela o pagamento do titular
+            raise FamilyError("invite_invalid")
+        from core.services.family_access import cobertura_no_lock, grant_member
+        if not cobertura_no_lock(cur, row["owner_user_id"], group_id):  # sem consumir: vale de novo se ele pagar
+            raise FamilyError("coverage_required")
         try:
             cur.execute(
                 """update family_invites set used_at = now(), used_by_user_id = %s
@@ -208,7 +228,6 @@ def accept_invite(token: str, user_id: int) -> int:
         _insert_member(cur, group_id, user_id, "member")  # erro aqui desfaz o "used" (rollback)
         conn.commit()
         owner_id = row["owner_user_id"]
-    from core.services.family_access import grant_member
     try:  # o membro já entrou (commit acima): falhar aqui não pode virar erro; a varredura alinha depois
         grant_member(owner_id, user_id)  # no-op se o titular não tem cobertura ativa
     except Exception as exc:
@@ -315,11 +334,14 @@ def log_read(group_id: int, viewer_user_id: int, member_user_id: int, scope: str
         conn.commit()
 
 
-def dissolve_group(owner_user_id: int) -> bool:
-    """Apaga na hora a casa inteira (cascade); o log sobrevive com group_id NULL."""
+def dissolve_group(owner_user_id: int, confere=None) -> bool:
+    """Apaga na hora a casa inteira (cascade); o log sobrevive com group_id NULL.
+    `confere(cur)` (opcional) roda sob o lock do grupo, na mesma transação: falso -> confirmation_mismatch."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("select id from family_groups where owner_user_id = %s for update", (owner_user_id,))
         row = cur.fetchone()
+        if row and confere and not confere(cur):
+            raise FamilyError("confirmation_mismatch")
         revogados = _revoke_family_grants(cur, row["id"], "family_dissolved") if row else []
         cur.execute("delete from family_groups where owner_user_id = %s", (owner_user_id,))
         apagou = cur.rowcount == 1

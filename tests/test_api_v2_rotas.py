@@ -29,10 +29,12 @@ from fastapi.sse import EventSourceResponse
 from pydantic import BaseModel
 
 from api.v2 import app as app_v2
-from api.v2.sessao import usuario_atual
+from api.v2.sessao import usuario_atual, usuario_logado
 from test_pix_rota_registrada import _andar_nas_rotas
 
 PREFIXO = "/api/v2"
+# As únicas rotas que dispensam a assinatura (quem não tem plano aceita o convite, vê a família e sai): `usuario_logado`.
+SEM_ASSINATURA = {("POST", "/familia/convites/aceitar"), ("GET", "/familia"), ("POST", "/familia/sair")}
 _PARAM_DE_USUARIO = re.compile(r"(?i)user|usuario|uid|owner|dono")
 
 
@@ -76,8 +78,13 @@ def violacoes(app_pai, app_v2) -> list[str]:
         if not isinstance(route, APIRoute):
             achados.append(f"{path}: {type(route).__name__}, não APIRoute")
             continue
-        if not any(d.call is usuario_atual for d in _dependants(route.dependant)):
-            achados.append(f"{path}: sem a dependência usuario_atual")
+        usadas = {d.call for d in _dependants(route.dependant)}
+        esperada, proibida = ((usuario_logado, usuario_atual) if any((m, path) in SEM_ASSINATURA for m in route.methods)
+                              else (usuario_atual, usuario_logado))
+        if esperada not in usadas:
+            achados.append(f"{path}: sem a dependência {esperada.__name__}")
+        if proibida in usadas:
+            achados.append(f"{path}: usa {proibida.__name__}, que não é a desta rota")
         # SSE (`EventSourceResponse` + gerador) tipa o ITEM do stream pela anotação de retorno.
         if (route.stream_item_field if route.is_sse_stream else route.response_model) is None:
             achados.append(f"{path}: sem response_model")
@@ -146,6 +153,18 @@ def _user_id_na_query(r):
         return Saida(ok=True)
 
 
+def _logado_fora_da_allowlist(r):
+    @r.get("/x", response_model=Saida)
+    def _x(uid: int = Depends(usuario_logado)):  # pragma: no cover
+        return Saida(ok=True)
+
+
+def _aceitar_com_usuario_atual(r):
+    @r.post("/familia/convites/aceitar", response_model=Saida)
+    def _x(uid: int = Depends(usuario_atual)):  # pragma: no cover
+        return Saida(ok=True)
+
+
 def _sem_response_model(r):
     @r.get("/x")
     def _x(uid: int = Depends(usuario_atual)):  # pragma: no cover
@@ -192,6 +211,8 @@ def _rota_no_pai():
 @pytest.mark.parametrize("registra, esperado", [
     (_sem_dependencia, "sem a dependência usuario_atual"),
     (_user_id_na_query, "parâmetro de usuário ['user_id']"),
+    (_logado_fora_da_allowlist, "x: usa usuario_logado"),
+    (_aceitar_com_usuario_atual, "sem a dependência usuario_logado"),
     (_sem_response_model, "sem response_model"),
     (_sse_sem_tipo_de_item, "sem response_model"),
     (_usuario_no_header, "parâmetro de usuário"),
@@ -220,6 +241,11 @@ def test_controle_negativo_sub_app_montado_de_novo(outro):
             f"esperado só ['{PREFIXO}']") in achados, achados
     # Pelo motivo certo: `/api/v2-shadow` não é /api/v2 por segmento.
     assert not any(a.startswith("pai sob") for a in achados), achados
+
+
+def test_sem_assinatura_so_nas_rotas_da_allowlist():
+    rotas = [p for p, _ in _andar_nas_rotas(app_v2.routes, com_rota=True)]
+    assert {p for _, p in SEM_ASSINATURA} <= set(rotas)  # a allowlist não aponta para o vazio
 
 
 def test_app_real_nao_tem_violacao():

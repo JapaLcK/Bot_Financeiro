@@ -53,6 +53,22 @@ def _cobertura(owner_id: int):
     return _decidir_cobertura(_ler_conta(owner_id), fg.is_suspended(owner_id), lambda: list_grants(owner_id))
 
 
+def cobertura_no_lock(cur, owner_id: int, group_id: int):
+    """`_cobertura` lida no cursor de quem já tem o lock do grupo (a lida fora do lock pode ter sido vencida por uma
+    revogação/suspensão que commitou no meio: ela faz UPDATE nesta linha do grupo ou na conta do titular)."""
+    cur.execute("select plan, plan_expires_at, last_payment_status from auth_accounts where user_id = %s",
+                (owner_id,))
+    conta = cur.fetchone()
+    cur.execute("select members_suspended_at is not null as s from family_groups where id = %s", (group_id,))
+    suspenso = cur.fetchone()["s"]
+
+    def grants_do_titular():
+        cur.execute("select status, source, starts_at, ends_at from plan_grants where user_id = %s"
+                    " and status = 'active'", (owner_id,))
+        return cur.fetchall()
+    return _decidir_cobertura(conta, suspenso, grants_do_titular)
+
+
 def grant_member(owner_id: int, member_user_id: int) -> bool:
     """Concede (ou renova, idempotente pela unique source+external_ref) o grant do membro."""
     cob = _cobertura(owner_id)
@@ -65,18 +81,7 @@ def grant_member(owner_id: int, member_user_id: int) -> bool:
             group_id = fam._lock_group(cur, owner_id)
         except fam.FamilyError:
             return False
-        # Cobertura revalidada DEPOIS do lock, na mesma transação (a lida antes pode ter sido vencida por uma
-        # revogação/suspensão que commitou no meio: ela faz UPDATE nesta linha do grupo ou na conta do titular).
-        cur.execute("select plan, plan_expires_at, last_payment_status from auth_accounts where user_id = %s",
-                    (owner_id,))
-        conta = cur.fetchone()
-        cur.execute("select members_suspended_at is not null as s from family_groups where id = %s", (group_id,))
-        suspenso = cur.fetchone()["s"]
-        def grants_do_titular():
-            cur.execute("select status, source, starts_at, ends_at from plan_grants where user_id = %s"
-                        " and status = 'active'", (owner_id,))
-            return cur.fetchall()
-        cob = _decidir_cobertura(conta, suspenso, grants_do_titular)
+        cob = cobertura_no_lock(cur, owner_id, group_id)  # revalidada DEPOIS do lock, na mesma transação
         if not cob:
             return False
         cur.execute("select id from family_members where group_id = %s and user_id = %s and role = 'member'"

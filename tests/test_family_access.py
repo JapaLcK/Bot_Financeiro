@@ -136,14 +136,17 @@ def test_membro_com_individual_maior_fica_com_o_maior_e_ao_sair_volta_para_a_ind
 def test_convite_sem_cobertura_do_titular_nao_concede():
     owner = _u("free")
     fam.create_group(owner)
-    m = _entra(owner)
-    assert not _fam(m) and _plano(m) == "free"
+    with pytest.raises(fam.FamilyError, match="coverage_required"):  # decisão do dono: sem cobertura, não ocupa vaga
+        _entra(owner)
+    assert not _sql("select 1 from family_members where role='member' and group_id=%s", (fam.get_group(owner)["id"],))
 
 
 def test_convite_aceito_com_titular_em_atraso_nao_concede():
     owner = _titular("pro_max")
     conta(owner, "pro_max", _agora() + timedelta(days=30), "past_due")
-    m = _entra(owner)
+    m = _u()
+    with pytest.raises(fam.FamilyError, match="coverage_required"):
+        fam.accept_invite(fam.create_invite(owner), m)
     assert not _fam(m) and _plano(m) == "free"
 
 
@@ -325,8 +328,8 @@ def test_cobertura_vencida_do_titular_nao_concede():
     owner = _titular("pro_max")
     _sql("update auth_accounts set plan_expires_at = now() - interval '1 minute' where user_id=%s", (owner,))
     assert fa._cobertura(owner) is None
-    assert _entra(owner) and not _fam(_sql("select user_id from family_members where role='member' "
-                                           "and group_id=%s", (fam.get_group(owner)["id"],))[0]["user_id"])
+    with pytest.raises(fam.FamilyError, match="coverage_required"):
+        _entra(owner)
 
 
 def test_admin_set_plan_preserva_o_grant_family():
@@ -480,7 +483,8 @@ def test_cancelamento_agendado_persiste_apos_recompute_do_titular_e_reativacao_d
     recompute_entitlement(owner, origem="varredura")   # a varredura diária / admin não religa
     assert _plano(m) == "free" and not _fam(m)
     assert _plano(owner) == "pro_max"
-    assert fam.accept_invite(fam.create_invite(owner), _u()) and True  # convite novo também não concede
+    with pytest.raises(fam.FamilyError, match="coverage_required"):  # convite novo: sem cobertura, nem entra
+        fam.accept_invite(fam.create_invite(owner), _u())
     _post(client, fake, _evt("customer.subscription.updated", owner),
           subs={"sub_f": _sub_stripe("active", cancel=False)})
     assert _plano(m) == "pro_max"
@@ -635,10 +639,12 @@ def test_updated_em_grupo_sem_membros_suspende_e_a_reativacao_libera_os_convidad
     _post(client, fake, _evt("customer.subscription.updated", owner),
           subs={"sub_f": _sub_stripe("active", cancel=True)})
     assert fg.is_suspended(owner)
-    m = _entra(owner)
-    assert not _fam(m) and _plano(m) == "free"                   # convite aceito durante a suspensão não concede
+    m, token = _u(), fam.create_invite(owner)
+    with pytest.raises(fam.FamilyError, match="coverage_required"):  # durante a suspensão o aceite é recusado
+        fam.accept_invite(token, m)
     _post(client, fake, _evt("customer.subscription.updated", owner),
           subs={"sub_f": _sub_stripe("active", cancel=False)})
+    fam.accept_invite(token, m)                                  # o mesmo convite vale de novo
     assert not fg.is_suspended(owner) and _plano(m) == "pro_max"
 
 
