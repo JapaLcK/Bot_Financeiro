@@ -335,7 +335,7 @@ def test_dissolucao_com_nonce_certo_apaga(w):
     assert (j.membros, j.convites, j.consentimentos) == (2, 0, 0)
     r = w.chamar(w.ta, "POST", "/familia/dissolucao", json={"confirmacao": j.confirmacao})
     assert r.status_code == 204
-    me = w.chamar(w.ma1, "GET", "/me").json()  # D3: o membro só descobre pelo app
+    me = w.chamar(w.ma1, "GET", "/me").json()  # membro com plano próprio: /me ainda responde
     assert me["familia"] is None and me["plan_tier"] == "essencial"
     erro(w.chamar(w.ta, "GET", "/familia/dissolucao"), 404, "not_found")
 
@@ -541,3 +541,29 @@ def test_conta_agendada_para_exclusao_nao_aceita_nem_sai(w):
     assert aceitar(w, w.u, t).status_code == 403
     assert w.chamar(w.ma1, "POST", "/familia/sair").status_code == 403
     assert _ativo(w.ma1) and not _ativo(w.u)
+
+
+# ── Rodada do Codex: status pelo acesso efetivo; aviso de dissolução no GET /familia ──
+
+def _status_membros(w, owner):
+    return [m["status"] for m in w.chamar(owner, "GET", "/familia").json()["membros"]]
+
+
+def test_status_do_membro_vem_do_acesso_efetivo_e_nao_do_marcador(w):
+    from core.services.family_access import revoke_members
+    from db.family_grants import set_suspended
+    set_suspended(w.ta, True)  # Stripe falhou, mas o Pix cobre: marcador setado e grants family intactos
+    assert _status_membros(w, w.ta) == ["ativo", "ativo"]
+    sql("update plan_grants set ends_at = now() - interval '1 minute' where source = 'family' and user_id = %s", w.ma1)
+    assert _status_membros(w, w.ta) == ["suspenso", "ativo"]  # grant vencido não é acesso
+    revoke_members(w.ta, "teste")  # sem cobertura: grants revogados
+    assert _status_membros(w, w.ta) == ["suspenso", "suspenso"]
+
+
+def test_dissolucao_membro_sem_plano_le_404_no_familia_e_402_no_me(w):
+    u = _usuario("free")
+    assert aceitar(w, u, fam.create_invite(w.tb)).status_code == 200
+    j = w.chamar(w.tb, "GET", "/familia/dissolucao").json()
+    assert w.chamar(w.tb, "POST", "/familia/dissolucao", json={"confirmacao": j["confirmacao"]}).status_code == 204
+    erro(w.chamar(u, "GET", "/familia"), 404, "not_found")  # o canal do aviso: sem gate de plano
+    erro(w.chamar(u, "GET", "/me"), 402, "plan_selection_required")  # /me segue com o gate de plano

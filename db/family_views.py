@@ -46,21 +46,25 @@ def _primeiro_nome(user_id: int) -> str:
 def owner_view(owner_user_id: int) -> dict | None:
     """{"capacidade", "membros": [{"ref", "nome", "status"}], "convites_ativos"} do grupo do titular, ou None."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select id, members_suspended_at is not null as suspenso from family_groups "
-                    "where owner_user_id = %s", (owner_user_id,))
+        cur.execute("select id from family_groups where owner_user_id = %s", (owner_user_id,))
         g = cur.fetchone()
         if not g:
             return None
+        # status = acesso efetivo: o marcador do grupo fica setado mesmo quando Pix/admin cobrem os membros
         cur.execute(
-            """select id, user_id from family_members
-                where group_id = %s and role = 'member' and left_at is null order by joined_at, id""",
+            """select m.id, m.user_id, exists (
+                     select 1 from plan_grants pg where pg.user_id = m.user_id and pg.source = 'family'
+                        and pg.external_ref = 'family_member:' || m.id and pg.status = 'active'
+                        and pg.starts_at <= now() and pg.ends_at > now()) as ativo
+                 from family_members m
+                where m.group_id = %s and m.role = 'member' and m.left_at is null order by m.joined_at, m.id""",
             (g["id"],),
         )
         membros = cur.fetchall()
         capacidade, convites = _capacity(cur, g["id"]), _convites_ativos(cur, g["id"])
     return {"capacidade": capacidade, "convites_ativos": convites,
             "membros": [{"ref": str(m["id"]), "nome": _primeiro_nome(m["user_id"]),
-                         "status": "suspenso" if g["suspenso"] else "ativo"} for m in membros]}
+                         "status": "ativo" if m["ativo"] else "suspenso"} for m in membros]}
 
 
 def member_user_id(owner_user_id: int, ref: str) -> int | None:
