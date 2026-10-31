@@ -1936,7 +1936,7 @@ function onPiiFilterChange() {
 const USER_STATUS_META = {
   paying:   { label: 'Pagante',      cls: 'badge-ok',      chip: 'green'  },
   trial:    { label: 'Trial',        cls: 'badge-info',    chip: 'blue'   },
-  past_due: { label: 'Inadimplente', cls: 'badge-warning', chip: 'yellow' },
+  past_due: { label: 'Pagamento pendente', cls: 'badge-warning', chip: 'yellow' },
   canceled: { label: 'Cancelado',    cls: 'badge-error',   chip: 'red'    },
   granted:  { label: 'Cortesia',     cls: 'badge-purple',  chip: 'purple' },
   free:     { label: 'Free',         cls: 'badge-muted',   chip: ''       },
@@ -2066,7 +2066,7 @@ function renderUsersChips(agg, billing, funnel, bySource) {
     { key: '',         label: 'Total',        val: fInt(agg.total),    chip: '' },
     { key: 'paying',   label: 'Pagantes',     val: fInt(agg.paying),   chip: 'green' },
     { key: 'trial',    label: 'Em trial',     val: fInt(agg.trial),    chip: 'blue' },
-    { key: 'past_due', label: 'Inadimpl.',    val: fInt(agg.past_due), chip: 'yellow' },
+    { key: 'past_due', label: 'Pag. pendente', val: fInt(agg.past_due), chip: 'yellow' },
     { key: 'canceled', label: 'Cancelados',   val: fInt(agg.canceled), chip: 'red' },
     { key: 'granted',  label: 'Cortesia',     val: fInt(agg.granted),  chip: 'purple' },
     { key: 'free',     label: 'Free',         val: fInt(agg.free),     chip: '' },

@@ -291,6 +291,43 @@ class TestLimits:
         with pytest.raises(PlanLimitExceeded):
             plan_service.check_can_create_launch(1)
 
+    def test_launch_cap_com_pagamento_falho_explica_e_manda_pra_conta(self, v2, monkeypatch):
+        # Caso real: assinante com a cobrança recusada caía no "No Grátis... lotou",
+        # que não diz o que aconteceu e nomeia um plano que não existe mais.
+        u = _user("plus", PAST, plan_selected=PAST)
+        u.update(last_payment_status="past_due", past_due_since=NOW - timedelta(days=1))
+        _patch_user(monkeypatch, u)
+        monkeypatch.setattr("db.plans.count_launches_this_month", lambda uid: 30)
+        with pytest.raises(PlanLimitExceeded) as e:
+            plan_service.check_can_create_launch(1)
+        msg = e.value.message
+        assert "pagamento da sua assinatura falhou" in msg
+        assert "pigbankai.com/conta" in msg and "/precos" not in msg
+        assert "Grátis" not in msg
+
+    def test_launch_cap_sem_carencia_nao_fala_em_gratis(self, v2, monkeypatch):
+        _patch_user(monkeypatch, _user("free"))
+        monkeypatch.setattr("db.plans.count_launches_this_month", lambda uid: 30)
+        with pytest.raises(PlanLimitExceeded) as e:
+            plan_service.check_can_create_launch(1)
+        msg = e.value.message
+        assert "Grátis" not in msg and "pigbankai.com/precos" in msg
+        assert "falhou" not in msg
+
+    def test_launch_cap_erro_ao_ler_conta_nao_afirma_pagamento_falho(self, v2, monkeypatch):
+        # Achado do Tester: erro de banco virava "o pagamento falhou" para quem nunca pagou.
+        chamadas = []
+        def _get(uid):
+            chamadas.append(uid)
+            if len(chamadas) > 1:  # 1ª leitura é a dos limites; a 2ª é a da carência
+                raise RuntimeError("banco caiu")
+            return _user("free")
+        monkeypatch.setattr(plan_service, "get_auth_user", _get)
+        monkeypatch.setattr("db.plans.count_launches_this_month", lambda uid: 30)
+        with pytest.raises(PlanLimitExceeded) as e:
+            plan_service.check_can_create_launch(1)
+        assert "falhou" not in e.value.message
+
     def test_launch_cap_free_abaixo_do_teto(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("free"))
         monkeypatch.setattr("db.plans.count_launches_this_month", lambda uid: 29)
