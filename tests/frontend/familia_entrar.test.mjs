@@ -100,18 +100,18 @@ test("controle negativo: sem o replaceState o hash fica na URL (o teste acima me
   });
 });
 
-test("o e-mail da sessão aparece; 'Não é você? Sair' faz o logout com CSRF e vai a /painel", async () => {
+test("o e-mail da sessão aparece; 'Não é você? Sair' faz o logout com CSRF e volta ao convite", async () => {
   await com({}, async (t) => {
     await aceita(t).waitFor();
     assert.match(await t.texto(), /Entrando como ana\.teste@exemplo\.com\./);
     assert.equal(await t.page.locator("#nav-entrar").isVisible(), false); // logado: só o botão do cartão é rosa
-    const vai = t.page.waitForRequest((q) => new URL(q.url()).pathname === "/painel");
+    const vai = t.page.waitForRequest((q) => q.isNavigationRequest() && new URL(q.url()).pathname === "/familia/entrar");
     await t.page.getByRole("link", { name: "Não é você? Sair" }).click();
     await vai;
     const out = t.reqs.filter((q) => q.url.endsWith("/auth/logout"));
     assert.deepEqual(out.map((q) => [q.metodo, q.csrf]), [["POST", "tok-123"]]);
-    assert.ok(t.reqs.findIndex((q) => q.url.endsWith("/auth/logout")) < t.reqs.findIndex((q) => new URL(q.url).pathname === "/painel")); // sai ANTES de navegar
-    await t.page.waitForURL("**/painel");
+    assert.ok(!t.reqs.some((q) => new URL(q.url).pathname === "/painel")); // não passa pelo /painel (o next=/painel venceria o convite)
+    await aceita(t).waitFor(); // a página do convite recarregou (o mock segue com sessão) e terminou de montar
     assert.equal((await t.guardado())?.t, TOKEN); // a limpeza do logout não leva o convite pendente
   });
 });

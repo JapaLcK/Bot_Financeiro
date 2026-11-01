@@ -51,7 +51,8 @@
 
   function sairDaConta() {
     try { localStorage.setItem("finbot_logout_at", String(Date.now())); } catch (_) {}
-    const fim = function () { location.assign("/painel"); };
+    // volta ao próprio convite (não ao /painel): o /painel mandaria a /login?next=/painel e o next venceria o convite
+    const fim = function () { location.assign("/familia/entrar"); };
     fetch("/auth/logout", { method: "POST", credentials: "same-origin", headers: window.pbCsrfHeaders ? window.pbCsrfHeaders() : {} }).then(fim, fim);
   }
 
