@@ -2,7 +2,7 @@ import * as Haptics from "expo-haptics";
 import { AccessibilityInfo, Dimensions, StyleSheet } from "react-native";
 import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { guardarCredenciais } from "@/storage/secure";
-import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
+import { fetchFalso, NO_MES_DO_TESTE, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import { trocarParaBela } from "./conversa_apoio";
 import fixture from "./painel.fixture.json";
@@ -34,8 +34,9 @@ function servidor() {
   return resposta(200, (fixture as Record<string, unknown>)[path.replace("/2/", "/1/")] ?? {});
  });
 }
+// Os chips de mês ("out", "setembro de 2026") são de outubro de 2026.
 beforeEach(async () => {
- prepararCaso(); desligarTrava(); perfil = "padrao"; sem = undefined; jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear(); jest.mocked(Haptics.notificationAsync).mockClear();
+ NO_MES_DO_TESTE(); prepararCaso(); desligarTrava(); perfil = "padrao"; sem = undefined; jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear(); jest.mocked(Haptics.notificationAsync).mockClear();
  marcas = { "extrato#sal": "pendente", "extrato#free": "pendente", "extrato#alu": "confirmada", "extrato#tio": "negada" };
  await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor();
 });

@@ -130,3 +130,6 @@ export const chamadas = () =>
     auth: (o.headers as Record<string, string>)["Authorization"],
     corpo: o.body === undefined ? undefined : JSON.parse(String(o.body)),
   }));
+// Para os testes cujas datas, rótulos e fixtures são de outubro de 2026: o relógio fica em outubro e o teste não quebra
+// na virada do mês. Só o Date é falso; o renderRouter guarda este horário. Chame no beforeEach, antes de renderizar.
+export const NO_MES_DO_TESTE = () => jest.useFakeTimers({ now: new Date("2026-10-15T15:00:00Z"), doNotFake: ["nextTick", "queueMicrotask", "setImmediate", "clearImmediate", "setInterval", "clearInterval", "setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame", "requestIdleCallback", "cancelIdleCallback", "performance", "hrtime"] });
