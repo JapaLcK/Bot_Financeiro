@@ -134,5 +134,5 @@ def rodar_uma_vez(agora: datetime | None = None) -> int:
             _um(uid, etapa, agora)
             feitos += 1
         except Exception as exc:     # uma falha não derruba o lote
-            _log.warning("remarketing user_id=%s etapa=%s falhou: %s", uid, etapa, type(exc).__name__)
+            _log.warning("remarketing etapa=%s falhou: %s", etapa, type(exc).__name__, extra={"user_id": uid})
     return feitos
