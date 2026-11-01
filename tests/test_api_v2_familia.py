@@ -130,7 +130,7 @@ def aceitar(w, uid, token):
 
 def test_i1_membro_ve_so_o_papel(w):
     r = w.chamar(w.ma1, "GET", "/familia")
-    assert r.status_code == 200 and r.json() == {"papel": "membro"}
+    assert r.status_code == 200 and r.json() == {"papel": "membro", "permissoes": []}
     VisaoMembro.model_validate(r.json())
 
 
@@ -141,7 +141,7 @@ def test_i2_titular_ve_so_os_seus_com_chaves_exatas(w):
     VisaoTitular.model_validate(j)
     assert set(j) == {"papel", "capacidade", "membros", "convites_ativos"}
     assert j["papel"] == "titular" and j["capacidade"] == 4
-    assert all(set(m) == {"ref", "nome", "status"} for m in j["membros"])
+    assert all(set(m) == {"ref", "nome", "status", "permissoes"} for m in j["membros"])
     # só os membros de A, só o primeiro nome
     assert [(m["ref"], m["nome"], m["status"]) for m in j["membros"]] == [
         (_ref(w.ma1), "Maria", "ativo"), (_ref(w.ma2), "Joao", "ativo")]
@@ -199,7 +199,7 @@ def test_i5_token_de_a_entra_u_em_a_e_tb_recebe_already_in_family(w):
     t = convite(w, w.ta)
     erro(aceitar(w, w.tb, t), 409, "already_in_family")
     r = aceitar(w, w.u, t)  # usuário free: sem 402
-    assert r.status_code == 200 and r.json() == {"papel": "membro"}
+    assert r.status_code == 200 and r.json() == {"papel": "membro", "permissoes": []}
     VisaoMembro.model_validate(r.json())
     assert _ativo(w.u) and _ref(w.u) in [m["ref"] for m in w.chamar(w.ta, "GET", "/familia").json()["membros"]]
 
@@ -445,7 +445,7 @@ def _free_membro_de_grupo_suspenso(w):
 def test_membro_sem_plano_ve_a_familia_sai_e_entra_em_outra(w):
     _free_membro_de_grupo_suspenso(w)
     r = w.chamar(w.u, "GET", "/familia")
-    assert r.status_code == 200 and r.json() == {"papel": "membro"}
+    assert r.status_code == 200 and r.json() == {"papel": "membro", "permissoes": []}
     assert w.chamar(w.u, "POST", "/familia/sair").status_code == 204
     assert aceitar(w, w.u, fam.create_invite(w.ta)).status_code == 200
     assert _ativo(w.u)

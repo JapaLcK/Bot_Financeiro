@@ -10219,12 +10219,12 @@
       "papel": "titular",
       "capacidade": 4,
       "membros": [
-        { "ref": "9f1c2a40-7b1e-4a53-8d3a-0c5d6e7f8a91", "nome": "Maria", "status": "ativo" },
-        { "ref": "b2d4f6a8-1c3e-4a5b-9d7f-123456789abc", "nome": "João", "status": "suspenso" }
+        { "ref": "9f1c2a40-7b1e-4a53-8d3a-0c5d6e7f8a91", "nome": "Maria", "status": "ativo", "permissoes": ["agregados"] },
+        { "ref": "b2d4f6a8-1c3e-4a5b-9d7f-123456789abc", "nome": "João", "status": "suspenso", "permissoes": [] }
       ],
       "convites_ativos": 0
     },
-    "membro": { "papel": "membro" },
+    "membro": { "papel": "membro", "permissoes": [] },
     "convite": {
       "token": "tok-ABC_def-123",
       "link": "https://pigbankai.com/familia/entrar#t=tok-ABC_def-123",

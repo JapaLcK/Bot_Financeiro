@@ -205,6 +205,12 @@ TABELA = {
     # sem gate de plano (quem não tem plano aceita, vê e sai), COM a perna da senha: `usuario_logado`/`usuario_sessao`
     **{(m, f"{pre}{p}"): (B, "usuario_logado (sem assinatura, com credencial)") for pre in ("/api/v2", "/api/app")
        for m, p in (("GET", "/familia"), ("POST", "/familia/sair"), ("POST", "/familia/convites/aceitar"))},
+    # PR 4 (api/v2/familia_dados.py): consentimento do membro (usuario_logado) e leitura do titular (usuario_atual)
+    **{(m, f"{pre}{p}"): (B, "usuario_logado (sem assinatura, com credencial)") for pre in ("/api/v2", "/api/app")
+       for m, p in (("POST", "/familia/permissoes"), ("DELETE", "/familia/permissoes/{escopo}"),
+                    ("GET", "/familia/historico"))},
+    **{(m, f"{pre}{p}"): (B, gate) for pre, gate in (("/api/v2", "usuario_atual"), ("/api/app", "usuario_do_app"))
+       for m, p in (("GET", "/familia/membros/{ref}/agregados"), ("GET", "/familia/membros/{ref}/lancamentos"))},
     ("WS", "/ws/{user_id}"): (B, "close 4403"),
     # ── HTML autenticado ──
     ("GET", "/app"): (L, "casca; o overlay sobe"), ("GET", "/home"): (L, "casca; o overlay sobe"),
