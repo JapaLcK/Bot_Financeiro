@@ -120,10 +120,11 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     nome, email = await asyncio.to_thread(_titular, user_id)
     try:
         async with _billing_user_lock(user_id):
-            return await asyncio.to_thread(
+            res = await asyncio.to_thread(
                 criar_checkout, user_id, plan_stored=plan_stored, cpf_cnpj=doc,
                 nome=nome, email=email, rastreio=_rastreio(request),
                 confirm_cancel_stripe=bool(payload.confirm_cancel_stripe), extras=extras)
+            return {**res, "retomada": True} if retomada else res
     except ExtrasIndisponiveis as exc:   # a oferta relida no POST, sem consulta nova
         raise HTTPException(status_code=409, detail={
             "error": exc.ERRO, "extras": exc.oferta}) from exc

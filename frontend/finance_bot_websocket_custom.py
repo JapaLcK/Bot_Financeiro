@@ -5558,7 +5558,10 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             f"&td={trial_days}&pl={plan}&ia={ia_quota}"
         )
         if retomada_etapa:   # sem sessão não há /home: a volta é a página própria da retomada
-            success_url = f"{DASHBOARD_URL}/retomar/pronto?sid={{CHECKOUT_SESSION_ID}}"
+            success_url = (
+                f"{DASHBOARD_URL}/retomar/pronto?sid={{CHECKOUT_SESSION_ID}}"
+                f"&ev={'trial' if trial_days > 0 else 'purchase'}"
+            )
 
         kwargs = dict(
             customer=cust_id,
