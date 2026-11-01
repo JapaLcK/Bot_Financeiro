@@ -126,6 +126,7 @@ def test_rotas_institucionais_e_precos_fazem_opt_in():
         "precos.html",
         "blog.html",
         "lp.html",
+        "quiz.html",  # quiz do Piggy: tráfego pago, mesmo opt-in da /lp
         "inicio-antiga.html",
     }
 
