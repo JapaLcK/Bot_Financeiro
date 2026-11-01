@@ -148,7 +148,7 @@ test("⌘K lista as rotas da Conta", async () => {
   await page.locator(".cmdk-item").first().waitFor();
   const itens = await page.locator(".cmdk-item").allTextContents();
   await ctx.close();
-  for (const rotulo of ["Perfil", "Cobrança", "Configurações", "Bancos conectados"]) assert.ok(itens.some((t) => t.includes(rotulo)), rotulo);
+  for (const rotulo of ["Perfil", "Cobrança", "Configurações", "Bancos conectados", "Família"]) assert.ok(itens.some((t) => t.includes(rotulo)), rotulo);
 });
 
 // O trilho é sticky, com a altura da janela e sem rolagem: o Sair é o último e tem de estar à vista.
@@ -262,7 +262,7 @@ test("perfil com display_name número e email objeto: a página da Conta abre, s
   assert.deepEqual(erros, []);
 });
 
-test("celular 390×844: a folha do Menu tem o grupo Conta (Perfil, Cobrança, Configurações, Bancos conectados, Sair) e o Sair se alcança rolando", async () => {
+test("celular 390×844: a folha do Menu tem o grupo Conta (Perfil, Cobrança, Configurações, Bancos conectados, Família, Sair) e o Sair se alcança rolando", async () => {
   const { s, antes } = conta({ logout: "lento" });
   const { ctx, page } = await abrir({ guia: "concluido", width: 390, height: 844, antes });
   await page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
@@ -276,7 +276,7 @@ test("celular 390×844: a folha do Menu tem o grupo Conta (Perfil, Cobrança, Co
   await page.locator(".menu-telas-conta").getByRole("button", { name: "Sair" }).dblclick(); // dois cliques seguidos: um POST só
   await page.waitForURL(`${ORIGIN}/?logout=1`);
   await ctx.close();
-  assert.deepEqual(r, { titulo: "Conta", itens: ["Perfil", "Cobrança", "Configurações", "Bancos conectados", "Sair"], rail: "none", alcanca: true });
+  assert.deepEqual(r, { titulo: "Conta", itens: ["Perfil", "Cobrança", "Configurações", "Bancos conectados", "Família", "Sair"], rail: "none", alcanca: true });
   assert.equal(s.posts.length, 1);
 });
 
@@ -302,7 +302,7 @@ test("protótipo (DEMO, mesmo bundle): sem seção Conta, sem Sair, rota da Cont
   await ctx.close();
   assert.deepEqual(r, { hash: "#/", titulo: r.titulo, conta: 0, folha: 0, ficou: true });
   assert.match(r.titulo, /^Resumo/);
-  assert.ok(!/Perfil|Cobrança|Configurações|Bancos conectados|Sair/.test(itens), itens);
+  assert.ok(!/Perfil|Cobrança|Configurações|Bancos conectados|Família|Sair/.test(itens), itens);
 });
 
 test("protótipo (DEMO): #/conta/cobranca também cai no Resumo, sem 'Carregando…' e sem nenhum pedido a /billing", async () => {

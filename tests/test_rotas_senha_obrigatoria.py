@@ -217,7 +217,7 @@ _HTML_PUBLICO = (
     "/", "/login", "/cadastro", "/q", "/recuperar-senha", "/suporte/contato", "/privacy",
     "/termos", "/blog", "/whatsapp", "/funcionalidades", "/comandos", "/comandos-app",
     "/agents", "/como-funciona", "/precos", "/lp", "/oferta", "/inicio-antiga", "/vsl", "/continuar-compra", "/assinar", "/suporte",
-    "/reset-password", "/redefinir-senha", "/completar-cadastro",
+    "/reset-password", "/redefinir-senha", "/completar-cadastro", "/familia/entrar",
     "/.well-known/apple-app-site-association",
 )
 TABELA.update({("GET", p): (P, "página pública") for p in _HTML_PUBLICO})

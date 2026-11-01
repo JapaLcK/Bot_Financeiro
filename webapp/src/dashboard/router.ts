@@ -30,6 +30,7 @@ export const ROUTES = [
   { path: "/conta/cobranca", label: "Cobrança", short: "Cobrança", icon: "ph-credit-card", title: "Cobrança" },
   { path: "/conta/configuracoes", label: "Configurações", short: "Configurações", icon: "ph-gear", title: "Configurações" },
   { path: "/conta/bancos", label: "Bancos conectados", short: "Bancos", icon: "ph-bank", title: "Bancos conectados" },
+  { path: "/conta/familia", label: "Família", short: "Família", icon: "ph-users-three", title: "Família" },
 ] as const;
 
 export type Path = (typeof ROUTES)[number]["path"];
@@ -37,7 +38,7 @@ export type Path = (typeof ROUTES)[number]["path"];
 // não está aqui (Previsão, Metas, Simulador…) abre por ele, e a Ajuda também.
 export const TABBAR: Path[] = ["/", "/gastos", "/piggy", "/lancamentos"];
 // O Piggy não entra no menu lateral: no desktop o acesso é a barra de conversa. O Orçamento doméstico, os Orçamentos por categoria e o Progresso ao milhão também não (só Ferramentas e ⌘K).
-export const CONTA: Path[] = ["/conta/perfil", "/conta/cobranca", "/conta/configuracoes", "/conta/bancos"];
+export const CONTA: Path[] = ["/conta/perfil", "/conta/cobranca", "/conta/configuracoes", "/conta/bancos", "/conta/familia"];
 export const RAIL: Path[] = ROUTES.map((r) => r.path).filter((p) => p !== "/piggy" && p !== "/simulador/compra" && p !== "/orcamento" && p !== "/orcamentos-categoria" && p !== "/milhao" && p !== "/agentes" && !CONTA.includes(p));
 // O protótipo (DEMO) não tem conta: as rotas da Conta não existem nele (nem hash, nem ⌘K).
 export const ATIVAS = ROUTES.filter((r) => !(DEMO && (CONTA.includes(r.path) || r.path === "/simulador/compra")));

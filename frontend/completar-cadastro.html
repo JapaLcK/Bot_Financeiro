@@ -17,6 +17,8 @@
 </script>
 <script defer="" src="/purchase-intent.js?v=1">
 </script>
+<script defer="" src="/familia-convite.js?v=1">
+</script>
 <link href="/phosphor.css?v=1" rel="stylesheet"/>
 </head>
 <body class="lp lp-auth lp-auth-page">
@@ -151,10 +153,10 @@ document.getElementById("signup-form").addEventListener("submit", async function
     // `pbTrack` porque o replace abaixo destrói a página (ver o snippet em
     // frontend/routes/shared.py): sem esperar, o evento morre no dataLayer.
     const irPraDash = () => {
-      const destino = window.PBPurchaseIntent
+      const depois = window.PBPurchaseIntent
         ? window.PBPurchaseIntent.afterAuth(data.dashboard_url || "/home")
         : (data.dashboard_url || "/home");
-      window.location.replace(destino);
+      window.location.replace(window.PBFamiliaConvite ? window.PBFamiliaConvite.destino(depois) : depois);
     };
     if (window.pbTrack && data.user_id) { pbTrack("sign_up", { method: "google" }, irPraDash); }
     else { irPraDash(); }
