@@ -21,6 +21,8 @@ const TOKEN = "Tok-0123456789_abcdefghijklmnopqrstuvwxyzABCDEF";
 const KEY = "pb_familia_convite_v1";
 const TIPOS = { ".js": "application/javascript", ".css": "text/css", ".html": "text/html; charset=utf-8", ".webp": "image/webp", ".png": "image/png", ".svg": "image/svg+xml", ".woff2": "font/woff2" };
 const ERRO = (status, code) => (r) => r.fulfill({ status, json: { error: { code, message: "x" } } });
+// O 401 do servidor real (resolve_dashboard_user_id) leva WWW-Authenticate: é o que aciona o refresh do auth-refresh.js.
+const NAO_AUTENTICADO = (r) => r.fulfill({ status: 401, headers: { "WWW-Authenticate": "Bearer" }, json: { error: { code: "unauthorized", message: "x" } } });
 const PAGINAS = { "/familia/entrar": "familia-entrar.html", "/login": "login.html", "/cadastro": "cadastro.html", "/completar-cadastro": "completar-cadastro.html" };
 
 // A página como o servidor a entrega (a rota do backend é testada em test_familia_entrar.py), com a API de mentira. `s.get`/`s.aceitar`: (route) => resposta.
@@ -67,7 +69,9 @@ async function abrir({ hash = `#t=${TOKEN}`, caminho = "/familia/entrar", width 
     fecha: () => ctx.close(),
   };
 }
-const com = async (opts, fn) => { const t = await abrir(opts); try { await fn(t); assert.deepEqual(t.erros.filter((e) => !/ViewTransition/.test(e)), [], "pageerror"); } finally { await t.fecha(); } };
+// Ruído do navegador ao sair de uma página com @view-transition (/login, /cadastro): "opt-in disabled" ou, sob carga, "Transition was skipped".
+const RUIDO_VT = /ViewTransition|Transition was skipped/;
+const com = async (opts, fn) => { const t = await abrir(opts); try { await fn(t); assert.deepEqual(t.erros.filter((e) => !RUIDO_VT.test(e)), [], "pageerror"); } finally { await t.fecha(); } };
 const aceita = (t) => t.page.getByRole("button", { name: "Entrar na família" });
 
 test("o token sai da URL: hash vazio, guardado só no sessionStorage, nenhuma requisição o leva na URL, nada vai ao GA4/Pixel", async () => {
@@ -107,11 +111,36 @@ test("o e-mail da sessão aparece; 'Não é você? Sair' faz o logout com CSRF e
     const out = t.reqs.filter((q) => q.url.endsWith("/auth/logout"));
     assert.deepEqual(out.map((q) => [q.metodo, q.csrf]), [["POST", "tok-123"]]);
     assert.ok(t.reqs.findIndex((q) => q.url.endsWith("/auth/logout")) < t.reqs.findIndex((q) => new URL(q.url).pathname === "/painel")); // sai ANTES de navegar
+    await t.page.waitForURL("**/painel");
+    assert.equal((await t.guardado())?.t, TOKEN); // a limpeza do logout não leva o convite pendente
+  });
+});
+
+test("conta trocada em outra aba: antes do POST relê o perfil; e-mail diferente mostra o novo e exige novo clique (sem POST)", async () => {
+  let n = 0;
+  const perfil = (r) => r.fulfill({ json: { user_id: 5, email: ++n === 1 ? "ana.teste@exemplo.com" : "outra@exemplo.com" } });
+  await com({ s: { perfil } }, async (t) => {
+    await aceita(t).waitFor();
+    await aceita(t).click();
+    await t.page.getByText("Entrando como outra@exemplo.com.").waitFor();
+    assert.equal(t.reqs.filter((q) => q.url.endsWith("/convites/aceitar")).length, 0);
+    await aceita(t).click(); // confirmou a conta nova: agora envia
+    await t.esperaH1("Você entrou na família.");
+    assert.equal(t.reqs.filter((q) => q.url.endsWith("/convites/aceitar")).length, 1);
+  });
+});
+
+test("conta igual no reler: o clique envia o aceite direto", async () => {
+  await com({}, async (t) => {
+    await aceita(t).waitFor();
+    await aceita(t).click();
+    await t.esperaH1("Você entrou na família.");
+    assert.equal(t.reqs.filter((q) => q.url.endsWith("/convites/aceitar")).length, 1);
   });
 });
 
 test("sem sessão (401): Entrar e Criar conta, sem token nos links; o convite segue guardado e o destino volta a ele", async () => {
-  await com({ s: { get: ERRO(401, "unauthorized") } }, async (t) => {
+  await com({ s: { get: NAO_AUTENTICADO } }, async (t) => {
     await t.esperaH1("Entre para aceitar o convite");
     assert.equal(await t.page.locator("#nav-entrar").isVisible(), true); // sem sessão: o Entrar da barra segue
     const links = await t.page.locator("#acoes a").evaluateAll((es) => es.map((e) => [e.textContent, e.getAttribute("href")]));
@@ -119,6 +148,10 @@ test("sem sessão (401): Entrar e Criar conta, sem token nos links; o convite se
     assert.equal((await t.guardado()).t, TOKEN);
     assert.equal(await t.page.evaluate(() => window.PBFamiliaConvite.destino("/home")), "/familia/entrar");
     assert.equal(t.page.url().includes(TOKEN), false);
+    assert.ok(t.reqs.some((q) => q.url.endsWith("/auth/refresh")), "o 401 com WWW-Authenticate passou pelo refresh (e a limpeza de conta)");
+    await t.page.getByRole("link", { name: "Entrar" }).last().click();
+    await t.page.waitForURL("**/login");
+    assert.equal((await t.guardado()).t, TOKEN); // o convite é intenção do visitante, não dado da conta: sobrevive até o login
   });
 });
 
@@ -287,7 +320,7 @@ test("/completar-cadastro (cadastro novo pelo Google): com convite vai ao convit
 
 const sessaoViva = (r) => r.fulfill({ json: { dashboard_url: "/painel" } });
 // "ViewTransition opt-in disabled": ruído do navegador ao sair de uma página com @view-transition (o /login e o /cadastro, com ou sem convite).
-const vaiPara = async (t, destino) => { await t.page.waitForURL(`${ORIGIN}${destino}`); t.erros = t.erros.filter((e) => !/ViewTransition/.test(e)); };
+const vaiPara = async (t, destino) => { await t.page.waitForURL(`${ORIGIN}${destino}`); t.erros = t.erros.filter((e) => !RUIDO_VT.test(e)); };
 
 test("/login: sessão viva sem convite segue o destino de sempre; com convite vai ao convite; ?next= interno manda mais", async () => {
   await com({ hash: "", caminho: "/login", s: { validate: sessaoViva } }, (t) => vaiPara(t, "/painel"));

@@ -102,16 +102,39 @@
     }, function () { mostrar("Não foi possível abrir o convite", GENERICO, [tentar]); });
   }
 
+  // O e-mail da conta da sessão agora, ou "" se não deu para saber.
+  function emailDaSessao() {
+    return fetch("/auth/dashboard-profile", { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? json(r) : null; }, function () { return null; })
+      .then(function (p) { return p && typeof p.email === "string" ? p.email : ""; });
+  }
+
+  const indisponivel = function () { mostrar("Não foi possível abrir o convite", GENERICO, [tentar]); };
+
+  function oferecer(email) {
+    mostrar("Entrar na família", "Você foi convidado para uma família no PigBank.", [{ texto: "Entrar na família", agir: function (b) { conferir(email, b); }, primario: true }], email);
+  }
+
+  // A conta pode ter mudado em outra aba (os cookies são compartilhados): o POST vale para a conta de AGORA,
+  // então relê antes de enviar e, se mudou, mostra a nova e pede novo clique.
+  function conferir(esperado, botao) {
+    if (botao.disabled) return;
+    botao.disabled = true;
+    emailDaSessao().then(function (email) {
+      if (!email) return indisponivel();
+      if (email !== esperado) return oferecer(email);
+      botao.disabled = false;
+      aceitar(botao);
+    });
+  }
+
   // Sem família: mostra com quem o aceite vai valer, e o clique é do usuário.
   function confirmar() {
-    fetch("/auth/dashboard-profile", { credentials: "same-origin", headers: { Accept: "application/json" } })
-      .then(function (r) { return r.ok ? json(r) : null; }, function () { return null; })
-      .then(function (p) {
-        const email = p && typeof p.email === "string" ? p.email : "";
-        // Sem saber com quem o aceite vale, não se oferece o aceite.
-        if (!email) return mostrar("Não foi possível abrir o convite", GENERICO, [tentar]);
-        mostrar("Entrar na família", "Você foi convidado para uma família no PigBank.", [{ texto: "Entrar na família", agir: aceitar, primario: true }], email);
-      });
+    emailDaSessao().then(function (email) {
+      // Sem saber com quem o aceite vale, não se oferece o aceite.
+      if (!email) return indisponivel();
+      oferecer(email);
+    });
   }
 
   inicio();

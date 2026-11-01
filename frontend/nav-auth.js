@@ -53,7 +53,7 @@
   // qualquer coisa derivada da CONTA sai. Lista do que preservar e não do que
   // apagar, para falhar fechado: chave nova derivada de conta é apagada por
   // default. `tests/frontend/sw_cache_privado.test.mjs` compara as duas (§0.7).
-  const PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos", "pbDebug", "pbSpa", "finbot_logout_at", "finbot_reset_at"];
+  const PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos", "pbDebug", "pbSpa", "finbot_logout_at", "finbot_reset_at", "pb_familia_convite_v1"];
 
   // Recebe o NOME, não o objeto: `window.localStorage` é um getter que LANÇA
   // com dados do site bloqueados, e a avaliação do argumento ficava fora do

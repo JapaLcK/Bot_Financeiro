@@ -97,6 +97,32 @@ test("convite: gerar, ver link e validade, copiar, revogar só o recém-gerado",
   });
 });
 
+test("revogar com 404 (convite já aceito ou inexistente): o link sai da tela, a família é relida e dá para gerar outro", async () => {
+  await com({ visao: titular({ membros: [MARIA] }), antes: clipboard }, async ({ s, bt, secao, escritas }) => {
+    await bt("Gerar link de convite").click();
+    await secao.getByText("https://pigbankai.com/familia/entrar#t=tok-1").waitFor();
+    s.revogar = ERRO(404, "not_found");
+    const gets = () => s.reqs.filter((q) => q.metodo === "GET" && q.caminho === "").length;
+    const antes = gets();
+    await bt("Revogar").click();
+    await bt("Gerar link de convite").waitFor();
+    assert.equal(await secao.getByText("tok-1").count(), 0);
+    assert.ok(gets() > antes, "releu a família");
+    assert.equal(escritas().filter((q) => q.metodo === "DELETE").length, 1);
+  });
+});
+
+test("revogar com 500 mantém o link na tela e avisa", async () => {
+  await com({ visao: titular({ membros: [MARIA] }), antes: clipboard }, async ({ s, bt, secao }) => {
+    await bt("Gerar link de convite").click();
+    await secao.getByText("https://pigbankai.com/familia/entrar#t=tok-1").waitFor();
+    s.revogar = ERRO(500, "internal");
+    await bt("Revogar").click();
+    await secao.getByRole("alert").waitFor();
+    assert.equal(await secao.getByText("tok-1").count(), 1);
+  });
+});
+
 test("copiar sem permissão avisa; Compartilhar só existe com navigator.share", async () => {
   await com({ visao: titular({ membros: [] }) }, async ({ bt, secao, page }) => {
     await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: () => Promise.reject(new Error("negado")) }, configurable: true }); });

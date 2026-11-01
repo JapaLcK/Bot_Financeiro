@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { gerarConvite, revogarConvite, validade, type Convite as DadosConvite } from "./api";
+import { useQueryClient } from "@tanstack/react-query";
+import { ErroApi } from "../lib/v2";
+import { familiaQuery, gerarConvite, revogarConvite, validade, type Convite as DadosConvite } from "./api";
 import { focarTitulo, type useEscrita } from "./escrita";
 
 // Convite: gera o link, mostra com a validade, copia/compartilha e revoga. O token só vive neste estado (nunca em storage, URL ou cache):
 // sair da tela o perde, e o convite segue valendo até expirar (o titular não tem como listá-lo de novo).
 export function Convite({ cheio, escrita }: { cheio: boolean; escrita: ReturnType<typeof useEscrita> }) {
   const { ocupado, rodar } = escrita;
+  const qc = useQueryClient();
   const [convite, setConvite] = useState<DadosConvite | null>(null);
   const [aviso, setAviso] = useState("");
   const link = useRef<HTMLParagraphElement>(null);
@@ -19,8 +22,12 @@ export function Convite({ cheio, escrita }: { cheio: boolean; escrita: ReturnTyp
   const revogar = async () => {
     if (!convite) return;
     setAviso("");
-    // 404 = o convite já não existe: a meta (link fora de uso) está cumprida; o servidor responde igual para token errado.
-    if (await rodar(() => revogarConvite(convite.token))) setConvite(null);
+    // 404 = o convite já não existe (aceito ou vencido): a meta (link fora de uso) está cumprida. Solta o link e relê a família.
+    const ok = await rodar(() => revogarConvite(convite.token).catch((e) => {
+      if (!(e instanceof ErroApi && e.status === 404)) throw e;
+      qc.invalidateQueries({ queryKey: familiaQuery.queryKey });
+    }));
+    if (ok) setConvite(null);
   };
   const copiar = () => {
     if (!convite) return;
