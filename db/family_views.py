@@ -9,6 +9,7 @@ import re
 
 from .connection import get_conn
 from .family import _capacity
+from .family_consents import ESCOPO_API, list_consents
 
 logger = logging.getLogger(__name__)
 _REF = re.compile(r"[0-9]{1,18}")
@@ -44,7 +45,7 @@ def _primeiro_nome(user_id: int) -> str:
 
 
 def owner_view(owner_user_id: int) -> dict | None:
-    """{"capacidade", "membros": [{"ref", "nome", "status"}], "convites_ativos"} do grupo do titular, ou None."""
+    """{"capacidade", "membros": [{"ref", "nome", "status", "permissoes"}], "convites_ativos"} do grupo do titular, ou None."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("select id from family_groups where owner_user_id = %s", (owner_user_id,))
         g = cur.fetchone()
@@ -62,9 +63,13 @@ def owner_view(owner_user_id: int) -> dict | None:
         )
         membros = cur.fetchall()
         capacidade, convites = _capacity(cur, g["id"]), _convites_ativos(cur, g["id"])
+    dados: dict = {}
+    for c in list_consents(owner_user_id):
+        dados.setdefault(c["member_user_id"], []).append(c["scope"])
     return {"capacidade": capacidade, "convites_ativos": convites,
             "membros": [{"ref": str(m["id"]), "nome": _primeiro_nome(m["user_id"]),
-                         "status": "ativo" if m["ativo"] else "suspenso"} for m in membros]}
+                         "status": "ativo" if m["ativo"] else "suspenso",
+                         "permissoes": [ESCOPO_API[s] for s in dados.get(m["user_id"], [])]} for m in membros]}
 
 
 def member_user_id(owner_user_id: int, ref: str) -> int | None:

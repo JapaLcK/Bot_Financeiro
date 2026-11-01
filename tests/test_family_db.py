@@ -206,14 +206,14 @@ def test_dissolucao_apaga_casa_e_mantem_log_com_group_null():
     _vaga(gid, a)
     _sql("insert into family_budgets (group_id, created_by_user_id, categoria, limite_cents) values (%s,%s,'x',1)", (gid, a))
     _sql("insert into family_goals (group_id, created_by_user_id, nome, alvo_cents) values (%s,%s,'x',1)", (gid, a))
-    fc.log_read(gid, a, m, "aggregates", "resumo_mes")
+    fc.log_read(gid, a, m, "aggregates", "agregados:2026-10")
     assert fam.dissolve_group(a) is True
     for t in ("family_groups", "family_members", "family_invites", "family_consents",
               "family_seat_purchases", "family_budgets", "family_goals"):
         col = "id" if t == "family_groups" else "group_id"
         assert _sql(f"select count(*) n from {t} where {col}=%s", (gid,), fetch=True)[0]["n"] == 0, t
     log = _sql("select group_id, viewer_user_id, recurso from family_access_log where member_user_id=%s", (m,), fetch=True)
-    assert log == [{"group_id": None, "viewer_user_id": a, "recurso": "resumo_mes"}]
+    assert log == [{"group_id": None, "viewer_user_id": a, "recurso": "agregados:2026-10"}]
     assert fam.dissolve_group(a) is False
     fam.create_group(a)  # titular e membro podem formar nova família
     fam.create_group(m)
@@ -284,22 +284,22 @@ def test_log_read_so_com_titular_membro_e_consentimento_ativos():
     outro, gid2, (m2,) = _casa(1)
     n = lambda: _sql("select count(*) n from family_access_log where group_id in (%s,%s)", (gid, gid2), fetch=True)[0]["n"]
     with pytest.raises(fam.FamilyError, match="no_consent"):
-        fc.log_read(gid, a, m, "aggregates", "r")  # sem consentimento
+        fc.log_read(gid, a, m, "aggregates", "agregados:2026-10")  # sem consentimento
     fc.grant_consent(m, "aggregates")
     with pytest.raises(fam.FamilyError, match="no_consent"):
-        fc.log_read(gid, a, m, "transactions", "r")  # escopo não concedido
+        fc.log_read(gid, a, m, "transactions", "lancamentos:2026-10")  # escopo não concedido
     with pytest.raises(fam.FamilyError, match="not_owner"):
-        fc.log_read(gid, outro, m, "aggregates", "r")  # viewer de outro grupo
+        fc.log_read(gid, outro, m, "aggregates", "agregados:2026-10")  # viewer de outro grupo
     with pytest.raises(fam.FamilyError, match="not_owner"):
-        fc.log_read(gid2, a, m, "aggregates", "r")  # grupo errado
+        fc.log_read(gid2, a, m, "aggregates", "agregados:2026-10")  # grupo errado
     with pytest.raises(fam.FamilyError, match="no_consent"):
-        fc.log_read(gid, a, m2, "aggregates", "r")  # membro de outro grupo
+        fc.log_read(gid, a, m2, "aggregates", "agregados:2026-10")  # membro de outro grupo
     assert n() == 0
-    fc.log_read(gid, a, m, "aggregates", "r")  # positivo
+    fc.log_read(gid, a, m, "aggregates", "agregados:2026-10")  # positivo
     assert n() == 1
     fam.remove_member(a, m)
     with pytest.raises(fam.FamilyError, match="no_consent"):
-        fc.log_read(gid, a, m, "aggregates", "r")  # saiu
+        fc.log_read(gid, a, m, "aggregates", "agregados:2026-10")  # saiu
     assert n() == 1
 
 
@@ -467,3 +467,20 @@ def test_validade_conferida_no_relogio_depois_do_lock():
          " values (%s,'pix',%s,1000,'paid',clock_timestamp() + interval '0.5 s')", (gid_b, uuid.uuid4().hex))
     tok_b = fam.create_invite(b)
     assert _segura_lock_e_mexe(b, lambda: fam.accept_invite(tok_b, _u()), lambda c: None) == "full"
+
+
+@pytest.mark.parametrize("recurso", ["resumo_mes", "r", "", "agregados:2026-10:x", "agregados:2026-1", "x agregados:2026-10",
+                                     "lancamentos:2026-10", "agregados:2026-10\n"])
+def test_log_read_recusa_recurso_fora_do_contrato_ou_de_outro_escopo_sem_gravar(recurso):
+    a, gid, (m,) = _casa(1)
+    fc.grant_consent(m, "aggregates")
+    with pytest.raises(fam.FamilyError, match="bad_recurso"):
+        fc.log_read(gid, a, m, "aggregates", recurso)
+    assert _sql("select count(*) n from family_access_log where group_id=%s", (gid,), fetch=True)[0]["n"] == 0
+    fc.log_read(gid, a, m, "aggregates", "agregados:2026-10")  # positivo: o formato válido grava
+    assert _sql("select count(*) n from family_access_log where group_id=%s", (gid,), fetch=True)[0]["n"] == 1
+
+
+def test_escopo_literal_e_dict_em_sincronia():
+    from typing import get_args
+    assert set(get_args(fc.Escopo)) == set(fc.ESCOPO_BANCO)

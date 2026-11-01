@@ -117,6 +117,6 @@ def test_cadastro_novo_aceita_o_convite_e_entra_no_painel_sem_ir_aos_precos(monk
     csrf = c.cookies.get("csrf_token")  # emitido no GET acima; o navegador o devolve no X-CSRF-Token (pbCsrfHeaders)
     assert csrf
     r = c.post("/api/v2/familia/convites/aceitar", json={"token": token}, headers={"X-CSRF-Token": csrf})
-    assert r.status_code == 200 and r.json() == {"papel": "membro"}
+    assert r.status_code == 200 and r.json() == {"papel": "membro", "permissoes": []}
     depois = c.get("/painel", follow_redirects=False)
     assert depois.status_code == 200, (depois.status_code, depois.headers.get("location"))

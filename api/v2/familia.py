@@ -18,18 +18,21 @@ from core.dashboard_links import base_url_publica
 from core.services.family_access import _cobertura
 from db import family as fam
 from db import family_views as views
+from db.family_consents import ESCOPO_API, Escopo, member_scopes
 from frontend.routes.shared import JWT_SECRET
 
 router = APIRouter(include_in_schema=False)
 
 _HTTP = {"invite_invalid": 404, "not_member": 404, "no_group": 404, "user_not_found": 404,
-         "already_in_family": 409, "confirmation_mismatch": 409, "coverage_required": 402, "full": 409, "owner_cannot_leave": 409}
+         "already_in_family": 409, "confirmation_mismatch": 409, "coverage_required": 402, "full": 409, "owner_cannot_leave": 409,
+         "no_consent": 403, "not_owner": 404, "aggregates_required": 409}
 
 
 class Membro(BaseModel):
     ref: str
     nome: str
     status: Literal["ativo", "suspenso"]
+    permissoes: list[Escopo] = []  # o que este membro liberou (metadado, nenhum dado dele)
 
 
 class VisaoTitular(BaseModel):
@@ -41,6 +44,7 @@ class VisaoTitular(BaseModel):
 
 class VisaoMembro(BaseModel):
     papel: Literal["membro"] = "membro"
+    permissoes: list[Escopo] = []  # o que EU liberei para o titular
 
 
 class Convite(BaseModel):
@@ -78,7 +82,7 @@ def _erro(exc: fam.FamilyError) -> HTTPException:
     status = _HTTP.get(codigo)
     if status is None:
         return exc  # código que a rota não conhece é bug: 500, não 409 inventado
-    visivel = {402: "family_coverage_required"}.get(status) or (
+    visivel = {402: "family_coverage_required", 403: "consent_required"}.get(status) or (
         codigo if status == 409 or codigo == "invite_invalid" else "not_found")
     return HTTPException(status_code=status, detail={"error": visivel})
 
@@ -115,7 +119,9 @@ def ver(uid: int = Depends(usuario_logado)):
     v = views.my_family(uid)
     if not v:
         raise _nao_achado()
-    return _visao_titular(uid) if v["role"] == "owner" else VisaoMembro()
+    if v["role"] == "owner":
+        return _visao_titular(uid)
+    return VisaoMembro(permissoes=[ESCOPO_API[e] for e in member_scopes(uid)])
 
 
 @router.post("/familia", status_code=201, response_model=VisaoTitular)
