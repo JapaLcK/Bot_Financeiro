@@ -216,7 +216,7 @@ TABELA = {
 _HTML_PUBLICO = (
     "/", "/login", "/cadastro", "/q", "/recuperar-senha", "/suporte/contato", "/privacy",
     "/termos", "/blog", "/whatsapp", "/funcionalidades", "/comandos", "/comandos-app",
-    "/agents", "/como-funciona", "/precos", "/lp", "/oferta", "/inicio-antiga", "/vsl", "/continuar-compra", "/assinar", "/suporte",
+    "/agents", "/como-funciona", "/precos", "/lp", "/quiz", "/oferta", "/inicio-antiga", "/vsl", "/continuar-compra", "/assinar", "/suporte",
     "/reset-password", "/redefinir-senha", "/completar-cadastro", "/familia/entrar",
     "/.well-known/apple-app-site-association",
 )
@@ -282,7 +282,7 @@ _SUFIXOS_DE_ASSET = (".js", ".css", ".png", ".json", ".txt", ".xml", ".html")
 
 
 def _eh_asset(path: str) -> bool:
-    return path.endswith(_SUFIXOS_DE_ASSET) or path.startswith(("/fonts/", "/brand/"))
+    return path.endswith(_SUFIXOS_DE_ASSET) or path.startswith(("/fonts/", "/brand/", "/quiz/assets/"))
 
 
 def _classe(metodo: str, path: str):

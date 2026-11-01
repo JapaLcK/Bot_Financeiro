@@ -481,6 +481,35 @@ async def serve_agents():
     return html_file(FRONTEND_DIR / "agents.html", clarity=True)
 
 
+_QUIZ_DIR = FRONTEND_DIR / "quiz"
+_QUIZ_ASSETS = {
+    "Archivo-Variable.woff2": "font/woff2",
+    "favicon.png": "image/png",
+    "pigbank-icone.png": "image/png",
+    "piggy-avatar.png": "image/png",
+}
+
+
+@router.get("/quiz")
+async def serve_quiz():
+    """Quiz do Piggy (teste A/B do Guilherme). Meta e GA4 vêm do
+    servidor; o HTML só dispara os eventos Quiz*. Sem Clarity: respostas e
+    perfil são dado financeiro, como em /quiz-resultado."""
+    return html_file(FRONTEND_DIR / "quiz" / "quiz.html", sem_teste=not demo_ligado())
+
+
+@router.get("/quiz/assets/{name}")
+async def serve_quiz_asset(name: str):
+    media = _QUIZ_ASSETS.get(name)  # lista fechada: sem path traversal
+    if media is None:
+        return Response(status_code=404)
+    return FileResponse(
+        _QUIZ_DIR / name,
+        media_type=media,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @router.get("/como-funciona")
 async def serve_como_funciona():
     return html_file(FRONTEND_DIR / "como-funciona.html", clarity=True)
