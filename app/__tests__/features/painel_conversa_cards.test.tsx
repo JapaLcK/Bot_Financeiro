@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from "expo-router/testing-library";
 import { metasSchema } from "@/api/schemas/painel";
 import { faladoComSinal } from "@/ui/dinheiro";
-import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
+import { fetchFalso, NO_MES_DO_TESTE, prepararCaso, resposta } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import { abrir, apertar, caminho, enviar, fim, ir, noResumo, reiniciar, respostaFluxo, srv } from "./conversa_apoio";
 import v2 from "../../../tests/frontend/api_v2_respostas.json";
@@ -9,9 +9,7 @@ import metasBanco from "./painel_metas_banco.fixture.json";
 import { CARDS, F, bloco, comBlocos, instalarCards, perguntar } from "./conversa_cards_apoio";
 // Os 18 cards do chat desenham o bloco que o servidor embutiu, nunca o provider: o provider destes casos responde 500 (instalarCards).
 jest.setTimeout(30_000);
-// As datas deste arquivo são de outubro de 2026 (calendário, rótulos, fixtures): o relógio fica em outubro
-// para o teste não quebrar na virada do mês. Só o Date é falso aqui; o renderRouter guarda este horário.
-const NO_MES_DO_TESTE = () => jest.useFakeTimers({ now: new Date("2026-10-15T15:00:00Z"), doNotFake: ["nextTick", "queueMicrotask", "setImmediate", "clearImmediate", "setInterval", "clearInterval", "setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame", "requestIdleCallback", "cancelIdleCallback", "performance", "hrtime"] });
+// As datas deste arquivo são de outubro de 2026 (calendário, rótulos, fixtures).
 beforeEach(async () => { NO_MES_DO_TESTE(); prepararCaso(); desligarTrava(); await reiniciar(); instalarCards(); });
 afterEach(() => { jest.restoreAllMocks(); });
 
