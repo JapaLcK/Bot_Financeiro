@@ -42,14 +42,15 @@ def _painel() -> str:
 
 
 def _tiles() -> str:
+    # Uma linha por item (ícone à esquerda): 3 colunas quebravam palavra a palavra no celular.
     t = lambda ic, tit, sub: (  # noqa: E731
-        f'<td width="33%" valign="top" style="padding:6px"><div style="background:#111;border-radius:14px;'
-        f'padding:14px 10px;text-align:center"><div style="font-size:24px">{ic}</div>'
-        f'<div style="font-size:13px;font-weight:700;color:{TXT};margin-top:6px">{tit}</div>'
-        f'<div style="font-size:12px;color:{MUTED};margin-top:2px">{sub}</div></div></td>')
-    return ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
+        f'<tr><td width="44" valign="middle" style="padding:10px 0 10px 14px;font-size:24px">{ic}</td>'
+        f'<td valign="middle" style="padding:10px 14px 10px 8px"><div style="font-size:14px;font-weight:700;color:{TXT}">{tit}</div>'
+        f'<div style="font-size:13px;color:{MUTED}">{sub}</div></td></tr>')
+    return ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#111;'
+            'border-radius:14px;margin:18px 0">'
             + t('🏦', 'Direto do banco', 'Open Finance') + t('🔔', 'Aviso antes', 'da conta apertar')
-            + t('💬', 'No WhatsApp', 'fala com o Piggy') + '</tr></table>')
+            + t('💬', 'No WhatsApp', 'fala com o Piggy') + '</table>')
 
 
 def _pagar(link: str) -> str:
@@ -71,17 +72,17 @@ def _feedback(pergunta: str) -> str:
 
 def _email(titulo: str, lead: str, corpo: str, cta: str, extra: str, base: str, unsub: str) -> str:
     return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>{titulo}</title></head>
-<body style="margin:0;padding:24px 0;background:{BG};font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;color:{TXT}">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:0 12px">
+<body style="margin:0;padding:16px 0;background:{BG};font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;color:{TXT}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:0 8px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:{CARD};border:1px solid rgba(255,255,255,.08);border-radius:24px;overflow:hidden">
 <tr><td style="height:4px;background:{PINK}"></td></tr>
-<tr><td align="center" style="padding:32px 32px 8px"><img src="{escape(base)}/brand/email-logo.png" width="60" alt="PigBank" style="display:block"/>
+<tr><td align="center" style="padding:28px 20px 8px"><img src="{escape(base)}/brand/email-logo.png" width="60" alt="PigBank" style="display:block"/>
 <div style="font-size:17px;font-weight:800;margin-top:12px">Pig<span style="color:{PINK}">Bank</span></div></td></tr>
-<tr><td style="padding:12px 32px 4px;font-size:16px;line-height:1.7;color:#E7E4E0">
+<tr><td style="padding:12px 20px 4px;font-size:16px;line-height:1.7;color:#E7E4E0">
 <p style="font-size:21px;line-height:1.4;font-weight:700;color:#fff;margin:0 0 14px">{lead}</p>
 <p style="margin:0 0 8px">{corpo}</p>{extra}</td></tr>
-<tr><td align="center" style="padding:6px 32px 30px">{cta}</td></tr>
-<tr><td style="padding:20px 32px 26px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:#7E7E7C;text-align:center;line-height:1.7">
+<tr><td align="center" style="padding:6px 20px 30px">{cta}</td></tr>
+<tr><td style="padding:20px 20px 26px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:#7E7E7C;text-align:center;line-height:1.7">
 Lucas, fundador do PigBank<br/>Não quer mais estes avisos? <a href="{unsub}" style="color:{MUTED}">Cancelar inscrição</a>.</td></tr>
 </table></td></tr></table></body></html>"""
 
