@@ -2175,6 +2175,21 @@ async def lifespan(app: FastAPI):
                 print(f"[stripe_email] erro: {exc}", file=sys.stderr)
             await asyncio.sleep(300)
 
+    async def _remarketing_worker():
+        """Régua de remarketing do checkout abandonado, a cada 5 min. Inerte sem
+        `REMARKETING_DESDE` (nem consulta o banco). Ver `core/services/remarketing.py`."""
+        from core.services.remarketing import rodar_uma_vez  # noqa: PLC0415
+        while True:
+            try:
+                n = await asyncio.to_thread(rodar_uma_vez)
+                if n:
+                    print(f"[remarketing] {n} candidato(s) processado(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[remarketing] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(300)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -2276,6 +2291,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
+                asyncio.create_task(_remarketing_worker(), name="remarketing_worker"),
                 asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
                 asyncio.create_task(_tarefa_finito_checks(), name="finito_checks"),
             ]
