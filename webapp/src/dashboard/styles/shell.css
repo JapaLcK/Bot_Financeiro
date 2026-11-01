@@ -249,9 +249,10 @@
 .menu-telas li a[aria-current="page"] i { color: var(--pink); }
 /* Mês, busca e Ferramentas lado a lado não deixam folga: o CI no Linux mede o texto mais
    largo que o macOS e estourava em 320 e em 361px. Até 420px o ano sai do título; até
-   360px a busca sai também. */
+   360px a busca sai também; até 340px a barra aperta o espaço para caber "Novembro". */
 @media (max-width: 420px) { .month-year { display: none; } }
 @media (max-width: 360px) { .topbar .cmd-trigger { display: none; } }
+@media (max-width: 340px) { .topbar { gap: 2px; } .topbar .btn-primary { padding: 0 8px; } }
 
 /* Portão de entrada (parts/Entrada.tsx): carregando e erro, antes de o painel montar.
    Sem altura de viewport (100vh no iOS passa da tela): o respiro vem do padding. */

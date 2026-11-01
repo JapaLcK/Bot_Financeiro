@@ -65,6 +65,7 @@
     .ledger-tools { width: calc(100% - 2px); }
     .search { width: calc(100% - 10px); }
   }
+  @media (max-width: 340px) { .topbar > * + * { margin-left: 2px; } }
   /* no celular o cabeçalho do bloco principal quebra: título numa linha, controles na outra */
   @media (max-width: 508px) {
     .w-hero .w-head:not(.w-head-info) .w-title { flex-basis: 100%; } /* com o ⓘ o título não ocupa a linha: o ⓘ fica ao lado dele */
