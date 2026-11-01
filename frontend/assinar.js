@@ -318,8 +318,13 @@
     }
     if (atual === "") {  // sem sessão: o comprador do link de retomada (cookie) segue para o pagamento
       try {
-        const r = await fetch("/billing/plans-config", { credentials: "same-origin" });
-        const em = r.ok && (await r.json())?.retomada?.email;
+        // Com prazo: pendurado, o plans-config seguraria o S1 de todo visitante (o mesmo risco do S3).
+        const em = await Promise.race([
+          fetch("/billing/plans-config", { credentials: "same-origin" })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) { return j?.retomada?.email; }),
+          new Promise(function (ok) { setTimeout(ok, 4000); }),
+        ]);
         if (em) { contaEmail = em; iniciaS3(); return; }
       } catch (_) { /* sem retomada: S1 */ }
     }

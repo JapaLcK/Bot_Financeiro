@@ -36,6 +36,12 @@ test("plans-config falha: S1 como hoje", async () => {
   await ctx.close();
 });
 
+test("plans-config pendurado: S1 depois do prazo", async () => {
+  const { ctx, page } = await abrir(browser, { api: { "GET /billing/plans-config": null } });
+  await tela(page, "s1");
+  await ctx.close();
+});
+
 test("sessão viva vence a retomada", async () => {
   const { ctx, page } = await abrir(browser, { api: { "GET /auth/me": ME("ana@x.com"), "GET /billing/plans-config": RET } });
   await page.locator("#stripe-checkout iframe").waitFor();
