@@ -7,9 +7,15 @@ Respostas do titular com `no-store`. Fora do schema OpenAPI, como `familia.py`.
 A página de lançamentos descarta os itens internos depois da consulta: pode vir menor que `limite`, até vazia com `proximo`.
 `gastos.ler_mes` e `get_budgets_status_for_month` semeiam/garantem o usuário do MEMBRO (idempotente, como no /painel dele).
 """
+import base64
+import hashlib
+import hmac
+import json
+import os
 from decimal import Decimal
 from typing import Literal
 
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
 
@@ -29,6 +35,7 @@ from db.connection import cat_visual
 
 router = APIRouter(include_in_schema=False)
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+_ROTULO_CURSOR = b"pigbank:familia:cursor:v1"
 
 
 class EscopoIn(BaseModel):
@@ -90,6 +97,22 @@ class LancamentosMembro(BaseModel):
     mes: str
     itens: list[LancamentoMembro]
     proximo: str | None
+
+
+def _cipher_cursor() -> Fernet:  # mesmo molde de core/services/retomada.py: chave por HMAC de JWT_SECRET, rótulo próprio
+    chave = hmac.new(os.environ["JWT_SECRET"].strip().encode(), _ROTULO_CURSOR, hashlib.sha256).digest()
+    return Fernet(base64.urlsafe_b64encode(chave))
+
+
+def _abre_cursor(token: str, contexto: list) -> str:
+    """O cursor cru traz instante, tabela e id internos: o titular só vê um token amarrado a titular+membro+mês."""
+    try:
+        *amarra, cru = json.loads(_cipher_cursor().decrypt(token.encode()))
+    except (InvalidToken, ValueError, TypeError, UnicodeError):
+        raise _recusa("cursor", "Cursor inválido.") from None
+    if amarra != contexto or not isinstance(cru, str):
+        raise _recusa("cursor", "Cursor inválido.")
+    return cru
 
 
 def _permissoes(uid: int) -> Permissoes:
@@ -172,18 +195,21 @@ def agregados(ref: str, response: Response, mes: str | None = Query(None, patter
 
 @router.get("/familia/membros/{ref}/lancamentos", response_model=LancamentosMembro)
 def lancamentos_do_membro(ref: str, response: Response, mes: str | None = Query(None, pattern=PADRAO_MES),
-                          cursor: str | None = Query(None, max_length=200), limite: int = Query(50, ge=1),
+                          cursor: str | None = Query(None, max_length=600), limite: int = Query(50, ge=1),
                           uid: int = Depends(usuario_atual)) -> LancamentosMembro:
     ano, m, agora = mes_pedido(mes)
     mes_s = f"{ano:04d}-{m:02d}"
 
     def ler(membro: int) -> LancamentosMembro:
+        contexto = [uid, membro, mes_s]  # a decifragem falha antes da consulta e, como `ler` roda antes do log, sem log
+        cru = _abre_cursor(cursor, contexto) if cursor else None
         try:
-            d = lancamentos_leitura.pagina(membro, ano, m, agora, cursor=cursor, limite=min(limite, _TETO))
+            d = lancamentos_leitura.pagina(membro, ano, m, agora, cursor=cru, limite=min(limite, _TETO))
         except lancamentos.CursorInvalido as e:
             raise _recusa("cursor", str(e)) from None
         return LancamentosMembro(
-            mes=mes_s, proximo=d["proximo"],
+            mes=mes_s,
+            proximo=_cipher_cursor().encrypt(json.dumps([*contexto, d["proximo"]]).encode()).decode() if d["proximo"] else None,
             itens=[LancamentoMembro(**{k: i[k] for k in LancamentoMembro.model_fields}) for i in d["itens"]
                    if not i["interno"]])
 
