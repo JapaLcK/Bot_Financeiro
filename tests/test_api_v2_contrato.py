@@ -26,6 +26,7 @@ from api.v2.comparacao import Comparacao
 from api.v2.contas import Contas
 from api.v2.contas_a_pagar import ContasAPagar
 from api.v2.erros import ErroV2
+from api.v2.familia import Convite, Dissolucao, VisaoMembro, VisaoTitular
 from api.v2.gastos import Gastos, GastosDaCategoria
 from api.v2.guia import DICAS, PASSOS, Guia
 from api.v2.insights import Insights
@@ -278,6 +279,14 @@ def test_fixture_de_assinaturas_segue_o_modelo(nome):
     assert a.model_dump(mode="json") == f  # dinheiro é texto: um 39.9 numérico volta "39.9"
     assert str(a.total_mensal) == str(sum((x.valor for x in a.servicos if x.status == "ativa"), Decimal(0)))
     assert a.total_anual == a.total_mensal * 12
+
+
+def test_fixture_de_familia_segue_o_modelo():
+    """As quatro respostas do Plano Família que tests/frontend/_familia.mjs serve; o `model_dump` volta igual (nenhum campo a mais nem a menos)."""
+    f = FIXTURES["familia"]
+    for nome, modelo in {"titular": VisaoTitular, "membro": VisaoMembro, "convite": Convite, "dissolucao": Dissolucao}.items():
+        m = modelo.model_validate(f[nome])
+        assert m.model_dump(mode="json") == {**f[nome], **({"expira_em": m.expira_em.isoformat().replace("+00:00", "Z")} if nome == "convite" else {})}
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["perfil"]))

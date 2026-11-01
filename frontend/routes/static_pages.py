@@ -210,6 +210,13 @@ async def serve_login():
     return html_file(FRONTEND_DIR / "login.html")
 
 
+@router.get("/familia/entrar")
+async def serve_familia_entrar():
+    # Sem gate de plano (quem aceita o convite ainda não tem plano) e sem GA4/Pixel (pixel=False): o token chega no
+    # fragmento e o GA4 grava `location.href`. familia-entrar.js tira o fragmento da URL antes de qualquer requisição.
+    return html_file(FRONTEND_DIR / "familia-entrar.html", pixel=False)
+
+
 @router.get("/cadastro")
 async def serve_cadastro():
     return html_file(FRONTEND_DIR / "cadastro.html")
@@ -618,6 +625,7 @@ async def serve_robots_txt():
         "Disallow: /auth/",
         "Disallow: /admin",
         "Disallow: /assinar",
+        "Disallow: /familia",
         "Disallow: /q",
         "Disallow: /teste",
         "Disallow: /t/",
@@ -982,6 +990,26 @@ async def serve_purchase_intent_js():
     """
     return FileResponse(
         FRONTEND_DIR / "purchase-intent.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/familia-convite.js")
+async def serve_familia_convite_js():
+    """Guarda o token do convite do Plano Família (só nesta aba, 2 h) entre /familia/entrar, login e cadastro."""
+    return FileResponse(
+        FRONTEND_DIR / "familia-convite.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/familia-entrar.js")
+async def serve_familia_entrar_js():
+    """Aceite do convite do Plano Família: tira o token da URL e chama /api/v2/familia/convites/aceitar."""
+    return FileResponse(
+        FRONTEND_DIR / "familia-entrar.js",
         media_type="application/javascript",
         headers={"Cache-Control": "no-cache"},
     )

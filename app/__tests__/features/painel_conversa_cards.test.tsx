@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from "expo-router/testing-library";
 import { metasSchema } from "@/api/schemas/painel";
 import { faladoComSinal } from "@/ui/dinheiro";
-import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
+import { fetchFalso, NO_MES_DO_TESTE, prepararCaso, resposta } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import { abrir, apertar, caminho, enviar, fim, ir, noResumo, reiniciar, respostaFluxo, srv } from "./conversa_apoio";
 import v2 from "../../../tests/frontend/api_v2_respostas.json";
@@ -9,7 +9,8 @@ import metasBanco from "./painel_metas_banco.fixture.json";
 import { CARDS, F, bloco, comBlocos, instalarCards, perguntar } from "./conversa_cards_apoio";
 // Os 18 cards do chat desenham o bloco que o servidor embutiu, nunca o provider: o provider destes casos responde 500 (instalarCards).
 jest.setTimeout(30_000);
-beforeEach(async () => { prepararCaso(); desligarTrava(); await reiniciar(); instalarCards(); });
+// As datas deste arquivo são de outubro de 2026 (calendário, rótulos, fixtures).
+beforeEach(async () => { NO_MES_DO_TESTE(); prepararCaso(); desligarTrava(); await reiniciar(); instalarCards(); });
 afterEach(() => { jest.restoreAllMocks(); });
 
 const PROIBIDOS = ["Tentar novamente", "Carregando dados", "Conferindo disponibilidade do simulador…", "Simulador indisponível no seu plano.", "Dado indisponível neste card."];
