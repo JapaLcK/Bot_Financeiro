@@ -124,7 +124,6 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
                 criar_checkout, user_id, plan_stored=plan_stored, cpf_cnpj=doc,
                 nome=nome, email=email, rastreio=_rastreio(request),
                 confirm_cancel_stripe=bool(payload.confirm_cancel_stripe), extras=extras)
-            # O cliente decide pelo POST, não pelo plans-config opcional, se o fim vai à /retomar/pronto.
             return {**res, "retomada": True} if retomada else res
     except ExtrasIndisponiveis as exc:   # a oferta relida no POST, sem consulta nova
         raise HTTPException(status_code=409, detail={
