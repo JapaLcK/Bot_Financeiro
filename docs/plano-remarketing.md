@@ -245,6 +245,12 @@ move código. `pix-checkout.js` (350) não é tocado.
 
 ### PR 6 — Job de envio (inerte sem a env)
 
+Implementado, SEM desconto (entra no PR 6b). `send_remarketing_email` mora em `core/services/remarketing.py`
+(não em `email_service.py`) e os 3 HTMLs em `core/services/remarketing_emails.py`. `REMARKETING_DESDE` filtra
+`t0 >= desde` e exige fuso. WhatsApp pula também com `numero_de_outra_conta` (identidade de WhatsApp ou
+`phone_hash` de OUTRO `user_id`, com a variante do 9º dígito). Teto de 200 candidatos por tick (`# ponytail:`
+em `db/remarketing.candidatos`). Testes: `tests/test_remarketing_job.py`.
+
 - `core/services/remarketing.py` (novo): `ligado()` lê `REMARKETING_DESDE` a cada tick
   (vazia/inválida = desligado, sem consulta); `rodar_uma_vez(agora)`.
 - `db/remarketing.py`: `candidatos` (única query sem `user_id`, só chaves),
