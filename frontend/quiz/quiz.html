@@ -171,14 +171,9 @@ button, input, a { font: inherit; }
   var LINK_TESTE = "https://pigbankai.com/teste";
 
   /* ---------- pixel: só no domínio real; fora dele, os eventos vão para o console ---------- */
-  var PIXEL = "1043786505244329";
-  if (/(^|\.)pigbankai\.com$/.test(location.hostname)) {
-    !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
-    fbq("init", PIXEL);
-    fbq("track", "PageView");
-  } else {
+  // O servidor injeta Meta Pixel e GA4 (html_file); aqui só o stub de teste local.
+  if (typeof window.fbq !== "function") {
     window.fbq = function () { try { console.info("[pixel, teste local]", [].slice.call(arguments).join(" ")); } catch (e) {} };
-    fbq("track", "PageView");
   }
   var jaFoi = {};
   function evento(nome, dados) {
@@ -253,7 +248,7 @@ button, input, a { font: inherit; }
     caixinha: ["cria uma caixinha pra viagem", "Caixinha criada. Qual é a meta?"]
   };
   var OFERTA = [
-    "Gostou? Dá pra testar **7 dias grátis** o plano que você escolher. Se cancelar antes do fim, não paga nada.",
+    "Gostou? Dá pra testar **7 dias grátis** o plano que você escolher (um teste por número). Se cancelar antes do fim, não paga nada.",
     "O Essencial é **R$ 9,90 por mês**. Os avisos automáticos, como gasto fora do padrão e assinatura esquecida, vêm a partir do Plus, de R$ 19,90.",
     "E no painel você conecta seu banco pelo **Open Finance**: os gastos chegam pra mim sozinhos, e você ainda pode me mandar mensagem quando quiser."
   ];
