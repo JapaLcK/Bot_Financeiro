@@ -19,14 +19,14 @@ const json = (r, corpo, status = 200) => r.fulfill({ status, contentType: "appli
 const CFG = { essencial_available: true, plus_available: true, pro_available: true, pix_annual_available: true };
 const RET = { email: "l•••@dominio.com" };
 
-async function abrirPrecos({ retomada = null, sub = [401, { detail: "x" }], poll = { status: "pending" }, pollStatus = 200, viewport } = {}) {
+async function abrirPrecos({ retomada = null, sub = [401, { detail: "x" }], poll = { status: "pending" }, pollStatus = 200, pixRet, viewport } = {}) {
   const page = await browser.newPage({ viewport: viewport || { width: 1280, height: 900 } });
   const subs = [];
   await page.route("**/auth/me", (r) => json(r, { detail: "x" }, 401));
   await page.route("**/billing/plans-config", (r) => json(r, { ...CFG, retomada }));
   await page.route("**/billing/subscription", (r) => { subs.push(1); return json(r, sub[1], sub[0]); });
   await page.route("**/billing/pix/checkout", (r) => json(r, {
-    public_token: "tok_abc", qr_payload: "00020126-payload", qr_image: "", amount_cents: 19900, plan: "plus" }));
+    public_token: "tok_abc", qr_payload: "00020126-payload", qr_image: "", amount_cents: 19900, plan: "plus", ...(pixRet && { retomada: true }) }));
   await page.route("**/billing/pix/tok_abc", (r) => json(r, poll, pollStatus));
   for (const p of ["**/home*", "**/retomar/pronto*", "**/cadastro*", "**/login*"]) {
     await page.route(p, (r) => r.fulfill({ contentType: "text/html", body: "<html><body>destino</body></html>" }));
@@ -73,6 +73,14 @@ test("pix-poll em retomada: pago vai para /retomar/pronto com gw e sid", async (
   const u = new URL(page.url());
   assert.equal(u.searchParams.get("gw"), "pix");
   assert.equal(u.searchParams.get("sid"), "tok_abc");
+  await page.close();
+});
+
+test("pix-poll: plans-config perdeu a retomada mas o checkout a trouxe, pago vai para /retomar/pronto", async () => {
+  // A sessão de 15 min pode vencer entre o plans-config e o POST; quem decide é a resposta do POST.
+  const { page } = await abrirPrecos({ sub: [200, { active: false }], poll: { status: "paid" }, pixRet: true });
+  await abrirModalPix(page);
+  await page.waitForURL(/\/retomar\/pronto/, { timeout: 10000 });
   await page.close();
 });
 

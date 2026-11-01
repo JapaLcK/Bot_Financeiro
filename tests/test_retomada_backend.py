@@ -465,6 +465,7 @@ def test_i_pix_cookie_de_a_cobra_a_e_recusa_migracao(vendavel, asaas_falso):
     a, _ = _conta("i-pix-a")
     r = _pix(_cliente(a))
     assert r.status_code == 200, r.text
+    assert r.json()["retomada"] is True   # o pix-poll decide o destino por aqui (a sessão pode vencer)
     assert len(_linhas(a)) == 1
     recusa = _pix(_cliente(a), confirm_cancel_stripe=True)
     assert recusa.status_code == 409 and recusa.json()["detail"] == {"error": "retomada_sem_migracao"}
@@ -477,6 +478,7 @@ def test_i_pix_sessao_vence_e_credencial_invalida_e_401(vendavel, asaas_falso):
     a, _ = _conta("i-pix-sa")
     b, _ = _conta("i-pix-sb")
     assert _pix(_cliente(a, painel=b)).status_code == 200
+    assert "retomada" not in _pix(_cliente(a, painel=b)).json()   # com sessão o campo não vem
     assert (len(_linhas(a)), len(_linhas(b))) == (0, 1)                    # cobrou B, não A
     assert _pix(_cliente(a, painel="jwt.invalido.x")).status_code == 401
     assert _pix(_cliente(a, auth=b)).status_code == 401                    # cookie de acesso não é o do painel

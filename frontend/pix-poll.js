@@ -29,12 +29,15 @@ const PIX_TERMINAIS = new Set(["canceled", "expired", "refunded", "chargeback"])
 // declarava expirada uma cobrança que o backend ainda aceitava pagar.
 const PIX_TETO_MS = 15 * 60 * 1000;
 
-const emRetomada = () => !!window.pbPixState?.cfg?.retomada;   // comprador do link, sem sessão
+// Comprador do link, sem sessão. O `retomada` da resposta do POST vale mesmo sem o plans-config (pendurado ou falho).
+let pixRetomada = false;
+const emRetomada = () => pixRetomada || !!window.pbPixState?.cfg?.retomada;
 let pixPoll = null;   // estado do modal aberto; null = não há QR na tela
 
 /** `cadernos` = quantos extras foram no POST que gerou ESTE QR (o servidor cobra exatamente esses, ou recusa). */
 function pixModalQr(d, plano, ctx, cadernos) {
   const nome = (PLAN_NAMES && PLAN_NAMES[plano]) || plano;
+  if (d.retomada) pixRetomada = true;
   // O que o QR cobra: plano + cadernos (`amount_cents` é só o plano). O `??` cobre servidor sem o campo.
   const valor = pixBrl(d.total_cents ?? d.amount_cents);
   // `ctx` é o modal que o pixCheckout já abriu para pedir o CPF/CNPJ: o QR é o
