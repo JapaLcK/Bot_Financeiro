@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Descubra seu perfil com dinheiro | PigBank</title>
+<meta name="description" content="7 perguntas rápidas com o Piggy, o assistente do PigBank no WhatsApp. No fim, ele mostra como responde.">
+<meta name="author" content="PigBank">
+<meta property="og:title" content="Descubra seu perfil com dinheiro | PigBank">
+<meta property="og:description" content="7 perguntas rápidas com o Piggy. No fim, ele mostra como responde no WhatsApp.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#FFFFFF">
+<link rel="icon" href="/quiz/assets/favicon.png" type="image/png">
+<link rel="preload" href="/quiz/assets/Archivo-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/quiz/assets/piggy-avatar.png" as="image">
+<style>
+@font-face { font-family: "Archivo"; font-style: normal; font-weight: 400 900; font-stretch: 62% 125%; font-display: swap; src: url("/quiz/assets/Archivo-Variable.woff2") format("woff2"); }
+:root {
+  --rosa: #FF2D8E; --rosa-forte: #E0177A; --rosa-escuro: #D4106B; --rosa-claro: #F7D7E3; --rosa-vidro: #FFF1F7;
+  --lima: #C6F11A; --tinta: #111111; --tinta-2: #2E2E2E; --mudo: #6B6B6B;
+  --fundo: #F6F4F1; --cartao: #FFFFFF; --borda: #E4E1DC;
+  --wa-fundo: #EFEAE2; --wa-verde: #D9FDD3; --wa-tinta: #111B21; --wa-mudo: #667781; --wa-azul: #53BDEB;
+  --raio: 22px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--fundo); color: var(--tinta); font-family: "Archivo", -apple-system, "Segoe UI", Roboto, Arial, sans-serif; font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+::selection { background: var(--rosa); color: #fff; }
+button, input, a { font: inherit; }
+:focus-visible { outline: 3px solid var(--rosa); outline-offset: 2px; border-radius: 10px; }
+.pular { position: absolute; left: -9999px; top: 8px; background: var(--tinta); color: #fff; padding: 10px 14px; border-radius: 10px; z-index: 10; }
+.pular:focus { left: 8px; }
+
+.app { display: grid; grid-template-rows: auto 4px minmax(0, 1fr) auto; height: 100dvh; max-width: 720px; margin: 0 auto; background: var(--fundo); position: relative; overflow: hidden; }
+@media (min-width: 760px) { .app { border-left: 1px solid var(--borda); border-right: 1px solid var(--borda); box-shadow: 0 0 60px rgba(17,17,17,.06); } body { background: #EEEBE6; } }
+
+/* topo */
+.topo { display: flex; align-items: center; gap: 10px; min-height: 68px; padding: 10px 14px; background: var(--cartao); border-bottom: 1px solid var(--borda); z-index: 2; }
+.voltar { width: 40px; height: 40px; border: 0; background: transparent; color: var(--tinta-2); display: grid; place-items: center; border-radius: 50%; cursor: pointer; }
+.voltar[disabled] { opacity: .25; cursor: default; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--rosa); background: var(--tinta); overflow: hidden; flex: none; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.quem { min-width: 0; }
+.quem strong { display: block; font-size: 16px; font-weight: 800; letter-spacing: -.01em; line-height: 1.2; }
+.quem span { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--mudo); }
+.quem span i { width: 8px; height: 8px; border-radius: 50%; background: var(--lima); box-shadow: 0 0 0 2px rgba(198,241,26,.25); }
+.marca { margin-left: auto; display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 14px; }
+.marca img { width: 22px; height: auto; display: block; }
+@media (max-width: 420px) { .marca span { display: none; } }
+
+.progresso { background: var(--rosa-claro); overflow: hidden; }
+.progresso i { display: block; height: 100%; width: 0; background: var(--lima); transition: width .5s cubic-bezier(.2,.7,.2,1); }
+
+/* conversa */
+.feed { overflow-y: auto; overscroll-behavior: contain; padding: 18px 14px 26px;
+  background: radial-gradient(520px 320px at 105% -6%, rgba(255,45,142,.07), transparent 70%), var(--fundo); }
+.hoje { width: fit-content; margin: 2px auto 18px; font-size: 12px; font-weight: 700; color: var(--mudo); background: rgba(255,255,255,.7); padding: 4px 10px; border-radius: 8px; }
+.linha { display: flex; gap: 8px; align-items: flex-end; margin: 0 0 10px; }
+.linha .avatar { width: 30px; height: 30px; border-width: 2px; }
+.linha.sem-avatar .avatar { visibility: hidden; }
+.balao { max-width: min(82%, 460px); padding: 11px 15px; border-radius: var(--raio) var(--raio) var(--raio) 7px; background: var(--cartao); border: 1px solid var(--borda); font-size: 15px; line-height: 1.5; }
+.balao b { font-weight: 800; }
+.linha.eu { justify-content: flex-end; }
+.linha.eu .balao { background: var(--rosa-forte); color: #fff; border-color: var(--rosa-forte); border-radius: var(--raio) var(--raio) 7px var(--raio); font-weight: 700; display: flex; gap: 10px; align-items: center; }
+.linha.eu .balao svg { flex: none; opacity: .85; }
+.digitando { display: inline-flex; gap: 5px; padding: 15px 16px; }
+.digitando span { width: 6px; height: 6px; border-radius: 50%; background: var(--mudo); animation: pulo 1.2s cubic-bezier(.45,0,.55,1) infinite; }
+.digitando span:nth-child(2) { animation-delay: .15s; } .digitando span:nth-child(3) { animation-delay: .3s; }
+@keyframes pulo { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-4px); opacity: 1; } }
+.entra { animation: entra .32s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes entra { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+
+/* resultado */
+.perfil { margin: 6px 0 14px 38px; background: var(--cartao); border: 1px solid var(--borda); border-radius: 20px; padding: 20px 20px 18px; box-shadow: 0 14px 32px rgba(17,17,17,.07); position: relative; overflow: hidden; }
+.perfil::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--lima); }
+.perfil small { display: block; font-size: 12px; font-weight: 800; color: var(--rosa-escuro); letter-spacing: .06em; }
+.perfil h2 { margin: 4px 0 8px; font-size: 25px; line-height: 1.1; font-weight: 800; letter-spacing: -.02em; font-stretch: 92%; }
+.perfil p { margin: 0; color: var(--tinta-2); font-size: 15px; line-height: 1.55; }
+
+/* WhatsApp de exemplo */
+.wa { margin: 6px 0 14px 38px; border-radius: 20px; overflow: hidden; border: 1px solid #D8D2C8; box-shadow: 0 14px 32px rgba(17,17,17,.08); background: var(--wa-fundo); }
+.wa-topo { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #fff; border-bottom: 1px solid #E9E4DC; }
+.wa-topo .avatar { width: 30px; height: 30px; }
+.wa-topo b { display: block; font-size: 14px; color: var(--wa-tinta); line-height: 1.2; }
+.wa-topo span { display: block; font-size: 12px; color: var(--wa-mudo); }
+.wa-topo svg { margin-left: auto; color: #25D366; }
+.wa-corpo { padding: 14px 12px 6px; background-image: radial-gradient(rgba(17,27,33,.045) 1px, transparent 1.2px); background-size: 14px 14px; min-height: 120px; }
+.wa-msg { display: flow-root; max-width: 86%; padding: 7px 10px 6px; border-radius: 10px; font-size: 14.5px; line-height: 1.42; color: var(--wa-tinta); margin-bottom: 8px; box-shadow: 0 1px .5px rgba(11,20,26,.13); position: relative; word-wrap: break-word; }
+.wa-msg.eu { margin-left: auto; background: var(--wa-verde); border-top-right-radius: 3px; }
+.wa-msg.piggy { background: #fff; border-top-left-radius: 3px; }
+.wa-msg time { float: right; margin: 6px 0 -2px 10px; font-size: 11px; color: var(--wa-mudo); display: inline-flex; align-items: center; gap: 3px; }
+.wa-msg time svg { color: var(--wa-azul); }
+.wa-msg b { font-weight: 800; }
+.wa-msg.digita { display: inline-flex; gap: 4px; padding: 11px 12px; }
+.wa-msg.digita span { width: 6px; height: 6px; border-radius: 50%; background: var(--wa-mudo); animation: pulo 1.2s infinite; }
+.wa-msg.digita span:nth-child(2) { animation-delay: .15s; } .wa-msg.digita span:nth-child(3) { animation-delay: .3s; }
+.wa-nota { margin: 0; padding: 6px 12px 10px; font-size: 11.5px; color: #54656F; text-align: center; }
+.refazer { display: flex; align-items: center; gap: 8px; margin: 8px 0 0 38px; padding: 8px 0; border: 0; background: transparent; color: var(--rosa-escuro); font-weight: 700; font-size: 14px; cursor: pointer; }
+
+/* respostas */
+.respostas { background: var(--cartao); border-top: 1px solid var(--borda); padding: 10px 12px max(12px, env(safe-area-inset-bottom)); z-index: 2; }
+.respostas:empty { display: none; }
+.opcoes { display: grid; gap: 8px; max-height: 42dvh; overflow-y: auto; }
+@media (min-width: 560px) { .opcoes { grid-template-columns: 1fr 1fr; } }
+.opcoes button { display: flex; align-items: center; gap: 10px; min-height: 50px; padding: 10px 14px; text-align: left; border: 1px solid var(--borda); background: var(--cartao); color: var(--tinta); border-radius: 12px; font-weight: 700; font-size: 14.5px; line-height: 1.3; cursor: pointer; transition: border-color .2s, background .2s, transform .2s; }
+.opcoes button span.txt { flex: 1; }
+.opcoes button .emo { font-size: 18px; }
+.opcoes button svg { color: var(--rosa); flex: none; }
+.opcoes button:active { transform: scale(.985); }
+.nome { display: flex; gap: 8px; padding: 5px; border: 1px solid var(--borda); background: var(--fundo); border-radius: 14px; }
+.nome:focus-within { border-color: var(--rosa); box-shadow: 0 0 0 3px var(--rosa-claro); }
+.nome input { flex: 1; min-width: 0; border: 0; background: transparent; outline: 0; padding: 10px 12px; font-size: 16px; color: var(--tinta); }
+.nome button { width: 48px; height: 46px; border: 0; border-radius: 10px; background: var(--rosa-forte); color: #fff; display: grid; place-items: center; cursor: pointer; }
+.nome button:disabled { opacity: .35; cursor: not-allowed; }
+.final { display: grid; gap: 8px; }
+.alt { margin: 0; }
+.testa { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 2px 12px 10px; }
+.testa small { flex: none; font-size: 12px; font-weight: 800; color: var(--mudo); margin-right: 2px; }
+.testa button { flex: none; border: 1px solid #D8D2C8; background: #fff; border-radius: 999px; padding: 7px 11px; font-size: 13px; font-weight: 700; color: var(--tinta-2); cursor: pointer; white-space: nowrap; transition: border-color .2s, background .2s; }
+.cta { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 54px; border-radius: 14px; background: var(--rosa-forte); color: #fff; text-decoration: none; font-weight: 800; font-size: 16.5px; letter-spacing: -.005em; box-shadow: 0 10px 22px rgba(255,45,142,.28); transition: transform .15s, background .2s; }
+.cta:active { transform: scale(.985); }
+.cta small { font-weight: 700; opacity: .9; font-size: 13px; }
+.alt { text-align: center; font-size: 13.5px; color: var(--mudo); }
+.alt a { color: var(--tinta-2); font-weight: 700; text-underline-offset: 3px; }
+
+@media (hover: hover) {
+  .voltar:hover { background: var(--fundo); }
+  .refazer:hover { text-decoration: underline; }
+  .opcoes button:hover, .testa button:hover { border-color: var(--rosa); background: var(--rosa-vidro); }
+  .cta:hover { background: var(--rosa-escuro); }
+}
+@media (max-width: 359px) { .testa button { white-space: normal; text-align: left; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+</style>
+</head>
+<body>
+<a class="pular" href="#respostas">Pular para as respostas</a>
+<main class="app">
+  <header class="topo">
+    <button class="voltar" type="button" id="voltar" aria-label="Voltar uma pergunta" disabled>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+    </button>
+    <div class="avatar"><img src="/quiz/assets/piggy-avatar.png" alt="Piggy" width="40" height="40"></div>
+    <div class="quem"><strong>Piggy</strong><span><i aria-hidden="true"></i>assistente do PigBank no WhatsApp</span></div>
+    <div class="marca"><img src="/quiz/assets/pigbank-icone.png" alt="" width="22" height="23"><span>PigBank</span></div>
+  </header>
+  <div class="progresso" role="progressbar" aria-label="Progresso do quiz" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="barra"></i></div>
+  <section class="feed" id="feed" role="log" aria-live="polite" aria-label="Conversa com o Piggy"></section>
+  <footer class="respostas" id="respostas" aria-label="Suas respostas"></footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- rastreio: utm_* e fbclid guardados para os botões (mesma chave da v1) ---------- */
+  var CHAVE = "pb_tracking";
+  try {
+    var entrada = new URLSearchParams(location.search), achados = {}, tem = false;
+    entrada.forEach(function (v, k) { if (/^utm_/i.test(k) || k === "fbclid") { achados[k] = v; tem = true; } });
+    if (tem) sessionStorage.setItem(CHAVE, JSON.stringify(achados));
+  } catch (e) { /* sem sessionStorage o link sai limpo */ }
+  function comRastreio(base) {
+    var q = "";
+    try { var g = JSON.parse(sessionStorage.getItem(CHAVE) || "{}"); q = new URLSearchParams(g).toString(); } catch (e) {}
+    return base + (q ? "?" + q : "");
+  }
+  var LINK_PLANOS = "https://pigbankai.com/precos";
+  var LINK_TESTE = "https://pigbankai.com/teste";
+
+  /* ---------- pixel: só no domínio real; fora dele, os eventos vão para o console ---------- */
+  var PIXEL = "1043786505244329";
+  if (/(^|\.)pigbankai\.com$/.test(location.hostname)) {
+    !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
+    fbq("init", PIXEL);
+    fbq("track", "PageView");
+  } else {
+    window.fbq = function () { try { console.info("[pixel, teste local]", [].slice.call(arguments).join(" ")); } catch (e) {} };
+    fbq("track", "PageView");
+  }
+  var jaFoi = {};
+  function evento(nome, dados) {
+    if (nome === "QuizIniciado" || nome === "QuizConcluido") { if (jaFoi[nome]) return; jaFoi[nome] = 1; }
+    try { fbq("trackCustom", nome, dados || {}); } catch (e) {}
+  }
+
+  /* ---------- conteúdo ---------- */
+  var ABERTURA = [
+    "Oi! Eu sou o Piggy, o assistente do PigBank no WhatsApp.",
+    "São 7 perguntas rápidas sobre como você lida com dinheiro. No fim, eu te mostro como eu respondo no WhatsApp.",
+    "Não tem resposta certa. Pode falar a real, combinado?"
+  ];
+  // Perguntas, opções e pontos iguais aos da v1. Novo: a reação do Piggy a cada resposta (fatos do site pigbankai.com).
+  var PERGUNTAS = [
+    { p: "Como você se sente quando abre o app do banco?", o: [
+      ["Tranquilo, sei o que tem lá", 0, "", "Que bom. Comigo dá pra saber como está o mês sem abrir o app, é só perguntar."],
+      ["Dá um friozinho na barriga", 1, "", "Esse frio passa quando você já sabe o número antes de abrir. É só me perguntar no WhatsApp."],
+      ["Evito abrir pra não ver", 3, "", "Muita gente faz isso. Comigo você pergunta e eu respondo, sem abrir o app do banco."],
+      ["Abro toda hora, com medo do que vou ver", 2, "", "Em vez de abrir o app toda hora, é só me perguntar. Eu respondo na hora."]
+    ]},
+    { p: "Como o dinheiro entra pra você?", o: [
+      ["Salário fixo, todo mês igual", 0, "", "Salário fixo ajuda a planejar. O difícil costuma ser o que sai, e isso eu acompanho."],
+      ["Freela, bico ou renda que muda todo mês", 2, "", "Renda que muda pede controle de perto. Recebeu? Me manda \"recebi 800\" que eu registro."],
+      ["Mesada ou ajuda da família", 1, "", "Então cada real conta. Eu te mostro pra onde ele foi."],
+      ["Ainda não tenho renda própria", 2, "", "Melhor hora pra criar o hábito é antes do primeiro salário."]
+    ]},
+    { p: "Chegou o fim do mês. Qual dessas é você?", o: [
+      ["Sobrou, e eu já guardei ou investi", 0, "😀", "Boa! Dá pra separar isso em caixinhas com meta, e eu acompanho cada uma."],
+      ["Sobrou alguma coisa, mas sumiu e eu nem sei pra onde foi", 1, "🙂", "Esse dinheiro que some costuma estar nos gastos pequenos. É bem isso que eu separo."],
+      ["Zero a zero. Fecho o mês no limite", 2, "😬", "Fechar no limite cansa. O primeiro passo é ver onde dá pra respirar."],
+      ["Faltou, e eu fui pro cartão ou pro cheque especial", 3, "🫣", "Sem julgamento. A gente começa vendo pra onde o dinheiro está indo."]
+    ]},
+    { p: "Você sabe quanto gastou no mês passado?", o: [
+      ["Sei certinho", 0, "", "Poucos sabem. Comigo dá pra saber sem fazer conta."],
+      ["Mais ou menos", 1, "", "Comigo é só perguntar \"quanto gastei este mês?\" que eu respondo na hora."],
+      ["Não faço a menor ideia", 3, "", "Relaxa, quase ninguém sabe. Daqui a pouco eu te mostro como isso aparece numa pergunta só."]
+    ]},
+    { p: "Quando a fatura do cartão chega, você…", o: [
+      ["Não tenho cartão de crédito", 0, "", "Menos uma conta pra vigiar. Boleto eu também lembro antes de vencer."],
+      ["Pago tudo, sem susto", 0, "", "Melhor assim. E quando quiser conferir, é só perguntar quanto vem na fatura."],
+      ["Já paguei o mínimo ou parcelei a fatura", 2, "", "Comigo é só perguntar \"minha fatura já fechou?\" que eu te digo quando fecha e quanto vem."],
+      ["Nem abro direito. É tanta parcela que perdi a conta", 3, "", "Eu junto cada parcela de cada cartão num lugar só, com o dia em que a fatura fecha."]
+    ]},
+    { p: "Caiu R$ 1.000 inesperado na sua conta. O que você faz primeiro?", o: [
+      ["Pago o que estou devendo", 2, "", "Faz sentido. Juro é o gasto que mais pesa."],
+      ["Guardo pra uma emergência", 0, "", "Faz sentido. Dá pra criar uma caixinha de emergência, e eu acompanho a meta."],
+      ["Invisto pra render", 0, "", "Seus investimentos também aparecem no painel, junto com o resto do mês."],
+      ["Compro aquilo que estou querendo faz tempo", 3, "", "Normal querer. Com uma caixinha pra isso, você junta aos poucos sem apertar o mês."]
+    ]},
+    { p: "Já tentou se organizar antes?", o: [
+      ["Fiz uma planilha e abandonei", 2, "", "Planilha cansa porque é tudo na mão. Com o banco conectado, os gastos chegam pra mim sozinhos."],
+      ["Baixei um app e larguei", 2, "", "Comigo não tem app pra baixar. É no WhatsApp que você já usa."],
+      ["Anoto no bloco de notas às vezes", 1, "", "Pode continuar mandando do seu jeito: texto, áudio ou foto do cupom."],
+      ["Nunca tentei", 3, "", "Então começa pelo mais fácil, que é conversar comigo."]
+    ]}
+  ];
+  var PERGUNTA_NOME = "Antes do resultado: como eu te chamo?";
+  var PERFIS = {
+    explorador: { t: "Explorador consciente", d: "Você já tem noção de pra onde vai o seu dinheiro. O que falta é saber isso sem precisar fazer conta.", demo: "sobrou", testa: ["caixinha", "uber", "assinatura"] },
+    equilibrista: { t: "Equilibrista financeiro", d: "Você fecha o mês, mas os gastos pequenos e os imprevistos comem o que ia sobrar.", demo: "delivery", testa: ["assinatura", "lembrete", "sobrou"] },
+    sobrevivente: { t: "Sobrevivente do mês", d: "Hoje o dinheiro dá mais aperto do que sossego. Dá pra mudar isso começando por saber pra onde ele vai.", demo: "fatura", testa: ["delivery", "assinatura", "lembrete"] }
+  };
+  // Conversas de exemplo: perguntas e respostas da seção "Me testa" e do topo do site (valores ilustrativos).
+  var DEMO = {
+    delivery: ["quanto gastei com delivery?", "Este mês foram **R$ 486** em 11 pedidos. É 32% a mais que no mês passado."],
+    fatura: ["minha fatura já fechou?", "Fecha em 4 dias: **R$ 1.247**."],
+    sobrou: ["quanto sobrou este mês?", "Sobraram **R$ 1.940**. Quer guardar uma parte numa caixinha?"],
+    assinatura: ["tenho alguma assinatura esquecida?", "Achei 3: streaming **R$ 39,90**, música **R$ 21,90** e um app de treino que parece esquecido. Quer revisar?"],
+    uber: ["quanto gastei com Uber?", "**R$ 186** em 14 corridas este mês."],
+    lembrete: ["me lembra da internet dia 12", "Combinado, te aviso dia 11."],
+    caixinha: ["cria uma caixinha pra viagem", "Caixinha criada. Qual é a meta?"]
+  };
+  var OFERTA = [
+    "Gostou? Dá pra testar **7 dias grátis** o plano que você escolher. Se cancelar antes do fim, não paga nada.",
+    "O Essencial é **R$ 9,90 por mês**. Os avisos automáticos, como gasto fora do padrão e assinatura esquecida, vêm a partir do Plus, de R$ 19,90.",
+    "E não precisa conectar o banco pra começar. Dá pra usar só me mandando mensagem."
+  ];
+
+  /* ---------- tela ---------- */
+  var feed = document.getElementById("feed"), resp = document.getElementById("respostas");
+  var barra = document.getElementById("barra"), btnVoltar = document.getElementById("voltar");
+  var calmo = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var estado = { respostas: [], nome: "", vez: 0 };
+  var teclado = false; // última interação pelo teclado? então o foco segue para as opções novas
+  document.addEventListener("keydown", function (e) { if (e.key === "Tab" || e.key === "Enter" || e.key === " ") teclado = true; });
+  document.addEventListener("pointerdown", function () { teclado = false; });
+  var N = PERGUNTAS.length;
+
+  function el(tag, cls, txt) { var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+  function negrito(alvo, txt) { // **x** vira <b>x</b>, sempre por textContent
+    txt.split("**").forEach(function (parte, i) { if (!parte) return; alvo.appendChild(i % 2 ? el("b", null, parte) : document.createTextNode(parte)); });
+    return alvo;
+  }
+  function avatar() { var d = el("div", "avatar"); var im = el("img"); im.src = "/quiz/assets/piggy-avatar.png"; im.alt = ""; im.width = 30; im.height = 30; d.appendChild(im); return d; }
+  var ICON_SETA = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
+  var ICON_OK = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+  var ICON_LIDO = '<svg width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 6l3 3 6-7"/><path d="M6 8.5l1 .5 6-7"/></svg>';
+  var colado = true; // a pessoa está no fim da conversa? se subiu para reler, a tela não puxa
+  feed.addEventListener("scroll", function () { colado = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 160; }, { passive: true });
+  function rolar(forca) { if (forca) colado = true; if (!colado) return; feed.scrollTop = feed.scrollHeight; requestAnimationFrame(function () { feed.scrollTop = feed.scrollHeight; }); }
+  try { new ResizeObserver(function () { if (colado) feed.scrollTop = feed.scrollHeight; }).observe(feed); } catch (e) {}
+  function espera(ms) { return new Promise(function (r) { setTimeout(r, calmo ? Math.min(ms, 120) : ms); }); }
+  function progresso(p) { barra.style.width = p + "%"; barra.parentNode.setAttribute("aria-valuenow", String(Math.round(p))); }
+  function hora() { var d = new Date(); return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2); }
+
+  function linhaPiggy(txt, anima) {
+    var l = el("div", "linha" + (anima ? " entra" : "")); l.appendChild(avatar());
+    l.appendChild(negrito(el("div", "balao"), txt)); feed.appendChild(l); rolar(); return l;
+  }
+  function linhaEu(txt, anima) {
+    var l = el("div", "linha eu" + (anima ? " entra" : "")); var b = el("div", "balao");
+    b.appendChild(el("span", null, txt)); b.insertAdjacentHTML("beforeend", ICON_OK); l.appendChild(b); feed.appendChild(l); rolar(); return l;
+  }
+  async function digita(txt, vez, ms) {
+    var l = el("div", "linha entra"); l.appendChild(avatar());
+    var b = el("div", "balao digitando"); b.setAttribute("role", "status"); b.setAttribute("aria-label", "Piggy está digitando");
+    b.appendChild(el("span")); b.appendChild(el("span")); b.appendChild(el("span")); l.appendChild(b); feed.appendChild(l); rolar();
+    await espera(ms || 650);
+    if (vez !== estado.vez) { l.remove(); return false; }
+    l.remove(); linhaPiggy(txt, true); return true;
+  }
+  function limpaRespostas() { resp.textContent = ""; }
+
+  function mostraOpcoes(i) {
+    limpaRespostas();
+    var box = el("div", "opcoes"); box.setAttribute("role", "group"); box.setAttribute("aria-label", PERGUNTAS[i].p);
+    PERGUNTAS[i].o.forEach(function (op, k) {
+      var bt = el("button"); bt.type = "button";
+      if (op[2]) bt.appendChild(el("span", "emo", op[2]));
+      bt.appendChild(el("span", "txt", op[0])); bt.insertAdjacentHTML("beforeend", ICON_SETA);
+      bt.addEventListener("click", function () { responde(i, k); });
+      box.appendChild(bt);
+    });
+    resp.appendChild(box); rolar();
+    if (teclado) { var pri = box.querySelector("button"); if (pri) pri.focus({ preventScroll: true }); }
+  }
+
+  async function pergunta(i) {
+    btnVoltar.disabled = i === 0 && estado.respostas.length === 0 ? true : false;
+    progresso(i / (N + 1) * 100);
+    var vez = estado.vez;
+    if (!(await digita(PERGUNTAS[i].p, vez, i === 0 ? 700 : 520))) return;
+    mostraOpcoes(i);
+  }
+
+  async function responde(i, k) {
+    if (estado.respostas.length !== i) return;
+    var vez = estado.vez; var op = PERGUNTAS[i].o[k];
+    limpaRespostas();
+    estado.respostas.push(k);
+    if (estado.respostas.length === 1) evento("QuizIniciado");
+    rolar(true); linhaEu(op[0], true);
+    btnVoltar.disabled = false;
+    progresso((i + 1) / (N + 1) * 100);
+    if (!(await digita(op[3], vez, 620))) return;
+    await espera(260); if (vez !== estado.vez) return;
+    if (i + 1 < N) pergunta(i + 1); else pedeNome();
+  }
+
+  async function pedeNome() {
+    var vez = estado.vez;
+    if (!(await digita(PERGUNTA_NOME, vez, 520))) return;
+    limpaRespostas();
+    var f = el("form", "nome"); f.setAttribute("autocomplete", "off");
+    var inp = el("input"); inp.type = "text"; inp.maxLength = 30; inp.placeholder = "Digite seu nome"; inp.setAttribute("aria-label", "Seu nome"); inp.setAttribute("autocapitalize", "words"); inp.setAttribute("enterkeyhint", "send");
+    var bt = el("button"); bt.type = "submit"; bt.disabled = true; bt.setAttribute("aria-label", "Ver meu resultado"); bt.innerHTML = ICON_SETA;
+    inp.addEventListener("input", function () { bt.disabled = !inp.value.trim(); });
+    f.addEventListener("submit", function (e) { e.preventDefault(); var n = inp.value.trim().split(/\s+/)[0]; if (!n) return; estado.nome = n.charAt(0).toUpperCase() + n.slice(1).toLowerCase(); limpaRespostas(); linhaEu(estado.nome, true); resultado(); });
+    f.appendChild(inp); f.appendChild(bt); resp.appendChild(f); rolar();
+    try { inp.focus({ preventScroll: true }); } catch (e) {}
+  }
+
+  function perfilDe(pontos) { return pontos <= 5 ? "explorador" : pontos <= 12 ? "equilibrista" : "sobrevivente"; }
+
+  function cartaoPerfil(chave) {
+    var P = PERFIS[chave], c = el("div", "perfil entra");
+    c.appendChild(el("small", null, "Seu perfil com dinheiro"));
+    c.appendChild(el("h2", null, P.t));
+    var d = P.d; c.appendChild(el("p", null, estado.nome + ", " + d.charAt(0).toLowerCase() + d.slice(1)));
+    feed.appendChild(c); rolar();
+  }
+
+  var waCorpo = null, waTesta = null;
+  function cartaoWhats() {
+    var w = el("div", "wa entra"); w.setAttribute("role", "group"); w.setAttribute("aria-label", "Conversa de exemplo com o Piggy no WhatsApp");
+    var t = el("div", "wa-topo"); t.appendChild(avatar());
+    var q = el("div"); q.appendChild(el("b", null, "Piggy")); q.appendChild(el("span", null, "online")); t.appendChild(q);
+    t.insertAdjacentHTML("beforeend", '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.6.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.8 11.9 11.9 0 0 0 4.6 4c1.7.7 2.4.8 3.2.7a2.8 2.8 0 0 0 1.8-1.3 2.3 2.3 0 0 0 .2-1.3c-.1-.1-.3-.2-.5-.3Z"/></svg>');
+    w.appendChild(t);
+    waCorpo = el("div", "wa-corpo"); w.appendChild(waCorpo);
+    waTesta = el("div", "testa"); waTesta.setAttribute("role", "group"); waTesta.setAttribute("aria-label", "Pergunte ao Piggy"); w.appendChild(waTesta);
+    w.appendChild(el("p", "wa-nota", "Conversa de exemplo. Valores ilustrativos."));
+    feed.appendChild(w); rolar();
+  }
+  async function trocaWhats(chave, vez, mostrar) {
+    function ver(n) { if (mostrar) { try { n.scrollIntoView({ block: "center", behavior: calmo ? "auto" : "smooth" }); } catch (e) {} } else rolar(); }
+    var par = DEMO[chave];
+    var eu = el("div", "wa-msg eu entra"); eu.appendChild(el("span", null, par[0]));
+    var t1 = el("time", null, hora() + " "); t1.insertAdjacentHTML("beforeend", ICON_LIDO); eu.appendChild(t1);
+    waCorpo.appendChild(eu); ver(eu);
+    await espera(380); if (vez !== estado.vez) return false;
+    var dg = el("div", "wa-msg piggy digita"); dg.setAttribute("role", "status"); dg.setAttribute("aria-label", "Piggy está digitando");
+    dg.appendChild(el("span")); dg.appendChild(el("span")); dg.appendChild(el("span")); waCorpo.appendChild(dg); ver(dg);
+    await espera(900); if (vez !== estado.vez) return false;
+    dg.remove();
+    var pg = negrito(el("div", "wa-msg piggy entra"), par[1]); pg.appendChild(el("time", null, hora()));
+    waCorpo.appendChild(pg); ver(pg);
+    return true;
+  }
+
+  async function resultado() {
+    var vez = estado.vez;
+    btnVoltar.disabled = false; progresso(100);
+    var pontos = estado.respostas.reduce(function (s, k, i) { return s + PERGUNTAS[i].o[k][1]; }, 0);
+    var chave = perfilDe(pontos), P = PERFIS[chave];
+    evento("QuizConcluido", { perfil: chave, pontos: pontos });
+    if (!(await digita("Pronto, " + estado.nome + ". Já deu pra entender o seu mês.", vez, 700))) return;
+    await espera(200); if (vez !== estado.vez) return;
+    cartaoPerfil(chave);
+    await espera(2400); if (vez !== estado.vez) return;
+    if (!(await digita("Agora olha como eu respondo no WhatsApp, com uma pergunta do seu perfil:", vez, 650))) return;
+    cartaoWhats();
+    await espera(500); if (vez !== estado.vez) return;
+    if (!(await trocaWhats(P.demo, vez))) return;
+    perguntasNoCartao(P);
+    await espera(700); if (vez !== estado.vez) return;
+    if (!(await digita(OFERTA[0], vez, 750))) return;
+    if (!(await digita(OFERTA[1], vez, 650))) return;
+    if (!(await digita(OFERTA[2], vez, 450))) return;
+    acoesFinais(P, vez);
+    var r = el("button", "refazer"); r.type = "button";
+    r.insertAdjacentHTML("beforeend", '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>');
+    r.appendChild(document.createTextNode("Refazer o diagnóstico"));
+    r.addEventListener("click", recomeca); feed.appendChild(r); rolar();
+  }
+
+  function perguntasNoCartao(P) {
+    if (!waTesta) return;
+    waTesta.textContent = ""; waTesta.appendChild(el("small", null, "Toca pra perguntar:"));
+    var ocupado = false;
+    P.testa.forEach(function (chave) {
+      var b = el("button", null, DEMO[chave][0]); b.type = "button";
+      b.addEventListener("click", async function () {
+        if (ocupado) return; ocupado = true; b.remove();
+        evento("PiggyDemo", { pergunta: chave });
+        await trocaWhats(chave, estado.vez, true); ocupado = false;
+        if (waTesta && !waTesta.querySelector("button")) { waTesta.remove(); waTesta = null; }
+      });
+      waTesta.appendChild(b);
+    });
+  }
+
+  function acoesFinais(P, vez) {
+    limpaRespostas();
+    var box = el("div", "final");
+    var cta = el("a", "cta"); cta.href = comRastreio(LINK_PLANOS);
+    cta.appendChild(el("span", null, "Ver os planos e testar grátis")); cta.insertAdjacentHTML("beforeend", ICON_SETA);
+    cta.addEventListener("click", function () { evento("QuizPlanosClick"); });
+    box.appendChild(cta);
+    var alt = el("p", "alt"); alt.appendChild(document.createTextNode("Ainda na dúvida? "));
+    var a = el("a", null, "Testar o Piggy no WhatsApp"); a.href = comRastreio(LINK_TESTE);
+    a.addEventListener("click", function () { try { fbq("trackCustom", "TesteClick"); } catch (e) {} });
+    alt.appendChild(a); box.appendChild(alt);
+    resp.appendChild(box); rolar();
+  }
+
+  /* ---------- voltar e recomeçar ---------- */
+  function redesenha() { // conversa até a última resposta, sem animação
+    feed.textContent = ""; feed.appendChild(el("div", "hoje", "Hoje"));
+    ABERTURA.forEach(function (t) { linhaPiggy(t, false); });
+    estado.respostas.forEach(function (k, i) { linhaPiggy(PERGUNTAS[i].p, false); linhaEu(PERGUNTAS[i].o[k][0], false); linhaPiggy(PERGUNTAS[i].o[k][3], false); });
+  }
+  function voltar() {
+    estado.vez++; waCorpo = null; waTesta = null; colado = true; limpaRespostas();
+    if (estado.respostas.length === 0) { recomeca(); return; }
+    if (estado.nome && estado.respostas.length === N) { estado.nome = ""; redesenha(); pedeNome(); progresso(N / (N + 1) * 100); return; }
+    estado.respostas.pop(); estado.nome = ""; redesenha(); pergunta(estado.respostas.length);
+  }
+  btnVoltar.addEventListener("click", voltar);
+
+  async function recomeca() {
+    estado.vez++; estado.respostas = []; estado.nome = ""; waCorpo = null; waTesta = null; colado = true; var vez = estado.vez;
+    limpaRespostas(); feed.textContent = ""; feed.appendChild(el("div", "hoje", "Hoje")); progresso(0); btnVoltar.disabled = true;
+    for (var i = 0; i < ABERTURA.length; i++) { if (!(await digita(ABERTURA[i], vez, 420))) return; await espera(160); }
+    if (vez !== estado.vez) return;
+    pergunta(0);
+  }
+  recomeca();
+})();
+</script>
+</body>
+</html>
