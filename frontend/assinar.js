@@ -316,6 +316,13 @@
       iniciaS3();
       return;
     }
+    if (atual === "") {  // sem sessão: o comprador do link de retomada (cookie) segue para o pagamento
+      try {
+        const r = await fetch("/billing/plans-config", { credentials: "same-origin" });
+        const em = r.ok && (await r.json())?.retomada?.email;
+        if (em) { contaEmail = em; iniciaS3(); return; }
+      } catch (_) { /* sem retomada: S1 */ }
+    }
     me = atual || null;  // S1a: e-mail digitado ≠ conta logada
     mostra("s1");
   });

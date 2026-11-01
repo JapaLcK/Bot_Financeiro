@@ -137,9 +137,9 @@ async def retomar(request: Request, t: str = ""):
 
 @router.get("/retomar/pronto")
 async def retomar_pronto():
-    # Provisório e inerte: a página de "Pagamento recebido" é do PR 5, que substitui esta
-    # rota. Até lá ninguém chega aqui (nenhum token foi emitido).
-    return _ir("/login")
+    # "Pagamento recebido": com pixel, porque quem compra pela retomada não passa pela /home, onde a
+    # conversão sempre saiu. Quem dispara é retomar-pronto.js (mesmo eventID da /home e da CAPI).
+    return shared.html_file(shared.FRONTEND_DIR / "retomar-pronto.html", pixel=True)
 
 
 @router.post("/billing/retomada/senha")

@@ -245,11 +245,18 @@ def test_r_o_cookie_que_o_retomar_grava_volta_aceito_pelo_jar():
     assert c.get("/billing/plans-config").json()["retomada"] == {"email": "r•••@dominio.com"}
 
 
-def test_r_sem_utm_vai_a_precos_puro_e_pronto_e_inerte():
+def test_r_pronto_carrega_o_pixel(monkeypatch):
+    from frontend.routes import shared
+    monkeypatch.setattr(shared, "META_PIXEL_ID", "123456789")
+    assert "fbq(" in _cliente().get("/retomar/pronto").text   # sem pixel a conversão do retomar-pronto.js é no-op
+
+
+def test_r_sem_utm_vai_a_precos_puro_e_pronto_e_html():
     uid, _ = _conta("r-puro")
     assert _retomar(_cliente(), retomada.emitir_token(uid, 1)).headers["location"] == "/precos"
     r = _cliente().get("/retomar/pronto", follow_redirects=False)
-    assert (r.status_code, r.headers["location"]) == (303, "/login")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
+    assert "Pagamento recebido" in r.text
 
 
 def test_r_clique_que_falha_nao_segura_a_compra(monkeypatch):
@@ -281,7 +288,7 @@ def test_i_so_o_cookie_de_a_compra_como_a_com_rm_etapa(monkeypatch):
     k = fake.last_session_kwargs
     assert k["metadata"]["finbot_user_id"] == str(a) and k["metadata"]["rm_etapa"] == "2"
     assert k["subscription_data"]["metadata"]["rm_etapa"] == "2"          # a assinatura também
-    assert k["success_url"] == f"{dashboard.DASHBOARD_URL}/retomar/pronto?sid={{CHECKOUT_SESSION_ID}}"
+    assert k["success_url"] == f"{dashboard.DASHBOARD_URL}/retomar/pronto?sid={{CHECKOUT_SESSION_ID}}&ev=purchase"
     assert fake.last_customer_kwargs["metadata"]["finbot_user_id"] == str(a)
     assert _sql("select count(*) as n from checkout_funnel_events where user_id = %s", (a,))[0]["n"] == 1
 
@@ -292,8 +299,21 @@ def test_i_retomada_embutida_volta_pela_pagina_da_retomada(monkeypatch):
     monkeypatch.setattr(dashboard, "STRIPE_PUBLISHABLE_KEY", "pk_test_x")
     assert _checkout(_cliente(a), embutido=True, origem="assinar").status_code == 200
     k = fake.last_session_kwargs
-    assert k["return_url"].endswith("/retomar/pronto?sid={CHECKOUT_SESSION_ID}")
+    assert k["return_url"].endswith("/retomar/pronto?sid={CHECKOUT_SESSION_ID}&ev=purchase")
     assert k["metadata"]["origem"] == "assinar"                           # `origem` segue a página
+
+
+def test_i_com_trial_a_volta_da_retomada_leva_ev_trial(monkeypatch):
+    import db.plans as plans
+    a, _ = _conta("i-trial")
+    fake = _stripe(monkeypatch)
+    monkeypatch.setattr(dashboard, "STRIPE_PUBLISHABLE_KEY", "pk_test_x")
+    monkeypatch.setattr(plans, "is_trial_eligible_for_user", lambda uid: True)
+    assert _checkout(_cliente(a, 2)).status_code == 200
+    assert fake.last_session_kwargs["subscription_data"]["trial_period_days"] > 0
+    assert fake.last_session_kwargs["success_url"].endswith("/retomar/pronto?sid={CHECKOUT_SESSION_ID}&ev=trial")
+    assert _checkout(_cliente(a, 2), embutido=True, origem="assinar").status_code == 200
+    assert fake.last_session_kwargs["return_url"].endswith("/retomar/pronto?sid={CHECKOUT_SESSION_ID}&ev=trial")
 
 
 def test_i_sessao_de_b_mais_cookie_de_a_e_tudo_como_b(monkeypatch):

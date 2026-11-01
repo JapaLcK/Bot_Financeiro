@@ -29,6 +29,7 @@ const PIX_TERMINAIS = new Set(["canceled", "expired", "refunded", "chargeback"])
 // declarava expirada uma cobrança que o backend ainda aceitava pagar.
 const PIX_TETO_MS = 15 * 60 * 1000;
 
+const emRetomada = () => !!window.pbPixState?.cfg?.retomada;   // comprador do link, sem sessão
 let pixPoll = null;   // estado do modal aberto; null = não há QR na tela
 
 /** `cadernos` = quantos extras foram no POST que gerou ESTE QR (o servidor cobra exatamente esses, ou recusa). */
@@ -245,6 +246,7 @@ function pixPago() {
   // `/billing/pix/<sid>` e tirar de lá o valor e a data. Dinheiro não viaja na
   // query string — `vl=` e `inicio=` saíram daqui porque qualquer um os digita,
   // e o `vl` forjado virava receita inventada na NOSSA conta de anúncios.
+  if (emRetomada()) { window.location.href = "/retomar/pronto?gw=pix&ev=purchase&sid=" + encodeURIComponent(token); return; }
   window.location.href = "/home?upgrade=success&sid=" + encodeURIComponent(token)
     + "&ev=purchase&td=0&pl=" + encodeURIComponent(plano) + "&gw=pix";
 }
@@ -284,6 +286,12 @@ function pixExpirou(motivo, confirmado) {
 function pixDesistir() {
   pixRotular(pixPoll.status, "ph-clock", "Não consegui confirmar por aqui — o"
     + " código continua válido. Entre de novo e a gente confirma.");
+  if (emRetomada()) {
+    pixPoll.status.textContent = "Se você já pagou, ";
+    const a = document.createElement("a");
+    a.href = "/login"; a.textContent = "entre pelo e-mail";
+    pixPoll.status.appendChild(a);
+  }
   pixAgendar(Math.max(0, pixPoll.deadline - Date.now()));
 }
 
