@@ -26,6 +26,9 @@ async function abrir(width, hash = "#/", { height = 800, semDialog = false, url 
   // Safari 14 (sem <dialog>): o mesmo corte do dashboard_v2_cmdk.test.mjs.
   if (semDialog) await ctx.addInitScript(() => { delete HTMLDialogElement.prototype.showModal; delete HTMLDialogElement.prototype.close; });
   const page = await ctx.newPage();
+  // Relógio fixo como o abrirPainel (_painel.mjs): o seletor mostra o mês real, e "Novembro" é mais largo que "Outubro";
+  // sem isto a folga da barra de cima mudava com o mês do calendário.
+  await page.clock.setFixedTime(new Date("2026-10-02T15:00:00Z"));
   await page.goto(`${url}${hash}`);
   await page.locator("#page-title").waitFor();
   return { ctx, page };

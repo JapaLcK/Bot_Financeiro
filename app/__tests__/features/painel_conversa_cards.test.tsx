@@ -9,7 +9,10 @@ import metasBanco from "./painel_metas_banco.fixture.json";
 import { CARDS, F, bloco, comBlocos, instalarCards, perguntar } from "./conversa_cards_apoio";
 // Os 18 cards do chat desenham o bloco que o servidor embutiu, nunca o provider: o provider destes casos responde 500 (instalarCards).
 jest.setTimeout(30_000);
-beforeEach(async () => { prepararCaso(); desligarTrava(); await reiniciar(); instalarCards(); });
+// As datas deste arquivo são de outubro de 2026 (calendário, rótulos, fixtures): o relógio fica em outubro
+// para o teste não quebrar na virada do mês. Só o Date é falso aqui; o renderRouter guarda este horário.
+const NO_MES_DO_TESTE = () => jest.useFakeTimers({ now: new Date("2026-10-15T15:00:00Z"), doNotFake: ["nextTick", "queueMicrotask", "setImmediate", "clearImmediate", "setInterval", "clearInterval", "setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame", "requestIdleCallback", "cancelIdleCallback", "performance", "hrtime"] });
+beforeEach(async () => { NO_MES_DO_TESTE(); prepararCaso(); desligarTrava(); await reiniciar(); instalarCards(); });
 afterEach(() => { jest.restoreAllMocks(); });
 
 const PROIBIDOS = ["Tentar novamente", "Carregando dados", "Conferindo disponibilidade do simulador…", "Simulador indisponível no seu plano.", "Dado indisponível neste card."];

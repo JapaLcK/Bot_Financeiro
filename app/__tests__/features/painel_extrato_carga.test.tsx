@@ -26,7 +26,10 @@ function servidor() {
 }
 const chamadasLanc = () => fetchFalso.mock.calls.filter(([url]) => new URL(String(url)).pathname === LANC);
 const refresh = () => act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); await drenar(); });
-beforeEach(async () => { prepararCaso(); desligarTrava(); lancamentos = () => pagina("Salário"); await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor(); });
+// As datas deste arquivo são de outubro de 2026 (calendário, rótulos, fixtures): o relógio fica em outubro
+// para o teste não quebrar na virada do mês. Só o Date é falso aqui; o renderRouter guarda este horário.
+const NO_MES_DO_TESTE = () => jest.useFakeTimers({ now: new Date("2026-10-15T15:00:00Z"), doNotFake: ["nextTick", "queueMicrotask", "setImmediate", "clearImmediate", "setInterval", "clearInterval", "setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame", "requestIdleCallback", "cancelIdleCallback", "performance", "hrtime"] });
+beforeEach(async () => { NO_MES_DO_TESTE(); prepararCaso(); desligarTrava(); lancamentos = () => pagina("Salário"); await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor(); });
 afterEach(() => jest.restoreAllMocks());
 const lista = () => waitFor(() => expect(screen.getByText("Salário")).toBeTruthy());
 it("deep link a frio em /extrato mostra a lista", async () => {
