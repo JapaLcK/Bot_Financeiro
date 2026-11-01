@@ -4696,6 +4696,7 @@ GOOGLE_OAUTH_NEXT_COOKIE = "google_oauth_next"
 GOOGLE_OAUTH_CHALLENGE_COOKIE = "google_oauth_challenge"
 GOOGLE_OAUTH_STATE_MAX_AGE = 600  # 10 minutos
 GOOGLE_OAUTH_PURCHASE_CONTINUE_URL = "/continuar-compra"
+GOOGLE_OAUTH_FAMILIA_URL = "/familia/entrar"  # o convite do Plano Família (familia-convite.js): sem token na URL, ele fica no sessionStorage
 
 
 class GoogleSignupCompleteBody(_CorpoSemVeneno):
@@ -4721,7 +4722,7 @@ class AppleExchangeBody(_CorpoSemVeneno):
 
 def _google_oauth_next_url(value: str | None) -> str | None:
     """Aceita somente destinos internos conhecidos após o OAuth."""
-    return value if value == GOOGLE_OAUTH_PURCHASE_CONTINUE_URL else None
+    return value if value in (GOOGLE_OAUTH_PURCHASE_CONTINUE_URL, GOOGLE_OAUTH_FAMILIA_URL) else None
 
 
 def _clear_google_oauth_cookies(response: Response) -> None:

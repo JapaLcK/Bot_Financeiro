@@ -33,6 +33,8 @@ if(PB_MFA)history.replaceState(null,'',location.pathname+location.search);
 </script>
 <script defer="" src="/purchase-intent.js?v=1">
 </script>
+<script defer="" src="/familia-convite.js?v=1">
+</script>
 <link href="/phosphor.css?v=1" rel="stylesheet"/>
 </head>
 <body class="lp lp-auth lp-auth-page">
@@ -156,7 +158,8 @@ if(PB_MFA)history.replaceState(null,'',location.pathname+location.search);
   }
   function postAuth(d){
     var fallback=(d&&d.dashboard_url)||'/home';
-    return window.PBPurchaseIntent?window.PBPurchaseIntent.afterAuth(fallback):fallback;
+    var depois=window.PBPurchaseIntent?window.PBPurchaseIntent.afterAuth(fallback):fallback;
+    return window.PBFamiliaConvite?window.PBFamiliaConvite.destino(depois):depois;
   }
   function err(id,m,ok){var e=document.getElementById(id);e.textContent=m;e.classList.toggle('ok',!!ok);e.classList.add('show')}
   function clrErr(){['login-error','mfa-error'].forEach(function(i){var e=document.getElementById(i);if(e){e.classList.remove('show','ok');e.textContent=''}})}
