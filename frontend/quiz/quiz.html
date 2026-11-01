@@ -147,6 +147,7 @@ button, input, a { font: inherit; }
     <div class="marca"><img src="/quiz/assets/pigbank-icone.png" alt="" width="22" height="23"><span>PigBank</span></div>
   </header>
   <div class="progresso" role="progressbar" aria-label="Progresso do quiz" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="barra"></i></div>
+  <a data-teste href="/teste" hidden></a>
   <section class="feed" id="feed" role="log" aria-live="polite" aria-label="Conversa com o Piggy"></section>
   <footer class="respostas" id="respostas" aria-label="Suas respostas"></footer>
 </main>
@@ -168,7 +169,8 @@ button, input, a { font: inherit; }
     return base + (q ? "?" + q : "");
   }
   var LINK_PLANOS = "https://pigbankai.com/precos";
-  var LINK_TESTE = "https://pigbankai.com/teste";
+  // html_file(sem_teste=True) remove o link data-teste quando o demo está desligado.
+  var LINK_TESTE = document.querySelector("a[data-teste]") ? "https://pigbankai.com/teste" : "";
 
   /* ---------- pixel: só no domínio real; fora dele, os eventos vão para o console ---------- */
   // O servidor injeta Meta Pixel e GA4 (html_file); aqui só o stub de teste local.
@@ -434,10 +436,12 @@ button, input, a { font: inherit; }
     cta.appendChild(el("span", null, "Ver os planos e testar grátis")); cta.insertAdjacentHTML("beforeend", ICON_SETA);
     cta.addEventListener("click", function () { evento("QuizPlanosClick"); });
     box.appendChild(cta);
-    var alt = el("p", "alt"); alt.appendChild(document.createTextNode("Ainda na dúvida? "));
-    var a = el("a", null, "Testar o Piggy no WhatsApp"); a.href = comRastreio(LINK_TESTE);
-    a.addEventListener("click", function () { try { fbq("trackCustom", "TesteClick"); } catch (e) {} });
-    alt.appendChild(a); box.appendChild(alt);
+    if (LINK_TESTE) {
+      var alt = el("p", "alt"); alt.appendChild(document.createTextNode("Ainda na dúvida? "));
+      var a = el("a", null, "Testar o Piggy no WhatsApp"); a.href = comRastreio(LINK_TESTE);
+      a.addEventListener("click", function () { try { fbq("trackCustom", "TesteClick"); } catch (e) {} });
+      alt.appendChild(a); box.appendChild(alt);
+    }
     resp.appendChild(box); rolar();
   }
 

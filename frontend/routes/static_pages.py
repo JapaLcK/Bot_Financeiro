@@ -494,7 +494,7 @@ _QUIZ_ASSETS = {
 async def serve_quiz():
     """Quiz do Piggy (teste A/B do Guilherme). Meta, GA4 e Clarity vêm do
     servidor; o HTML só dispara os eventos Quiz*."""
-    return html_file(_QUIZ_DIR / "quiz.html", clarity=True)
+    return html_file(_QUIZ_DIR / "quiz.html", clarity=True, sem_teste=not demo_ligado())
 
 
 @router.get("/quiz/assets/{name}")
