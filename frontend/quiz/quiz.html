@@ -392,7 +392,7 @@ button, input, a { font: inherit; }
     btnVoltar.disabled = false; progresso(100);
     var pontos = estado.respostas.reduce(function (s, k, i) { return s + PERGUNTAS[i].o[k][1]; }, 0);
     var chave = perfilDe(pontos), P = PERFIS[chave];
-    evento("QuizConcluido", { perfil: chave, pontos: pontos });
+    evento("QuizConcluido");
     if (!(await digita("Pronto, " + estado.nome + ". Já deu pra entender o seu mês.", vez, 700))) return;
     await espera(200); if (vez !== estado.vez) return;
     cartaoPerfil(chave);
@@ -421,7 +421,7 @@ button, input, a { font: inherit; }
       var b = el("button", null, DEMO[chave][0]); b.type = "button";
       b.addEventListener("click", async function () {
         if (ocupado) return; ocupado = true; b.remove();
-        evento("PiggyDemo", { pergunta: chave });
+        evento("PiggyDemo");
         await trocaWhats(chave, estado.vez, true); ocupado = false;
         if (waTesta && !waTesta.querySelector("button")) { waTesta.remove(); waTesta = null; }
       });
