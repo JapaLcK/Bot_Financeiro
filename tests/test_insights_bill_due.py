@@ -209,11 +209,10 @@ def test_7_mesmo_dia_um_item_por_conta_na_ordem_dos_ids(llm, monkeypatch):
 def test_8_nome_em_uma_linha_com_teto_e_cpf_fora_da_chave(llm, monkeypatch):
     _relogio(monkeypatch)
     uid = _usuario("pro_max")
-    for n in ("luz *Enel*\nCasa", "Aluguel 123.456.789-00", "x" * 60, "", "***", "outros"):
-        _boleto(uid, 5, n)
+    ids = [_boleto(uid, 5, n) for n in ("luz *Enel*\nCasa", "Aluguel 123.456.789-00", "x" * 60, "", "***", "outros")]
     marcado, cpf, longo, vazio, so_marcacao, outros = _contas(uid)
     assert marcado["title"] == "Luz Enel Casa vence em 5 dias (R$ 180,00)"
-    assert "123.456.789-00" in cpf["title"] and "456" not in cpf["key"]  # a chave leva o id, nunca o nome
+    assert "123.456.789-00" in cpf["title"] and cpf["key"] == f"bill_due:{ids[1]}:2026-11-02"  # o id, nunca o nome
     assert longo["title"] == "X" + "x" * 38 + "… vence em 5 dias (R$ 180,00)"
     assert vazio["title"] == "Boleto vence em 5 dias (R$ 180,00)"
     assert so_marcacao["title"] == "Conta vence em 5 dias (R$ 180,00)"  # não o "outros" do `nome()` vazio

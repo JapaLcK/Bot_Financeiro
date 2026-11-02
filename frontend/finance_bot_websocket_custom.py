@@ -2175,6 +2175,21 @@ async def lifespan(app: FastAPI):
                 print(f"[stripe_email] erro: {exc}", file=sys.stderr)
             await asyncio.sleep(300)
 
+    async def _remarketing_worker():
+        """Régua de remarketing do checkout abandonado, a cada 5 min. Inerte sem
+        `REMARKETING_DESDE` (nem consulta o banco). Ver `core/services/remarketing.py`."""
+        from core.services.remarketing import rodar_uma_vez  # noqa: PLC0415
+        while True:
+            try:
+                n = await asyncio.to_thread(rodar_uma_vez)
+                if n:
+                    print(f"[remarketing] {n} candidato(s) processado(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[remarketing] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(300)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -2276,6 +2291,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
+                asyncio.create_task(_remarketing_worker(), name="remarketing_worker"),
                 asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
                 asyncio.create_task(_tarefa_finito_checks(), name="finito_checks"),
             ]
@@ -3593,7 +3609,42 @@ async def _vincular_se_permitido(user_id: int, sub: str, email: str, provider: s
 
     if await asyncio.to_thread(is_account_scheduled_for_deletion, user_id) or await _mfa_ligado(user_id):
         return
+    if not await _revogar_sessoes_do_quiz(user_id):
+        return
     await asyncio.to_thread(link_google_identity, user_id, sub, email, provider or PROVIDER_GOOGLE)
+
+
+def _sobrou_sessao_ou_refresh(user_id: int) -> bool:
+    from db.connection import get_conn
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select exists(select 1 from auth_sessions where user_id = %s and revoked_at is null)"
+            " or exists(select 1 from auth_refresh_tokens where user_id = %s and revoked_at is null) as sobrou",
+            (int(user_id), int(user_id)),
+        )
+        return bool(cur.fetchone()["sobrou"])
+
+
+async def _revogar_sessoes_do_quiz(user_id: int) -> bool:
+    """Conta sem credencial (a do quiz) cujo e-mail o dono prova agora por Google/Apple:
+    quem a criou pode ser outro, com sessão e refresh na mão. O vínculo tira o
+    `exigir_credencial` do caminho, então a sessão do criador herdaria os dados
+    do dono. Revoga tudo ANTES de gravar a identidade (a sessão deste login é emitida
+    depois, em `_concluir_login`). As revogações engolem erro e devolvem 0: confere
+    no banco e, se sobrou algo, devolve False — quem chama não vincula."""
+    from core.refresh_tokens import revoke_user_refresh_tokens
+    from core.sessions import revoke_other_sessions
+    from db import conta_sem_credencial
+
+    if not await asyncio.to_thread(conta_sem_credencial, user_id):
+        return True
+    await asyncio.to_thread(revoke_other_sessions, int(user_id), None)
+    await asyncio.to_thread(revoke_user_refresh_tokens, int(user_id))
+    if await asyncio.to_thread(_sobrou_sessao_ou_refresh, user_id):
+        logging.getLogger(__name__).error("vinculo social: sessão/refresh sobrou, sem vincular", extra={"user_id": user_id})
+        return False
+    return True
 
 
 async def _desafio_mfa(request: Request, user_id: int, email: str) -> str | None:
@@ -4661,6 +4712,7 @@ GOOGLE_OAUTH_NEXT_COOKIE = "google_oauth_next"
 GOOGLE_OAUTH_CHALLENGE_COOKIE = "google_oauth_challenge"
 GOOGLE_OAUTH_STATE_MAX_AGE = 600  # 10 minutos
 GOOGLE_OAUTH_PURCHASE_CONTINUE_URL = "/continuar-compra"
+GOOGLE_OAUTH_FAMILIA_URL = "/familia/entrar"  # o convite do Plano Família (familia-convite.js): sem token na URL, ele fica no sessionStorage
 
 
 class GoogleSignupCompleteBody(_CorpoSemVeneno):
@@ -4686,7 +4738,7 @@ class AppleExchangeBody(_CorpoSemVeneno):
 
 def _google_oauth_next_url(value: str | None) -> str | None:
     """Aceita somente destinos internos conhecidos após o OAuth."""
-    return value if value == GOOGLE_OAUTH_PURCHASE_CONTINUE_URL else None
+    return value if value in (GOOGLE_OAUTH_PURCHASE_CONTINUE_URL, GOOGLE_OAUTH_FAMILIA_URL) else None
 
 
 def _clear_google_oauth_cookies(response: Response) -> None:
@@ -5522,7 +5574,10 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             f"&td={trial_days}&pl={plan}&ia={ia_quota}"
         )
         if retomada_etapa:   # sem sessão não há /home: a volta é a página própria da retomada
-            success_url = f"{DASHBOARD_URL}/retomar/pronto?sid={{CHECKOUT_SESSION_ID}}"
+            success_url = (
+                f"{DASHBOARD_URL}/retomar/pronto?sid={{CHECKOUT_SESSION_ID}}"
+                f"&ev={'trial' if trial_days > 0 else 'purchase'}"
+            )
 
         kwargs = dict(
             customer=cust_id,

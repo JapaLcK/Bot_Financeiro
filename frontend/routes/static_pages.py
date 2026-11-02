@@ -210,6 +210,13 @@ async def serve_login():
     return html_file(FRONTEND_DIR / "login.html")
 
 
+@router.get("/familia/entrar")
+async def serve_familia_entrar():
+    # Sem gate de plano (quem aceita o convite ainda não tem plano) e sem GA4/Pixel (pixel=False): o token chega no
+    # fragmento e o GA4 grava `location.href`. familia-entrar.js tira o fragmento da URL antes de qualquer requisição.
+    return html_file(FRONTEND_DIR / "familia-entrar.html", pixel=False)
+
+
 @router.get("/cadastro")
 async def serve_cadastro():
     return html_file(FRONTEND_DIR / "cadastro.html")
@@ -237,6 +244,12 @@ async def serve_assinar_rede_js(request: Request):
 @router.get("/assinar.js")
 async def serve_assinar_js(request: Request):
     return FileResponse(FRONTEND_DIR / "assinar.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
+@router.get("/retomar-pronto.js")
+async def serve_retomar_pronto_js(request: Request):
+    return FileResponse(FRONTEND_DIR / "retomar-pronto.js", media_type="application/javascript",
                         headers={"Cache-Control": _cache_asset_versionado(request)})
 
 
@@ -468,6 +481,35 @@ async def serve_agents():
     return html_file(FRONTEND_DIR / "agents.html", clarity=True)
 
 
+_QUIZ_DIR = FRONTEND_DIR / "quiz"
+_QUIZ_ASSETS = {
+    "Archivo-Variable.woff2": "font/woff2",
+    "favicon.png": "image/png",
+    "pigbank-icone.png": "image/png",
+    "piggy-avatar.png": "image/png",
+}
+
+
+@router.get("/quiz")
+async def serve_quiz():
+    """Quiz do Piggy (teste A/B do Guilherme). Meta e GA4 vêm do
+    servidor; o HTML só dispara os eventos Quiz*. Sem Clarity: respostas e
+    perfil são dado financeiro, como em /quiz-resultado."""
+    return html_file(FRONTEND_DIR / "quiz" / "quiz.html", sem_teste=not demo_ligado())
+
+
+@router.get("/quiz/assets/{name}")
+async def serve_quiz_asset(name: str):
+    media = _QUIZ_ASSETS.get(name)  # lista fechada: sem path traversal
+    if media is None:
+        return Response(status_code=404)
+    return FileResponse(
+        _QUIZ_DIR / name,
+        media_type=media,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @router.get("/como-funciona")
 async def serve_como_funciona():
     return html_file(FRONTEND_DIR / "como-funciona.html", clarity=True)
@@ -612,6 +654,7 @@ async def serve_robots_txt():
         "Disallow: /auth/",
         "Disallow: /admin",
         "Disallow: /assinar",
+        "Disallow: /familia",
         "Disallow: /q",
         "Disallow: /teste",
         "Disallow: /t/",
@@ -976,6 +1019,26 @@ async def serve_purchase_intent_js():
     """
     return FileResponse(
         FRONTEND_DIR / "purchase-intent.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/familia-convite.js")
+async def serve_familia_convite_js():
+    """Guarda o token do convite do Plano Família (só nesta aba, 2 h) entre /familia/entrar, login e cadastro."""
+    return FileResponse(
+        FRONTEND_DIR / "familia-convite.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/familia-entrar.js")
+async def serve_familia_entrar_js():
+    """Aceite do convite do Plano Família: tira o token da URL e chama /api/v2/familia/convites/aceitar."""
+    return FileResponse(
+        FRONTEND_DIR / "familia-entrar.js",
         media_type="application/javascript",
         headers={"Cache-Control": "no-cache"},
     )

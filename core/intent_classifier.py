@@ -1194,10 +1194,10 @@ def _classify_llm_call(user_content: str, user_id: int | None) -> IntentResult:
             from core.services.plan_service import plan_gate_ok
             if not plan_gate_ok(int(user_id), "generic"):
                 return IntentResult(intent="out_of_scope", confidence=0.0)
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "gate pago do tier-3 falhou pro user %s — classificação indisponível",
-                user_id, exc_info=True,
+                "gate pago do tier-3 falhou pro user %s — classificação indisponível causa=%s sqlstate=%s",
+                user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id},
             )
             return IntentResult(intent="out_of_scope", confidence=0.0)
 

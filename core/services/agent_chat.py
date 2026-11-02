@@ -295,8 +295,9 @@ def chat(user_id: int, kind: str, text: str, context: str | None = None, *,
         if own:  # cosmético: falha aqui não derruba a resposta
             try:
                 card = card_da_resposta(user_id, kind, consultas)
-            except Exception:
-                logger.exception("agent_chat: card falhou user_id=%s kind=%s", user_id, kind)
+            except Exception as exc:
+                logger.error("agent_chat: card falhou user_id=%s kind=%s causa=%s sqlstate=%s", user_id, kind,
+                             type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         if redirects:
             names = ", ".join(r["name"] for r in redirects)
             subject = "Essa outra parte" if reply else "Esse assunto"

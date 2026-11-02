@@ -90,9 +90,10 @@ def regra_ativa(user_id: int) -> bool:
     "não registrei" visível. A conta paga pelo banco confere de novo (`quitar`)."""
     try:
         return db.has_open_finance_connections(user_id)
-    except Exception:
+    except Exception as exc:
         logger.warning("regra da forma falhou pro user %s — tratando como banco "
-                       "conectado", user_id, exc_info=True)
+                       "conectado causa=%s sqlstate=%s", user_id,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return True
 
 

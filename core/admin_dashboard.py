@@ -942,7 +942,10 @@ def _derive_account_status(row: dict, now: datetime) -> str:
     # perdido) — o painel tem de concordar com o entitlement real.
     expires = row.get("plan_expires_at")
     if expires is not None and expires < now:
-        return "canceled"
+        # Período vencido com a Stripe retentando a cobrança não é cancelamento:
+        # a assinatura está viva. Só 'past_due' — 'unpaid' com plano vencido pode
+        # ser o terminal (ver o comentário de `_LIVE_PAYMENT_STATUSES` adiante).
+        return "past_due" if pay == "past_due" else "canceled"
     if pay == "trialing":
         return "trial"
     if pay == "active":
@@ -962,7 +965,9 @@ _ACCOUNT_STATUS_SQL = """
             CASE WHEN lower(coalesce(a.last_payment_status, ''))
                       IN ('canceled', 'incomplete_expired', 'unpaid')
                  THEN 'canceled' ELSE 'free' END
-        WHEN a.plan_expires_at IS NOT NULL AND a.plan_expires_at < now() THEN 'canceled'
+        WHEN a.plan_expires_at IS NOT NULL AND a.plan_expires_at < now() THEN
+            CASE WHEN lower(coalesce(a.last_payment_status, '')) = 'past_due'
+                 THEN 'past_due' ELSE 'canceled' END
         WHEN lower(coalesce(a.last_payment_status, '')) = 'trialing' THEN 'trial'
         WHEN lower(coalesce(a.last_payment_status, '')) = 'active' THEN 'paying'
         WHEN lower(coalesce(a.last_payment_status, ''))

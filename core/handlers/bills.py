@@ -92,8 +92,9 @@ def conta_paga(user_id: int, paid: dict, val) -> str:
         cb = db.get_consolidated_balance(user_id)
         aviso = aviso_conferir(None, cb.get("reconciliation"), so_contagem=True)
         fim = f"\n{aviso}" if aviso else " Tá tudo em dia! 🐷"
-    except Exception:
-        logger.exception("aviso a conferir falhou depois de pagar conta (user %s)", user_id)
+    except Exception as exc:
+        logger.error("aviso a conferir falhou depois de pagar conta (user %s) causa=%s sqlstate=%s", user_id,
+                     type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         fim = ""
     return (
         f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "

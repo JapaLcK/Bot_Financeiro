@@ -33,7 +33,11 @@ qc.getQueryCache().subscribe((e) => {
     // As famílias com o uid na chave (["conta", <assunto>, uid] e ["agentes", uid]) do uid antigo já são da conta anterior: quem as
     // mostra troca de chave sozinho, e relê-las agora seria ler a conta anterior com a sessão nova. Só elas: ["previsao", 30] não é uid.
     const doUidAntigo = (k: readonly unknown[]) => ((k[0] === "conta" && k.length === 3) || (k[0] === "agentes" && k.length === 2)) && k[k.length - 1] === antigo;
-    void qc.invalidateQueries({ predicate: (q) => daConta(q) && !doUidAntigo(q.queryKey) });
+    // ["conta", <assunto>] sem uid (família, cobrança, MFA…) e na tela: invalidar manteria o dado da conta anterior à vista até a releitura chegar.
+    // Reset zera o dado e relê; a tela mostra a carga em vez da conta anterior.
+    const semUid = (k: readonly unknown[]) => k[0] === "conta" && k.length === 2;
+    void qc.resetQueries({ predicate: (q) => semUid(q.queryKey) });
+    void qc.invalidateQueries({ predicate: (q) => daConta(q) && !doUidAntigo(q.queryKey) && !semUid(q.queryKey) });
   }); }
   uidVisto = uid;
 });

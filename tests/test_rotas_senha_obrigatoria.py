@@ -197,6 +197,20 @@ TABELA = {
     ("POST", "/api/app/orcamentos-categoria"): (B, "usuario_do_app"),
     ("POST", "/api/app/orcamentos-categoria/apagar"): (B, "usuario_do_app"),
     ("POST", "/api/app/gastos-fixos"): (B, "usuario_do_app"),
+    # ── Plano Família (api/v2/familia.py, nos dois prefixos) ──
+    **{(m, f"{pre}{p}"): (B, gate) for pre, gate in (("/api/v2", "usuario_atual"), ("/api/app", "usuario_do_app"))
+       for m, p in (("POST", "/familia"), ("POST", "/familia/convites"),
+                    ("DELETE", "/familia/convites"), ("DELETE", "/familia/membros/{ref}"),
+                    ("GET", "/familia/dissolucao"), ("POST", "/familia/dissolucao"))},
+    # sem gate de plano (quem não tem plano aceita, vê e sai), COM a perna da senha: `usuario_logado`/`usuario_sessao`
+    **{(m, f"{pre}{p}"): (B, "usuario_logado (sem assinatura, com credencial)") for pre in ("/api/v2", "/api/app")
+       for m, p in (("GET", "/familia"), ("POST", "/familia/sair"), ("POST", "/familia/convites/aceitar"))},
+    # PR 4 (api/v2/familia_dados.py): consentimento do membro (usuario_logado) e leitura do titular (usuario_atual)
+    **{(m, f"{pre}{p}"): (B, "usuario_logado (sem assinatura, com credencial)") for pre in ("/api/v2", "/api/app")
+       for m, p in (("POST", "/familia/permissoes"), ("DELETE", "/familia/permissoes/{escopo}"),
+                    ("GET", "/familia/historico"))},
+    **{(m, f"{pre}{p}"): (B, gate) for pre, gate in (("/api/v2", "usuario_atual"), ("/api/app", "usuario_do_app"))
+       for m, p in (("GET", "/familia/membros/{ref}/agregados"), ("GET", "/familia/membros/{ref}/lancamentos"))},
     ("WS", "/ws/{user_id}"): (B, "close 4403"),
     # ── HTML autenticado ──
     ("GET", "/app"): (L, "casca; o overlay sobe"), ("GET", "/home"): (L, "casca; o overlay sobe"),
@@ -208,8 +222,8 @@ TABELA = {
 _HTML_PUBLICO = (
     "/", "/login", "/cadastro", "/q", "/recuperar-senha", "/suporte/contato", "/privacy",
     "/termos", "/blog", "/whatsapp", "/funcionalidades", "/comandos", "/comandos-app",
-    "/agents", "/como-funciona", "/precos", "/lp", "/oferta", "/inicio-antiga", "/vsl", "/continuar-compra", "/assinar", "/suporte",
-    "/reset-password", "/redefinir-senha", "/completar-cadastro",
+    "/agents", "/como-funciona", "/precos", "/lp", "/quiz", "/oferta", "/inicio-antiga", "/vsl", "/continuar-compra", "/assinar", "/suporte",
+    "/reset-password", "/redefinir-senha", "/completar-cadastro", "/familia/entrar",
     "/.well-known/apple-app-site-association",
 )
 TABELA.update({("GET", p): (P, "página pública") for p in _HTML_PUBLICO})
@@ -274,7 +288,7 @@ _SUFIXOS_DE_ASSET = (".js", ".css", ".png", ".json", ".txt", ".xml", ".html")
 
 
 def _eh_asset(path: str) -> bool:
-    return path.endswith(_SUFIXOS_DE_ASSET) or path.startswith(("/fonts/", "/brand/"))
+    return path.endswith(_SUFIXOS_DE_ASSET) or path.startswith(("/fonts/", "/brand/", "/quiz/assets/"))
 
 
 def _classe(metodo: str, path: str):
@@ -365,7 +379,7 @@ def _cadeia_de_sessao(fn, vistos=None):
     vistos.add(fn)
     yield fn
     for nome, _ in _chamadas(fn):
-        if nome == "usuario_assinante":
+        if nome in ("usuario_assinante", "usuario_sessao"):
             helper = fn.__globals__.get(nome)
             if inspect.isroutine(helper):
                 yield from _cadeia_de_sessao(helper, vistos)

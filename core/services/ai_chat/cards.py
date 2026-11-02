@@ -273,8 +273,9 @@ def registro() -> dict[str, Card]:
         abas = _mes(uid, a, detalhes=mes_detalhes)
         try:
             c = contas(uid=uid)
-        except Exception:
-            logger.warning("card categorias: contas indisponível pra user %s, sai sem a sincronização", uid, exc_info=True)
+        except Exception as exc:
+            logger.warning("card categorias: contas indisponível pra user %s, sai sem a sincronização causa=%s sqlstate=%s",
+                           uid, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
             return abas
         return [(m, r | {"contas": c}) for m, r in abas]
 

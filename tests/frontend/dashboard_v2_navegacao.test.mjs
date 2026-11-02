@@ -26,6 +26,9 @@ async function abrir(width, hash = "#/", { height = 800, semDialog = false, url 
   // Safari 14 (sem <dialog>): o mesmo corte do dashboard_v2_cmdk.test.mjs.
   if (semDialog) await ctx.addInitScript(() => { delete HTMLDialogElement.prototype.showModal; delete HTMLDialogElement.prototype.close; });
   const page = await ctx.newPage();
+  // Relógio fixo como o abrirPainel (_painel.mjs): o seletor mostra o mês real, e "Novembro" é mais largo que "Outubro";
+  // sem isto a folga da barra de cima mudava com o mês do calendário.
+  await page.clock.setFixedTime(new Date("2026-10-02T15:00:00Z"));
   await page.goto(`${url}${hash}`);
   await page.locator("#page-title").waitFor();
   return { ctx, page };
@@ -108,7 +111,7 @@ test("a aba do Piggy mostra quando é a página atual, como as outras", async ()
   assert.equal(dentro, "none|1");
 });
 
-// O Menu da barra de baixo (parts/MenuTelas.tsx): uma folha com as 9 telas do menu lateral, a Ajuda e o grupo Conta (Perfil, Cobrança, Configurações, Bancos conectados, Sair).
+// O Menu da barra de baixo (parts/MenuTelas.tsx): uma folha com as 9 telas do menu lateral, a Ajuda e o grupo Conta (Perfil, Cobrança, Configurações, Bancos conectados, Família, Sair).
 // Nativo e com o fallback do Safari 14 (sem showModal/close): o mesmo roteiro.
 const ROTULOS = ["Resumo", "Previsão", "Para onde vai", "Assinaturas", "Simulador", "Metas", "Patrimônio", "Lançamentos", "Ferramentas"];
 for (const semDialog of [false, true]) {
@@ -158,7 +161,7 @@ for (const semDialog of [false, true]) {
     r.ajuda = [await visivel(), await page.evaluate(() => window.__guia)];
     await ctx.close();
     assert.deepEqual(r, {
-      fechada: false, aberta: true, rotulos: [...ROTULOS, "Perfil", "Cobrança", "Configurações", "Bancos conectados"], atual: ["Resumo"], foco: [true, "Resumo"], guias: 0,
+      fechada: false, aberta: true, rotulos: [...ROTULOS, "Perfil", "Cobrança", "Configurações", "Bancos conectados", "Família"], atual: ["Resumo"], foco: [true, "Resumo"], guias: 0,
       tabs: Array(17).fill(true), cmdk: 0, escFechou: true, escFoco: true, foraFechou: true, mesmaTela: true,
       navegou: [false, ["#/previsao", "page-title"]], atualDepois: ["Previsão"], ajuda: [false, 1],
     });

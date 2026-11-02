@@ -29,8 +29,8 @@ def lancar(user_id: int, tipo: str, valor, alvo: str | None, nota: str | None,
     propose_manual_reconciliation(user_id, launch_id)
     try:
         learn_from_inference(user_id, nota, categoria, target_hint=alvo, reason=inferred.reason)
-    except Exception:
-        logger.exception("learn_from_inference falhou depois do commit (user %s, lancamento %s)",
-                         user_id, launch_id)
+    except Exception as exc:
+        logger.error("learn_from_inference falhou depois do commit (user %s, lancamento %s) causa=%s sqlstate=%s",
+                     user_id, launch_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
     return {"launch_id": launch_id, "user_seq": user_seq, "new_balance": new_balance,
             "categoria": categoria, "nota": nota, "is_internal": is_internal}
