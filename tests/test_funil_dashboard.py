@@ -566,6 +566,8 @@ _CHAVES_PERMITIDAS = (
     | {"gerados", "pagos", "expirados", "cancelados", "abertos", "taxa_pago"}
     | {"entregas", "enviados", "nao_comprou", "estornados", "pendentes"}
     | {"clicaram", "abriram", "organicos", "responderam", "no_limite", "clicaram_checkout"}
+    | {"remarketing", "na_regua", "etapas", "etapa", "sem_canal", "enviando", "email_ok", "email_falhas",
+       "whatsapp_ok", "whatsapp_falhas", "cliques", "recuperados"}
 )
 
 

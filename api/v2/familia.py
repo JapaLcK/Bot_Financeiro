@@ -25,7 +25,8 @@ router = APIRouter(include_in_schema=False)
 
 _HTTP = {"invite_invalid": 404, "not_member": 404, "no_group": 404, "user_not_found": 404,
          "already_in_family": 409, "confirmation_mismatch": 409, "coverage_required": 402, "full": 409, "owner_cannot_leave": 409,
-         "no_consent": 403, "not_owner": 404, "aggregates_required": 409}
+         "no_consent": 403, "not_owner": 404, "aggregates_required": 409,
+         "item_not_found": 404, "edit_conflict": 409, "category_taken": 409, "insufficient": 409}
 
 
 class Membro(BaseModel):
@@ -57,6 +58,8 @@ class Dissolucao(BaseModel):
     membros: int
     convites: int
     consentimentos: int
+    metas: int
+    orcamentos: int
     confirmacao: str
 
 
@@ -106,7 +109,7 @@ async def _limite(bucket: str, uid: int, maximo: int, janela: int) -> None:
 def _nonce(uid: int, p: dict) -> str:
     """Sem estado: muda se o grupo ou qualquer membro/contagem mudar entre ver e confirmar (trocar um membro por outro também)."""
     ids = ",".join(map(str, p["ids_membros"]))
-    msg = f"familia-dissolucao:{uid}:{p['group_id']}:{ids}:{p['convites']}:{p['consentimentos']}"
+    msg = f"familia-dissolucao:{uid}:{p['group_id']}:{ids}:{p['convites']}:{p['consentimentos']}:{p['metas']}:{p['orcamentos']}"
     return hmac.new(JWT_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
 
@@ -205,7 +208,7 @@ def previa_dissolucao(uid: int = Depends(usuario_atual)) -> Dissolucao:
     if not p:
         raise _nao_achado()
     return Dissolucao(membros=p["membros"], convites=p["convites"], consentimentos=p["consentimentos"],
-                      confirmacao=_nonce(uid, p))
+                      metas=p["metas"], orcamentos=p["orcamentos"], confirmacao=_nonce(uid, p))
 
 
 @router.post("/familia/dissolucao", response_model=Vazio)

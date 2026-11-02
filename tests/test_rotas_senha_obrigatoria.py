@@ -211,6 +211,14 @@ TABELA = {
                     ("GET", "/familia/historico"))},
     **{(m, f"{pre}{p}"): (B, gate) for pre, gate in (("/api/v2", "usuario_atual"), ("/api/app", "usuario_do_app"))
        for m, p in (("GET", "/familia/membros/{ref}/agregados"), ("GET", "/familia/membros/{ref}/lancamentos"))},
+    # PR 5 (api/v2/familia_casa.py): a casa. Leitura sem plano (usuario_logado), escrita com plano.
+    **{(m, f"{pre}{p}"): (B, "usuario_logado (sem assinatura, com credencial)") for pre in ("/api/v2", "/api/app")
+       for m, p in (("GET", "/familia/casa"),)},
+    **{(m, f"{pre}{p}"): (B, gate) for pre, gate in (("/api/v2", "usuario_atual"), ("/api/app", "usuario_do_app"))
+       for m, p in (("POST", "/familia/casa/metas"), ("PUT", "/familia/casa/metas/{ref}"),
+                    ("DELETE", "/familia/casa/metas/{ref}"), ("POST", "/familia/casa/metas/{ref}/movimentos"),
+                    ("POST", "/familia/casa/orcamentos"), ("PUT", "/familia/casa/orcamentos/{ref}"),
+                    ("DELETE", "/familia/casa/orcamentos/{ref}"), ("POST", "/familia/casa/orcamentos/{ref}/movimentos"))},
     ("WS", "/ws/{user_id}"): (B, "close 4403"),
     # ── HTML autenticado ──
     ("GET", "/app"): (L, "casca; o overlay sobe"), ("GET", "/home"): (L, "casca; o overlay sobe"),
