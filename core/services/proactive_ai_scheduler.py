@@ -130,7 +130,8 @@ async def _precompute_once() -> None:
             n_ok += 1
         except Exception as exc:
             n_err += 1
-            logger.warning("[proactive-ai] user=%s falhou: %s", uid, exc)
+            logger.warning("[proactive-ai] user=%s falhou causa=%s sqlstate=%s", uid,
+                           type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
 
     elapsed = (datetime.now(timezone.utc) - started).total_seconds()
     summary = (

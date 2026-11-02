@@ -53,13 +53,15 @@ def accrue_all_users_investments() -> dict[str, int]:
                 accrue(user_id)
             except Exception as exc:
                 ok = False
-                logger.warning("Falha ao atualizar %s user_id=%s: %s", tipo, user_id, exc, exc_info=True)
+                logger.warning("Falha ao atualizar %s user_id=%s causa=%s sqlstate=%s", tipo, user_id,
+                               type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
                 log_system_event_sync(
                     "warning",
                     "investment_accrual_user_failed",
-                    f"Falha ao atualizar {tipo} automaticamente: {exc}",
+                    f"Falha ao atualizar {tipo} automaticamente: {type(exc).__name__}",
                     source="investment_scheduler",
                     user_id=user_id,
+                    details={"sqlstate": getattr(exc, "sqlstate", None)},
                 )
         if ok:
             updated += 1

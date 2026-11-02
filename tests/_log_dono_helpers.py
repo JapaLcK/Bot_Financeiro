@@ -105,3 +105,34 @@ def _vazou(texto: str, *proibidos: str) -> str | None:
 def _sem_vazamento(linha: dict, *proibidos: str) -> None:
     texto = linha["message"] + json.dumps(linha["details"], ensure_ascii=False)
     assert not (p := _vazou(texto, *proibidos)), f"{p!r} vazou em {linha['event_type']}: {texto}"
+
+
+def _limpa(linha: dict, *proibidos: str) -> None:
+    """Sem vazamento e sem pilha: um `exc_info` no record vira `details.traceback` no
+    `_DashboardHandler`, então a ausência da chave prova que o record não o tinha."""
+    _sem_vazamento(linha, *proibidos)
+    assert "traceback" not in (linha["details"] or {}), linha
+
+
+def _isola_e_apaga(a: int, b: int, ids_a: set[int], id_b: int, marca: int) -> None:
+    """As linhas de A saem no ZIP de A e não no de B; a exclusão de A as apaga e deixa a de B."""
+    assert ids_a <= _exportados(a)[1], "a falha de A não saiu na exportação de A"
+    assert not ids_a & _exportados(b)[1], "linha de A na exportação de B"
+    privacy.delete_user_data(a)
+    assert _linhas(marca, "user_id = %s", (a,)) == [], "log de A sobreviveu à exclusão"
+    assert _linhas(marca, "id = %s", (id_b,)), "a exclusão de A levou a linha de B"
+
+
+def _nenhuma(linhas: list[dict], event_type: str, prefixo: str = "") -> None:
+    """Nenhuma linha do `event_type` com o prefixo: a falha de um não cai na coluna do outro."""
+    achadas = [x for x in linhas if x["event_type"] == event_type and x["message"].startswith(prefixo)]
+    assert not achadas, (event_type, prefixo, achadas)
+
+
+def _marcador() -> str:
+    return f"MARCADOR-{uuid.uuid4().hex}"
+
+
+# A falha cai no 1º visitado (prova que o laço SEGUE) e no 2º (prova que a linha é do dono da volta
+# ATUAL, e não do primeiro do lote: `extra={"user_id": lista[0]}` passaria só com o 1º).
+FALHA_NO = pytest.mark.parametrize("falha_no", [1, 2], ids=["falha_no_1o", "falha_no_2o"])

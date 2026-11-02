@@ -282,4 +282,5 @@ async def _check_trial_ending() -> None:
                     user_id=user_id,
                 )
         except Exception as exc:
-            logger.error("[trial-ending] falha enviando user_id=%s: %s", user_id, exc)
+            logger.error("[trial-ending] falha enviando user_id=%s causa=%s sqlstate=%s", user_id,
+                         type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
