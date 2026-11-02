@@ -1,12 +1,15 @@
 """core/services/remarketing_emails.py — os 3 e-mails da régua de remarketing (PR 6).
 
-HTML em tabelas, tema escuro. Sem desconto (entra no PR 6b). Nenhum dado do usuário entra no HTML
+HTML em tabelas, tema escuro. O desconto de cada etapa vem de `DESCONTO_POR_ETAPA` (só no plano, no 1º
+pagamento; cadernos a preço cheio, e por isso o e-mail não os cita). Nenhum dado do usuário entra no HTML
 além dos dois links (`link`, `unsub`), escapados aqui.
 """
 from __future__ import annotations
 
 from html import escape
 from urllib.parse import quote
+
+from core.services.retomada import DESCONTO_POR_ETAPA
 
 PINK, BG, CARD, TXT, MUTED, NEON = "#FF2D8E", "#0C0C0D", "#1B1B1E", "#F6F4F1", "#9C9C9A", "#C6F11A"
 CONTATO = "lucas@pigbankai.com"
@@ -51,6 +54,14 @@ def _tiles() -> str:
             'border-radius:14px;margin:18px 0">'
             + t('🏦', 'Direto do banco', 'Open Finance') + t('🔔', 'Aviso antes', 'da conta apertar')
             + t('💬', 'No WhatsApp', 'fala com o Piggy') + '</table>')
+
+
+def _oferta(pct: int) -> str:
+    return (f'<div style="background:linear-gradient(135deg,{PINK},#B0125F);border-radius:18px;padding:20px;'
+            f'text-align:center;margin:20px 0"><div style="font-size:12px;letter-spacing:.12em;'
+            f'text-transform:uppercase;color:#FFD3E8">Só pra você</div>'
+            f'<div style="font-size:44px;font-weight:900;color:#fff;line-height:1.1">{pct}% OFF</div>'
+            f'<div style="font-size:14px;color:#fff">no primeiro pagamento do plano</div></div>')
 
 
 def _pagar(link: str) -> str:
@@ -109,11 +120,12 @@ def montar(etapa: int, link: str, unsub: str, base: str) -> tuple[str, str, str]
     assunto, lead, corpo, pergunta = _TEXTOS[etapa]
     l, u = escape(link), escape(unsub)
     cta = _pagar(l) if etapa == 1 else _btn(_BOTOES[etapa], l)
-    extra = {1: _painel() + _feedback(pergunta),
+    pct = DESCONTO_POR_ETAPA[etapa]
+    extra = _oferta(pct) + {1: _painel() + _feedback(pergunta),
              2: _tiles() + _painel() + _feedback(pergunta),
              3: _tiles() + _feedback(pergunta)}[etapa]
     html = _email(assunto, lead, corpo, cta, extra, base, u)
-    texto = (f"{lead}\n\n{corpo}\n\nVoltar de onde parou: {link}\n\n"
+    texto = (f"{lead}\n\n{corpo}\n\n{pct}% OFF no primeiro pagamento do plano.\n\nVoltar de onde parou: {link}\n\n"
              f"{pergunta} Responda este e-mail ou escreva para {CONTATO}.\n\n"
              f"Lucas, fundador do PigBank\nNão quer mais estes avisos? {unsub}\n")
     return assunto, html, texto
