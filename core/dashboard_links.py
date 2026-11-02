@@ -66,6 +66,7 @@ def build_dashboard_link(
         if view in {"overview", "investments", "open-finance"}:
             suffix = f"?view={view}"
         return f"{base_url}/d/{code}{suffix}"
-    except Exception:
-        logger.exception("Falha ao gerar link seguro do dashboard para user_id=%s", user_id)
+    except Exception as exc:
+        logger.error("Falha ao gerar link seguro do dashboard causa=%s sqlstate=%s", type(exc).__name__,
+                     getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return None
