@@ -106,7 +106,8 @@ def _wa_lembrete(user_id: int) -> bool:
             return False
     except Exception as exc:
         logger.warning("[cobranca] leitura do opt-out de WhatsApp falhou"
-                       " user_id=%s: %s — nao envia", user_id, exc)
+                       " user_id=%s causa=%s sqlstate=%s — nao envia", user_id,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return False
     nome = (os.getenv("WA_TEMPLATE_PAYMENT_REMINDER") or "").strip()
     if not nome:
@@ -139,7 +140,8 @@ def _wa_lembrete(user_id: int) -> bool:
             return False
     except Exception as exc:
         logger.warning("[cobranca] revalidacao da inadimplencia falhou"
-                       " user_id=%s: %s — nao envia", user_id, exc)
+                       " user_id=%s causa=%s sqlstate=%s — nao envia", user_id,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return False
     try:
         from adapters.whatsapp.wa_app import _dedupe_whatsapp_targets
@@ -176,14 +178,15 @@ def _wa_lembrete(user_id: int) -> bool:
                 # falha, e repetir aqui só espalharia PII (§0.1 — se um dia
                 # precisar, `utils_phone.mask_phone` já existe).
                 logger.warning("[cobranca] WhatsApp: um destino falhou"
-                               " user_id=%s: %s", user_id, exc)
+                               " user_id=%s causa=%s sqlstate=%s", user_id,
+                               type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         if aceitos < len(destinos):
             # A informação útil na falha PARCIAL é a razão, não "deu erro":
             # 2/3 é melhoria entregue com um número morto, 0/3 é token ou
             # template quebrado. Sem isto os dois davam o mesmo log.
             logger.warning("[cobranca] WhatsApp parcial user_id=%s:"
                            " %d de %d destinos aceitaram", user_id,
-                           aceitos, len(destinos))
+                           aceitos, len(destinos), extra={"user_id": user_id})
         # "ALGUM destino aceitou" — a semântica que uma rodada anterior
         # DOCUMENTOU e o código não implementava. **Este `return` está DENTRO do
         # `try` de fora e sempre esteve**: não foi ele que mudou. O que
@@ -195,5 +198,6 @@ def _wa_lembrete(user_id: int) -> bool:
     except Exception as exc:
         # Só chega aqui a falha de SETUP (import/identidades/dedupe), e aí
         # nenhum destino foi tentado — `False` é o veredito certo.
-        logger.warning("[cobranca] WhatsApp não enviado user_id=%s: %s", user_id, exc)
+        logger.warning("[cobranca] WhatsApp não enviado user_id=%s causa=%s sqlstate=%s", user_id,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return False
