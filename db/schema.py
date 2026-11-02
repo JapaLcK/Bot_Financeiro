@@ -3331,6 +3331,12 @@ def init_db():
         )
         """,
         """create index if not exists idx_family_goals_group on family_goals (group_id)""",
+        # PR 5: versão (edição concorrente), gasto do mês do orçamento e categoria única por grupo (sem diferenciar caixa).
+        """alter table family_goals add column if not exists versao bigint not null default 1""",
+        """alter table family_budgets add column if not exists versao bigint not null default 1""",
+        """alter table family_budgets add column if not exists gasto_cents bigint not null default 0 check (gasto_cents >= 0)""",
+        """alter table family_budgets add column if not exists gasto_mes date""",
+        """create unique index if not exists uq_family_budgets_group_categoria on family_budgets (group_id, lower(categoria))""",
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks
