@@ -59,14 +59,26 @@ def dia_da_cadeia(linhas) -> int:
     return ultima.day if dias[ultima.day] == maior else next(d for d, n in dias.items() if n == maior)
 
 
+def _reajuste(valores: list) -> int:
+    """Índice da 1ª cobrança no valor atual: de trás para frente até o primeiro valor diferente (0 = sem reajuste)."""
+    i = len(valores) - 1
+    while i > 0 and valores[i - 1] == valores[-1]:
+        i -= 1
+    return i
+
+
+def _estavel_antes(linhas: list) -> bool:
+    """O preço antigo aparece nas duas cobranças logo antes do reajuste da cadeia (B5, P2)."""
+    valores = [abs(r["amount"]) for r in linhas]
+    i = _reajuste(valores)
+    return i >= 2 and valores[i - 2] == valores[i - 1]
+
+
 def _item(linhas: list, chave: str, categoria, marca, today: date) -> dict:
     ult = linhas[-1]
     valores = [abs(r["amount"]) for r in linhas]
     valor = valores[-1]
-    # Reajuste: de trás para frente até o primeiro valor diferente.
-    i = len(valores) - 1
-    while i > 0 and valores[i - 1] == valor:
-        i -= 1
+    i = _reajuste(valores)
     valor_anterior = valores[i - 1] if i > 0 else None
     reajuste_em = linhas[i]["transaction_date"].isoformat() if i > 0 else None
 
@@ -147,7 +159,7 @@ def listar_assinaturas(user_id: int, today: date) -> dict:
 
     # `ignoradas` só a tela lê: Detetive e chat usam servicos + outras. Em
     # `ignoradas`, `marcada` é a marca guardada, que o Voltar a mostrar restaura.
-    servicos, outras, ignoradas, chaves = [], [], [], set()
+    servicos, outras, ignoradas, chaves, estaveis = [], [], [], set(), []
     for chave, linhas in ((c, ls) for c, lista in cadeias_.items() for ls in lista):
         ult = linhas[-1]
         categoria = categoria_pigbank(ult["category"])
@@ -156,12 +168,22 @@ def listar_assinaturas(user_id: int, today: date) -> dict:
         if marca == "ignorar":
             ignoradas.append(_item(linhas, chave, categoria, "assinatura" if antes else None, today))
             continue
-        destino = servicos if _eh_servico(ult, categoria, marca) else outras
-        destino.append(_item(linhas, chave, categoria, marca, today))
+        item = _item(linhas, chave, categoria, marca, today)
+        if not _eh_servico(ult, categoria, marca):
+            outras.append(item)
+            continue
+        servicos.append(item)
+        if item["reajuste_em"] and _estavel_antes(linhas):  # a estabilidade da PRÓPRIA cadeia deste item
+            estaveis.append(item)
 
     servicos.sort(key=lambda x: -x["valor"])
     outras.sort(key=lambda x: -x["valor"])
     ignoradas.sort(key=lambda x: -x["valor"])
     total = sum((x["valor"] for x in servicos if x["status"] == "ativa"), Decimal(0))
     return {"servicos": servicos, "outras": outras, "ignoradas": ignoradas, "total_mensal": total,
-            "total_anual": total * 12, "chaves": sorted(chaves)}
+            "total_anual": total * 12, "chaves": sorted(chaves),
+            # Os MESMOS objetos de `servicos` cujo reajuste veio depois de duas cobranças no preço antigo (B5). Lista
+            # à parte, e não campo do item, porque o chat do Detetive manda o item inteiro ao modelo; a rota a descarta
+            # como descarta "chaves". Não pela chave: dois serviços do mesmo comerciante (iCloud e Apple Music) a
+            # dividem.
+            "reajustes_estaveis": estaveis}

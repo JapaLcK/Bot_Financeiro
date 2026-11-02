@@ -2237,7 +2237,7 @@ já enviado antes do PUT não é desfeito.
 
 **PigBank Insights, contrato v1 (PL-06 PR A1).** `/insights/{uid}/current` e o card `piggy` do chat
 devolvem os fatos dos detectores de `db/insights.py` e `core/services/insights_detectores.py` (`budget_warning`,
-`category_spike`, `recurring_increase`, `of_bill_increase`, `salary_burn_fast`, `goal_behind`, `bill_due`, `month_projection`) no contrato de
+`category_spike`, `recurring_increase`, `of_bill_increase`, `salary_burn_fast`, `goal_behind`, `bill_due`, `month_projection`, `subscription_increase`) no contrato de
 `core/services/insights_contrato.py`: os campos legados (`key`, `type`, `icon`, `title`, `message`,
 `severity`, `action_*`) mais `explicacao` (versao 1: `tipo`, `familia`, `detector`, `calculado_em`,
 `periodo` com `rotulo` e `parcial`, `fonte`, `referencia`, `atual`, `diferenca`, `amostra`), com dinheiro
@@ -2279,6 +2279,25 @@ dentro da janela de conferência (`JANELA_CONFERENCIA_DIAS`), conta a favor e s�
 corpo termina sempre com a ressalva de que a Previsão mensal de Gastos fixos considera só recorrências e pode mostrar
 outro valor (`NOTA_GASTOS_FIXOS`; um teste trava que ela cabe no teto do `message` de `montar_item`). O
 `check_cashflow` do chat (`project()`, sem a janela) pode se abster no mesmo caso (issue #1326).
+O `subscription_increase` (PL-06 B5, família `assinatura`) é o reajuste de uma assinatura mensal da Pluggy
+(`listar_assinaturas`, só `servicos`): sobe nos últimos `REAJUSTE_DIAS` dias depois de o preço antigo se repetir em
+duas cobranças seguidas (`reajustes_estaveis`, chave de topo de `listar_assinaturas` com os próprios itens de
+`servicos` cuja cadeia é estável; fora dos itens, que a guarda de `test_assinaturas.py` fecha), warning a partir de
+`REAJUSTE_ALERTA`% de alta e info abaixo, queda não avisa; chave `subscription_increase:{merchant_key}:{dia do
+reajuste}:{valor ANTERIOR em centavos}` (o sujeito é `sujeito(nome, chave)`: o `merchant_key`, ou o hash dele quando o
+nome tem dado pessoal; reajuste novo é fato novo; dois serviços do mesmo comerciante reajustados no mesmo dia com
+preços antigos diferentes são dois avisos, cada um dispensável; e o preço antigo, já assentado, não muda quando a
+Pluggy corrige os centavos da cobrança nova ou a relança com outro id, então o dispensado não volta; limites aceitos
+pelo dono: mesmo comerciante, mesmo dia e mesmo preço antigo viram um aviso só, e corrigir uma cobrança antiga muda a
+chave), gate `subscriptions` (Plus) na geração e na leitura, `impacto {por_ano_valor}` só no Pro, sem botão, logo
+antes da conta do OF no laço. A conta do OF (`of_bill_increase`) do MESMO fato sai na LEITURA
+(`insights_contrato.projetar`: mesmo `comerciante_id`, o `merchant_key` em hash, e mesmo valor novo em centavos; outro
+serviço do comerciante ou um aumento que o Recurring Payments ainda não viu saem os dois, porque duplicidade é aceita
+e aviso perdido não): depois do filtro de recurso e antes das dispensas, então só some quando o reajuste sobreviveu ao
+gate, quem perde o recurso volta a vê-la, e dispensar o reajuste não a ressuscita. Se a consulta de assinaturas falha,
+o detector entra em `falhas` e a conta do OF continua saindo. Limites: o casamento depende de a Pluggy usar a mesma
+descrição no grupo e na transação (senão saem os dois itens), e passada a janela a conta do OF da mesma assinatura
+pode voltar (issue #1336).
 
 **PigBank Insights, dispensar e útil (PL-06 PR A2).** Tabela `insight_estado` (PK `user_id, chave`;
 `db/insight_estado.py`): cada cálculo registra a chave com a severidade e a medida do ÚLTIMO cálculo
