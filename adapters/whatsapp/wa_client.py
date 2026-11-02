@@ -123,6 +123,7 @@ def send_template(
     body_params: Optional[list[str]] = None,
     named_body_params: Optional[Dict[str, str]] = None,
     quick_reply_buttons: Optional[list[dict]] = None,
+    url_button_param: Optional[str] = None,
     access_token: Optional[str] = None,
     phone_number_id: Optional[str] = None,
     graph_version: Optional[str] = None,
@@ -171,6 +172,16 @@ def send_template(
                 "sub_type": "quick_reply",
                 "index": str(button.get("index", index)),
                 "parameters": [{"type": "payload", "payload": payload_value}],
+            }
+        )
+
+    if url_button_param:  # botão de URL dinâmica (índice 0): o {{1}} da base do template
+        components.append(
+            {
+                "type": "button",
+                "sub_type": "url",
+                "index": "0",
+                "parameters": [{"type": "text", "text": url_button_param}],
             }
         )
 

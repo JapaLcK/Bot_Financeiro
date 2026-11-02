@@ -496,7 +496,7 @@ def register_auth_user_impl(
         conn.commit()
     invalidate_auth_user_cache(user_id)
 
-    link_code = create_link_code(user_id, minutes_valid=15)
+    link_code = ""  # só /auth/link-code gera código (token forte)
 
     try:
         from core.services.email_service import send_welcome_email
@@ -907,7 +907,7 @@ def inserir_conta_nova(cur, *, user_id: int, email: str, password_hash: str | No
 
 def boas_vindas(create_link_code, email: str, user_id: int) -> str:
     """Depois de a conta nascer: o `link_code` do WhatsApp e o e-mail de boas-vindas."""
-    link_code = create_link_code(user_id, minutes_valid=15)
+    link_code = ""  # só /auth/link-code gera código (token forte)
     try:
         from core.services.email_service import send_welcome_email
 
@@ -1096,7 +1096,7 @@ def attempt_whatsapp_phone_link_impl(
 ) -> dict:
     """Classifica o número que escreve. NÃO LIGA MAIS NADA (Grupo 7, PR-5, D1(c)): o
     telefone digitado no site não prova que o número é de quem digitou (V3: B digita o
-    número de C, C manda "oi" e virava B). Só o código (`vincular 123456`) liga.
+    número de C, C manda "oi" e virava B). Só o código (`vincular <código>`) liga.
 
     O telefone continua LIDO, e só para uma coisa: reconhecer a conta paga que ainda não
     criou a senha (`precisa_senha`), cujo número tem de receber o texto dela e o opt-out

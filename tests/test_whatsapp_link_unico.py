@@ -20,6 +20,7 @@ CEGUEIRA DECLARADA: o WhatsApp real abrindo com o texto preenchido (iOS, Android
 WhatsApp Web) e o e-mail renderizado não são exercitados aqui.
 """
 import os
+import re
 import secrets
 import subprocess
 import uuid
@@ -74,7 +75,7 @@ def _link_code(monkeypatch):
 
 def _login(monkeypatch):
     corpo, _ = login_http(monkeypatch, como_app=False)
-    assert corpo["link_code"] == "ABC123"  # dublê de create_link_code em login_http
+    assert corpo["link_code"] == ""  # só /auth/link-code gera código
     return corpo
 
 
@@ -128,10 +129,12 @@ ids = lambda f: f.__name__.lstrip("_")  # noqa: E731
 def test_com_numero_o_link_leva_vincular_e_o_codigo(rota, monkeypatch):
     monkeypatch.setenv("WHATSAPP_NUMBER", NUMERO)
     corpo = rota(monkeypatch)
+    if rota is not _link_code:  # as outras rotas devolvem as chaves vazias, sem criar código
+        assert corpo["link_code"] == "" and corpo["whatsapp_link"] == ""
+        return
     url = corpo["whatsapp_link"]
     assert url.startswith(f"https://api.whatsapp.com/send?phone={NUMERO}&text="), url
-    assert _texto(url) == f"vincular {corpo['link_code']}"
-    assert len(corpo["link_code"]) == 6  # (o `login` usa o dublê "ABC123"; o resto, o código real)
+    assert re.fullmatch(r"vincular pbl[0-9a-f]{32}", _texto(url))
 
 
 @pytest.mark.parametrize("rota", ROTAS, ids=ids)
@@ -139,7 +142,6 @@ def test_sem_numero_o_link_vem_vazio_e_nunca_o_seletor_com_o_codigo(rota, monkey
     monkeypatch.delenv("WHATSAPP_NUMBER", raising=False)
     corpo = rota(monkeypatch)
     assert corpo["whatsapp_link"] == "", corpo["whatsapp_link"]
-    assert corpo["link_code"]  # o código segue sendo gerado: o /comecar o mostra para digitar
 
 
 def test_link_code_isolamento_o_codigo_do_link_e_do_dono_dele(monkeypatch):
@@ -161,7 +163,7 @@ def test_link_code_isolamento_o_codigo_do_link_e_do_dono_dele(monkeypatch):
 
 # ── round trip site × parser × bot ───────────────────────────────────────────
 
-@pytest.mark.parametrize("codigo", ["123456", "000042", "999999"])
+@pytest.mark.parametrize("codigo", ["pbl" + "0123456789abcdef" * 2, "pbl" + "f" * 32])
 def test_round_trip_site_x_parser(codigo, monkeypatch):
     monkeypatch.setenv("WHATSAPP_NUMBER", NUMERO)
     r = classify(_texto(link_whatsapp(f"vincular {codigo}")), allow_ai=False)
@@ -195,7 +197,7 @@ def test_link_whatsapp_le_o_numero_a_cada_chamada_e_so_o_seletor_leva_saudacao(m
     monkeypatch.setenv("WHATSAPP_NUMBER", "+55 (11) 98888-7777")
     assert link_whatsapp("oi").startswith("https://api.whatsapp.com/send?phone=5511988887777&text=")
     monkeypatch.setenv("WHATSAPP_NUMBER", "")
-    assert link_whatsapp("vincular 123456") == ""  # falha fechada
+    assert link_whatsapp("vincular pbl") == ""  # falha fechada
     assert link_whatsapp("oi", seletor=True) == "https://wa.me/?text=oi"  # saudação, sem segredo
 
 
@@ -204,7 +206,7 @@ def test_numero_sem_digito_ascii_nao_gera_phone(numero, monkeypatch):
     """Dígitos Unicode (árabe-índico, largura total, sobrescrito) passam em `str.isdigit`
     e gerariam `phone=` não-ASCII: valem como número ausente."""
     monkeypatch.setenv("WHATSAPP_NUMBER", numero)
-    assert link_whatsapp("vincular 123456") == ""
+    assert link_whatsapp("vincular pbl") == ""
     assert link_whatsapp("oi", seletor=True) == "https://wa.me/?text=oi"
 
 

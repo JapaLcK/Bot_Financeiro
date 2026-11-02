@@ -3,7 +3,7 @@ import { StyleSheet } from "react-native";
 import { Icone } from "@/ui/componentes/Icone";
 import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { guardarCredenciais } from "@/storage/secure";
-import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
+import { fetchFalso, NO_MES_DO_TESTE, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import { irAoExtrato } from "@/features/painel/navegacao";
 import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
@@ -26,7 +26,8 @@ function servidor() {
 }
 const chamadasLanc = () => fetchFalso.mock.calls.filter(([url]) => new URL(String(url)).pathname === LANC);
 const refresh = () => act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); await drenar(); });
-beforeEach(async () => { prepararCaso(); desligarTrava(); lancamentos = () => pagina("Salário"); await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor(); });
+// As datas deste arquivo são de outubro de 2026 (calendário, rótulos, fixtures).
+beforeEach(async () => { NO_MES_DO_TESTE(); prepararCaso(); desligarTrava(); lancamentos = () => pagina("Salário"); await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor(); });
 afterEach(() => jest.restoreAllMocks());
 const lista = () => waitFor(() => expect(screen.getByText("Salário")).toBeTruthy());
 it("deep link a frio em /extrato mostra a lista", async () => {

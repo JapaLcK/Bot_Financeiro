@@ -756,12 +756,23 @@ def check_can_create_launch(user_id: int) -> None:
         return
     from db.plans import count_launches_this_month
     if count_launches_this_month(user_id) >= cap:
-        raise PlanLimitExceeded(
-            "launches_month",
-            f"🐷 No Grátis você registra {cap} lançamentos por mês — e esse mês "
-            "lotou! No Essencial é ilimitado (com áudio, foto de cupom e OFX).\n"
-            "Faça upgrade: https://pigbankai.com/precos",
-        )
+        from core.services import billing_copy
+        from core.services.billing_dunning import carencia_aberta
+        # Não usa `estado_sem_plano_pago`: no erro ela responde "carencia", e aqui
+        # isso afirmaria "o pagamento falhou" a quem nunca pagou. Erro → neutra.
+        try:
+            user = get_auth_user(int(user_id))
+            em_carencia = bool(user) and carencia_aberta(
+                user.get("past_due_since"), user.get("last_payment_status"),
+                datetime.now(timezone.utc))
+        except Exception:
+            em_carencia = False
+        if em_carencia:
+            msg = billing_copy.LANCAMENTOS_EM_CARENCIA.format(cap=cap)
+        else:
+            msg = (f"🐷 Você atingiu o limite de {cap} lançamentos deste mês. "
+                   "Pra continuar anotando, escolha um plano: https://pigbankai.com/precos")
+        raise PlanLimitExceeded("launches_month", msg)
 
 
 def pockets_restantes(user_id: int) -> int | None:

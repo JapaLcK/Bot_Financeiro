@@ -58,8 +58,9 @@ def recusa(user_id: int, caso: str) -> str | None:
     try:
         from core.services.plan_service import dashboard_v2_beta
         bloqueado = dashboard_v2_beta(int(user_id))
-    except Exception:
-        logger.warning("fonte_unica: chave do v2 falhou, liberando user=%s", user_id, exc_info=True)
+    except Exception as exc:
+        logger.warning("fonte_unica: chave do v2 falhou, liberando user=%s causa=%s sqlstate=%s", user_id,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return None
     return MENSAGENS[caso] if bloqueado else None
 

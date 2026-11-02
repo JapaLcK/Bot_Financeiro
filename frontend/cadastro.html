@@ -25,6 +25,8 @@
 </script>
 <script defer="" src="/purchase-intent.js?v=1">
 </script>
+<script defer="" src="/familia-convite.js?v=1">
+</script>
 <link href="/phosphor.css?v=1" rel="stylesheet"/>
 </head>
 <body class="lp lp-auth lp-auth-page">
@@ -214,7 +216,7 @@
         var destino=window.PBPurchaseIntent
           ? window.PBPurchaseIntent.afterAuth(d.dashboard_url)
           : d.dashboard_url;
-        goDash(destino);
+        goDash(window.PBFamiliaConvite?window.PBFamiliaConvite.destino(destino):destino);
       };
       if(window.pbTrack&&d.user_id){pbTrack('sign_up',{method:'email'},irPraDash);}
       else{irPraDash();}

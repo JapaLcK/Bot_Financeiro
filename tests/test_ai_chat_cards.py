@@ -107,7 +107,9 @@ def test_categorias_sem_contas_quando_contas_falha_e_loga(mundo, caplog):
         r, (bloco,), _ = mostrar(a, card="categorias", meses=[M, M0])
     assert all(set(aba["recursos"]) == {"detalhes"} for aba in bloco["abas"]) and len(bloco["abas"]) == 2
     assert r == ok
-    assert any("contas indisponível" in x.getMessage() and x.exc_info for x in caplog.records)
+    # #657 D6: a causa no texto e o dono na coluna, sem a pilha (o texto cru da exceção).
+    assert any("contas indisponível" in x.getMessage() and "causa=RuntimeError" in x.getMessage()
+               and x.exc_info is None and getattr(x, "user_id", None) == a for x in caplog.records)
 
 
 def test_categorias_falha_de_mes_detalhes_continua_falhando(mundo):

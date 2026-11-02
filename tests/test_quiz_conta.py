@@ -147,7 +147,7 @@ def test_email_novo_cria_conta_sem_senha_logada_e_grava_o_quiz(env):
 
 
 def test_link_code_falha_depois_do_commit_conta_nasce_logada_sem_pii(env, monkeypatch, caplog, capsys):
-    """O `create_link_code` roda depois do commit da conta: se ele lançasse até a rota,
+    """O `boas_vindas` (e-mail) roda depois do commit da conta: se ele lançasse até a rota,
     ela respondia 503 sem sessão e o retry caía em `tem_conta` — conta sem senha presa."""
     email, tel = _email(), _telefone()
     chamadas = []
@@ -156,7 +156,7 @@ def test_link_code_falha_depois_do_commit_conta_nasce_logada_sem_pii(env, monkey
         chamadas.append(user_id)
         raise Exception(f"Failing row ({email}, {tel})")
 
-    monkeypatch.setattr(db_signup_quiz, "create_link_code", explode)
+    monkeypatch.setattr(db_signup_quiz.db_support, "boas_vindas", lambda cb, email_, uid: explode(uid))
     client = _navegador()
     r = _conta_quiz(client, email, whatsapp=tel)
     assert r.status_code == 200, r.text

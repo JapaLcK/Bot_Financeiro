@@ -1,0 +1,15 @@
+/* Família da Conta (familia/*.tsx): sem flex gap (Safari 14); botões de 44px pelo `.conta-perfil .btn` (pages.css, a seção leva a classe); o link quebra em qualquer ponto para nunca passar do cartão. */
+.conta-familia { display: grid; justify-items: start; row-gap: 12px; }
+.conta-familia > *, .conta-familia .fam-convite { max-width: 100%; min-width: 0; }
+.conta-familia p { margin: 0; }
+.conta-familia .btn[aria-disabled="true"], .conta-familia .btn:disabled { opacity: 0.6; cursor: default; }
+.fam-lista { list-style: none; margin: 0; padding: 0; width: 100%; }
+.fam-lista li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 14px; min-height: 44px; padding: 6px 0; }
+.fam-lista li > i { font-size: 20px; color: var(--ink-3); }
+.fam-lista b { font-size: 16px; font-weight: 500; overflow-wrap: break-word; word-break: break-word; }
+.fam-lista .selo { margin-left: 8px; vertical-align: middle; }
+.fam-convite { display: grid; row-gap: 8px; justify-items: start; width: 100%; }
+.fam-link { padding: 10px 12px; border-radius: 8px; background: var(--plane-2); font-size: 14px; word-break: break-all; }
+.fam-acoes { display: flex; flex-wrap: wrap; margin: -8px 0 0 -8px; }
+.fam-acoes > .btn { margin: 8px 0 0 8px; }
+.fam-falha { font-size: 14px; }

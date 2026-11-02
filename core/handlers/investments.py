@@ -410,11 +410,11 @@ def _aporta(user_id: int, investment_name: str, amount: float, text: str, source
                     + "\n\n" + _investment_dashboard_link(user_id))
         if code == "AMOUNT_INVALID":
             return "Valor inválido para aporte. Tente: *aportar 500 no CDB Nubank*."
-        logger.warning("deposit: código inesperado user=%s inv=%s code=%s", user_id, investment_name, code)
+        logger.warning("deposit: código inesperado user=%s code=%s", user_id, code, extra={"user_id": user_id})
         return "Não consegui registrar esse aporte. Confira o valor e tente de novo."
     except PlanLimitExceeded:
         raise  # handle_incoming responde com a mensagem amigável de upgrade
-    except Exception:
+    except Exception as exc:
         # SOBE, não vira texto. `investment_deposit_from_account` é uma transação
         # só, com o commit no fim: o que estoura nela não moveu dinheiro. Enquanto
         # isto devolvia "Não consegui registrar esse aporte agora", o
@@ -423,7 +423,8 @@ def _aporta(user_id: int, investment_name: str, amount: float, text: str, source
         # o aporte. Mesmo defeito da caixinha, apontado pelo Codex no PR #144.
         # O usuário continua recebendo uma mensagem de "tente em instantes": a do
         # `handle_incoming`, que ainda registra o erro no dashboard.
-        logger.exception("deposit falhou user=%s inv=%s", user_id, investment_name)
+        logger.error("deposit falhou user=%s causa=%s sqlstate=%s", user_id,
+                     type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         raise
 
     # DEPOIS do commit: o dinheiro JÁ ANDOU e a exceção NÃO pode subir daqui —
@@ -436,9 +437,10 @@ def _aporta(user_id: int, investment_name: str, amount: float, text: str, source
         if source["kind"] == funding.BANK:
             msg += "\n\n" + funding.nota_sync()
         return msg
-    except Exception:
-        logger.exception(
-            "aporte %s registrado, mas a mensagem falhou (user=%s)", launch_id, user_id)
+    except Exception as exc:
+        logger.error(
+            "aporte %s registrado, mas a mensagem falhou (user=%s) causa=%s sqlstate=%s", launch_id, user_id,
+            type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return (f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}** "
                 f"registrado (ID interno #{launch_id}).")
 
@@ -528,14 +530,15 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
             return f"Saldo insuficiente no investimento **{investment_name}**.\n\n" + list_investments(user_id)
         if code == "AMOUNT_INVALID":
             return "Valor inválido para resgate. Tente: *resgatar 500 do CDB Nubank*."
-        logger.warning("withdraw: código inesperado user=%s inv=%s code=%s", user_id, investment_name, code)
+        logger.warning("withdraw: código inesperado user=%s code=%s", user_id, code, extra={"user_id": user_id})
         return "Não consegui registrar esse resgate. Confira o valor e tente de novo."
     except PlanLimitExceeded:
         raise  # handle_incoming responde com a mensagem amigável de upgrade
     except Exception as e:
         if violacao_finito(e):
             raise  # idem
-        logger.exception("withdraw falhou user=%s inv=%s", user_id, investment_name)
+        logger.error("withdraw falhou user=%s causa=%s sqlstate=%s", user_id,
+                     type(e).__name__, getattr(e, "sqlstate", None), extra={"user_id": user_id})
         return "Não consegui registrar esse resgate agora. Tente de novo em instantes."
 
     gross = float(taxes.get("gross", amount or 0)) if taxes else float(amount or 0)

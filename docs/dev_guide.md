@@ -358,7 +358,7 @@ Fluxo:
 
 Observações:
 - o token expira e só pode ser usado uma vez
-- o usuário não precisa mais digitar `vincular 123456` para o fluxo web → WhatsApp
+- o usuário não precisa mais digitar `vincular <código>` para o fluxo web → WhatsApp
 
 ### Rodar testes automatizados
 

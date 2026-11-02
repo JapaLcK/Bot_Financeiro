@@ -147,9 +147,10 @@ def deposita_com_origem(user_id: int, pocket_name: str, amount: float, text: str
         if source["kind"] == funding.BANK:
             msg += "\n\n" + funding.nota_sync()
         return msg
-    except Exception:
-        logger.exception(
-            "depósito %s registrado, mas a mensagem falhou (user=%s)", launch_id, user_id)
+    except Exception as exc:
+        logger.error(
+            "depósito %s registrado, mas a mensagem falhou (user=%s) causa=%s sqlstate=%s", launch_id, user_id,
+            type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return (f"✅ Depósito de {fmt_brl(float(amount))} na caixinha **{canon}** "
                 f"registrado (ID interno #{launch_id}).")
 

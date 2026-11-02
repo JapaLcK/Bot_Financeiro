@@ -154,7 +154,7 @@ def grants_para_precificar(user_id: int) -> list[dict]:
     valores = valores_por_cobranca(user_id)
     ativos = []
     for g in list_grants(user_id):
-        if g["status"] != "active":
+        if g["status"] != "active" or g["source"] == "family":  # acesso de família não é compra
             continue
         item = dict(g)
         item["amount_cents"] = (valores.get(str(g["external_ref"]))

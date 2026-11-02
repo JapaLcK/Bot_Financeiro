@@ -68,12 +68,17 @@
 .rail-conta { margin-top: auto; display: grid; gap: 2px; }
 .rail-conta button:disabled, .menu-telas-conta button:disabled { opacity: 0.5; cursor: default; } /* Sair já clicado */
 .rail-conta-t { margin: 0; padding: 0 12px 4px; font-size: 11.5px; color: var(--ink-3); }
-/* Trilho mais baixo que a coluna: o trilho normal (Conta + rodapé) só cabe a partir de 749px e só com a folga de baixo a partir de 769px, então 768px é o último compacto (com o limite em 740px, 741–748px cortava o rodapé). Um 1366×768 deixa ~657px e o trilho não rola; 625px é a menor altura em que o trilho compacto ainda cabe (624 rola 1px); um 1280×720 deixa ~590px: aí rola, ver o @media de 650px. Itens e espaços menores. */
-@media (max-height: 768px) {
+/* Trilho mais baixo que a coluna: com a Conta de 5 itens (a Família é o 5º) o trilho normal (Conta + rodapé) só cabe a partir de 787px (1440×786 corta 1px,
+   1440×780 corta 7px), então 786px é o último compacto. Um 1366×768 deixa ~657px e o trilho não rola. Itens e espaços menores. */
+@media (max-height: 786px) {
   .rail { gap: 14px; padding: 14px 14px 12px; }
   .rail-list a, .rail-list button, .rail-conta a, .rail-conta button { height: 32px; }
   .rail-list { gap: 0; }
   .rail-conta ul { gap: 0; }
+}
+/* Os 5 itens da Conta a 32px pedem 657px; abaixo de 656px os itens baixam a 30px e o trilho segue sem rolar até 625px (624 rola 1px). */
+@media (max-height: 656px) {
+  .rail-list a, .rail-list button, .rail-conta a, .rail-conta button { height: 30px; }
 }
 /* Janela baixa demais até para isso (zoom, janela pequena): o trilho rola e o Sair se alcança com Tab. O overflow cortaria o menu da Ajuda,
    que abre para a direita: nessa altura ele fica `fixed`, ao lado do trilho e rente ao pé da janela. 650px = o trilho cheio (~625px a 1440 de largura) + folga. */
@@ -244,9 +249,10 @@
 .menu-telas li a[aria-current="page"] i { color: var(--pink); }
 /* Mês, busca e Ferramentas lado a lado não deixam folga: o CI no Linux mede o texto mais
    largo que o macOS e estourava em 320 e em 361px. Até 420px o ano sai do título; até
-   360px a busca sai também. */
+   360px a busca sai também; até 340px a barra aperta o espaço para caber "Novembro". */
 @media (max-width: 420px) { .month-year { display: none; } }
 @media (max-width: 360px) { .topbar .cmd-trigger { display: none; } }
+@media (max-width: 340px) { .topbar { gap: 2px; } .topbar .btn-primary { padding: 0 8px; } }
 
 /* Portão de entrada (parts/Entrada.tsx): carregando e erro, antes de o painel montar.
    Sem altura de viewport (100vh no iOS passa da tela): o respiro vem do padding. */

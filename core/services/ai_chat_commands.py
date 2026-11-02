@@ -147,7 +147,8 @@ def encerra_pergunta_da_ia(user_id: int, ultima_id: int) -> None:
     try:
         db.ai_append_message_if_last(user_id, ultima_id, "system", _PERGUNTA_ENCERRADA)
     except Exception as exc:
-        logger.warning("encerra_pergunta_da_ia falhou pra user %s: %s", user_id, exc)
+        logger.warning("encerra_pergunta_da_ia falhou pra user %s causa=%s sqlstate=%s", user_id,
+                       type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
 
 
 def aviso_de_cota(user_id: int) -> str | None:
@@ -323,5 +324,6 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
             platform=platform,
         )
     except Exception as exc:
-        logger.error("ai_chat_run falhou pra user %s: %s", user_id, exc)
+        logger.error("ai_chat_run falhou pra user %s causa=%s sqlstate=%s", user_id,
+                     type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return ERROR_MSG

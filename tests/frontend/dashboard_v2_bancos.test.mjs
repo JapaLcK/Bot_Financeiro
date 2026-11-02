@@ -788,6 +788,7 @@ test("o 'Conectar banco' do resumo: link rosa de 44 px+ com o texto 'Conectar ba
   const a = await bancos({ conexoes: dois_, bancos: "barra" });
   await esperaCards(a.page, 2);
   const mais = a.page.getByRole("link", { name: "Conectar banco", exact: true });
+  await mais.first().waitFor(); // o link chega depois dos cards (limite do servidor): contar antes dava 0 no CI
   const r = { n: await mais.count(), href: await mais.getAttribute("href"), medida: await mais.evaluate((e) => [Math.round(e.getBoundingClientRect().height) >= 44, e.textContent.trim(), !!e.closest(".banco-resumo"), e.classList.contains("btn-primary")]) };
   await a.ctx.close();
   assert.deepEqual(r, { n: 1, href: "/settings?view=open-finance", medida: [true, "Conectar banco", true, true] });

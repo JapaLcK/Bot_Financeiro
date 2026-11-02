@@ -1057,10 +1057,10 @@ def _maybe_recurring_offer(
             "due_day": int(when.day),
             "merchant_key": key,
         }
-    except Exception:
+    except Exception as exc:
         logger.warning(
-            "detecção de gasto fixo falhou (user %s, descr=%r) — seguindo sem oferta",
-            user_id, descr, exc_info=True,
+            "detecção de gasto fixo falhou (user %s) — seguindo sem oferta causa=%s sqlstate=%s",
+            user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id},
         )
         return None
 
@@ -1216,10 +1216,10 @@ def add_from_entities(
         )
         if declaracao and reason_final == "explicit":  # o parser não aprende na declaração (recusa não persiste): aqui
             learn_from_explicit_category(user_id, normalize_text(nota_clean), categoria_final)
-    except Exception:
-        logger.exception(
-            "learn_from_inference falhou depois do commit (user %s, lancamento %s)",
-            user_id, launch_id)
+    except Exception as exc:
+        logger.error(
+            "learn_from_inference falhou depois do commit (user %s, lancamento %s) causa=%s sqlstate=%s",
+            user_id, launch_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
 
     # Banco importou antes e o usuário lançou depois: vira a mesma pendência
     # confirmável da ordem direta, nunca fusão. ANTES do saldo relido abaixo,
@@ -1244,12 +1244,12 @@ def add_from_entities(
                 user_id, alvo_clean or nota_clean, valor, categoria_final,
                 criado_em, launch_id,
             )
-        except Exception:
+        except Exception as exc:
             # Pós-commit: melhor perder a oferta que subir exceção (ver o
             # comentário do learn_from_inference acima).
-            logger.exception(
-                "_maybe_recurring_offer falhou depois do commit (user %s, lancamento %s)",
-                user_id, launch_id)
+            logger.error(
+                "_maybe_recurring_offer falhou depois do commit (user %s, lancamento %s) causa=%s sqlstate=%s",
+                user_id, launch_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
 
     if recurring_offer:
         try:
@@ -1261,10 +1261,10 @@ def add_from_entities(
                 gravou_pending = True
             if not gravou_pending:
                 recurring_offer = None
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "falha ao salvar pending confirm_recurring_offer (user %s) — oferta perdida",
-                user_id, exc_info=True,
+                "falha ao salvar pending confirm_recurring_offer (user %s) — oferta perdida causa=%s sqlstate=%s",
+                user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id},
             )
             recurring_offer = None
     # Botão "categoria errada?" no WhatsApp (one-shot, lido por
@@ -1281,10 +1281,11 @@ def add_from_entities(
                     "recategorize_launch_offer",
                     recat_payload,
                 )
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "falha ao salvar pending recategorize_launch_offer (user %s, launch %s) — botão de recategorizar não vai aparecer",
-                user_id, launch_id, exc_info=True,
+                "falha ao salvar pending recategorize_launch_offer (user %s, launch %s) — botão de recategorizar não vai aparecer"
+                " causa=%s sqlstate=%s",
+                user_id, launch_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id},
             )
 
     emoji = "💸" if tipo == "despesa" else "💰"
@@ -1320,10 +1321,10 @@ def add_from_entities(
                 # formato, não autoriza imprimir a Carteira de antes da fusão.
                 linha_saldo = f"🏦 Saldo: {fmt_brl(float(cb['manual'] or 0))}"
                 linha_aviso = aviso_conferir(cb["manual"], cb.get("reconciliation"))
-        except Exception:
-            logger.exception(
-                "saldo consolidado falhou depois do commit (user_id=%s, lancamento %s)",
-                user_id, launch_id, extra={"user_id": user_id})
+        except Exception as exc:
+            logger.error(
+                "saldo consolidado falhou depois do commit (user_id=%s, lancamento %s) causa=%s sqlstate=%s",
+                user_id, launch_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
     resposta = (
         f"{emoji} **{tipo.capitalize()} registrada{' pelo banco' if declaracao else ''}**: {fmt_brl(valor)}\n"
         f"🏷️ Categoria: {categoria_final}\n"
@@ -1340,10 +1341,10 @@ def add_from_entities(
             alert = evaluate_after_expense(user_id, categoria_final, valor, when)
             if alert:
                 resposta += format_alert_text(alert)
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "avaliação de alerta de orçamento falhou (user %s, categoria %r) — alerta pode ter sido perdido",
-                user_id, categoria_final, exc_info=True,
+                "avaliação de alerta de orçamento falhou (user %s) — alerta pode ter sido perdido causa=%s sqlstate=%s",
+                user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id},
             )
 
     if recurring_offer:
@@ -1376,10 +1377,10 @@ def add_from_entities(
                     source="launches",
                     user_id=user_id,
                 )
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "nudge de primeiro lançamento falhou (user %s) — seguindo sem ele",
-                user_id, exc_info=True,
+                "nudge de primeiro lançamento falhou (user %s) — seguindo sem ele causa=%s sqlstate=%s",
+                user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id},
             )
 
     return resposta

@@ -2175,6 +2175,21 @@ async def lifespan(app: FastAPI):
                 print(f"[stripe_email] erro: {exc}", file=sys.stderr)
             await asyncio.sleep(300)
 
+    async def _remarketing_worker():
+        """Régua de remarketing do checkout abandonado, a cada 5 min. Inerte sem
+        `REMARKETING_DESDE` (nem consulta o banco). Ver `core/services/remarketing.py`."""
+        from core.services.remarketing import rodar_uma_vez  # noqa: PLC0415
+        while True:
+            try:
+                n = await asyncio.to_thread(rodar_uma_vez)
+                if n:
+                    print(f"[remarketing] {n} candidato(s) processado(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[remarketing] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(300)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -2276,6 +2291,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
+                asyncio.create_task(_remarketing_worker(), name="remarketing_worker"),
                 asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
                 asyncio.create_task(_tarefa_finito_checks(), name="finito_checks"),
             ]
@@ -3521,19 +3537,17 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
         raise HTTPException(status_code=400, detail=detalhe_seguro(e))
 
     user_id    = result["user_id"]
-    link_code  = result["link_code"]
     credenciais = await _sessao_de_conta_nova(
         request, response, background_tasks, user_id=int(user_id),
         email=body.email.strip().lower(), origem_url=f"{DASHBOARD_URL}/cadastro",
     )
 
-    wa_link = link_whatsapp(f"vincular {link_code}")
-
+    # Só /auth/link-code gera código (token forte); as chaves ficam vazias por contrato.
     return {
         "user_id": user_id,
         "email": body.email.strip().lower(),
-        "link_code": link_code,
-        "whatsapp_link": wa_link,
+        "link_code": "",
+        "whatsapp_link": "",
         "dashboard_url": _post_login_url(user_id, request),
         **credenciais,
     }
@@ -3595,7 +3609,42 @@ async def _vincular_se_permitido(user_id: int, sub: str, email: str, provider: s
 
     if await asyncio.to_thread(is_account_scheduled_for_deletion, user_id) or await _mfa_ligado(user_id):
         return
+    if not await _revogar_sessoes_do_quiz(user_id):
+        return
     await asyncio.to_thread(link_google_identity, user_id, sub, email, provider or PROVIDER_GOOGLE)
+
+
+def _sobrou_sessao_ou_refresh(user_id: int) -> bool:
+    from db.connection import get_conn
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select exists(select 1 from auth_sessions where user_id = %s and revoked_at is null)"
+            " or exists(select 1 from auth_refresh_tokens where user_id = %s and revoked_at is null) as sobrou",
+            (int(user_id), int(user_id)),
+        )
+        return bool(cur.fetchone()["sobrou"])
+
+
+async def _revogar_sessoes_do_quiz(user_id: int) -> bool:
+    """Conta sem credencial (a do quiz) cujo e-mail o dono prova agora por Google/Apple:
+    quem a criou pode ser outro, com sessão e refresh na mão. O vínculo tira o
+    `exigir_credencial` do caminho, então a sessão do criador herdaria os dados
+    do dono. Revoga tudo ANTES de gravar a identidade (a sessão deste login é emitida
+    depois, em `_concluir_login`). As revogações engolem erro e devolvem 0: confere
+    no banco e, se sobrou algo, devolve False — quem chama não vincula."""
+    from core.refresh_tokens import revoke_user_refresh_tokens
+    from core.sessions import revoke_other_sessions
+    from db import conta_sem_credencial
+
+    if not await asyncio.to_thread(conta_sem_credencial, user_id):
+        return True
+    await asyncio.to_thread(revoke_other_sessions, int(user_id), None)
+    await asyncio.to_thread(revoke_user_refresh_tokens, int(user_id))
+    if await asyncio.to_thread(_sobrou_sessao_ou_refresh, user_id):
+        logging.getLogger(__name__).error("vinculo social: sessão/refresh sobrou, sem vincular", extra={"user_id": user_id})
+        return False
+    return True
 
 
 async def _desafio_mfa(request: Request, user_id: int, email: str) -> str | None:
@@ -3632,8 +3681,6 @@ async def _concluir_login(
 ) -> dict:
     """Final comum de `/auth/login`, `/auth/google/exchange` e `/auth/apple/exchange`, depois de a
     identidade estar provada: exclusão agendada → desafio de MFA → sessão."""
-    from db import create_link_code
-
     _raise_if_account_scheduled_for_deletion(user_id)
 
     # Se o usuario tem MFA ativado, emite challenge token e retorna 200 com
@@ -3647,7 +3694,6 @@ async def _concluir_login(
             "email": email,
         }
 
-    link_code  = create_link_code(user_id, minutes_valid=15)
     token, jti, refresh = _issue_session_token(user_id, email, request)
     credenciais = _entrega_sessao(
         request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
@@ -3664,14 +3710,12 @@ async def _concluir_login(
         user_agent=request.headers.get("user-agent"),
     )
 
-    wa_link = link_whatsapp(f"vincular {link_code}")
-
     return {
         "user_id": user_id,
         "email": email,
         "plan": plan,
-        "link_code": link_code,
-        "whatsapp_link": wa_link,
+        "link_code": "",
+        "whatsapp_link": "",
         "dashboard_url": _post_login_url(user_id, request),
         **credenciais,
     }
@@ -4276,7 +4320,6 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         mfa_reserve_login_challenge_attempt,
         mfa_consume_login_challenge_with_code,
         get_auth_user,
-        create_link_code,
     )
 
     # Desafio morto é 400, nunca 401: 401 é "renove a sessão" no interceptor.
@@ -4322,7 +4365,6 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
-    link_code = await asyncio.to_thread(create_link_code, user_id, 15)
     token, jti, refresh = _issue_session_token(user_id, user["email"], request)
     credenciais = _entrega_sessao(
         request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
@@ -4340,13 +4382,12 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         user_agent=request.headers.get("user-agent"),
     )
 
-    wa_link = link_whatsapp(f"vincular {link_code}")
     return {
         "user_id": user_id,
         "email": user["email"],
         "plan": user.get("plan", "free"),
-        "link_code": link_code,
-        "whatsapp_link": wa_link,
+        "link_code": "",
+        "whatsapp_link": "",
         "dashboard_url": _post_login_url(user_id, request),
         **credenciais,
     }
@@ -4671,6 +4712,7 @@ GOOGLE_OAUTH_NEXT_COOKIE = "google_oauth_next"
 GOOGLE_OAUTH_CHALLENGE_COOKIE = "google_oauth_challenge"
 GOOGLE_OAUTH_STATE_MAX_AGE = 600  # 10 minutos
 GOOGLE_OAUTH_PURCHASE_CONTINUE_URL = "/continuar-compra"
+GOOGLE_OAUTH_FAMILIA_URL = "/familia/entrar"  # o convite do Plano Família (familia-convite.js): sem token na URL, ele fica no sessionStorage
 
 
 class GoogleSignupCompleteBody(_CorpoSemVeneno):
@@ -4696,7 +4738,7 @@ class AppleExchangeBody(_CorpoSemVeneno):
 
 def _google_oauth_next_url(value: str | None) -> str | None:
     """Aceita somente destinos internos conhecidos após o OAuth."""
-    return value if value == GOOGLE_OAUTH_PURCHASE_CONTINUE_URL else None
+    return value if value in (GOOGLE_OAUTH_PURCHASE_CONTINUE_URL, GOOGLE_OAUTH_FAMILIA_URL) else None
 
 
 def _clear_google_oauth_cookies(response: Response) -> None:
@@ -5092,13 +5134,11 @@ async def _completar_cadastro_social(
         user_agent=request.headers.get("user-agent"),
     )
 
-    wa_link = link_whatsapp(f"vincular {result['link_code']}")
-
     return {
         "user_id": user_id,
         "email": email,
-        "link_code": result["link_code"],
-        "whatsapp_link": wa_link,
+        "link_code": "",
+        "whatsapp_link": "",
         "dashboard_url": _post_login_url(user_id, request),
         **credenciais,
     }
@@ -5534,7 +5574,10 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             f"&td={trial_days}&pl={plan}&ia={ia_quota}"
         )
         if retomada_etapa:   # sem sessão não há /home: a volta é a página própria da retomada
-            success_url = f"{DASHBOARD_URL}/retomar/pronto?sid={{CHECKOUT_SESSION_ID}}"
+            success_url = (
+                f"{DASHBOARD_URL}/retomar/pronto?sid={{CHECKOUT_SESSION_ID}}"
+                f"&ev={'trial' if trial_days > 0 else 'purchase'}"
+            )
 
         kwargs = dict(
             customer=cust_id,
@@ -7067,6 +7110,14 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             )
         elif user_id:
             await asyncio.to_thread(set_payment_status, user_id, "past_due")
+            # Plano Família: o titular segue até o fim do período, os membros perdem agora.
+            # ... EXCETO se outro grant dele (ex.: Pix vigente) ainda cobre; `desde` = instante do evento.
+            # A ordem importa: o past_due acima é o que faz `_cobertura` recusar o próprio Stripe em atraso.
+            # Só a falha DA ASSINATURA tira a família: fatura avulsa (sem _sub_id) com assinatura saudável não.
+            if _sub_id:
+                from core.services.family_access import encerrando  # noqa: PLC0415
+                await asyncio.to_thread(encerrando, int(user_id), "stripe", str(_sub_id),
+                                        "family_payment_failed", _event_version(event))
             # Relógio da inadimplência (core/services/billing_dunning).
             # Idempotente no SQL: a Stripe manda um payment_failed por smart
             # retry e reentrega o mesmo evento em cima de 5xx — nenhum dos dois
@@ -7147,6 +7198,29 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 )
             except Exception as exc:
                 print(f"[billing] admin notify payment_failed falhou user={user_id}: {exc}")
+
+    elif event["type"] == "customer.subscription.updated":
+        # Só o Plano Família escuta este evento. O estado vem do `retrieve` (o payload pode chegar fora de
+        # ordem); falha transitória propaga e vira 5xx (a Stripe reentrega), assinatura inexistente não.
+        obj = event["data"]["object"]
+        user_id = await _resolve_user(obj)
+        from db.family import get_group  # noqa: PLC0415
+        # Condiciona ao GRUPO, não aos membros: a suspensão vale também para quem ainda vai entrar.
+        if user_id and _g(obj, "id") and await asyncio.to_thread(get_group, int(user_id)):
+            from core.services.billing_dunning import PAST_DUE_PAYMENT_STATUSES  # noqa: PLC0415
+            from core.services.family_access import encerrando, retomar  # noqa: PLC0415
+            try:
+                _atual = await asyncio.to_thread(stripe.Subscription.retrieve, _g(obj, "id"))
+            except Exception as exc:
+                if getattr(exc, "code", None) != "resource_missing":
+                    raise
+                _atual = None  # sumiu de vez: o `deleted` dela decide, reentregar não muda nada
+            _st = (_g(_atual, "status") or "").strip().lower() if _atual else ""
+            if _atual and (_g(_atual, "cancel_at_period_end") or _st in PAST_DUE_PAYMENT_STATUSES):
+                await asyncio.to_thread(encerrando, int(user_id), "stripe", _g(obj, "id"),
+                                        "family_assinatura_encerrando")
+            elif _st in ("active", "trialing"):
+                await asyncio.to_thread(retomar, int(user_id))
 
     elif event["type"] == "customer.subscription.deleted":
         obj     = event["data"]["object"]

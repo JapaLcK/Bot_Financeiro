@@ -181,10 +181,15 @@
    *                          flash na cadeia reset → logout → relogin na
    *                          mesma aba. Não é dado de conta: é um timestamp,
    *                          e a validação de userId do restore vem antes.
+   *   pb_familia_convite_v1  convite do Plano Família guardado por
+   *                          /familia/entrar (sessionStorage): é a intenção do
+   *                          VISITANTE, não dado da conta. O 401 do visitante
+   *                          sem sessão passa pelo refresh e limparia o convite
+   *                          antes do Entrar/Criar conta.
    */
   const _PRESERVA = new Set([
     "pigbank_theme", "pigbank_hide_balance", "pbFabPos", "pbDebug", "pbSpa",
-    "finbot_logout_at", "finbot_reset_at",
+    "finbot_logout_at", "finbot_reset_at", "pb_familia_convite_v1",
   ]);
 
   /**

@@ -66,7 +66,7 @@ it("mínimo maior que o máximo: erro no campo e nenhuma consulta", async () => 
  expect(screen.getByText("O máximo não pode ser menor que o mínimo.")).toBeTruthy(); expect(chamadas().length).toBe(antes);
 });
 it("a contagem de fichas soma tipo, origem, valor, dia e categoria (min e max são UM filtro)", async () => {
- await abrir("/extrato?dia=2026-10-02&categoria=alimentacao"); expect(nFichas()).toBe(2);
+ await abrir(`/extrato?dia=${mesAtual()}-02&categoria=alimentacao`); expect(nFichas()).toBe(2);
  await filtrar({ tipo: "Entradas", origem: "Banco", min: "1000", max: "9000" }); await waitFor(() => expect(nFichas()).toBe(5));
  expect(screen.getByRole("button", { name: "Filtros", selected: true })).toBeTruthy(); // o rótulo falado não muda com a contagem (o botão é só ícone); o VoiceOver ouve "selecionado"
 });
@@ -85,7 +85,7 @@ it("tirar uma ficha refaz a consulta sem ela e mantém as outras", async () => {
  expect(ficha("valor")).toBeNull(); expect(nFichas()).toBe(0); // sobrou só tipo=saida, que o atalho "Saídas" já mostra: sem ficha
 });
 it("Limpar tudo tira tipo, origem, valor, dia e categoria de uma vez e fecha a folha", async () => {
- await abrir("/extrato?dia=2026-10-02&categoria=alimentacao"); await filtrar({ tipo: "Saídas", origem: "Cartão", min: "1000" });
+ await abrir(`/extrato?dia=${mesAtual()}-02&categoria=alimentacao`); await filtrar({ tipo: "Saídas", origem: "Cartão", min: "1000" });
  await waitFor(() => expect(consulta().get("valor_min")).toBe("10.00")); await abrirFiltros();
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Limpar tudo" })); await drenar(); });
  await waitFor(() => expect([...consulta().keys()].sort()).toEqual(["limite", "mes"]));

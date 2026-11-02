@@ -917,6 +917,29 @@ def send_email_changed_notice(to: str, novo_mascarado: str) -> bool:
     )
 
 
+def send_whatsapp_linked_notice(to: str, numero_mascarado: str) -> bool:
+    """Aviso de segurança: um WhatsApp (número MASCARADO) foi ligado à conta por código."""
+    num = _esc(numero_mascarado)
+    content = f"""
+      <p>Olá!</p>
+      <p>O WhatsApp <strong>{num}</strong> foi ligado à sua conta no <strong>PigBank</strong>.</p>
+      <p><strong>Foi você?</strong> Pode ignorar este aviso.</p>
+      <p><strong>Não foi você?</strong> Escreva agora para <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
+    """
+    html = _base_html("🔔 Um WhatsApp foi ligado à sua conta PigBank", content)
+    text = (
+        f"Olá! O WhatsApp {numero_mascarado} foi ligado à sua conta no PigBank.\n\n"
+        "Foi você? Pode ignorar este aviso.\n"
+        f"Não foi você? Escreva agora para {SUPPORT_EMAIL}."
+    )
+    return send_email(
+        to=to,
+        subject="🔔 Um WhatsApp foi ligado à sua conta PigBank",
+        html_body=html,
+        text_body=text,
+    )
+
+
 def send_data_export_link_email(
     to: str,
     download_url: str,

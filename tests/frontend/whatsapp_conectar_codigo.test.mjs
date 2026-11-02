@@ -127,7 +127,7 @@ test("páginas públicas: sem a promessa de 'mande um oi', com o código", async
   try {
     for (const [caminho, trechos] of [
       ["/whatsapp.html", ["Conecte pelo site", "Envie o código", "Pode ser outro número", "gerado por você, no site", "Antes de conectar", "conecte o WhatsApp."]],
-      ["/como-funciona.html", ["vincular 123456", "Conectar WhatsApp"]],
+      ["/como-funciona.html", ["vincular pbl…", "Conectar WhatsApp"]],
       ["/suporte.html", ["Conectar WhatsApp", "mensagem que já vem pronta com o seu código"]],
     ]) {
       const page = await ctx.newPage();

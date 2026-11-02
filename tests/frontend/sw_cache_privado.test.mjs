@@ -111,6 +111,10 @@ const ROTAS_PRIVADAS = [
   "/open-finance/42",
   "/agents/42",
   "/auth/me",
+  // Plano Família: a família, a prévia da dissolução e a página de aceite (o token passa por ela).
+  "/api/v2/familia",
+  "/api/v2/familia/dissolucao",
+  "/familia/entrar",
 ];
 
 test("nenhuma rota autenticada entra no cache", () => {

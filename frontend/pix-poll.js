@@ -29,11 +29,15 @@ const PIX_TERMINAIS = new Set(["canceled", "expired", "refunded", "chargeback"])
 // declarava expirada uma cobrança que o backend ainda aceitava pagar.
 const PIX_TETO_MS = 15 * 60 * 1000;
 
+// Comprador do link, sem sessão. O `retomada` da resposta do POST vale mesmo sem o plans-config (pendurado ou falho).
+let pixRetomada = false;
+const emRetomada = () => pixRetomada || !!window.pbPixState?.cfg?.retomada;
 let pixPoll = null;   // estado do modal aberto; null = não há QR na tela
 
 /** `cadernos` = quantos extras foram no POST que gerou ESTE QR (o servidor cobra exatamente esses, ou recusa). */
 function pixModalQr(d, plano, ctx, cadernos) {
   const nome = (PLAN_NAMES && PLAN_NAMES[plano]) || plano;
+  if (d.retomada) pixRetomada = true;
   // O que o QR cobra: plano + cadernos (`amount_cents` é só o plano). O `??` cobre servidor sem o campo.
   const valor = pixBrl(d.total_cents ?? d.amount_cents);
   // `ctx` é o modal que o pixCheckout já abriu para pedir o CPF/CNPJ: o QR é o
@@ -245,6 +249,7 @@ function pixPago() {
   // `/billing/pix/<sid>` e tirar de lá o valor e a data. Dinheiro não viaja na
   // query string — `vl=` e `inicio=` saíram daqui porque qualquer um os digita,
   // e o `vl` forjado virava receita inventada na NOSSA conta de anúncios.
+  if (emRetomada()) { window.location.href = "/retomar/pronto?gw=pix&ev=purchase&sid=" + encodeURIComponent(token); return; }
   window.location.href = "/home?upgrade=success&sid=" + encodeURIComponent(token)
     + "&ev=purchase&td=0&pl=" + encodeURIComponent(plano) + "&gw=pix";
 }
@@ -284,6 +289,12 @@ function pixExpirou(motivo, confirmado) {
 function pixDesistir() {
   pixRotular(pixPoll.status, "ph-clock", "Não consegui confirmar por aqui — o"
     + " código continua válido. Entre de novo e a gente confirma.");
+  if (emRetomada()) {
+    pixPoll.status.textContent = "Se você já pagou, ";
+    const a = document.createElement("a");
+    a.href = "/login"; a.textContent = "entre pelo e-mail";
+    pixPoll.status.appendChild(a);
+  }
   pixAgendar(Math.max(0, pixPoll.deadline - Date.now()));
 }
 

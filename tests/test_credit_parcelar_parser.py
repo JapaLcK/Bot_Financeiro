@@ -210,3 +210,12 @@ def test_parcelei_12_parcelas_de_mil(user_id):
     assert total == 12000.00, f"esperava total 12000, veio {total}"
     assert vparc == 1000.00, f"esperava parcela 1000, veio {vparc}"
     assert nota == "geladeira", f"descrição suja: {nota!r}"
+
+
+def test_parcele_imperativo_com_valor_depois_da_contagem(user_id):
+    """Caso real: 'Parcele em 5x no cartão bradesco 1293,48' caía na ajuda de cartões,
+    e o valor viria do '5x' (R$ 5) por ser o 1º número."""
+    _seed_card(user_id, "Bradesco")
+    msg = handle(user_id, "Parcele em 5x no cartão bradesco 1293,48")
+    # Sem descrição, o bot confirma valor/contagem/cartão e pergunta o nome da compra.
+    assert "R$ 1.293,48 em 5x" in msg and "Bradesco" in msg

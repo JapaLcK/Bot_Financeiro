@@ -985,6 +985,8 @@ async function cancelChange() {
     // Assinante existente continua coberto pelo 409 `already_subscribed` do
     // próprio checkout, que consulta a assinatura apenas nesse caso.
     if (purchaseContinuationPage) return;
+    // Comprador do link de retomada (cookie, sem sessão): não há assinatura a consultar.
+    if (cfgPlanos?.retomada) { window.pbPlanAuthState = "retomada"; publicarPix(null, true); return; }
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
     const resolvida = await loadSubscription();
     refreshPlanButtons();

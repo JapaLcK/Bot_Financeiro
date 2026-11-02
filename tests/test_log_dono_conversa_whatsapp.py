@@ -48,6 +48,7 @@ from core.types import IncomingMessage
 from db.connection import get_conn
 from test_senha_obrigatoria_whatsapp import _manda, enviadas, env  # noqa: F401 (fixtures)
 from test_wa_parar import _a_e_b_com_conta, _com_senha_ligada, _opt_out
+from utils_text import normalize_text
 
 FONE = "11987654321"
 GASTO = "gastei 50,90 no açaí da Dona Zélia"
@@ -129,10 +130,22 @@ def _exportados(uid: int) -> tuple[str, set[int]]:
     return bruto, {e["id"] for e in json.loads(bruto)["dados"]["eventos_sistema"]}
 
 
+def _vazou(texto: str, *proibidos: str) -> str | None:
+    """O 1º proibido que aparece no texto, comparando NORMALIZADO: o código loga a `nota` já
+    passada pelo `normalize_text` ("acai da dona zelia"), sem acento nem maiúscula. Proibido que
+    normaliza para vazio casaria com tudo e esconderia os seguintes: falha alto. O `DETAIL:` do
+    psycopg vai cru, para não casar com "details"."""
+    dobrado = normalize_text(texto)
+    for p in (*proibidos, FONE, "already exists"):
+        assert normalize_text(p or ""), f"proibido vazio ({p!r}) não confere nada"
+        if normalize_text(p) in dobrado:
+            return p
+    return "DETAIL:" if "DETAIL:" in texto else None
+
+
 def _sem_vazamento(linha: dict, *proibidos: str) -> None:
     texto = linha["message"] + json.dumps(linha["details"], ensure_ascii=False)
-    for p in (*proibidos, FONE, "DETAIL", "already exists"):
-        assert p not in texto, f"{p!r} vazou em {linha['event_type']}: {texto}"
+    assert not (p := _vazou(texto, *proibidos)), f"{p!r} vazou em {linha['event_type']}: {texto}"
 
 
 def _conversa(uid: int, texto: str) -> str:
@@ -322,3 +335,12 @@ def test_falha_ao_montar_a_pilha_nao_derruba_a_resposta_nem_o_log(monkeypatch):
     for linha in (_uma(linhas, "message_processing_failed", "handle_incoming/whatsapp"),
                   _uma(linhas, "logger.error", "core.handle_incoming", "handle_incoming FAILED")):
         _sem_vazamento(linha, marcador, "açaí", "Zélia")
+
+
+def test_vazou_acha_a_forma_normalizada_e_recusa_proibido_vazio():
+    t = f"nota='acai da dona zelia' DETAIL:  Key (nota)=({FONE})"
+    assert _vazou(t, "Açaí") == "Açaí" and _vazou(t, "zzz") == FONE
+    assert _vazou("DETAIL:  Key", "zzz") == "DETAIL:" and _vazou("details detailed", "zzz") is None
+    for vazio in ("", None, " - "):
+        with pytest.raises(AssertionError, match="proibido vazio"):
+            _vazou(t, "zzz", vazio)

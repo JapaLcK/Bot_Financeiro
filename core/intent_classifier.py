@@ -312,6 +312,9 @@ VERBOS_DE_LANCAMENTO = frozenset(_VERBOS_SAIDA_SOLTA + _VERBOS_ENTRADA)
 # Tier 2 — Regex / alias (normalizado)
 # ---------------------------------------------------------------------------
 
+# Token de vínculo (db.users.create_link_code): `pbl` + 32 hex. Fonte única; o wa_runtime importa.
+LINK_CODE_PATTERN = r"pbl[0-9a-f]{32}"
+
 _ALIAS_PATTERNS: list[tuple[str, str]] = [
     # saudações — captura qualquer variação antes de chegar na IA
     (r"^(oi+e*|ol[aá]+|al[oô]+|hello+|hey+|e ?ai+|opa+|eai+)\b",
@@ -545,9 +548,9 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "report.monthly"),
 
     # vinculação de contas
-    (r"^link(\s+\d{6})?$",
+    (rf"^link(\s+{LINK_CODE_PATTERN})?$",
      "account.link"),
-    (r"^vincular\s+\d{6}$",
+    (rf"^vincular\s+{LINK_CODE_PATTERN}$",
      "account.vincular"),
 
     # ajuda com seção
@@ -1067,12 +1070,12 @@ def _try_alias(norm: str, original: str) -> IntentResult | None:
                     entities["minute"] = int(mh.group(2)) if mh.group(2) else 0
 
             elif intent == "account.link":
-                m = re.search(r"link\s+(\d{6})", norm)
+                m = re.search(rf"link\s+({LINK_CODE_PATTERN})", norm)
                 if m:
                     entities["code"] = m.group(1)
 
             elif intent == "account.vincular":
-                m = re.search(r"vincular\s+(\d{6})", norm)
+                m = re.search(rf"vincular\s+({LINK_CODE_PATTERN})", norm)
                 if m:
                     entities["code"] = m.group(1)
 
@@ -1191,10 +1194,10 @@ def _classify_llm_call(user_content: str, user_id: int | None) -> IntentResult:
             from core.services.plan_service import plan_gate_ok
             if not plan_gate_ok(int(user_id), "generic"):
                 return IntentResult(intent="out_of_scope", confidence=0.0)
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "gate pago do tier-3 falhou pro user %s — classificação indisponível",
-                user_id, exc_info=True,
+                "gate pago do tier-3 falhou pro user %s — classificação indisponível causa=%s sqlstate=%s",
+                user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id},
             )
             return IntentResult(intent="out_of_scope", confidence=0.0)
 
