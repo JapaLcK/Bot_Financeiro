@@ -33,12 +33,19 @@ TIPOS: dict[str, tuple[str, dict[str, Any]]] = {
     "bill_due": ("vencimento", {"base": "contas_a_pagar", "cartao": None, "origem": "suas contas a pagar"}),
     "month_projection": ("projecao", {"base": "previsao", "cartao": None,
                                       "origem": "saldo de hoje e o que está previsto até o fim do mês"}),
+    "subscription_increase": ("assinatura", {"base": "open_finance", "cartao": None,
+                                             "origem": "assinaturas detectadas pelo Open Finance"}),
 }
 SO_PRO = ("impacto", "acoes")
 # Recurso de plano que o tipo exige além de `insights`, conferido NA LEITURA (`projetar`): o cache é um só para todos
 # os planos, e quem perde o recurso dentro do TTL não pode seguir vendo o item (plano-b, B3).
-RECURSO_POR_TIPO = {"bill_due": "recurring_expenses", "month_projection": "forecast"}
+RECURSO_POR_TIPO = {"bill_due": "recurring_expenses", "month_projection": "forecast",
+                    "subscription_increase": "subscriptions"}
 GRAVIDADE = {"info": 0, "warning": 1, "critical": 2}  # a ordem do feed e a régua do "piorou" (D4)
+# Reajuste (`recurring_increase` e `subscription_increase`, Q5 e P1 da B5): entra no feed até `REAJUSTE_DIAS` dias
+# depois da mudança de preço, e é warning a partir de `REAJUSTE_ALERTA`% de alta (info abaixo).
+REAJUSTE_DIAS = 60
+REAJUSTE_ALERTA = 10
 LIMITE = 6
 CHAVE_MAX = 160
 _MESES = ("janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro",
@@ -106,6 +113,12 @@ def sujeito(cru: str | None, normalizado: str) -> str:
     return hashlib.sha1(normalizado.encode()).hexdigest()[:12]
 
 
+def comerciante_id(chave_comerciante: str) -> str:
+    """Identificador opaco do comerciante (o `merchant_key`, em hash): o reajuste da assinatura e a conta do OF do
+    mesmo comerciante se reconhecem na leitura (`projetar`) sem levar o nome, que pode ter dado pessoal, ao cache."""
+    return hashlib.sha1(chave_comerciante.encode()).hexdigest()[:12]
+
+
 def chave(tipo: str, sujeito, periodo: str) -> str:
     """Estável, sem versão (bump de prompt não ressuscita dispensado) e com teto: sujeito longo vira hash.
 
@@ -120,6 +133,9 @@ def chave(tipo: str, sujeito, periodo: str) -> str:
     - conta a pagar (`bill_due`): o período é o dia do vencimento; a faixa info/warning/critical é piora do mesmo
       fato e fica fora; `vencida` entra no sujeito (`id:vencida`), como na meta.
     - previsão do mês (`month_projection`): sujeito fixo `saldo`, período o mês; warning × critical é piora.
+    - reajuste de assinatura (`subscription_increase`): sujeito o `merchant_key`, período `data do reajuste:valor
+      anterior em centavos` (`chave_periodo`): dois serviços do mesmo comerciante no mesmo dia são dois fatos, e a
+      correção ou relançamento da cobrança nova não muda a chave.
     O sujeito pode ter `:` (`merchant_key` não tira; a meta usa `id:estado`): a chave é opaca, comparada
     inteira. Nunca faça `split(":")` dela.
     Sujeito textual entra por `sujeito()`, que troca por hash o nome com dado pessoal.
@@ -177,15 +193,34 @@ def piorou(item: dict, sev_dispensada: str, valor_dispensado: Decimal | None) ->
     return m is not None and valor_dispensado is not None and m > valor_dispensado
 
 
+def _fato(item: dict) -> tuple[str, int] | None:
+    """(comerciante, valor novo em centavos): o reajuste e a conta do OF são o mesmo fato só se os dois batem."""
+    e = item.get("explicacao")  # roda na leitura: item torto não vira 500
+    if not isinstance(e, dict) or not isinstance(e.get("referencia"), dict) or not isinstance(e.get("atual"), dict):
+        return None
+    cid = e["referencia"].get("comerciante_id")
+    try:
+        valor = int((Decimal(str(e["atual"]["valor"])) * 100).to_integral_value())
+    except (KeyError, TypeError, ValueError, ArithmeticError):  # ValueError: int(NaN)
+        return None
+    return (cid, valor) if cid else None
+
+
 def projetar(itens: list[dict], *, acoes_ok: bool,
              dispensadas: Mapping[str, tuple[str, Decimal | None]] | None = None,
              recursos_ok: Mapping[str, bool] | None = None, limite: int = LIMITE) -> list[dict]:
-    """O que o usuário recebe do cache: sem o dispensado que não piorou (chave -> referência da dispensa,
-    `db.insight_estado.dispensadas`), sem o tipo cujo recurso (`RECURSO_POR_TIPO`) não está em `recursos_ok`
-    (ausente = sem acesso), sem `impacto`/`acoes` fora do Pro, e só então cortado em `limite`."""
+    """O que o usuário recebe do cache, nesta ordem: sem o tipo cujo recurso (`RECURSO_POR_TIPO`) não está em
+    `recursos_ok` (ausente = sem acesso); sem a conta do OF (`of_bill_increase`) do comerciante que tem reajuste de
+    assinatura do MESMO fato entre os que sobraram, mesmo comerciante e mesmo valor novo (B5: um fato, um item; outro
+    serviço do comerciante ou um aumento que o Recurring Payments ainda não viu saem os dois, nunca um aviso a menos;
+    quem perdeu o recurso volta a ver a conta); sem o dispensado
+    que não piorou (chave -> referência da dispensa, `db.insight_estado.dispensadas`), depois da absorção, para que
+    dispensar o reajuste não ressuscite a conta; sem `impacto`/`acoes` fora do Pro; e só então cortado em `limite`."""
     d, r = dispensadas or {}, recursos_ok or {}
-    out = [it for it in itens if it.get("key") not in d or piorou(it, *d[it["key"]])]
-    out = [it for it in out if it.get("type") not in RECURSO_POR_TIPO or r.get(RECURSO_POR_TIPO[it["type"]])]
+    out = [it for it in itens if it.get("type") not in RECURSO_POR_TIPO or r.get(RECURSO_POR_TIPO[it["type"]])]
+    reajustados = {_fato(it) for it in out if it.get("type") == "subscription_increase"} - {None}
+    out = [it for it in out if not (it.get("type") == "of_bill_increase" and _fato(it) in reajustados)]
+    out = [it for it in out if it.get("key") not in d or piorou(it, *d[it["key"]])]
     if not acoes_ok:
         out = [{k: v for k, v in it.items() if k not in SO_PRO} for it in out]
     return out[:limite]
