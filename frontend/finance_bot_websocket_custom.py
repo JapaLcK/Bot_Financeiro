@@ -57,6 +57,7 @@ from core.admin_dashboard import (
     log_system_event,
     log_admin_startup_warnings,
     admin_error_logging_middleware,
+    origem_do_erro,
     register_admin_routes,
 )
 from core.feedback_routes import register_feedback_routes
@@ -2810,9 +2811,9 @@ async def valor_finito_violado_handler(request: Request, exc: psycopg.errors.Che
     nome = violacao_finito(exc)
     if nome is None:
         raise exc
+    source, user_id = origem_do_erro(request)
     await log_system_event("warning", "valor_nao_finito_no_banco", f"constraint {nome}",
-                           source=f"{request.method} {request.url.path}",
-                           details={"constraint": nome})
+                           source=source, user_id=user_id, details={"constraint": nome})
     return vary_accept(JSONResponse(status_code=400,
                                     content={"detail": MSG_VALOR_API}))
 
@@ -3124,6 +3125,7 @@ async def _get_current_user(
         if await asyncio.to_thread(get_password_changed_at, user_id):
             raise HTTPException(status_code=401, detail="Sessão expirada. Faça login novamente.",
                                 headers=WWW_AUTHENTICATE_401)
+    request.state.session_user_id = user_id  # sessão validada: o dono do 500 (origem_do_erro)
 
     _raise_if_account_scheduled_for_deletion(user_id)
     return user_id
@@ -3741,12 +3743,13 @@ async def auth_logout(request: Request, response: Response):
                     # Revoga também TODOS os refresh tokens dessa sessão
                     from core.refresh_tokens import revoke_session_refresh_tokens
                     await asyncio.to_thread(revoke_session_refresh_tokens, jti)
-                except Exception:
+                except Exception as exc:
                     # Cookies são limpos mesmo assim, mas a sessão segue válida
                     # no servidor — precisa aparecer no log.
                     logging.getLogger(__name__).warning(
-                        "logout: falha ao revogar sessão/refresh tokens (user %s, jti %s)",
-                        user_id_raw, jti, exc_info=True,
+                        "logout: falha ao revogar sessão/refresh tokens (jti %s) causa=%s sqlstate=%s",
+                        jti, type(exc).__name__, getattr(exc, "sqlstate", None),
+                        extra={"user_id": user_id_raw},
                     )
 
     # Revoga também o refresh_token APRESENTADO (caso a sessão já não bata —
@@ -3985,7 +3988,8 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
         await asyncio.to_thread(revoke_other_sessions, int(user_id), None)
         await asyncio.to_thread(revoke_user_refresh_tokens, int(user_id))
     except Exception as exc:  # nunca deixa o reset falhar por causa da revogação
-        logging.getLogger(__name__).warning("reset_revoke_sessions user=%s: %s", user_id, exc)
+        logging.getLogger(__name__).warning("reset_revoke_sessions causa=%s sqlstate=%s", type(exc).__name__,
+                                            getattr(exc, "sqlstate", None), extra={"user_id": user_id})
 
     await asyncio.to_thread(
         record_audit_event,
@@ -7699,12 +7703,13 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
                 create_refresh_token, int(user_id), jti, ip=ip, user_agent=ua,
             )
             _set_refresh_cookie(response, refresh)
-    except Exception:
+    except Exception as exc:
         # Fail-soft — o dashboard ainda funciona com o dashboard_token, mas o
         # user vai "deslogar" ao navegar pra /conta. Logado pra ser visível.
         logging.getLogger(__name__).warning(
-            "magic link: não emitiu auth/refresh token pro user %s — sessão degradada (só dashboard_token)",
-            user_id, exc_info=True,
+            "magic link: não emitiu auth/refresh token — sessão degradada (só dashboard_token)"
+            " causa=%s sqlstate=%s", type(exc).__name__, getattr(exc, "sqlstate", None),
+            extra={"user_id": user_id},
         )
     return response
 

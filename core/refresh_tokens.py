@@ -128,8 +128,8 @@ def consume_refresh_token(
             # REPLAY: token já tinha sido usado → roubo detectado, revoga TUDO do user.
             if row["used_at"] is not None:
                 logger.warning(
-                    "[refresh] possível replay detectado user_id=%s — revogando todos os refresh tokens",
-                    user_id,
+                    "[refresh] possível replay detectado — revogando todos os refresh tokens",
+                    extra={"user_id": user_id},
                 )
                 cur.execute(
                     "update auth_refresh_tokens set revoked_at = now() where user_id = %s and revoked_at is null",

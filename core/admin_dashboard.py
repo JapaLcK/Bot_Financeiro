@@ -29,7 +29,7 @@ from core.crypto import (
     encrypt_pii_optional,
     pii_audit_batch,
 )
-from core.pg_text import detalhe_seguro, limpa_para_pg, redigir_failing_row
+from core.pg_text import detalhe_seguro, limpa_para_pg, quadros_da_cadeia, redigir_failing_row
 from core.secure_compare import constant_time_eq
 from core.system_event_log import statement_timeout_options
 
@@ -1660,6 +1660,25 @@ def status_do_erro(exc: Exception) -> tuple[int, str]:
     return 500, "Erro interno do servidor."
 
 
+def origem_do_erro(request: Request) -> tuple[str, int | None]:
+    """(`source`, `user_id`) de uma exceção não tratada, para este middleware e o da /api/v2.
+
+    `source` é o TEMPLATE da rota (`GET /history/{user_id}/list`), não o caminho concreto, que leva
+    o uid de quem foi acessado e segredo (`/d/{code}`, `/auth/account/export/download/{token}`).
+    Sem rota (exceção antes do roteamento, ex.: `LimiteCorpoMiddleware`): `<sem rota>`. Limite do
+    FastAPI: `include_router(prefix=...)` daria o template sem o prefixo (hoje nenhum caso).
+    `user_id` é o da SESSÃO validada (`request.state.session_user_id`, gravado pelos resolvedores),
+    nunca o do path: admin vendo `/admin/api/users/{B}` não põe a linha na conta de B.
+    Nunca levanta: roda no `except` de último recurso."""
+    try:
+        scope = request.scope
+        rota = getattr(scope.get("route"), "path", None)
+        caminho = f"{scope.get('root_path') or ''}{rota}" if rota else "<sem rota>"
+        return f"{scope.get('method')} {caminho}", getattr(request.state, "session_user_id", None)
+    except Exception:  # noqa: BLE001
+        return "<sem rota>", None
+
+
 async def admin_error_logging_middleware(request: Request, call_next):
     try:
         return await call_next(request)
@@ -1675,29 +1694,29 @@ async def admin_error_logging_middleware(request: Request, call_next):
         _admin_log.info("client disconnect: %s %s", request.method, request.url.path)
         return Response(status_code=499)
     except Exception as exc:
-        import traceback
-        tb_str = traceback.format_exc()
-        err_str = str(exc) or exc.__class__.__name__
+        # Só os quadros da pilha, sem a linha do erro: a do psycopg traz o `DETAIL: Key (…)=(…)`
+        # com dado do usuário (DP11 da #657). A chave `traceback` fica: a exportação a omite (A9).
+        quadros, sqlstate = quadros_da_cadeia(exc)
+        source, user_id = origem_do_erro(request)
+        tipo = exc.__class__.__name__
 
-        # Imprime o traceback completo no stdout pra aparecer nos logs do Railway.
-        print(
-            f"[unhandled] {request.method} {request.url.path}: {exc.__class__.__name__}: {err_str}\n{tb_str}",
-            file=sys.stderr,
-            flush=True,
-        )
+        # A pilha no stdout pra aparecer nos logs do Railway.
+        print(f"[unhandled] {source}: {tipo} sqlstate={sqlstate}\n{quadros}", file=sys.stderr, flush=True)
 
         status_code, user_msg = status_do_erro(exc)
 
         await log_system_event(
             "error",
             "http_unhandled_exception",
-            err_str,
-            source=f"{request.method} {request.url.path}",
+            tipo,
+            source=source,
+            user_id=user_id,
             details={
                 "query_keys": sorted(request.query_params.keys()),
                 "status_code": status_code,
-                "exc_type": exc.__class__.__name__,
-                "traceback": tb_str[-2000:],
+                "exc_type": tipo,
+                "sqlstate": sqlstate,
+                "traceback": quadros[-2000:],
             },
         )
 

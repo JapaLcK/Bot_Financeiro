@@ -1355,6 +1355,7 @@ function renderErrorItem(row) {
       <div class="error-item-msg">${esc(row.message.slice(0,180))}${row.message.length>180?'…':''}</div>
       ${hint   ? `<div class="error-item-source"><i class="ph ph-lightbulb" aria-hidden="true"></i> ${esc(hint)}</div>` : ''}
       ${row.source ? `<div class="error-item-source"><i class="ph ph-map-pin" aria-hidden="true"></i> ${esc(row.source)}</div>` : ''}
+      ${row.user_id ? `<div class="error-item-source">user ${esc(String(row.user_id))}</div>` : ''}
       <div class="expand-hint">${hintLabel}</div>
       <div class="error-item-tb">${content}</div>
     </div>`;
@@ -1622,6 +1623,7 @@ function renderOpsList(ops) {
       </div>
       <div class="error-item-msg">${esc(row.message.slice(0,160))}</div>
       ${row.source ? `<div class="error-item-source"><i class="ph ph-map-pin" aria-hidden="true"></i> ${esc(row.source)}</div>` : ''}
+      ${row.user_id ? `<div class="error-item-source">user ${esc(String(row.user_id))}</div>` : ''}
       <div class="expand-hint">${hasTb ? '▼ ver traceback' : '▼ ver detalhes'}</div>
       <div class="error-item-tb">${content}</div>
     </div>`;
