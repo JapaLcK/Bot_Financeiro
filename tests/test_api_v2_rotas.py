@@ -35,7 +35,8 @@ from test_pix_rota_registrada import _andar_nas_rotas
 PREFIXO = "/api/v2"
 # As únicas rotas que dispensam a assinatura (quem não tem plano aceita o convite, vê a família, sai e gerencia o que libera): `usuario_logado`.
 SEM_ASSINATURA = {("POST", "/familia/convites/aceitar"), ("GET", "/familia"), ("POST", "/familia/sair"),
-                  ("POST", "/familia/permissoes"), ("DELETE", "/familia/permissoes/{escopo}"), ("GET", "/familia/historico")}
+                  ("POST", "/familia/permissoes"), ("DELETE", "/familia/permissoes/{escopo}"), ("GET", "/familia/historico"),
+                  ("GET", "/familia/casa")}
 _PARAM_DE_USUARIO = re.compile(r"(?i)user|usuario|uid|owner|dono")
 
 
