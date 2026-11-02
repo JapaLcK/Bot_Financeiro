@@ -170,3 +170,68 @@ def detect_subscription_increase(user_id: int) -> list[dict[str, Any]]:
         # cadeias.
         por_chave.setdefault(it["key"], it)
     return list(por_chave.values())
+
+
+SOBRA_E = "Sobra é o que entrou menos o que saiu no mês, com o cartão pela fatura."  # P5 da B4: nunca "guardou"
+SOBRA_DESDE_DIA = 5  # P7 da B4: o mês fechado só é avaliado a partir deste dia do mês seguinte (dado atrasado)
+SOBRA_COBERTURA_DIAS = 7  # P8 da B4: algum lançamento nos primeiros dias do mês base (indício de cobertura)
+
+
+def detect_positive_result(user_id: int) -> list[dict[str, Any]]:
+    """O mês que acabou de fechar (no fuso do app) teve sobra positiva e maior que a do mês anterior (Q4 da B4). A sobra
+    é o "Entrou − Saiu" do Resumo do mês, lido por `comparacao_periodos.comparar_mes` (mesma fonte, sem soma nova);
+    não é poupança: dinheiro posto na caixinha continua contando como sobra, e o texto nunca diz "guardou". Dados
+    suficientes (P1 c): o plano enxerga os dois meses inteiros (`inicio_do_historico`), o mês anterior tem lançamento
+    (`sem_base`), o histórico do usuário começa até o dia 1 do mês anterior (`previsao_variavel._inicio_do_historico`)
+    e o Resumo não avisa número possivelmente incompleto (`motivos`). Reduzem o risco de dado faltando, sem garantir
+    completude: conexão do banco que parou (PAUSED ou DELETED, `_TERMINAL`) a partir do dia 1 do mês anterior, no fuso
+    do app (P6 com a P10 e a P11: o `updated_at` da conexão terminal é usado como data APROXIMADA da parada: nunca
+    fica antes da parada real, mas pode ficar depois, porque a varredura de plano repausa conexão DELETED e regrava o
+    `updated_at` (issue #1371); o efeito do erro é calar o aviso por mais tempo, nunca celebrar sem motivo; o banco
+    que parou antes do período comparado não cala), só a partir do dia `SOBRA_DESDE_DIA` do mês seguinte (P7) e algum
+    lançamento nos primeiros `SOBRA_COBERTURA_DIAS` dias do mês base (P8). Fica no feed o resto do mês seguinte (P2),
+    como `info`, sem `impacto` nem `acoes` (P3), por último no laço (Q4b). O Repórter chama de sobra outra conta (P4,
+    issue #1360). Limite (P9): o cache de insights não sabe de um lançamento novo; a sobra mostrada pode estar até um
+    TTL atrasada (D13). Gate: o de `insights`; `comparar_mes` exige `financial_comparison`, o mesmo tier."""
+    from datetime import timedelta
+
+    from core.services.comparacao_periodos import MESES, comparar_mes
+    from core.services.previsao_variavel import _inicio_do_historico
+    from db.connection import get_conn
+    from db.open_finance_state import _TERMINAL
+    agora = now_tz()
+    if day_tz(agora).day < SOBRA_DESDE_DIA:  # P7: antes disso o mês fechado ainda pode receber lançamento atrasado
+        return []
+    ini = (day_tz(agora).replace(day=1) - timedelta(days=1)).replace(day=1)  # 1º dia do mês fechado
+    c = comparar_mes(user_id, ini.year, ini.month, agora)
+    if c is None or c["motivo"] in ("inicio_do_historico", "sem_base") or c["motivos"]:
+        return []
+    sobra, ant = c["resultado"]["total_atual"], c["resultado"]["total_anterior"]
+    if not (sobra > 0 and sobra > ant):
+        return []
+    ini_ant = c["anterior"]["inicio"]
+    with get_conn() as conn, conn.cursor() as cur:
+        primeiro = _inicio_do_historico(cur, user_id)
+        no_comeco = _inicio_do_historico(cur, user_id, ini_ant)
+        # P6/P10/P11: data APROXIMADA da parada, o `updated_at` da conexão terminal. Os escritores do terminal
+        # (pausa por plano e webhook `item/deleted`) gravam `now()`, e sync não toca linha terminal: nunca fica antes
+        # da parada, mas a varredura de plano repausa DELETED e a empurra para depois (#1371), o que só cala a mais.
+        cur.execute("select max(updated_at) as d from open_finance_connections"
+                    f" where user_id = %s and upper(coalesce(status,'')) in {_TERMINAL}", (user_id,))
+        parou_em = cur.fetchone()["d"]
+    parou_no_periodo = parou_em is not None and day_tz(parou_em) >= ini_ant  # o dia 1 do mês anterior, inclusive
+    if primeiro is None or primeiro > ini_ant:  # o mês anterior não está inteiro no histórico do usuário
+        return []
+    if no_comeco is None or no_comeco > ini_ant + timedelta(days=SOBRA_COBERTURA_DIAS - 1) or parou_no_periodo:
+        return []
+    nome_ant = MESES[ini_ant.month - 1]
+    base = (f"{fmt_brl(sobra - ant)} a mais que {nome_ant}." if ant > 0 else
+            f"{nome_ant.capitalize()} tinha fechado zerado." if ant == 0 else
+            f"{nome_ant.capitalize()} tinha fechado com {fmt_brl(-ant)} no negativo.")
+    return [montar_item(
+        "positive_result", "mes", {**periodo_mes(ini), "parcial": False}, severity="info", icon="🎉",
+        title=f"{MESES[ini.month - 1].capitalize()} fechou com {fmt_brl(sobra)} de sobra", message=f"{base} {SOBRA_E}",
+        action_label="Ver análises", action_view="analytics",
+        referencia={"estatistica": "mes_anterior_inteiro", "valor": ant,
+                    "periodo": {**periodo_mes(ini_ant), "parcial": False}},
+        atual={"valor": sobra}, diferenca=diferenca(sobra, ant), amostra=None)]
