@@ -10230,6 +10230,6 @@
       "link": "https://pigbankai.com/familia/entrar#t=tok-ABC_def-123",
       "expira_em": "2026-11-08T15:00:00Z"
     },
-    "dissolucao": { "membros": 2, "convites": 1, "consentimentos": 0, "confirmacao": "nonce-abc123" }
+    "dissolucao": { "membros": 2, "convites": 1, "consentimentos": 0, "metas": 0, "orcamentos": 0, "confirmacao": "nonce-abc123" }
   }
 }

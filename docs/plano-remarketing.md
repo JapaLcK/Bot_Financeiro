@@ -243,9 +243,20 @@ move código. `pix-checkout.js` (350) não é tocado.
   com caderno + cupom; Apple Pay; Pix no sandbox do Asaas; "Definir senha" → login →
   grant; repetir num navegador logado em outra conta (compra para a conta logada).
 
+### PR 6b — Desconto escalonado (IMPLEMENTADO)
+
+E1 5%, E2 10%, E3 20%, só no 1º pagamento e só sobre o plano (cadernos a preço cheio). Fonte única:
+`DESCONTO_POR_ETAPA` em `core/services/retomada.py`; a etapa vem SÓ do cookie `pb_retomada`. Cartão: cupom
+Stripe `rm_e{etapa}_{pct}_{product}` (`core/services/retomada_cupom.py`, `repeating`/1 mês: cobre a 1ª cobrança
+com ou sem trial e não a renovação; cupom divergente = 503, nunca corrigido), `discounts` no lugar de
+`allow_promotion_codes`, `rm_desc` no metadata e na reutilização de sessão. Pix anual: `desconto_pct` em
+`criar_checkout`, aplicado antes do piso; substituição compara `price_cents`. `ja_comprou` relido sob o lock (409).
+`plans-config` devolve `retomada.{desconto_pct, precos, trial}` já calculados. Fica para staging: test clock do
+Stripe e sandbox do Asaas. Sem coluna para etapa/pct na cobrança Pix (nada gravado).
+
 ### PR 6 — Job de envio (inerte sem a env)
 
-Implementado, SEM desconto (entra no PR 6b). `send_remarketing_email` mora em `core/services/remarketing.py`
+Implementado; o desconto veio no PR 6b (abaixo). `send_remarketing_email` mora em `core/services/remarketing.py`
 (não em `email_service.py`) e os 3 HTMLs em `core/services/remarketing_emails.py`. `REMARKETING_DESDE` filtra
 `t0 >= desde` e exige fuso. WhatsApp pula também com `numero_de_outra_conta` (identidade de WhatsApp ou
 `phone_hash` de OUTRO `user_id`, com a variante do 9º dígito). Teto de 200 candidatos por tick (`# ponytail:`
@@ -325,7 +336,7 @@ falhas, presos em `enviando`, cliques, recuperados (`completed` depois de
 - PARAR duplicado (reentrega do mesmo wamid) gera 2 respostas; falha só da limpeza responde
   "Não consegui registrar" com o opt-out já gravado (um 2º PARAR conserta).
 - Página de descadastro fala em "dicas e insights" (copy antiga).
-- Cupom depois: pelo cupom da página ou por `rm_etapa` no servidor; se for `discounts`
-  na sessão, tirar `allow_promotion_codes=True`.
+- ~~Cupom depois~~ RESOLVIDO no PR 6b: `discounts` na sessão pela etapa do cookie, sem
+  `allow_promotion_codes`.
 - Só fora daqui: PARAR e templates no aparelho; página própria e Express no navegador
   do WhatsApp; Pix no sandbox; entrega da Meta em produção.

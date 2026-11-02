@@ -332,7 +332,7 @@ def test_convite_sem_vaga_e_409_full(w):
 def test_dissolucao_com_nonce_certo_apaga(w):
     d = w.chamar(w.ta, "GET", "/familia/dissolucao")
     j = Dissolucao.model_validate(d.json())
-    assert (j.membros, j.convites, j.consentimentos) == (2, 0, 0)
+    assert (j.membros, j.convites, j.consentimentos, j.metas, j.orcamentos) == (2, 0, 0, 0, 0)
     r = w.chamar(w.ta, "POST", "/familia/dissolucao", json={"confirmacao": j.confirmacao})
     assert r.status_code == 204
     me = w.chamar(w.ma1, "GET", "/me").json()  # membro com plano próprio: /me ainda responde

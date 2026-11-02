@@ -303,12 +303,9 @@ RECEITA_START_VERBS = (
 )
 
 
-def parse_receita_despesa_natural(user_id: int, raw_text: str, aprender: bool = True) -> dict | None:
-    """`aprender=False`: não grava regra de categoria (o chamador ainda pode recusar o lançamento; recusa não persiste nada)."""
-    text_clean = (raw_text or "").strip()
-    if not text_clean:
-        return None
-
+def texto_base(text_clean: str):
+    """(texto que o parser lê, data, categoria explícita): sem a `#categoria` e sem a data. Pura (não lê banco nem IA):
+    a declaração bancária confere o valor contra ESTE texto (`core/handlers/declaracao_valor.py`)."""
     # categoria explícita (se houver)
     text_for_parse, explicit_cat = _extract_explicit_category(text_clean)
 
@@ -317,30 +314,46 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str, aprender: bool = 
 
     # usa o texto sem a data para tipo/categoria/valor
     text_base = text_without_date.strip() if text_without_date else text_for_parse.strip()
-    raw_norm = normalize_text(text_base)
+    return text_base, dt_evento, explicit_cat
 
+
+def tipo_do_texto(text_base: str) -> str | None:
+    """"despesa"/"receita" pelo começo do texto (já sem data e categoria), ou None: o parser não lê a frase. Pura:
+    a declaração bancária só confere o valor do parser quando ele de fato grava (`core/handlers/declaracao_valor.py`)."""
+    raw_norm = normalize_text(text_base)
     # tipo — receita SEMPRE exige palavra-chave explícita ("recebi"/"receita"/
     # "ganhei"/"entrou"/"caiu"/"pingou"/"pinguei"/"embolsei" — o mesmo conjunto
     # de verbos que core/intent_classifier.py já roteia pra launches.add como
     # receita). Sem palavra-chave, uma mensagem que começa com o valor
     # ("77,90 mercado") é despesa por padrão: é o atalho mais usado pra lançar
     # gasto, então o user não precisa escrever "gastei" toda vez.
-    tipo = None
     if raw_norm.startswith(("gastei ", "gasto ", "paguei ", "pagar ", "comprei ", "debitei ", "mandei ", "enviei ", "pixei ")):
-        tipo = "despesa"
-    elif raw_norm.startswith(RECEITA_START_VERBS):
-        tipo = "receita"
-    elif "saldo" in raw_norm and raw_norm.startswith((
+        return "despesa"
+    if raw_norm.startswith(RECEITA_START_VERBS):
+        return "receita"
+    if "saldo" in raw_norm and raw_norm.startswith((
         "adicionar ", "adicione ", "adiciona ", "adicionei ", "adicionou ",
         "somar ", "soma ", "some ", "somei ",
     )):
         # "adicione 10 mil de saldo" / "somar 500 ao saldo" → adiciona dinheiro
         # ao saldo, tratado como receita. "adicionar" sozinho é ambíguo (cartão,
         # caixinha, categoria), então só vale quando a frase fala de "saldo".
-        tipo = "receita"
-    elif _STARTS_WITH_VALUE_RE.match(text_base):
-        tipo = "despesa"
-    else:
+        return "receita"
+    if _STARTS_WITH_VALUE_RE.match(text_base):
+        return "despesa"
+    return None
+
+
+def parse_receita_despesa_natural(user_id: int, raw_text: str, aprender: bool = True) -> dict | None:
+    """`aprender=False`: não grava regra de categoria (o chamador ainda pode recusar o lançamento; recusa não persiste nada)."""
+    text_clean = (raw_text or "").strip()
+    if not text_clean:
+        return None
+
+    text_base, dt_evento, explicit_cat = texto_base(text_clean)
+    raw_norm = normalize_text(text_base)
+    tipo = tipo_do_texto(text_base)
+    if tipo is None:
         return None
 
     # valor

@@ -3,8 +3,8 @@ tabela forma x canal em `.time-dev/pr-b/enumeracao-valor.md`). Cada caso roda po
 Postgres real) e a recusa nunca grava, nunca consome a chave `wa:<hash>:<n>` e nunca deixa pergunta de pé.
 
 Controle negativo: `declaracao_valor.recusa` devolvendo None deixa vermelhos os grupos de recusa; a guarda de decisão BANCO
-de `rotear_partes` tirada deixa vermelho o grupo de cenários sem declaração. Positivos: valores claros e dois pedaços com
-descrição gravam; Carteira, flag desligada e fora da lista seguem como antes.
+de `rotear_partes` tirada deixa vermelho o grupo de cenários sem declaração. Positivos: valores claros gravam (dois pedaços com
+descrição são T16, E1 da #1310); Carteira, flag desligada e fora da lista seguem como antes.
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ RECUSAS = [
     "gastei 2 contos e 50 no mercado pelo banco", "gastei 2 pila e 50 no mercado pelo banco",
     "gastei 2 mais 50 no mercado pelo banco", "gastei 2 reais mais 50 no mercado pelo banco",
     "gastei dois e 50 no mercado pelo banco", "gastei duas e 50 no mercado pelo banco",
-    "paguei mil e 200 de aluguel pelo banco", "gastei 10 reais e paguei o aluguel pelo banco",
+    "paguei mil e 200 de aluguel pelo banco",  # "10 reais e paguei o aluguel": um número só, declara (#1310)
     # F2: valor lido pela metade, sem "e" entre dois dígitos
     "paguei mil e quinhentos de aluguel pelo banco", "paguei mil e duzentos de aluguel pelo banco",
     "paguei 1 mil e duzentos de aluguel pelo banco", "gastei 2 e meio no mercado pelo banco",
@@ -41,12 +41,9 @@ RECUSAS = [
     "gastei 2 reais com 50 no mercado pelo banco", "gastei 2 e cinquenta no mercado pelo banco",
     "gastei doís e cinqüenta no mercado pelo banco",
     # F3: a ambiguidade cruza pedaços que têm descrição dos dois lados
-    "gastei 100 no mercado dia 20 e 21 de outubro pelo banco", "gastei 50 hoje e 30 ontem pelo banco",
-    "paguei 3x de 100 e 50 de juros pelo banco", "gastei 30 no mercado e 20 hoje pelo banco",
-    "gastei dia 5 e 30 na padaria pelo banco",  # o splitter corta "gastei dia 5": sem a data tirada do pedaço, grava R$ 5
-    # a descrição que sobra do parse começa com número (`_ALVO_NUMERO_RE`). "15 no 99" é o N9 do DP-10 (descrição só
-    # numérica recusa): fixa o que HOJE acontece, o leitor estrito da issue #1310 pode mudar.
-    "gastei 3 mil 200 no mercado pelo banco", "gastei 20 a 30 no mercado pelo banco", "gastei 15 no 99 pelo banco",
+    "gastei 50 hoje e 30 ontem pelo banco",  # "dia 20 e 21 de outubro": T12 (#1310)
+    "gastei 30 no mercado e 20 hoje pelo banco",  # "3x de 100 e 50 de juros" é T14 (parcelado, #1310)
+    # "3 mil 200", "20 a 30" e "15 no 99" passaram a T12 com o leitor estrito (#1310): test_declaracao_b_leitor_estrito.py
     # centena + "e" + qualquer coisa que não seja unidade, 11 a 19 ou dezena
     "gastei cento e meio no mercado pelo banco", "gastei duzentos e meio no mercado pelo banco",
 ]
@@ -67,12 +64,7 @@ POSITIVOS = [
     ("gastei duzentos e cinquenta no mercado pelo banco", [250.0]), ("gastei cento e vinte no mercado pelo banco", [120.0]),
     ("gastei dois mil e quinhentos no mercado pelo banco", [2500.0]),
     ("gastei dois mil e duzentos reais no mercado pelo banco", [2200.0]),
-    ("gastei 20 no mercado e 30 na padaria pelo banco", [20.0, 30.0]),
-    ("gastei 25 no uber e 15 no mercado pelo banco", [15.0, 25.0]),
-    ("gastei 80 pro joao e 20 pro pedro pelo banco", [20.0, 80.0]),
-    ("paguei luz 120 e paguei internet 100 pelo banco", [100.0, 120.0]),
-    ("gastei 20 reais no mercado e 30 reais na padaria pelo banco", [20.0, 30.0]),
-]
+]  # dois gastos numa mensagem são T16 (E1, #1310): test_declaracao_b_leitor_estrito.py
 
 
 @pytest.mark.parametrize("modo", ["texto", "audio"])
@@ -140,7 +132,7 @@ def test_recusa_nao_consome_a_chave_da_proxima_mensagem(ana, liga):
 @pytest.mark.parametrize("texto", ["gastei 50" + " " * 16000 + "no mercado pelo banco", "gastei " + "1," * 8000,
                                    "pix " * 4000, "gastei 50 no mercado " + "e 1 " * 4000])
 def test_texto_patologico_nao_trava_a_recusa(texto):
-    """As regex são quadráticas em texto patológico: só os primeiros 1000 caracteres são analisados."""
+    """Acima de 1000 caracteres a mensagem é recusada sem análise (T15); até lá, ver G8 de test_declaracao_b_leitor_estrito."""
     import time
     from core.handlers import declaracao_valor
     t0 = time.perf_counter()
@@ -183,10 +175,10 @@ COMPOSTOS = [  # composição válida em português (e que o parser lê certo): 
     ("gastei dez mil e quinhentos no mercado pelo banco", 10500.0), ("gastei cem mil no mercado pelo banco", 100000.0),
     ("gastei mil no mercado pelo banco", 1000.0), ("gastei 2 mil no mercado pelo banco", 2000.0),
     ("gastei 1,5 mil no mercado pelo banco", 1500.0), ("gastei 2.500,00 no mercado pelo banco", 2500.0),
-    ("gastei 10 de gorjeta pelo banco", 10.0), ("paguei 30 de gasolina no pix", 30.0), ("gastei 80 no 99 pop pelo banco", 80.0),
+    ("gastei 10 de gorjeta pelo banco", 10.0), ("paguei 30 de gasolina no pix", 30.0),
     ("gastei 50 no mercado 24h pelo banco", 50.0), ("paguei luz 2026 pelo banco", 2026.0),
-    ("gastei 30 com 2 amigos pelo banco", 30.0), ("gastei 25 na 25 de março pelo banco", 25.0),
-]
+    ("gastei 25 na 25 de março pelo banco", 25.0),
+]  # "80 no 99 pop" e "30 com 2 amigos" recusam (T12, D2 da #1310); com R$ gravam: test_declaracao_b_leitor_estrito.py
 
 
 @pytest.mark.parametrize("modo", ["texto", "audio"])
@@ -205,20 +197,18 @@ def test_fila_de_valores_recusa_o_valor_lido_pela_metade(ana, liga, monkeypatch,
     assert "registrada pelo banco" in manda_wamid(ana, "1200")[0]
 
 
-# --- E3: a data sai antes de procurar "N e M" ---
+# --- E3: a data sai antes de procurar "N e M"; com dois gastos na mensagem a declaração recusa (T16, E1 da #1310) ---
 DATAS = [
-    ("gastei 50 no mercado dia 5 e 30 na padaria pelo banco", [30.0, 50.0]),
-    ("paguei 100 de luz dia 10 e 80 de água dia 12 pelo banco", [80.0, 100.0]),
-    ("gastei 50 no mercado 05/10 e 30 na padaria 06/10 pelo banco", [30.0, 50.0]),
-    ("recebi 100 da vó dia 5 e 50 do tio dia 6 pelo banco", [50.0, 100.0]),
+    "gastei 50 no mercado dia 5 e 30 na padaria pelo banco", "paguei 100 de luz dia 10 e 80 de água dia 12 pelo banco",
+    "gastei 50 no mercado 05/10 e 30 na padaria 06/10 pelo banco", "recebi 100 da vó dia 5 e 50 do tio dia 6 pelo banco",
 ]
 
 
 @pytest.mark.parametrize("modo", ["texto", "audio"])
-@pytest.mark.parametrize("texto,valores", DATAS)
-def test_positivo_data_entre_dois_gastos_com_descricao_grava_os_dois(ana, liga, monkeypatch, modo, texto, valores):
-    diz(ana, modo, monkeypatch, texto)
-    assert sorted(float(d["valor"]) for d in declaracoes(ana)) == valores
+@pytest.mark.parametrize("texto", DATAS)
+def test_data_entre_dois_gastos_e_t16(ana, liga, monkeypatch, modo, texto):
+    assert "um gasto por mensagem" in diz(ana, modo, monkeypatch, texto)
+    assert declaracoes(ana) == [] and chaves(ana) == 0
 
 
 # --- E4/E6: cartão de CRÉDITO nunca declara, em despesa, em receita e em qualquer pedaço da mensagem ---
@@ -239,8 +229,8 @@ def test_cartao_de_credito_em_qualquer_pedaco_ou_em_receita_e_t8(ana, liga, monk
 
 @pytest.mark.parametrize("modo", ["texto", "audio"])
 def test_positivo_cartao_de_debito_declara(ana, liga, monkeypatch, modo):
-    diz(ana, modo, monkeypatch, "gastei 50 no mercado e 30 na padaria no cartão de débito")
-    assert sorted(float(d["valor"]) for d in declaracoes(ana)) == [30.0, 50.0]
+    diz(ana, modo, monkeypatch, "gastei 50 no mercado no cartão de débito")
+    assert sorted(float(d["valor"]) for d in declaracoes(ana)) == [50.0]
 
 
 # --- E5: a guarda `declara` do cartão no áudio. Sem a flag (ou fora da lista) o áudio multipedaço com cartão fica como

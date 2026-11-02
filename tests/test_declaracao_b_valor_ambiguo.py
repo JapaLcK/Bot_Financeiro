@@ -1,8 +1,8 @@
 """PR-B (ADR 0006): "2 reais e 50" não é um valor só nem dois gastos: o splitter parte em " e N" e a declaração (valor
 travado, DP-4) gravaria R$ 50 (ou R$ 2 e R$ 50). Na decisão BANCO a mensagem é recusada sem gravar (T11); fila: o item volta.
 
-Controle negativo: `recusa_valor` sem o ramo `_AMBIGUO_RE` (texto) e a recusa de `rotear_partes` sem efeito (áudio) deixam vermelhos
-os casos de recusa. Positivos: dois pedaços COM descrição continuam gravando dois; valor claro grava; Carteira, cartão e
+Controle negativo: `declaracao_valor.recusa` devolvendo None (texto) e a recusa de `rotear_partes` sem efeito (áudio)
+deixam vermelhos os casos de recusa. Positivos: valor claro grava (dois pedaços COM descrição são T16 desde a #1310, E1); Carteira, cartão e
 flag desligada não mudam.
 """
 from __future__ import annotations
@@ -44,21 +44,19 @@ def test_audio_cuja_forma_vem_na_resposta_tambem_recusa(ana, liga, monkeypatch):
     assert declaracoes(ana) == [] and n_lancamentos(ana) == 0
 
 
-@pytest.mark.parametrize("texto,valores", [
-    ("gastei 20 no mercado e 30 na padaria pelo banco", [20.0, 30.0]),
-    ("gastei 50 no mercado e mais 20 na padaria no pix", [20.0, 50.0]),
+@pytest.mark.parametrize("texto,valores", [  # dois pedaços com descrição: T16 (E1, #1310)
     ("gastei 2200 no mercado pelo banco", [2200.0]), ("gastei 12,90 no mercado no pix", [12.9]),
     ("gastei dois mil e duzentos reais no mercado no pix", [2200.0]),
     ("gastei vinte e cinco reais no mercado no pix", [25.0]),
 ])
-def test_positivo_valor_claro_e_dois_pedacos_com_descricao_gravam(ana, liga, texto, valores):
+def test_positivo_valor_claro_grava(ana, liga, texto, valores):
     manda_wamid(ana, texto)
     assert sorted(float(d["valor"]) for d in declaracoes(ana)) == valores
 
 
-def test_positivo_audio_com_dois_pedacos_com_descricao_grava_dois(ana, liga, monkeypatch):
-    fala(monkeypatch, ana, "gastei 20 no mercado e 30 na padaria pelo banco")
-    assert sorted(float(d["valor"]) for d in declaracoes(ana)) == [20.0, 30.0]
+def test_positivo_audio_com_um_valor_claro_grava(ana, liga, monkeypatch):
+    fala(monkeypatch, ana, "gastei 20 no mercado pelo banco")
+    assert sorted(float(d["valor"]) for d in declaracoes(ana)) == [20.0]
 
 
 def test_fila_de_valores_devolve_o_item(ana, liga, monkeypatch):

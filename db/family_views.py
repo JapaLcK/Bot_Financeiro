@@ -104,5 +104,10 @@ def dissolve_preview_cur(cur, owner_user_id: int) -> dict | None:
     ids = [m["id"] for m in cur.fetchall()]
     cur.execute("select count(*) as n from family_consents where group_id = %s and revoked_at is null",
                 (g["id"],))
-    return {"group_id": g["id"], "membros": len(ids), "ids_membros": ids, "consentimentos": cur.fetchone()["n"],
-            "convites": _convites_ativos(cur, g["id"])}
+    consentimentos = cur.fetchone()["n"]
+    # Contagem da casa: a única leitura de family_goals/family_budgets fora de db/family_house.py (tests/test_casa_so_na_porta.py).
+    cur.execute("select (select count(*) from family_goals where group_id = %(g)s) as metas, "
+                "(select count(*) from family_budgets where group_id = %(g)s) as orcamentos", {"g": g["id"]})
+    casa = cur.fetchone()
+    return {"group_id": g["id"], "membros": len(ids), "ids_membros": ids, "consentimentos": consentimentos,
+            "convites": _convites_ativos(cur, g["id"]), "metas": casa["metas"], "orcamentos": casa["orcamentos"]}

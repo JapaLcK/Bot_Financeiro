@@ -332,6 +332,9 @@ def test_pix_pricing_so_e_importado_pelo_checkout_e_pela_rota():
         # o aviso de fim do Grátis lê só `PRECOS_ANUAIS_CENTS` para a copy;
         # não emite cobrança e não fala com o Asaas
         "core/services/email_service.py",
+        # a retomada (remarketing 6b) lê só `PRECOS_ANUAIS_CENTS` para mostrar o preço
+        # com desconto; não emite cobrança. É o 2º leitor: o gatilho acima vale (issue própria).
+        "frontend/routes/retomada.py",
     }
     achados = set(_quem_importa(("core.services.pix_pricing",), raiz=""))
     assert achados == esperado, (

@@ -21,6 +21,7 @@ from core.admin_dashboard import (
     _fetch_checkout_funnel,
     db_connect,
 )
+from core.funil_remarketing import fetch_remarketing
 from core.services.billing_dunning import DUNNING_GRACE_DAYS, PAST_DUE_PAYMENT_STATUSES
 
 JANELAS = (7, 30)
@@ -266,12 +267,14 @@ async def fetch_funil() -> dict[str, Any]:
                   AND lower(coalesce(last_payment_status, '')) = ANY(%s)
                 """, (DUNNING_GRACE_DAYS, list(PAST_DUE_PAYMENT_STATUSES)))
             atraso = dict(await cur.fetchone())
+            remarketing = await fetch_remarketing(cur)
     atraso["carencia_dias"] = DUNNING_GRACE_DAYS
     return {
         "gerado_em": agora,
         "viewed_pricing_desde": desde,
         "janelas": janelas,
         "atraso": atraso,
+        "remarketing": remarketing,
         "links": links_externos(),
     }
 

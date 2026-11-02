@@ -57,6 +57,7 @@ from core.admin_dashboard import (
     log_system_event,
     log_admin_startup_warnings,
     admin_error_logging_middleware,
+    origem_do_erro,
     register_admin_routes,
 )
 from core.feedback_routes import register_feedback_routes
@@ -140,8 +141,11 @@ from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.billing_bump import router as billing_bump_router
 from frontend.routes.retomada import (
-    COOKIE as RETOMADA_COOKIE, Comprador, comprador, email_mascarado, router as retomada_router,
+    COOKIE as RETOMADA_COOKIE, Comprador, comprador, desconto_config, email_mascarado, router as retomada_router,
 )
+from core.services.retomada import desconto_da_etapa
+from core.services.retomada_cupom import CupomIndisponivel, cupom_id
+from db.remarketing import ja_comprou
 from frontend.routes.agents import router as agents_router
 from frontend.routes.ai_chat import AIChatBody, criar_router as criar_ai_chat_router, texto_valido
 from frontend.routes.analytics import router as analytics_router
@@ -2807,9 +2811,9 @@ async def valor_finito_violado_handler(request: Request, exc: psycopg.errors.Che
     nome = violacao_finito(exc)
     if nome is None:
         raise exc
+    source, user_id = origem_do_erro(request)
     await log_system_event("warning", "valor_nao_finito_no_banco", f"constraint {nome}",
-                           source=f"{request.method} {request.url.path}",
-                           details={"constraint": nome})
+                           source=source, user_id=user_id, details={"constraint": nome})
     return vary_accept(JSONResponse(status_code=400,
                                     content={"detail": MSG_VALOR_API}))
 
@@ -3121,6 +3125,7 @@ async def _get_current_user(
         if await asyncio.to_thread(get_password_changed_at, user_id):
             raise HTTPException(status_code=401, detail="Sessão expirada. Faça login novamente.",
                                 headers=WWW_AUTHENTICATE_401)
+    request.state.session_user_id = user_id  # sessão validada: o dono do 500 (origem_do_erro)
 
     _raise_if_account_scheduled_for_deletion(user_id)
     return user_id
@@ -3738,12 +3743,13 @@ async def auth_logout(request: Request, response: Response):
                     # Revoga também TODOS os refresh tokens dessa sessão
                     from core.refresh_tokens import revoke_session_refresh_tokens
                     await asyncio.to_thread(revoke_session_refresh_tokens, jti)
-                except Exception:
+                except Exception as exc:
                     # Cookies são limpos mesmo assim, mas a sessão segue válida
                     # no servidor — precisa aparecer no log.
                     logging.getLogger(__name__).warning(
-                        "logout: falha ao revogar sessão/refresh tokens (user %s, jti %s)",
-                        user_id_raw, jti, exc_info=True,
+                        "logout: falha ao revogar sessão/refresh tokens (jti %s) causa=%s sqlstate=%s",
+                        jti, type(exc).__name__, getattr(exc, "sqlstate", None),
+                        extra={"user_id": user_id_raw},
                     )
 
     # Revoga também o refresh_token APRESENTADO (caso a sessão já não bata —
@@ -3982,7 +3988,8 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
         await asyncio.to_thread(revoke_other_sessions, int(user_id), None)
         await asyncio.to_thread(revoke_user_refresh_tokens, int(user_id))
     except Exception as exc:  # nunca deixa o reset falhar por causa da revogação
-        logging.getLogger(__name__).warning("reset_revoke_sessions user=%s: %s", user_id, exc)
+        logging.getLogger(__name__).warning("reset_revoke_sessions causa=%s sqlstate=%s", type(exc).__name__,
+                                            getattr(exc, "sqlstate", None), extra={"user_id": user_id})
 
     await asyncio.to_thread(
         record_audit_event,
@@ -5336,6 +5343,8 @@ def _checkout_session_matches(session, user_id: int, plan: str, interval: str, p
         # Sessão de retomada (`rm_etapa`) só é reaproveitada pela retomada da MESMA etapa,
         # e a do fluxo logado nunca por ela: o rastro da compra não se mistura.
         and str(_sg(metadata, "rm_etapa") or "") == str(retomada_etapa or "")
+        # O desconto também: sessão de antes do 6b (sem `rm_desc`) ou de outra tabela não é reaproveitada.
+        and str(_sg(metadata, "rm_desc") or "") == str(desconto_da_etapa(retomada_etapa) or "")
         and modo_ok
     )
 
@@ -5380,6 +5389,12 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             detail={"error": "pix_active",
                     "message": "Você já tem o plano anual pago no Pix. Ele vale até o fim do período — depois disso dá pra assinar no cartão."},
         )
+
+    # Desconto só para quem ainda não comprou: relido AQUI, sob o lock, e não só no /retomar.
+    desconto = desconto_da_etapa(retomada_etapa)
+    if desconto and await asyncio.to_thread(ja_comprou, user_id):
+        raise HTTPException(status_code=409, detail={
+            "error": "ja_comprou", "message": "Você já é cliente. O desconto de retomada vale só no 1º pagamento."})
 
     customer_id = user.get("stripe_customer_id")
     if customer_id:
@@ -5532,6 +5547,13 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
     from core.services.extras_assinar import da_env, ofertas_da_pagina, para_metadata, para_tela
     ofertas = await asyncio.to_thread(ofertas_da_pagina, stripe_mod, user_id) if elementos else []
 
+    cupom = None
+    if desconto:   # antes de criar qualquer coisa: cupom divergente é 503, sem sessão
+        try:
+            cupom = await asyncio.to_thread(cupom_id, stripe_mod, retomada_etapa, desconto, price_id)
+        except CupomIndisponivel:
+            raise HTTPException(status_code=503, detail="Não consegui aplicar o desconto agora. Tenta de novo em instantes.")
+
     def _new_session(cust_id: str):
         metadata = {
             "finbot_user_id": str(user_id),
@@ -5544,6 +5566,8 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         metadata.update(rastreio or {})
         if retomada_etapa:   # vem do token no servidor; vai na sessão E na assinatura (cópia abaixo)
             metadata["rm_etapa"] = str(retomada_etapa)
+        if cupom:
+            metadata["rm_desc"] = str(desconto)
         # Produtos extras nas DUAS origens. Foto (preço + URL) no nascimento da
         # sessão: o webhook e o job leem dela, nunca da env do momento.
         extras = [(p, u) for p, u, _ in ofertas] if elementos else da_env()
@@ -5577,10 +5601,13 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             line_items=[{"price": price_id, "quantity": 1}],
             mode="subscription",
             locale="pt-BR",
-            allow_promotion_codes=True,
             metadata=metadata,
             subscription_data=subscription_data,
         )
+        if cupom:   # o Stripe recusa `discounts` junto de `allow_promotion_codes`
+            kwargs["discounts"] = [{"coupon": cupom}]
+        else:
+            kwargs["allow_promotion_codes"] = True
         if extras and not elementos:
             kwargs["optional_items"] = [{"price": p, "quantity": 1} for p, _ in extras]
         if origem == "assinar" or elementos:
@@ -5672,7 +5699,7 @@ async def billing_plans_config(request: Request, response: Response):
     from core.services.pix_checkout import pix_annual_available
     from core.services.plan_service import plans_v2_enabled, trial_days_total
     mascara = await asyncio.to_thread(email_mascarado, request)
-    retomada = {"email": mascara} if mascara else None
+    retomada = {"email": mascara, **await asyncio.to_thread(desconto_config, request)} if mascara else None
     response.headers["Cache-Control"] = "no-store"   # a resposta depende do cookie
     return {
         "plans_v2_enabled": plans_v2_enabled(),
@@ -7677,12 +7704,13 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
                 create_refresh_token, int(user_id), jti, ip=ip, user_agent=ua,
             )
             _set_refresh_cookie(response, refresh)
-    except Exception:
+    except Exception as exc:
         # Fail-soft — o dashboard ainda funciona com o dashboard_token, mas o
         # user vai "deslogar" ao navegar pra /conta. Logado pra ser visível.
         logging.getLogger(__name__).warning(
-            "magic link: não emitiu auth/refresh token pro user %s — sessão degradada (só dashboard_token)",
-            user_id, exc_info=True,
+            "magic link: não emitiu auth/refresh token — sessão degradada (só dashboard_token)"
+            " causa=%s sqlstate=%s", type(exc).__name__, getattr(exc, "sqlstate", None),
+            extra={"user_id": user_id},
         )
     return response
 

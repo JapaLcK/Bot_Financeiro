@@ -6,7 +6,8 @@ from __future__ import annotations
 from typing import Any
 
 from core.services.insights_contrato import (
-    RECURSO_POR_TIPO, dinheiro, montar_item, navegar, nome, periodo_dia, periodo_mes,
+    REAJUSTE_ALERTA, REAJUSTE_DIAS, RECURSO_POR_TIPO, comerciante_id, diferenca, dinheiro, montar_item, navegar, nome,
+    periodo_dia, periodo_mes, sujeito,
 )
 from utils_date import day_tz, now_tz
 from utils_text import fmt_brl
@@ -118,3 +119,54 @@ def detect_month_projection(user_id: int) -> list[dict[str, Any]]:
         referencia={"estatistica": "previsao_pior_caso", "data_alvo": per["fim"], "saldo_hoje_valor": saldo,
                     "premissa": premissa_da_janela(snap)},
         atual={"valor": fecha}, diferenca=None, amostra=None, impacto={"falta_valor": -fecha})]
+
+
+def detect_subscription_increase(user_id: int) -> list[dict[str, Any]]:
+    """Assinatura mensal da Pluggy (`listar_assinaturas`, `servicos`: P4) que subiu de preço nos últimos `REAJUSTE_DIAS`
+    dias (Q5), depois de o preço antigo se repetir em duas cobranças seguidas (`reajustes_estaveis`, P2). Queda não
+    avisa (P3); warning a partir de `REAJUSTE_ALERTA`% (P1). Chave `subscription_increase:{merchant_key}:{dia do
+    reajuste}:{valor ANTERIOR em centavos}` (o sujeito é `sujeito(nome, chave)`: o `merchant_key`, ou o hash dele
+    quando o nome tem dado pessoal): reajuste novo é fato novo; dois serviços do mesmo comerciante reajustados no
+    mesmo dia com preços antigos diferentes (iCloud e Apple Music) são dois avisos, cada um dispensável (P6); e o
+    preço antigo, já assentado, não muda quando a Pluggy corrige os centavos da cobrança nova ou a relança com outro
+    id (P7). Limites aceitos: mesmo comerciante, mesmo dia e mesmo preço antigo viram um aviso só; corrigir uma
+    cobrança ANTIGA muda a chave. A conta do OF (`of_bill_increase`) do MESMO fato (mesmo `comerciante_id` e mesmo
+    valor novo) sai na LEITURA (`insights_contrato.projetar`), só quando este item sobreviveu ao gate. Se esta
+    consulta falha, o detector entra em `falhas`, não há item e a conta do OF continua saindo (fail-open). Passada a
+    janela, a conta do OF da mesma assinatura pode voltar (issue #1336). Gate `subscriptions` (Plus) aqui e na
+    leitura."""
+    from datetime import date, timedelta
+
+    from core.reports.weekly import _pct
+    from core.services.assinaturas import listar_assinaturas
+    from core.services.plan_service import plan_gate_ok
+    if not plan_gate_ok(user_id, RECURSO_POR_TIPO["subscription_increase"]):  # poupa as consultas; a leitura confere
+        return []
+    hoje = day_tz(now_tz())
+    por_chave: dict[str, dict[str, Any]] = {}
+    for a in listar_assinaturas(user_id, hoje)["reajustes_estaveis"]:  # só `servicos`, preço antigo estável
+        anterior, novo = a["valor_anterior"], a["valor"]
+        if a["status"] != "ativa" or novo <= anterior:
+            continue
+        quando = date.fromisoformat(a["reajuste_em"])
+        if not hoje - timedelta(days=REAJUSTE_DIAS) <= quando <= hoje:
+            continue
+        novo_valor = dinheiro(novo)
+        conta = nome(a["nome"], reserva="Assinatura")
+        nm = conta[:1].upper() + conta[1:]
+        it = montar_item(
+            "subscription_increase", sujeito(a["nome"], a["chave"]), periodo_dia(quando),
+            chave_periodo=f"{quando.isoformat()}:{int(dinheiro(anterior) * 100)}",  # pelo preço antigo (P6, P7)
+            severity="warning" if (novo - anterior) * 100 >= REAJUSTE_ALERTA * anterior else "info",
+            title=f"{nm} subiu {_pct(novo - anterior, anterior, 0)}%",
+            message=(f"De {fmt_brl(anterior)} para {fmt_brl(novo)} por mês, cobrado assim desde {quando:%d/%m}. "
+                     "Detectado pelo Open Finance."),
+            icon="📈", action_label=None, action_view=None,  # o painel antigo não tem tela de assinaturas (D9)
+            referencia={"estatistica": "valor_anterior", "assinatura": conta, "valor": dinheiro(anterior),
+                        "frequencia": "monthly", "comerciante_id": comerciante_id(a["chave"])},
+            atual={"valor": novo_valor, "data": quando}, diferenca=diferenca(novo, anterior),
+            impacto={"por_ano_valor": dinheiro((novo - anterior) * 12)})  # mensal (`_mensal`): x12 é exato (D8)
+        # Mesma chave = mesmo comerciante, dia e preço antigo (limite 1 aceito na P7): fica o primeiro na ordem das
+        # cadeias.
+        por_chave.setdefault(it["key"], it)
+    return list(por_chave.values())

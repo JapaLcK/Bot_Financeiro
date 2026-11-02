@@ -116,6 +116,7 @@ def entregar_pendentes() -> int:
                 "error", "ebook_entrega_falhou",
                 "Entrega do e-book falhou; o claim expira e o próximo ciclo tenta.",
                 source="billing", user_id=uid,
-                details={"session_id": sid, "ebook_price": preco, "erro": f"{type(exc).__name__}: {exc}"[:300]},
+                details={"session_id": sid, "ebook_price": preco, "erro": type(exc).__name__,
+                         "sqlstate": getattr(exc, "sqlstate", None)},
             )
     return n

@@ -1060,6 +1060,7 @@ def resolve_dashboard_user_id(request: Request) -> int:
         if get_password_changed_at(user_id):
             raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.",
                                 headers=WWW_AUTHENTICATE_401)
+    request.state.session_user_id = int(user_id)  # sessão validada: o dono do 500 (origem_do_erro)
     return int(user_id)
 
 

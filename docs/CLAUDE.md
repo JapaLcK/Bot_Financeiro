@@ -148,6 +148,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro", "agents_ui_enabled": bool, "chat_ia": bool, "familia": {"papel": "titular"|"membro"} | null}`, sem PII. `familia` (Plano Família, `db/family_views.my_family`) é só acréscimo: o app instalado não atualiza com o deploy, então o campo nunca muda de forma. `agents_ui_enabled` é o freio `AGENTS_UI_ENABLED=0` (o mesmo gate do `/auth/me` e do `/agents`): com ele `false` o /painel esconde a tela de Agentes. `chat_ia` é o freio do chat com a IA no /painel: env `PAINEL_CHAT_IA_TODOS=1` (abre para todos; sem teto global de custo, vale a cota mensal por plano) ou `PAINEL_CHAT_IA_USER_IDS` (user_id separados por vírgula, lida a cada pedido; ausente, vazia ou sem id válido = ninguém; `painel_chat_ia` em `core/services/plan_service.py`). Ligado, a conversa do Piggy vai ao `/ai/chat/stream` e o passo `piggy.pergunta` do guia vira `dado: "real"`.
 - **API do Plano Família** (`api/v2/familia.py`, montada em `/api/v2` e `/api/app`, fora do OpenAPI até o PR do app): `GET|POST /familia`, `POST|DELETE /familia/convites`, `POST /familia/convites/aceitar`, `DELETE /familia/membros/{ref}`, `POST /familia/sair`, `GET|POST /familia/dissolucao`. Nenhuma rota recebe user_id/group_id; `ref` = `family_members.id`, resolvido sempre com o filtro do titular (`db/family_views.member_user_id`). O titular vê de cada membro só `ref`, primeiro nome, status e `permissoes` (metadado do que o membro liberou, nenhum dado dele). O aceite, `GET /familia` e `POST /familia/sair` usam `usuario_logado` (`api/v2/sessao.py`): sessão sem exigir assinatura (quem entra é grátis até aceitar; as demais rotas assim estão no PR 4 abaixo; `SEM_ASSINATURA` em `tests/test_api_v2_rotas.py` reprova outra). Limites: aceite 10/h e emissão 20/dia por usuário (`_check_persistent_rate_limit`). Escrita sem corpo precisa de `Content-Type: application/json` (isenção de CSRF sem cookie). O aviso de saída/dissolução vem de `GET /familia` (404 `not_found` = fora de família; funciona sem plano); o `familia` do `/me` só leva o papel enquanto o usuário tem acesso, porque `/me` usa `usuario_atual` e dá 402 para o membro que ficou free.
 - **Consentimento e leitura do titular (Plano Família, PR 4)** (`api/v2/familia_dados.py`, `core/services/family_reads.py`, `db/family_consents.py`): o membro (`usuario_logado`, sem exigir plano; todas em `SEM_ASSINATURA`) usa `POST /familia/permissoes {escopo}`, `DELETE /familia/permissoes/{escopo}` (`agregados` derruba `lancamentos` junto) e `GET /familia/historico?antes&limite` (quem leu, `escopo`, `mes`; vale também depois de sair ou da dissolução); `permissoes` vem em `GET /familia` (de cada membro para o titular; as próprias para o membro). O titular (`usuario_atual`) lê `GET /familia/membros/{ref}/agregados|lancamentos?mes=` SÓ por `ler_do_membro`: ref fora do grupo, o próprio titular, ex-membro ou malformado = 404 `not_found`; membro ativo sem a permissão = 403 `consent_required`; mês futuro ou anterior ao mês em que o membro entrou = 422. Confere o consentimento, consulta com o user_id do membro, e `log_read` reconfere sob o lock e grava ANTES de o dado sair (revogado no meio = 403, dado descartado, sem log). Respostas por lista branca e `Cache-Control: no-store`. `recurso` do log = `agregados:AAAA-MM` ou `lancamentos:AAAA-MM`, do mesmo escopo lido (`log_read` recusa o resto com `bad_recurso` antes de gravar; contrato do histórico; cada página de lançamentos é uma linha). Limite herdado: `family_access_log.viewer_user_id` é `on delete cascade`: se o titular apagar a conta, o membro perde o histórico dessas leituras. Par no outro lado: app no PR 8.
+- **A casa (Plano Família, PR 5)** (`api/v2/familia_casa.py`, `db/family_house.py`, nos dois prefixos, fora do OpenAPI): metas e orçamentos que pertencem ao GRUPO; qualquer membro ativo, titular incluso, lê (`GET /familia/casa`, `usuario_logado`, em `SEM_ASSINATURA`) e escreve (`usuario_atual`, 402 sem plano): `POST /familia/casa/metas`, `PUT|DELETE .../metas/{ref}`, `POST .../metas/{ref}/movimentos`, e o par `.../orcamentos`. Escrita devolve a `Casa` inteira (DELETE, 204); `PUT` troca o item e exige a `versao` lida (409 `edit_conflict`); movimento (`somar`/`subtrair`) soma sempre e subtrair além do saldo é 409 `insufficient`; categoria única por grupo sem diferenciar caixa (409 `category_taken`); sem teto de itens. O gasto do orçamento é um contador do mês lançado na própria casa (`gasto_mes`; mês novo parte de 0), nunca lido de `launches`. `ref` = prefixo do tipo (`m` meta, `o` orçamento) + id da linha; sem prefixo, prefixo errado ou malformado = o mesmo 404; sempre com `group_id` do chamador: ref de outro grupo, inexistente, malformado, ex-membro e sem família são o mesmo 404. `autor` = primeiro nome se quem criou ainda é membro ativo do grupo, senão `null`. Só `db/family_house.py` toca `family_goals`/`family_budgets` (`tests/test_casa_so_na_porta.py`); escrita abre o lock do grupo (`_lock_member_group(..., com_titular=True)`). A prévia de dissolução conta `metas`/`orcamentos` e eles entram no nonce. Fora da exportação LGPD (item é do grupo). Par no outro lado: telas no PR 6, app no PR 8.
 - `GET /api/v2/eventos` (`api/v2/eventos.py`): SSE, `data: {"recurso": "open_finance"|"tudo"}`
   (sem dado financeiro, sem id, sem `id:`/replay) e `: ping` a cada 15 s. Quem avisa chama
   `eventos.avisar(user_id, recurso)` na thread do loop, depois do commit: o fim do sync do
@@ -1563,13 +1564,18 @@ metadata não muda). Recusa do Stripe no `modify` (`InvalidRequestError`) é 409
 do checkout), limite de 120/h por IP, CSRF do middleware global, e **não olha a
 flag**: com ela desligada não nasce sessão `elements`, e a página já aberta segue pagável.
 
-**Job de envio da régua (PR 6 de `docs/plano-remarketing.md`; sem desconto, que é o PR 6b).**
+**Job de envio da régua (PR 6 de `docs/plano-remarketing.md`; o desconto é o PR 6b, abaixo).**
 `_remarketing_worker` (300 s, `to_thread`) chama `core/services/remarketing.rodar_uma_vez`, inerte sem
 `REMARKETING_DESDE` (ISO 8601 com fuso; vazia, inválida ou sem fuso = desligado, zero queries). Por candidato
 (`db/remarketing.candidatos`: janelas E1 30min–12h, E2 24–36h, E3 48–60h do T0, `t0 >= desde`): `ja_comprou` ->
 `em_andamento` (adia) -> `reivindicar` (claim atômico) -> e-mail -> WhatsApp (relendo o estado antes de cada
 canal) -> `fechar`. WhatsApp só com `origem='assinar'`, telefone, sem opt-out, `WA_TEMPLATE_REMARKETING_<n>` e
 número que não é de outra conta; `send_template(url_button_param=token)` preenche o botão de URL.
+
+**Desconto da retomada (PR 6b).** E1 5%, E2 10%, E3 20% no 1º pagamento, só no plano (`DESCONTO_POR_ETAPA`,
+`core/services/retomada.py`; a etapa só do cookie). Cartão: cupom `rm_e{etapa}_{pct}_{product}` (`retomada_cupom.py`,
+`repeating`/1 mês, divergente = 503) em `discounts`, sem `allow_promotion_codes`; `rm_desc` entra na reutilização da
+sessão. Pix anual: `criar_checkout(desconto_pct=)`. `ja_comprou` relido sob o lock (409). Detalhe: `docs/plano-remarketing.md`.
 
 **Retomada do checkout abandonado (PR 4 de `docs/plano-remarketing.md`; inerte até o PR 6
 emitir um token).** `GET /retomar?t=…` (`frontend/routes/retomada.py`, só 303) troca o token
@@ -2249,7 +2255,7 @@ já enviado antes do PUT não é desfeito.
 
 **PigBank Insights, contrato v1 (PL-06 PR A1).** `/insights/{uid}/current` e o card `piggy` do chat
 devolvem os fatos dos detectores de `db/insights.py` e `core/services/insights_detectores.py` (`budget_warning`,
-`category_spike`, `recurring_increase`, `of_bill_increase`, `salary_burn_fast`, `goal_behind`, `bill_due`, `month_projection`) no contrato de
+`category_spike`, `recurring_increase`, `of_bill_increase`, `salary_burn_fast`, `goal_behind`, `bill_due`, `month_projection`, `subscription_increase`) no contrato de
 `core/services/insights_contrato.py`: os campos legados (`key`, `type`, `icon`, `title`, `message`,
 `severity`, `action_*`) mais `explicacao` (versao 1: `tipo`, `familia`, `detector`, `calculado_em`,
 `periodo` com `rotulo` e `parcial`, `fonte`, `referencia`, `atual`, `diferenca`, `amostra`), com dinheiro
@@ -2291,6 +2297,25 @@ dentro da janela de conferência (`JANELA_CONFERENCIA_DIAS`), conta a favor e s�
 corpo termina sempre com a ressalva de que a Previsão mensal de Gastos fixos considera só recorrências e pode mostrar
 outro valor (`NOTA_GASTOS_FIXOS`; um teste trava que ela cabe no teto do `message` de `montar_item`). O
 `check_cashflow` do chat (`project()`, sem a janela) pode se abster no mesmo caso (issue #1326).
+O `subscription_increase` (PL-06 B5, família `assinatura`) é o reajuste de uma assinatura mensal da Pluggy
+(`listar_assinaturas`, só `servicos`): sobe nos últimos `REAJUSTE_DIAS` dias depois de o preço antigo se repetir em
+duas cobranças seguidas (`reajustes_estaveis`, chave de topo de `listar_assinaturas` com os próprios itens de
+`servicos` cuja cadeia é estável; fora dos itens, que a guarda de `test_assinaturas.py` fecha), warning a partir de
+`REAJUSTE_ALERTA`% de alta e info abaixo, queda não avisa; chave `subscription_increase:{merchant_key}:{dia do
+reajuste}:{valor ANTERIOR em centavos}` (o sujeito é `sujeito(nome, chave)`: o `merchant_key`, ou o hash dele quando o
+nome tem dado pessoal; reajuste novo é fato novo; dois serviços do mesmo comerciante reajustados no mesmo dia com
+preços antigos diferentes são dois avisos, cada um dispensável; e o preço antigo, já assentado, não muda quando a
+Pluggy corrige os centavos da cobrança nova ou a relança com outro id, então o dispensado não volta; limites aceitos
+pelo dono: mesmo comerciante, mesmo dia e mesmo preço antigo viram um aviso só, e corrigir uma cobrança antiga muda a
+chave), gate `subscriptions` (Plus) na geração e na leitura, `impacto {por_ano_valor}` só no Pro, sem botão, logo
+antes da conta do OF no laço. A conta do OF (`of_bill_increase`) do MESMO fato sai na LEITURA
+(`insights_contrato.projetar`: mesmo `comerciante_id`, o `merchant_key` em hash, e mesmo valor novo em centavos; outro
+serviço do comerciante ou um aumento que o Recurring Payments ainda não viu saem os dois, porque duplicidade é aceita
+e aviso perdido não): depois do filtro de recurso e antes das dispensas, então só some quando o reajuste sobreviveu ao
+gate, quem perde o recurso volta a vê-la, e dispensar o reajuste não a ressuscita. Se a consulta de assinaturas falha,
+o detector entra em `falhas` e a conta do OF continua saindo. Limites: o casamento depende de a Pluggy usar a mesma
+descrição no grupo e na transação (senão saem os dois itens), e passada a janela a conta do OF da mesma assinatura
+pode voltar (issue #1336).
 
 **PigBank Insights, dispensar e útil (PL-06 PR A2).** Tabela `insight_estado` (PK `user_id, chave`;
 `db/insight_estado.py`): cada cálculo registra a chave com a severidade e a medida do ÚLTIMO cálculo

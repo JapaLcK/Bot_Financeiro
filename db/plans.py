@@ -86,7 +86,8 @@ def claim_trial_for_user(user_id: int) -> datetime | None:
     except TrialClaimError:
         raise
     except Exception as exc:
-        logger.warning("claim_trial_for_user falhou pro user %s", user_id, exc_info=True)
+        logger.warning("claim_trial_for_user falhou causa=%s sqlstate=%s", type(exc).__name__,
+                       getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         raise TrialClaimError("Falha ao persistir o uso do trial.") from exc
 
 
@@ -129,7 +130,8 @@ def motivo_trial_indisponivel(user_id: int) -> str | None:
                 )
                 return None if cur.fetchone() is None else "telefone_ja_usou"
     except Exception as exc:
-        logger.warning("motivo_trial_indisponivel falhou pro user %s", user_id, exc_info=True)
+        logger.warning("motivo_trial_indisponivel falhou causa=%s sqlstate=%s", type(exc).__name__,
+                       getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         raise TrialEligibilityError("Falha ao consultar a elegibilidade do trial.") from exc
 
 

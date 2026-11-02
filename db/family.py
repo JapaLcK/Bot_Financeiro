@@ -236,12 +236,14 @@ def accept_invite(token: str, user_id: int) -> int:
     return group_id
 
 
-def _lock_member_group(cur, member_user_id: int) -> tuple[int, int]:
-    """Trava o grupo do membro (mesma ordem de lock de remove_member) e reconfere o vínculo ativo."""
+def _lock_member_group(cur, member_user_id: int, com_titular: bool = False) -> tuple[int, int]:
+    """Trava o grupo do membro (mesma ordem de lock de remove_member) e reconfere o vínculo ativo.
+    `com_titular`: o titular também vale (a casa é de qualquer membro ativo)."""
+    papeis = ("owner", "member") if com_titular else ("member",)
     cur.execute(
         """select g.id, g.owner_user_id from family_members m join family_groups g on g.id = m.group_id
-            where m.user_id = %s and m.role = 'member' and m.left_at is null""",
-        (member_user_id,),
+            where m.user_id = %s and m.role = any(%s) and m.left_at is null""",
+        (member_user_id, list(papeis)),
     )
     row = cur.fetchone()
     if not row:
@@ -251,8 +253,8 @@ def _lock_member_group(cur, member_user_id: int) -> tuple[int, int]:
     except FamilyError:  # grupo dissolvido entre a leitura e o lock
         raise FamilyError("not_member") from None
     cur.execute(
-        "select 1 from family_members where group_id = %s and user_id = %s and role = 'member' and left_at is null",
-        (gid, member_user_id),
+        "select 1 from family_members where group_id = %s and user_id = %s and role = any(%s) and left_at is null",
+        (gid, member_user_id, list(papeis)),
     )
     if not cur.fetchone():
         raise FamilyError("not_member")

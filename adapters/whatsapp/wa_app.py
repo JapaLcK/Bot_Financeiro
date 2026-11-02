@@ -424,7 +424,8 @@ def _daily_report_tick() -> None:
         proactive_template = _proactive_template_config()
 
         if wa_targets and not proactive_template:
-            logger.warning("WA daily report skipped uid=%s: WA_PROACTIVE_TEMPLATE_NAME nao configurado", uid)
+            logger.warning("WA daily report skipped uid=%s: WA_PROACTIVE_TEMPLATE_NAME nao configurado", uid,
+                           extra={"user_id": uid})
             log_system_event_sync(
                 "warning",
                 "whatsapp_proactive_template_missing",
@@ -481,14 +482,15 @@ def _daily_report_tick() -> None:
                     instance["hostname"],
                 )
             except Exception as exc:
-                logger.warning("WA daily report send error to=%s error=%s", mask_phone(to), exc)
+                logger.warning("WA daily report send error to=%s causa=%s sqlstate=%s", mask_phone(to),
+                               type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
                 log_system_event_sync(
                     "warning",
                     "whatsapp_daily_report_send_failed",
-                    f"Falha ao enviar relatorio diario via WhatsApp: {exc}",
+                    f"Falha ao enviar relatorio diario via WhatsApp: {type(exc).__name__}",
                     source="wa_app",
                     user_id=uid,
-                    details={"to": mask_phone(to)},
+                    details={"to": mask_phone(to), "sqlstate": getattr(exc, "sqlstate", None)},
                 )
 
         if reminders:
@@ -502,14 +504,16 @@ def _daily_report_tick() -> None:
             try:
                 mark_card_reminder_sent(uid, reminder["card_id"], today)
             except Exception as exc:
-                logger.warning("WA card reminder mark error uid=%s card_id=%s error=%s", uid, reminder["card_id"], exc)
+                logger.warning("WA card reminder mark error uid=%s card_id=%s causa=%s sqlstate=%s", uid,
+                               reminder["card_id"], type(exc).__name__, getattr(exc, "sqlstate", None),
+                               extra={"user_id": uid})
                 log_system_event_sync(
                     "warning",
                     "whatsapp_card_reminder_mark_failed",
-                    f"Falha ao marcar lembrete de cartao enviado: {exc}",
+                    f"Falha ao marcar lembrete de cartao enviado: {type(exc).__name__}",
                     source="wa_app",
                     user_id=uid,
-                    details={"card_id": reminder["card_id"]},
+                    details={"card_id": reminder["card_id"], "sqlstate": getattr(exc, "sqlstate", None)},
                 )
 
 
@@ -589,7 +593,8 @@ def _bill_reminder_tick() -> None:
         try:
             due = list_due_bill_reminders(uid, today, days_before=days_before)
         except Exception as exc:
-            logger.warning("WA bill reminder query error uid=%s error=%s", uid, exc)
+            logger.warning("WA bill reminder query error uid=%s causa=%s sqlstate=%s", uid,
+                           type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
             continue
         if not due:
             continue
@@ -633,12 +638,14 @@ def _bill_reminder_tick() -> None:
                         details={"to": mask_phone(to), "bill_id": bill.get("id"), "template_name": cfg["name"]},
                     )
                 except Exception as exc:
-                    logger.warning("WA bill reminder send error uid=%s to=%s error=%s", uid, mask_phone(to), exc)
+                    logger.warning("WA bill reminder send error uid=%s to=%s causa=%s sqlstate=%s", uid, mask_phone(to),
+                                   type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
             if sent_any:
                 try:
                     mark_bill_reminder_sent(int(bill["id"]), today)
                 except Exception as exc:
-                    logger.warning("WA bill reminder mark error uid=%s bill_id=%s error=%s", uid, bill.get("id"), exc)
+                    logger.warning("WA bill reminder mark error uid=%s bill_id=%s causa=%s sqlstate=%s", uid, bill.get("id"),
+                                   type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
 
 
 async def _bill_reminder_loop():
@@ -711,14 +718,15 @@ def _send_periodic_template(uid, wa_targets, cfg, summary, kind, instance) -> No
                 },
             )
         except Exception as exc:
-            logger.warning("WA %s report send error to=%s error=%s", kind, mask_phone(to), exc)
+            logger.warning("WA %s report send error to=%s causa=%s sqlstate=%s", kind, mask_phone(to),
+                           type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
             log_system_event_sync(
                 "warning",
                 f"whatsapp_{kind}_report_send_failed",
-                f"Falha ao enviar relatorio {label} via WhatsApp: {exc}",
+                f"Falha ao enviar relatorio {label} via WhatsApp: {type(exc).__name__}",
                 source="wa_app",
                 user_id=uid,
-                details={"to": mask_phone(to)},
+                details={"to": mask_phone(to), "sqlstate": getattr(exc, "sqlstate", None)},
             )
 
 
@@ -745,8 +753,9 @@ def _liberar_claim_semanal(uid, period_date) -> bool:
     """Devolve o claim; se falhar, não levanta (os outros usuários do tick precisam rodar) e fica pendente."""
     try:
         release_weekly_report_claim(uid, period_date)
-    except Exception:
-        logger.exception("WA weekly report release failed uid=%s", uid)
+    except Exception as exc:
+        logger.error("WA weekly report release failed uid=%s causa=%s sqlstate=%s", uid,
+                     type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
         _WEEKLY_RELEASE_PENDENTES.add((uid, period_date))
         return False
     _WEEKLY_RELEASE_PENDENTES.discard((uid, period_date))
@@ -801,13 +810,15 @@ def _periodic_report_tick() -> None:
         if weekly_ok and claim_weekly_report_send(uid, today):
             try:
                 summary = build_weekly_report_summary(uid, closed=True)
-            except Exception:
+            except Exception as exc:
                 # Build falhou depois do claim: devolve a semana para o próximo ciclo (30 s) tentar de
                 # novo, até _WEEKLY_BUILD_MAX_TENTATIVAS; na última a semana fica perdida de propósito.
                 tentativas = _contar_falha_do_build_semanal(uid, today)
                 ultima = tentativas >= _WEEKLY_BUILD_MAX_TENTATIVAS
-                logger.exception("WA weekly report build failed uid=%s tentativa=%d/%d%s", uid, tentativas,
-                                 _WEEKLY_BUILD_MAX_TENTATIVAS, " (desistindo: semana não será reenviada)" if ultima else "")
+                logger.error("WA weekly report build failed uid=%s tentativa=%d/%d%s causa=%s sqlstate=%s", uid,
+                             tentativas, _WEEKLY_BUILD_MAX_TENTATIVAS,
+                             " (desistindo: semana não será reenviada)" if ultima else "",
+                             type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
                 if not ultima:
                     _liberar_claim_semanal(uid, today)
             else:

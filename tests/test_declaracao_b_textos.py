@@ -1,4 +1,5 @@
-"""PR-B (ADR 0006): os textos T1 a T11, aprovados pelo dono em 2026-10-26 (DP-1) e 2026-10-27 (T9, T10, T11, variante do T1), exatos, e nenhum deixa vazar o
+"""PR-B (ADR 0006): os textos T1 a T17 (sem T13), aprovados pelo dono em 2026-10-26 (DP-1), 2026-10-27 (T9, T10, T11, variante
+do T1) e 2026-10-28 (T12, T14, T15, issue #1310; T16, T17 e o T12 reescrito pela E3), exatos, e nenhum deixa vazar o
 código `DECLARACAO_*` do escritor. Pino de texto (como `test_declaracao_a2c_texto.py`): sem controle de mutação.
 T1/T2/T3/T4/T6/T7/T8/T9 saem pela conversa; T5 (defesa, raro) pela tradução do erro do escritor.
 """
@@ -128,3 +129,33 @@ def test_t11_valor_ambiguo(ana, liga):
     assert manda_wamid(ana, "gastei 2 reais e 50 no mercado pelo banco") == [
         "🐷 Não registrei: não sei se *2 reais e 50* é um valor só ou dois gastos. "
         "Manda de novo só com números, por exemplo: *gastei 2,50 no mercado pelo banco*."]
+
+
+def test_t12_nao_sei_qual_numero_e_o_valor(ana, liga):
+    assert manda_wamid(ana, "comprei 2 camisetas por 80 pelo banco") == [
+        "🐷 Não registrei: não sei qual desses números é o valor. Manda de novo só o valor em número, com *R$* antes; "
+        "se o nome tem número, escreve junto (*99pop*). Por exemplo: *gastei R$ 80 na Renner pelo banco*."]
+
+
+def test_t14_parcelado(ana, liga):
+    assert manda_wamid(ana, "paguei R$ 600 em 3x pelo banco") == [
+        "🐷 Não registrei: compra parcelada não sai inteira da conta de uma vez. Se você pagou uma parcela agora, "
+        "manda só ela, por exemplo: *paguei R$ 200 da parcela da geladeira pelo banco*."]
+
+
+def test_t15_mensagem_longa(ana, liga):
+    assert manda_wamid(ana, "gastei 50 no mercado " + "muito bom " * 100 + "pelo banco") == [
+        "🐷 Não registrei: a mensagem ficou longa demais para eu ter certeza do valor. Manda só o gasto, por exemplo: "
+        "*gastei 50 no mercado pelo banco*."]
+
+
+def test_t16_um_gasto_por_mensagem(ana, liga):
+    assert manda_wamid(ana, "gastei 20 no mercado e 30 na padaria pelo banco") == [
+        "🐷 Não registrei: pelo banco eu registro um gasto por mensagem. Manda cada um separado, por exemplo: "
+        "*gastei 20 no mercado pelo banco*."]
+
+
+def test_t17_valor_aproximado(ana, liga):
+    assert manda_wamid(ana, "gastei uns 50 no mercado pelo banco") == [
+        "🐷 Não registrei: pelo banco eu preciso do valor exato. Manda de novo com o valor certinho, por exemplo: "
+        "*gastei 50 no mercado pelo banco*."]

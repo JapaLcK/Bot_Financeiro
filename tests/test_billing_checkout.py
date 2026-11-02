@@ -149,6 +149,40 @@ class _FakeStripe:
             def list(**kwargs):
                 return {"data": []}
 
+        self.coupons: dict[str, dict] = {}
+        self.coupon_create_calls = 0
+        self.coupon_race = False   # True: o create perde a corrida ("already exists")
+
+        class _Price:
+            @staticmethod
+            def retrieve(price_id):
+                return {"id": price_id, "product": "prod_x"}
+
+        class _Coupon:
+            @staticmethod
+            def retrieve(cid):
+                if cid not in outer.coupons:
+                    raise _FakeInvalidRequestError("No such coupon", code="resource_missing")
+                return outer.coupons[cid]
+
+            @staticmethod
+            def create(**kw):
+                outer.coupon_create_calls += 1
+                if outer.coupon_race or kw["id"] in outer.coupons:
+                    outer.coupon_race = False
+                    outer.coupons.setdefault(kw["id"], {
+                        "id": kw["id"], "valid": True, "percent_off": float(kw["percent_off"]),
+                        "duration": kw["duration"], "duration_in_months": kw["duration_in_months"],
+                        "applies_to": kw["applies_to"]})
+                    raise _FakeInvalidRequestError("Coupon already exists", code="resource_already_exists")
+                outer.coupons[kw["id"]] = {
+                    "id": kw["id"], "valid": True, "percent_off": float(kw["percent_off"]),
+                    "duration": kw["duration"], "duration_in_months": kw["duration_in_months"],
+                    "applies_to": kw["applies_to"]}
+                return outer.coupons[kw["id"]]
+
+        self.Price = _Price
+        self.Coupon = _Coupon
         self.Customer = _Customer
         self.Subscription = _Subscription
         self.checkout = SimpleNamespace(Session=_Session)

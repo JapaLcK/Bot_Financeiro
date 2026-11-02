@@ -20,7 +20,8 @@ from decimal import Decimal
 from typing import Any
 
 from core.services.insights_contrato import (
-    GRAVIDADE, dinheiro, diferenca, montar_item, navegar, nome, periodo_dia, periodo_mes, sujeito,
+    GRAVIDADE, REAJUSTE_ALERTA, REAJUSTE_DIAS, comerciante_id, dinheiro, diferenca, montar_item, navegar, nome,
+    periodo_dia, periodo_mes, sujeito,
 )
 from utils_date import day_tz, now_tz
 from utils_text import fmt_brl, merchant_key
@@ -165,9 +166,9 @@ def _detect_category_spike(user_id: int) -> list[dict[str, Any]]:
 
 
 def _detect_recurring_increase(user_id: int) -> list[dict[str, Any]]:
-    """Recorrentes cujo `amount` foi reajustado nos últimos 60 dias."""
+    """Recorrentes cujo `amount` foi reajustado nos últimos `REAJUSTE_DIAS` dias."""
     today = date.today()
-    cutoff = today - timedelta(days=60)
+    cutoff = today - timedelta(days=REAJUSTE_DIAS)
     out: list[dict[str, Any]] = []
     recs = list_recurring_expenses(user_id, include_inactive=False)
 
@@ -194,7 +195,7 @@ def _detect_recurring_increase(user_id: int) -> list[dict[str, Any]]:
         vezes = {"monthly": 12, "annual": 1}.get(freq)
         out.append(montar_item(
             "recurring_increase", r["id"], periodo_dia(changed_at),
-            severity="warning" if delta > 0 and abs(delta_pct) >= 10 else "info",
+            severity="warning" if delta > 0 and abs(delta_pct) >= REAJUSTE_ALERTA else "info",
             title=f"{r['name']} {signal} {abs(delta_pct):.0f}%",
             message=(
                 f"De {fmt_brl(old)} pra {fmt_brl(new)} "
@@ -431,7 +432,8 @@ def _detect_of_bill_increase(user_id: int) -> list[dict[str, Any]]:
             # Sem botão, como em produção (o sanitizador antigo anulava `history`); voltar com ele é do dono.
             action_label=None, action_view=None, icon="📈",
             referencia={"estatistica": "media_meses_anteriores", "estabelecimento": nome(f["merchant"]),
-                        "valor": dinheiro(old), "meses": f["meses_anteriores"]},
+                        "valor": dinheiro(old), "meses": f["meses_anteriores"],
+                        "comerciante_id": comerciante_id(merchant_key(f["merchant"]))},  # a absorção da B5 (`projetar`)
             atual={"valor": dinheiro(new), "data": f["date"]}, diferenca=diferenca(f["new"], f["old"])))
     return out
 
@@ -441,7 +443,7 @@ def compute_active_insights(user_id: int) -> tuple[list[dict[str, Any]], list[st
 
     Detector que quebra não derruba os outros: os itens deles saem, e o nome dele vai em `falhas`.
     """
-    from core.services.insights_detectores import detect_bill_due, detect_month_projection
+    from core.services.insights_detectores import detect_bill_due, detect_month_projection, detect_subscription_increase
     ensure_user(user_id)
     out: list[dict[str, Any]] = []
     falhas: list[str] = []
@@ -450,6 +452,7 @@ def compute_active_insights(user_id: int) -> tuple[list[dict[str, Any]], list[st
         detect_month_projection,  # logo depois da conta (P4 da B3)
         _detect_budget_warnings,
         _detect_recurring_increase,
+        detect_subscription_increase,  # logo antes da conta do OF, que ele absorve na leitura (B5)
         _detect_of_bill_increase,
         _detect_category_spike,
         _detect_salary_burn_fast,

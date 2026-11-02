@@ -345,7 +345,7 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
   }
 
   function render() {
-    const w = data.janelas[win], c = w.checkout, a = w.ativacao, t = w.trial, p = w.pix, e = w.ebook, tt = w.teste, d = data.atraso;
+    const w = data.janelas[win], c = w.checkout, a = w.ativacao, t = w.trial, p = w.pix, e = w.ebook, tt = w.teste, d = data.atraso, rm = data.remarketing;
     const html = [
       funnel(w),
       channels(w),
@@ -381,6 +381,11 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
       simple("7. Cobrança em atraso agora",
         "<b>O que é:</b> contas com cobrança falha em aberto neste momento (não depende da janela de 7/30 dias).",
         [fact("Em atraso", n(d.total)), fact(`Além de ${n(d.carencia_dias)} dias`, n(d.alem_carencia), "fora da carência")]),
+      ...(!rm ? [] : [simple("7b. Régua de remarketing",
+        "<b>O que é:</b> acumulado (sem janela) dos envios da régua por etapa. “Presos” = reivindicados e nunca fechados. “Recuperados” = clicaram e concluíram um checkout depois do clique. Só contagens.",
+        [fact("Na régua", n(rm.na_regua))].concat((rm.etapas || []).map((x) => fact(`Etapa ${n(x.etapa)}`,
+          `${n(x.enviados)} enviados`,
+          `e-mail ${n(x.email_ok)} ok / ${n(x.email_falhas)} falha · WhatsApp ${n(x.whatsapp_ok)} ok / ${n(x.whatsapp_falhas)} falha · sem canal ${n(x.sem_canal)} · presos ${n(x.enviando)} · cliques ${n(x.cliques)} · recuperados ${n(x.recuperados)}`))))]),
       ...Object.keys(FONTES).map(fonteCard),
       card("9. Onde olhar o resto",
         "<b>O que é:</b> atalhos para os painéis externos. Só aparecem os que têm ID configurado aqui.",
