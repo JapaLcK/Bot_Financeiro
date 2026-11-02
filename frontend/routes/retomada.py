@@ -91,6 +91,31 @@ def email_mascarado(request: Request) -> str | None:
     return tokens.mascarar_email(email) if email else None
 
 
+def desconto_config(request: Request) -> dict:
+    """Para o `plans-config`, SÓ com cookie válido: `desconto_pct`, os preços JÁ com desconto
+    (centavos, mensal / anual cartão / anual Pix, por tier público) e se o trial vale. O front
+    não faz conta de dinheiro. A etapa sai do cookie, nunca do pedido."""
+    from core.services.pix_pricing import PRECOS_ANUAIS_CENTS  # noqa: PLC0415
+    from core.services.plan_service import TIER_TO_STORED_PLAN, plans_v2_enabled  # noqa: PLC0415
+
+    lido = None if traz_sessao(request) else _cookie_lido(request)
+    pct = tokens.desconto_da_etapa(lido[1]) if lido else None
+    if not pct:
+        return {}
+    precos = {}
+    for tier, mensal in tokens.PRECOS_MENSAIS_CENTS.items():
+        anual = tokens.com_desconto(PRECOS_ANUAIS_CENTS[TIER_TO_STORED_PLAN[tier]], pct)
+        precos[tier] = {"monthly": tokens.com_desconto(mensal, pct), "annual": anual, "pix": anual}
+    trial = False
+    if plans_v2_enabled():   # a mesma pergunta do checkout; falhou = sem promessa de trial
+        from db.plans import is_trial_eligible_for_user  # noqa: PLC0415
+        try:
+            trial = bool(is_trial_eligible_for_user(lido[0]))
+        except Exception as exc:
+            logging.getLogger(__name__).warning("retomada_trial_falhou: %s", type(exc).__name__)
+    return {"desconto_pct": pct, "precos": precos, "trial": trial}
+
+
 def _precos(request: Request) -> str:
     """`/precos` repassando só os `utm_*`: o token NUNCA chega à URL da /precos."""
     utm = [(k, v[:200]) for k, v in request.query_params.multi_items() if k.startswith("utm_")]

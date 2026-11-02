@@ -20,8 +20,23 @@ from cryptography.fernet import Fernet, InvalidToken
 TTL_S = 7 * 86400
 COOKIE_MAX_AGE = 2 * 3600   # fonte única: Max-Age do cookie e validade do token do cookie
 ETAPAS = (1, 2, 3)
+# Desconto no 1º pagamento, em %, por etapa: fonte única (checkout, plans-config e e-mails leem daqui).
+DESCONTO_POR_ETAPA = {1: 5, 2: 10, 3: 20}
+# Preço mensal CHEIO em centavos por tier público, só para a /precos mostrar o desconto. O anual mora em
+# `pix_pricing.PRECOS_ANUAIS_CENTS`. O que o cartão cobra é o Price do Stripe; o teste ata isto ao HTML.
+PRECOS_MENSAIS_CENTS = {"essencial": 990, "plus": 1990, "pro": 4990}
 _ROTULO = b"pigbank:retomada:v1"
 _ROTULO_COOKIE = b"pigbank:retomada:cookie:v1"
+
+
+def desconto_da_etapa(etapa) -> int | None:
+    """% de desconto da etapa, ou None fora da tabela (inclui bool e não-int)."""
+    return DESCONTO_POR_ETAPA.get(etapa) if type(etapa) is int else None
+
+
+def com_desconto(cents: int, pct: int) -> int:
+    """A regra de arredondamento do desconto, num lugar só: piso em centavos."""
+    return int(cents) * (100 - int(pct)) // 100
 
 
 def _cipher(cookie: bool = False) -> Fernet:

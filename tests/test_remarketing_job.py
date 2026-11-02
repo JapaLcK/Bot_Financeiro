@@ -351,10 +351,9 @@ def test_botao_de_url_e_payload_antigo_intacto(monkeypatch):
 
 
 @pytest.mark.parametrize("etapa", [1, 2, 3])
-def test_html_sem_desconto_e_escapa(etapa):
+def test_html_com_desconto_e_escapa(etapa):
     assunto, html, texto = montar(etapa, 'https://x.test/r?a=1&b="2"', 'https://x.test/u?a=<s>&b=2', "https://x.test")
-    for peca in (assunto, html, texto):
-        assert not re.search(r"\bOFF\b|desconto|oferta", peca, re.I)
+    assert not re.search(r"\bOFF\b", assunto)   # o desconto está no corpo (PR 6b), não no assunto
     assert 'b="2"' not in html and "&quot;" in html and "<s>" not in html and "&lt;s&gt;" in html
     assert "https://x.test/u?a=<s>&b=2" in texto
 

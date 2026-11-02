@@ -242,7 +242,7 @@ def test_r_o_cookie_que_o_retomar_grava_volta_aceito_pelo_jar():
     uid, _ = _conta("r-jar")
     c = _cliente()
     _retomar(c, retomada.emitir_token(uid, 3))
-    assert c.get("/billing/plans-config").json()["retomada"] == {"email": "r•••@dominio.com"}
+    assert c.get("/billing/plans-config").json()["retomada"]["email"] == "r•••@dominio.com"
 
 
 def test_r_pronto_carrega_o_pixel(monkeypatch):
@@ -506,7 +506,7 @@ def test_m_plans_config_so_mascara_com_cookie_valido_e_sem_sessao():
     sem_cookie = _cliente().get("/billing/plans-config")
     assert sem_cookie.json()["retomada"] is None and sem_cookie.headers["cache-control"] == "no-store"
     r = _cliente(a).get("/billing/plans-config")
-    assert r.json()["retomada"] == {"email": "r•••@dominio.com"}
+    assert r.json()["retomada"]["email"] == "r•••@dominio.com"
     assert email not in r.text and "retomada-m-a" not in r.text
     assert r.headers["cache-control"] == "no-store"
     for jar in ({"auth": b}, {"painel": b}, {"auth": "jwt.invalido.x"}, {"bearer": "x"}):
@@ -629,7 +629,7 @@ def test_refresh_falho_nao_derruba_o_comprador_do_link(monkeypatch):
     assert c.get("/auth/me").status_code == 401
     assert c.post("/auth/refresh", headers=_csrf_do_jar(c)).status_code == 401
     assert rota.COOKIE in c.cookies
-    assert c.get("/billing/plans-config").json()["retomada"] == {"email": "r•••@dominio.com"}
+    assert c.get("/billing/plans-config").json()["retomada"]["email"] == "r•••@dominio.com"
     r = c.post("/billing/create-checkout", json={"plan": "plus"}, headers=_csrf_do_jar(c))
     assert r.status_code == 200, r.text
     assert fake.last_session_kwargs["metadata"]["finbot_user_id"] == str(uid)

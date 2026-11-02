@@ -171,7 +171,8 @@ def _cancelar_remota(linha: dict) -> None:
 
 def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
                    email: str | None = None, rastreio: dict[str, str] | None = None,
-                   confirm_cancel_stripe: bool = False, extras=()) -> dict:
+                   confirm_cancel_stripe: bool = False, extras=(),
+                   desconto_pct: int | None = None) -> dict:
     """Emite (ou reaproveita) a cobrança Pix anual. **Roda sob lock do usuário.**
 
     Levanta `CheckoutIndisponivel` (503), `Vitalicio`, `StripeAtivo`, `CoberturaJaPaga` e
@@ -203,6 +204,10 @@ def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
     preco = PRECOS_ANUAIS_CENTS.get(plan_stored)
     if preco is None:
         raise CheckoutIndisponivel("preco_anual_nao_configurado")
+
+    if desconto_pct:   # ANTES do piso `min_cents` (em `plano_da_cobranca`); cadernos seguem cheios
+        from core.services.retomada import com_desconto  # noqa: PLC0415
+        preco = com_desconto(preco, desconto_pct)
 
     stripe_sub = _stripe_vivo(user_id)
     if stripe_sub and not confirm_cancel_stripe:
@@ -258,7 +263,9 @@ def _criar_ou_substituir(user_id, plan_stored, venda, stripe_sub, rastreio, foto
     # perder, e `pending` não volta para a reconciliação — devolver o mesmo
     # código expirado prendia o cliente sem cobrança pagável para sempre. Cadernos:
     # só o MESMO conjunto de ids (a ordem não importa); outro conjunto substitui.
+    # `price_cents` (já com desconto, antes do crédito): QR de outro valor nunca volta.
     if (qr_vivo(ativa) and ativa["plan"] == plan_stored
+            and ativa["price_cents"] == venda["price_cents"]
             and {e["price"] for e in ativa["extras"]} == {e["price"] for e in foto}):
         return None
     _cancelar_remota(ativa)

@@ -53,6 +53,8 @@ from core.services.pix_checkout import (
 )
 from core.services.pix_extras import ExtrasIndisponiveis
 from core.services.pix_pricing import CoberturaJaPaga
+from core.services.retomada import desconto_da_etapa
+from db.remarketing import ja_comprou
 from core.services.plan_service import TIER_TO_STORED_PLAN, tier_publico
 from frontend.routes import shared
 from frontend.routes.retomada import comprador_pix
@@ -120,10 +122,15 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     nome, email = await asyncio.to_thread(_titular, user_id)
     try:
         async with _billing_user_lock(user_id):
+            desconto = desconto_da_etapa(retomada)   # a etapa vem só do cookie, nunca do corpo
+            if desconto and await asyncio.to_thread(ja_comprou, user_id):   # relido sob o lock
+                raise HTTPException(status_code=409, detail={
+                    "error": "ja_comprou", "message": "Você já é cliente. O desconto de retomada vale só no 1º pagamento."})
             res = await asyncio.to_thread(
                 criar_checkout, user_id, plan_stored=plan_stored, cpf_cnpj=doc,
                 nome=nome, email=email, rastreio=_rastreio(request),
-                confirm_cancel_stripe=bool(payload.confirm_cancel_stripe), extras=extras)
+                confirm_cancel_stripe=bool(payload.confirm_cancel_stripe), extras=extras,
+                desconto_pct=desconto)
             return {**res, "retomada": True} if retomada else res
     except ExtrasIndisponiveis as exc:   # a oferta relida no POST, sem consulta nova
         raise HTTPException(status_code=409, detail={

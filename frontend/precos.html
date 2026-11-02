@@ -141,6 +141,13 @@
     position: absolute; inset: 0 auto auto 0; opacity: 0; pointer-events: none;
   }
   #plans-v2 .price-flow-host { display: inline-flex; }
+  /* Link de retomada: o preço com desconto é texto estático (o servidor manda a conta pronta), então
+     o NumberFlow sai de cena. Sem a classe `rm-on` nada acima muda. */
+  #plans-v2.rm-on .price-flow-host, #plans-v2.rm-on .price-eq { display: none !important; }
+  #plans-v2.rm-on .price.has-number-flow > [data-price-monthly],
+  #plans-v2.rm-on .price.has-number-flow > [data-price-annual] { position: static; opacity: 1; pointer-events: auto; }
+  #plans-v2 .price s.rm-cheio { display: block; font-size: .95rem; font-weight: 500; letter-spacing: 0; color: var(--ink-3); }
+  #plans-v2 .price .rm-selo { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: #FF2D8E; color: #fff; font-size: .72rem; font-weight: 700; letter-spacing: 0; vertical-align: middle; }
   /* site.css reduz TODO `span` dentro de `.price` para a tipografia do /mês.
      O NumberFlow usa spans próprios, então precisa restaurar aqui a tipografia
      do valor antes de reduzir somente o sufixo abaixo. */
@@ -515,6 +522,36 @@ const PLAN_PRICES = {
   plus:      { monthly: "R$ 19,90/mês", annual: "R$ 199/ano" },
   pro:       { monthly: "R$ 49,90/mês", annual: "R$ 499/ano" },
 };
+
+/* Comprador do link de retomada: o servidor manda o desconto e os preços JÁ calculados (centavos);
+   aqui só se formata. Cheio riscado, preço com desconto e selo; cadernos não entram (preço cheio). */
+function aplicarDescontoRetomada(r, diasTrial) {
+  if (!r?.desconto_pct || !r.precos) return;
+  const fmt = c => "R$\u00a0" + (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: c % 100 ? 2 : 0, maximumFractionDigits: 2 });
+  document.getElementById("plans-v2").classList.add("rm-on");
+  document.querySelectorAll("#plans-v2 article.plan").forEach(card => {
+    const p = r.precos[card.querySelector("[data-plan-btn]")?.dataset.planBtn];
+    if (!p) return;
+    [["monthly", "data-price-monthly", "copyMonthly"], ["annual", "data-price-annual", "copyAnnual"]].forEach(([ciclo, attr, copia]) => {
+      const el = card.querySelector(`.price [${attr}]`);
+      if (!el) return;
+      const cheio = document.createElement("s");
+      cheio.className = "rm-cheio";
+      cheio.textContent = el.firstChild.textContent;
+      const selo = document.createElement("span");
+      selo.className = "rm-selo";
+      selo.textContent = r.desconto_pct + "% OFF";
+      const per = el.querySelector(".per");
+      el.textContent = "";
+      el.append(cheio, fmt(p[ciclo]), per, selo);
+      if (r.trial && diasTrial) {
+        const txt = card.querySelector(".price-cycle-copy");
+        txt.dataset[copia] = `${diasTrial} dias grátis, depois ${fmt(p[ciclo])} (${r.desconto_pct}% OFF na 1ª cobrança)`;
+        if (currentCycle === ciclo) txt.textContent = txt.dataset[copia];
+      }
+    });
+  });
+}
 
 /* Valor numérico do plano pros eventos do GA4 (`value`/`price`), lido do
    PLAN_PRICES acima em vez de uma segunda tabela: preço só é editado num lugar,
@@ -960,6 +997,7 @@ async function cancelChange() {
     if (resp.ok) {
       cfgPlanos = await resp.json();
       const cfg = cfgPlanos;
+      aplicarDescontoRetomada(cfg.retomada, cfg.trial_days);
       // Plano sem price configurado no Stripe → botão vira "Indisponível" (não
       // deixa o usuário clicar pra tomar um erro). querySelectorAll, não
       // querySelector: um seletor cobre todos os botões do plano.

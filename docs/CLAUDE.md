@@ -1563,13 +1563,18 @@ metadata não muda). Recusa do Stripe no `modify` (`InvalidRequestError`) é 409
 do checkout), limite de 120/h por IP, CSRF do middleware global, e **não olha a
 flag**: com ela desligada não nasce sessão `elements`, e a página já aberta segue pagável.
 
-**Job de envio da régua (PR 6 de `docs/plano-remarketing.md`; sem desconto, que é o PR 6b).**
+**Job de envio da régua (PR 6 de `docs/plano-remarketing.md`; o desconto é o PR 6b, abaixo).**
 `_remarketing_worker` (300 s, `to_thread`) chama `core/services/remarketing.rodar_uma_vez`, inerte sem
 `REMARKETING_DESDE` (ISO 8601 com fuso; vazia, inválida ou sem fuso = desligado, zero queries). Por candidato
 (`db/remarketing.candidatos`: janelas E1 30min–12h, E2 24–36h, E3 48–60h do T0, `t0 >= desde`): `ja_comprou` ->
 `em_andamento` (adia) -> `reivindicar` (claim atômico) -> e-mail -> WhatsApp (relendo o estado antes de cada
 canal) -> `fechar`. WhatsApp só com `origem='assinar'`, telefone, sem opt-out, `WA_TEMPLATE_REMARKETING_<n>` e
 número que não é de outra conta; `send_template(url_button_param=token)` preenche o botão de URL.
+
+**Desconto da retomada (PR 6b).** E1 5%, E2 10%, E3 20% no 1º pagamento, só no plano (`DESCONTO_POR_ETAPA`,
+`core/services/retomada.py`; a etapa só do cookie). Cartão: cupom `rm_e{etapa}_{pct}_{product}` (`retomada_cupom.py`,
+`repeating`/1 mês, divergente = 503) em `discounts`, sem `allow_promotion_codes`; `rm_desc` entra na reutilização da
+sessão. Pix anual: `criar_checkout(desconto_pct=)`. `ja_comprou` relido sob o lock (409). Detalhe: `docs/plano-remarketing.md`.
 
 **Retomada do checkout abandonado (PR 4 de `docs/plano-remarketing.md`; inerte até o PR 6
 emitir um token).** `GET /retomar?t=…` (`frontend/routes/retomada.py`, só 303) troca o token

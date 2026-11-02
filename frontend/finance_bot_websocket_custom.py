@@ -140,8 +140,11 @@ from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.billing_bump import router as billing_bump_router
 from frontend.routes.retomada import (
-    COOKIE as RETOMADA_COOKIE, Comprador, comprador, email_mascarado, router as retomada_router,
+    COOKIE as RETOMADA_COOKIE, Comprador, comprador, desconto_config, email_mascarado, router as retomada_router,
 )
+from core.services.retomada import desconto_da_etapa
+from core.services.retomada_cupom import CupomIndisponivel, cupom_id
+from db.remarketing import ja_comprou
 from frontend.routes.agents import router as agents_router
 from frontend.routes.ai_chat import AIChatBody, criar_router as criar_ai_chat_router, texto_valido
 from frontend.routes.analytics import router as analytics_router
@@ -5336,6 +5339,8 @@ def _checkout_session_matches(session, user_id: int, plan: str, interval: str, p
         # Sessão de retomada (`rm_etapa`) só é reaproveitada pela retomada da MESMA etapa,
         # e a do fluxo logado nunca por ela: o rastro da compra não se mistura.
         and str(_sg(metadata, "rm_etapa") or "") == str(retomada_etapa or "")
+        # O desconto também: sessão de antes do 6b (sem `rm_desc`) ou de outra tabela não é reaproveitada.
+        and str(_sg(metadata, "rm_desc") or "") == str(desconto_da_etapa(retomada_etapa) or "")
         and modo_ok
     )
 
@@ -5380,6 +5385,12 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             detail={"error": "pix_active",
                     "message": "Você já tem o plano anual pago no Pix. Ele vale até o fim do período — depois disso dá pra assinar no cartão."},
         )
+
+    # Desconto só para quem ainda não comprou: relido AQUI, sob o lock, e não só no /retomar.
+    desconto = desconto_da_etapa(retomada_etapa)
+    if desconto and await asyncio.to_thread(ja_comprou, user_id):
+        raise HTTPException(status_code=409, detail={
+            "error": "ja_comprou", "message": "Você já é cliente. O desconto de retomada vale só no 1º pagamento."})
 
     customer_id = user.get("stripe_customer_id")
     if customer_id:
@@ -5540,6 +5551,13 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
     from core.services.extras_assinar import da_env, ofertas_da_pagina, para_metadata, para_tela
     ofertas = await asyncio.to_thread(ofertas_da_pagina, stripe_mod, user_id) if elementos else []
 
+    cupom = None
+    if desconto:   # antes de criar qualquer coisa: cupom divergente é 503, sem sessão
+        try:
+            cupom = await asyncio.to_thread(cupom_id, stripe_mod, retomada_etapa, desconto, price_id)
+        except CupomIndisponivel:
+            raise HTTPException(status_code=503, detail="Não consegui aplicar o desconto agora. Tenta de novo em instantes.")
+
     def _new_session(cust_id: str):
         metadata = {
             "finbot_user_id": str(user_id),
@@ -5552,6 +5570,8 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         metadata.update(rastreio or {})
         if retomada_etapa:   # vem do token no servidor; vai na sessão E na assinatura (cópia abaixo)
             metadata["rm_etapa"] = str(retomada_etapa)
+        if cupom:
+            metadata["rm_desc"] = str(desconto)
         # Produtos extras nas DUAS origens. Foto (preço + URL) no nascimento da
         # sessão: o webhook e o job leem dela, nunca da env do momento.
         extras = [(p, u) for p, u, _ in ofertas] if elementos else da_env()
@@ -5585,10 +5605,13 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             line_items=[{"price": price_id, "quantity": 1}],
             mode="subscription",
             locale="pt-BR",
-            allow_promotion_codes=True,
             metadata=metadata,
             subscription_data=subscription_data,
         )
+        if cupom:   # o Stripe recusa `discounts` junto de `allow_promotion_codes`
+            kwargs["discounts"] = [{"coupon": cupom}]
+        else:
+            kwargs["allow_promotion_codes"] = True
         if extras and not elementos:
             kwargs["optional_items"] = [{"price": p, "quantity": 1} for p, _ in extras]
         if origem == "assinar" or elementos:
@@ -5680,7 +5703,7 @@ async def billing_plans_config(request: Request, response: Response):
     from core.services.pix_checkout import pix_annual_available
     from core.services.plan_service import plans_v2_enabled, trial_days_total
     mascara = await asyncio.to_thread(email_mascarado, request)
-    retomada = {"email": mascara} if mascara else None
+    retomada = {"email": mascara, **await asyncio.to_thread(desconto_config, request)} if mascara else None
     response.headers["Cache-Control"] = "no-store"   # a resposta depende do cookie
     return {
         "plans_v2_enabled": plans_v2_enabled(),
