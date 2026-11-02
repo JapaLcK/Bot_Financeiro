@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 import frontend.finance_bot_websocket_custom as dashboard
-import frontend.routes.billing_pix as billing_pix
+import db.remarketing as remarketing
 from _pix_checkout_helpers import _comprar, _linhas, asaas_falso, vendavel  # noqa: F401 - fixtures
 from core.services import retomada
 from core.services.retomada_cupom import CupomIndisponivel, cupom_id
@@ -130,12 +130,12 @@ def test_ja_comprou_e_409_nos_dois_meios_e_quem_nao_comprou_passa(monkeypatch, v
     a, _ = _conta("d-comprou")
     fake = _stripe(monkeypatch)
     monkeypatch.setattr(dashboard, "ja_comprou", lambda uid: True)
-    monkeypatch.setattr(billing_pix, "ja_comprou", lambda uid: True)
+    monkeypatch.setattr(remarketing, "ja_comprou", lambda uid: True)
     assert _checkout(_cliente(a, 1)).status_code == 409
     assert fake.session_create_calls == 0 and fake.customer_create_calls == 0
     assert _pix(_cliente(a, 1), plan="essencial").status_code == 409 and _linhas(a) == []
     monkeypatch.setattr(dashboard, "ja_comprou", lambda uid: False)
-    monkeypatch.setattr(billing_pix, "ja_comprou", lambda uid: False)
+    monkeypatch.setattr(remarketing, "ja_comprou", lambda uid: False)
     assert _checkout(_cliente(a, 1)).status_code == 200
     assert _pix(_cliente(a, 1), plan="essencial").status_code == 200
 

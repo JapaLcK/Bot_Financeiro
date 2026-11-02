@@ -91,6 +91,18 @@ def email_mascarado(request: Request) -> str | None:
     return tokens.mascarar_email(email) if email else None
 
 
+async def desconto_pix(etapa, user_id: int):
+    """% do Pix: a etapa vem só do cookie, nunca do corpo. Quem já comprou leva 409.
+    Chame sob o `_billing_user_lock`, para o `ja_comprou` ser relido ali."""
+    from db.remarketing import ja_comprou  # noqa: PLC0415
+
+    desconto = tokens.desconto_da_etapa(etapa)
+    if desconto and await asyncio.to_thread(ja_comprou, user_id):
+        raise HTTPException(status_code=409, detail={
+            "error": "ja_comprou", "message": "Você já é cliente. O desconto de retomada vale só no 1º pagamento."})
+    return desconto
+
+
 def desconto_config(request: Request) -> dict:
     """Para o `plans-config`, SÓ com cookie válido: `desconto_pct`, os preços JÁ com desconto
     (centavos, mensal / anual cartão / anual Pix, por tier público) e se o trial vale. O front
