@@ -61,9 +61,10 @@ for (const [nome, viewport] of [["desktop", { width: 1280, height: 900 }], ["mob
   });
 }
 
-test("sem trial: o texto do ciclo continua o de hoje", async () => {
+test("sem trial: o texto diz que o desconto é só na 1ª cobrança", async () => {
   const page = await abrir({ ...RET, trial: false }, { width: 1280, height: 900 });
-  assert.equal(await page.locator("#plans-v2 .price-cycle-copy").first().innerText(), "Cobrado mensalmente");
+  const txt = (await page.locator("#plans-v2 .price-cycle-copy").first().innerText()).replace(/\s+/g, " ");
+  assert.match(txt, /^20% OFF na 1ª cobrança, depois R\$ \d/);
   await page.close();
 });
 
