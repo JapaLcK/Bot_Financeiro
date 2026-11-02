@@ -52,11 +52,11 @@ def test_tres_casas_na_resposta_a_pergunta_tambem_recusa(ana, liga):
     assert "2 casas" in r and declaracoes(ana) == [] and sem_pergunta(ana)
 
 
-def test_um_recusa_outro_grava(ana, liga):
-    """V6: o pedaço com 3 casas é recusado (T4) e o outro é declarado."""
+def test_dois_gastos_um_com_tres_casas_recusam_os_dois(ana, liga):
+    """V6 com E1 (#1310): dois gastos na mensagem recusam antes do escritor (T16); nada grava."""
     r = manda_wamid(ana, "gastei 50,123 no mercado e 30 na padaria no pix")[0]
-    assert "2 casas" in r and "registrada pelo banco" in r and "R$ 30,00" in r, r
-    assert [float(d["valor"]) for d in declaracoes(ana)] == [30.0]
+    assert "um gasto por mensagem" in r, r
+    assert declaracoes(ana) == []
 
 
 def test_carteira_aceita_tres_casas_como_hoje(ana):
@@ -178,7 +178,7 @@ def test_valor_abreviado_na_fila_devolve_o_item(ana, liga, monkeypatch):
 
 @pytest.mark.parametrize("texto,valor", [
     ("gastei 2200 no mercado no pix", 2200.0), ("gastei 2 mil no mercado no pix", 2000.0),
-    ("gastei 10 km de uber no pix", 10.0), ("gastei 1,5 mil na padaria no pix", 1500.0),
+    ("gastei 1,5 mil na padaria no pix", 1500.0),  # "10 km de uber" é medida: T12 (#1310)
     ("gastei 30 em arroz 5 kg no pix", 30.0),
 ])
 def test_positivo_valor_por_extenso_ou_numero_grava(ana, liga, texto, valor):

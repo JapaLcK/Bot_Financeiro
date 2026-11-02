@@ -26,7 +26,10 @@ def test_porta_ligada_declara(ana, liga, monkeypatch, nome):
     decls = declaracoes(ana)
     assert len(decls) == quantas, respostas
     assert n_lancamentos(ana) == quantas and carteira(ana) == 200.0
-    assert any("registrada pelo banco" in r for r in respostas), respostas
+    if not quantas:  # dois gastos numa mensagem: a declaração recusa (E1)
+        assert any("um gasto por mensagem" in r for r in respostas), respostas
+    else:
+        assert any("registrada pelo banco" in r for r in respostas), respostas
     assert sem_pergunta(ana)
     for d in decls:  # a chave é hash + ordem no turno; o wamid cru nunca vai para a coluna
         assert d["external_id"].startswith("wa:") and "wamid" not in d["external_id"], d["external_id"]

@@ -4,8 +4,8 @@ Mesmo wamid duas vezes = UMA declaração (a segunda diz "já registrei"); duas 
 DUAS (nenhum dedupe por valor, descrição ou dia); sem wamid utilizável não declara. O `_SEEN` do runtime (memória,
 180 s) NÃO está no caminho: estes testes chamam `handle_incoming` direto, que é o que vale depois do TTL ou de um deploy.
 
-Controles negativos: o escritor ignorando `chave_acao` (sem `external_id` e sem a checagem) deixa vermelhos R2, R5, R6
-(`:1`), R7 e a fila; um dedupe por conteúdo no lugar da chave deixa vermelho `test_mesmo_texto_wamids_diferentes_sao_duas`
+Controles negativos: o escritor ignorando `chave_acao` (sem `external_id` e sem a checagem) deixa vermelhos R2, R5 e a
+fila (R6 e R7, duas declarações num turno, deixaram de existir com o E1 da #1310: um gasto por mensagem); um dedupe por conteúdo no lugar da chave deixa vermelho `test_mesmo_texto_wamids_diferentes_sao_duas`
 (R3, o controle exigido pela ADR). Positivos: R3 e a primeira entrega de cada caso.
 """
 from __future__ import annotations
@@ -55,31 +55,14 @@ def test_resposta_reentregue_nao_grava_duas_vezes(ana, liga):
     assert len(declaracoes(ana)) == 1 and "registrada pelo banco" not in r[0], r
 
 
-def test_duas_frases_duas_chaves(ana, liga):
+def test_duas_frases_recusam_sem_consumir_chave(ana, liga):
+    """E1 (#1310): dois gastos numa mensagem não declaram (T16), e a reentrega do mesmo wamid recusa igual. A ordem `<n>` da
+    chave segue no código, mas com um gasto por mensagem ela é sempre 0 (o cenário "frase 0 gravou, frase 1 estourou"
+    deixou de existir)."""
     w = "wamid.R6-" + uuid.uuid4().hex
-    manda_wamid(ana, "gastei 50 no mercado e 30 na padaria no pix", w)
-    sufixos = sorted(d["external_id"].rsplit(":", 1)[1] for d in declaracoes(ana))
-    assert sufixos == ["0", "1"]
-    r = manda_wamid(ana, "gastei 50 no mercado e 30 na padaria no pix", w)[0]
-    assert r.count("já tinha registrado") == 2 and len(declaracoes(ana)) == 2
-
-
-def test_retentativa_no_meio_pula_a_gravada_e_grava_a_que_faltou(ana, liga, monkeypatch):
-    """R7: a frase 0 gravou, a 1 estourou. A retentativa do MESMO wamid repete a 0 (chave existe) e grava a 1."""
-    real, chamadas = db.add_launch_and_update_balance, []
-
-    def falha_a_segunda_vez(*a, **k):
-        chamadas.append(1)
-        if len(chamadas) == 2:
-            raise RuntimeError("caiu no meio")
-        return real(*a, **k)
-
-    monkeypatch.setattr(db, "add_launch_and_update_balance", falha_a_segunda_vez)
-    w = "wamid.R7-" + uuid.uuid4().hex
-    assert "erro" in manda_wamid(ana, "gastei 50 no mercado e 30 na padaria no pix", w)[0].lower()
-    assert [float(d["valor"]) for d in declaracoes(ana)] == [50.0]
-    manda_wamid(ana, "gastei 50 no mercado e 30 na padaria no pix", w)
-    assert sorted(float(d["valor"]) for d in declaracoes(ana)) == [30.0, 50.0] and carteira(ana) == 200.0
+    for _ in range(2):
+        assert "um gasto por mensagem" in manda_wamid(ana, "gastei 50 no mercado e 30 na padaria no pix", w)[0]
+    assert declaracoes(ana) == []
 
 
 def test_fila_reentregue_devolve_o_item_em_vez_de_perde_lo(ana, liga, monkeypatch):
