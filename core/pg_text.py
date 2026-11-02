@@ -223,6 +223,9 @@ def quadros_da_cadeia(exc: BaseException) -> tuple[str, str | None]:
     SEM a linha final de cada exceção: a do psycopg traz o `DETAIL: Key (…)=(…)` com dado do
     usuário (P2 c da #657). Cada elo é separado por uma linha só com o tipo. A causa entra porque
     `raise X from e` (db/accounts.py) e o contexto implícito escondem o quadro do banco e o sqlstate.
+    Dois sentidos de "sqlstate" nos logs (A7 da #657): os topos (conversa e HTTP, via esta função)
+    gravam o 1º da CADEIA; os demais sites, `getattr(exc, "sqlstate")` da exceção de FORA. Num
+    `raise ValueError from erro_do_banco`, o topo diz `23505` e um site comum diz `None`.
 
     Nunca levanta: roda no `except` de último recurso da conversa, e levantar ali tira a resposta
     amigável e a linha do log, e devolve o DETAIL pelo `logger.exception` do worker."""

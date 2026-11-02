@@ -215,7 +215,7 @@ async def check_payment_reminder() -> None:
             if await loop.run_in_executor(None, _pago_por_outro_caminho, user_id):
                 continue
         except Exception as exc:
-            logger.error("[cobranca] checagem de grant falhou user_id=%s: %s", user_id, exc)
+            logger.error("[cobranca] checagem de grant falhou user_id=%s causa=%s sqlstate=%s", user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
             continue
         # REVALIDAÇÃO, a última coisa antes do envio. `rows` é UM snapshot e o
         # lote não tem `LIMIT`: quem pagasse depois da query — em especial
@@ -233,7 +233,7 @@ async def check_payment_reminder() -> None:
         try:
             atual = await loop.run_in_executor(None, lembrete_ainda_vale, user_id)
         except Exception as exc:
-            logger.error("[cobranca] revalidacao falhou user_id=%s: %s", user_id, exc)
+            logger.error("[cobranca] revalidacao falhou user_id=%s causa=%s sqlstate=%s", user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
             continue
         if atual is None:
             logger.info("[cobranca] lembrete abortado: ciclo fechou ou opt-out de"
@@ -244,13 +244,13 @@ async def check_payment_reminder() -> None:
         # de que uma linha ruim não derruba o lote (a exceção do
         # `core.crypto.decrypt_pii` viraria abandono dos candidatos seguintes,
         # porque o chamador embrulha esta função inteira). O log leva `user_id` e
-        # a exceção e nenhum e-mail — o que falhou foi obter o endereço.
+        # o tipo da exceção e nenhum e-mail — o que falhou foi obter o endereço.
         try:
             email = await loop.run_in_executor(
                 None, _resolver_email, user_id, atual)
         except Exception as exc:
-            logger.error("[cobranca] decriptacao do e-mail falhou"
-                         " user_id=%s: %s", user_id, exc)
+            logger.error("[cobranca] decriptacao do e-mail falhou user_id=%s causa=%s sqlstate=%s",
+                         user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
             continue
         if not email:
             continue
@@ -276,7 +276,7 @@ async def check_payment_reminder() -> None:
                 details={"email": True, "whatsapp": wa},
             )
         except Exception as exc:
-            logger.error("[cobranca] falha enviando user_id=%s: %s", user_id, exc)
+            logger.error("[cobranca] falha enviando user_id=%s causa=%s sqlstate=%s", user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
 
 
 def _resolver_email(user_id: int, linha: dict) -> str | None:

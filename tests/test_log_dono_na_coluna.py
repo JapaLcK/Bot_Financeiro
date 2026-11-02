@@ -102,11 +102,21 @@ _N_MSG = {"_log_event": 2}      # scripts/account_deletion_job.py: (level, messa
 # (`SystemExit("texto").code` é texto livre).
 _EXC_SEGURA = {"sqlstate", "constraint_name", "status_code", "__class__", "motivo", "codigo"}
 
-# Fora do ratchet, com o motivo. Chave que nenhum código produz reprova (órfã).
+# Fora do ratchet, com o motivo. Cada entrada cobre UMA ocorrência da chave: uma
+# segunda na mesma função volta ao ratchet (`_atual`). Chave que nenhum código
+# produz reprova (órfã).
 JUSTIFICADAS: dict[tuple[str, str, str], str] = {
     ("core/observability.py", "_log_falha", "LOG_EXTRA_RAW"):
         "o `exc_info=com_traceback` do helper é preso ponto a ponto pela "
         "allowlist de tests/test_log_falha_traceback.py",
+    ("core/services/stripe_email_sync.py", "_sincronizar", "EVT_COL_RAW"):
+        "`exc.code`/`exc.param` da `stripe.InvalidRequestError` são o código de catálogo e o "
+        "nome do parâmetro (`resource_missing`/`customer`), sem dado do cliente; o operador "
+        "precisa deles para separar cliente apagado de e-mail recusado. A mensagem da exceção "
+        "não é logada: "
+        "tests/test_settings_contact_stripe_sync.py::test_email_recusado_fica_fora_do_log. "
+        "Classe cega: TROCAR esta ocorrência por outro texto cru na mesma função (a contagem "
+        "fica 1)",
 }
 
 
@@ -268,7 +278,10 @@ def _compara(atual: Counter, base: dict) -> tuple[list, list]:
 
 
 def _atual(achados: list) -> Counter:
-    return Counter(k for k in achados if k not in JUSTIFICADAS)
+    atual = Counter(achados)
+    for k in JUSTIFICADAS:    # uma ocorrência por entrada, não a chave inteira
+        atual[k] -= 1
+    return +atual
 
 
 def test_ratchet_do_dono_na_coluna():
@@ -309,7 +322,8 @@ def test_varredura_ponta_a_ponta_pelo_git(tmp_path, monkeypatch):
     (inclusive latin-1 com cookie de coding), o solto não rastreado não entra,
     a base maior que o código reprova com "DIMINUIU", o rename reprova numa
     falha só com os dois lados (sem o comando que recusaria), a JUSTIFICADAS
-    órfã reprova, e rastreado que não parseia reprova com o nome."""
+    órfã reprova, a JUSTIFICADAS cobre uma ocorrência só (a segunda na mesma
+    função reprova), e rastreado que não parseia reprova com o nome."""
     log = "import logging\nlogger = logging.getLogger(__name__)\n"
     raiz = _repo_de_brinquedo(tmp_path, {
         "core/novo.py": f"{log}def tick(user_id):\n    logger.warning('x user=%s', user_id)\n"
@@ -345,6 +359,14 @@ def test_varredura_ponta_a_ponta_pelo_git(tmp_path, monkeypatch):
     monkeypatch.setitem(globals(), "JUSTIFICADAS",
                         {("core/novo.py", "inexistente", "LOG_MSG_NULL"): "x"})
     assert "JUSTIFICADAS com entrada" in ratchet({latin: 1, chave: 1})
+    # A justificativa cobre UMA ocorrência: a segunda na mesma função volta ao ratchet.
+    monkeypatch.setitem(globals(), "JUSTIFICADAS", {chave: "x"})
+    monkeypatch.setitem(globals(), "DIVIDA", {latin: 1})
+    test_ratchet_do_dono_na_coluna()                            # a única, justificada: verde
+    (raiz / "core" / "novo.py").write_text(f"{log}def tick(user_id):\n"
+                                           + "    logger.warning('x user=%s', user_id)\n" * 2)
+    subprocess.run(["git", "-C", str(raiz), "add", "-A"], check=True)
+    assert f"{chave} 0 -> 1" in ratchet({latin: 1})
 
     (raiz / "core" / "quebrado.py").write_text("def (:\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(raiz), "add", "-A"], check=True)

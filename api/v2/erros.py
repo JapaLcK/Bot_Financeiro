@@ -5,7 +5,6 @@ montado trata. Ficam de fora (nascem nos middlewares do pai, antes do sub-app)
 o 403 do CSRF e o 422 do `query_venenosa_middleware`, que saem `{"detail": ...}`.
 """
 import sys
-import traceback
 from http.client import responses
 
 import psycopg
@@ -16,8 +15,8 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import ClientDisconnect
 
-from core.admin_dashboard import log_system_event, status_do_erro
-from core.pg_text import limpa_para_pg
+from core.admin_dashboard import log_system_event, origem_do_erro, status_do_erro
+from core.pg_text import limpa_para_pg, quadros_da_cadeia
 from core.pg_text import MSG_VALOR_API, violacao_finito
 
 _CODIGOS = {
@@ -89,8 +88,9 @@ async def valor_finito_erro(request: Request, exc: psycopg.errors.CheckViolation
     nome = violacao_finito(exc)
     if nome is None:
         raise exc
+    source, user_id = origem_do_erro(request)
     await log_system_event("warning", "valor_nao_finito_no_banco", f"constraint {nome}",
-                           source=f"{request.method} {request.url.path}", details={"constraint": nome})
+                           source=source, user_id=user_id, details={"constraint": nome})
     return _envelope(400, "valor_invalido", MSG_VALOR_API)
 
 
@@ -129,15 +129,15 @@ async def erro_interno(request: Request, exc: Exception) -> JSONResponse:
         raise exc
     # O resto o pai não enxerga (o sub-app já respondeu): sem o
     # `log_system_event` aqui, o erro some do painel de admin.
+    # Mesma forma do `admin_error_logging_middleware`: só os quadros, sem o DETAIL (DP11).
     status, message = status_do_erro(exc)
-    tb = "".join(traceback.format_exception(exc))
-    err = str(exc) or exc.__class__.__name__
-    print(f"[unhandled] {request.method} {request.url.path}: {exc.__class__.__name__}: {err}\n{tb}",
-          file=sys.stderr, flush=True)
+    quadros, sqlstate = quadros_da_cadeia(exc)
+    source, user_id = origem_do_erro(request)
+    tipo = exc.__class__.__name__
+    print(f"[unhandled] {source}: {tipo} sqlstate={sqlstate}\n{quadros}", file=sys.stderr, flush=True)
     await log_system_event(
-        "error", "http_unhandled_exception", err,
-        source=f"{request.method} {request.url.path}",
+        "error", "http_unhandled_exception", tipo, source=source, user_id=user_id,
         details={"query_keys": sorted(request.query_params.keys()), "status_code": status,
-                 "exc_type": exc.__class__.__name__, "traceback": tb[-2000:]},
+                 "exc_type": tipo, "sqlstate": sqlstate, "traceback": quadros[-2000:]},
     )
     return _envelope(status, _CODIGOS.get(status, "internal_error"), message)

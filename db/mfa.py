@@ -231,7 +231,8 @@ def verify_and_enable(user_id: int, code: str) -> list[str]:
     try:
         mark_mfa_onboarding_shown(user_id)
     except Exception as exc:  # nunca derruba a resposta do enable
-        logger.warning("mfa onboarding mark falhou user=%s: %s", user_id, exc)
+        logger.warning("mfa onboarding mark falhou causa=%s sqlstate=%s", type(exc).__name__,
+                       getattr(exc, "sqlstate", None), extra={"user_id": user_id})
 
     return backup_codes
 

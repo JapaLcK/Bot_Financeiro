@@ -162,5 +162,6 @@ def send_push_to_user(
                 else:
                     logger.warning("APNs %s pro token …%s", resp.status_code, token[-6:])
     except Exception as e:
-        logger.error("APNs: falha geral no envio pra user %s: %s", user_id, e)
+        logger.error("APNs: falha geral no envio pra user %s causa=%s sqlstate=%s", user_id,
+                     type(e).__name__, getattr(e, "sqlstate", None), extra={"user_id": user_id})
     return sent
