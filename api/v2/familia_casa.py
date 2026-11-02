@@ -25,10 +25,11 @@ from db.categories import CATEGORY_NAME_MAX_LEN
 
 router = APIRouter(include_in_schema=False)
 def _categoria(v: str) -> str:
-    """NFC e sem invisíveis de formato (Cf, ex. zero-width): "Café" NFD/NFC e "Ca\u200bfé" são a mesma categoria.
+    """Sem invisíveis de formato (Cf, ex. zero-width) e DEPOIS NFC (um invisível entre a letra e o acento a deixaria
+    decomposta): "Café" NFD/NFC e "Ca\u200bfé" são a mesma categoria.
     ZWJ (emoji compostos) e ZWNJ (persa) ficam; sozinhos o `_nome` já recusa como vazio (não imprimíveis)."""
-    v = "".join(c for c in unicodedata.normalize("NFC", v) if c in "\u200c\u200d" or unicodedata.category(c) != "Cf")
-    return _nome(v)
+    v = "".join(c for c in v if c in "\u200c\u200d" or unicodedata.category(c) != "Cf")
+    return _nome(unicodedata.normalize("NFC", v))
 
 
 Categoria = Annotated[str, Field(max_length=CATEGORY_NAME_MAX_LEN), AfterValidator(_categoria)]

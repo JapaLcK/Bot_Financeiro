@@ -55,6 +55,7 @@ def _le(cur, gid: int) -> tuple[dict, set]:
 def casa(uid: int) -> dict:
     """{"mes", "metas", "orcamentos"} (centavos) do grupo de `uid`, ou FamilyError("not_member")."""
     with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("set transaction isolation level repeatable read, read only")  # vínculo e leituras: um snapshot só
         cur.execute("select group_id from family_members where user_id = %s and left_at is null", (uid,))
         m = cur.fetchone()
         if not m:

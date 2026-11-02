@@ -11,6 +11,7 @@ from _apoio_auth_app import sessao_de
 from _apoio_casa import casa, erro, item, linha, meta, orc
 from _espera_lock import _esperar_backend_travado
 from db import family as fam
+from db import family_house as house
 from db.connection import get_conn
 from test_api_v2_familia import _ativo
 from test_api_v2_familia_dados import w  # noqa: F401  (w é fixture)
@@ -105,3 +106,29 @@ def test_t12_edicao_que_espera_o_lock_e_barrada_se_o_autor_saiu_enquanto_isso(w)
     t.join(15)
     erro(res[0], 404, "not_found")
     assert linha("family_goals", ref) == antes and not _ativo(w.ma1)
+
+
+def test_t13_get_le_vinculo_e_casa_no_mesmo_snapshot_remocao_no_meio_nao_vaza_item_novo(w, monkeypatch):
+    meta(w, w.ta, "Antiga")
+    real = house._le
+
+    def _le_depois_da_remocao(cur, g):  # outra conexão remove MA1 e cria meta nova ANTES da leitura da casa
+        with get_conn() as c2, c2.cursor() as cur2:
+            cur2.execute("select id from family_groups where owner_user_id = %s for update", (w.ta,))
+            fam._remove_locked(cur2, cur2.fetchone()["id"], w.ma1, "left")
+            cur2.execute("insert into family_goals (group_id, created_by_user_id, nome, alvo_cents) values (%s, %s, 'Nova', 100)", (g, w.ta))
+            c2.commit()
+        return real(cur, g)
+
+    monkeypatch.setattr(house, "_le", _le_depois_da_remocao)
+    assert [m["nome"] for m in house.casa(w.ma1)["metas"]] == ["Antiga"]  # snapshot anterior à remoção
+    monkeypatch.undo()
+    assert not _ativo(w.ma1)
+    assert [m["nome"] for m in house.casa(w.ta)["metas"]] == ["Antiga", "Nova"]  # caminho normal intacto
+
+
+def test_t14_invisivel_entre_letra_e_acento_nao_escapa_do_unique(w):
+    orc(w, w.ma1, "Café")
+    erro(w.chamar(w.ta, "POST", "/familia/casa/orcamentos", json={"categoria": "Cafe\u200b\u0301", "limite": "5"}), 409, "category_taken")
+    r = w.chamar(w.ta, "POST", "/familia/casa/orcamentos", json={"categoria": "Cafe\u200b\u0301 2", "limite": "5"})
+    assert "Café 2" in [o["categoria"] for o in r.json()["orcamentos"]]  # gravada NFC
