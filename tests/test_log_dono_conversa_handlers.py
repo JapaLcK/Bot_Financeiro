@@ -5,7 +5,7 @@ texto que o usuário digitou (D4).
 T7: a conversa de verdade (`handle_incoming` real, Postgres, o `_DashboardHandler` do root),
 um caso por gancho pós-commit de `add_from_entities`. T8: um turno de IA que esgota as voltas.
 T9: chamada direta dos sites que a conversa não alcança barato, a rede contra `NameError` nos
-`except` reescritos (o retorno de fail-open continua o da base). Os helpers são os do PR-6a.
+`except` reescritos (o retorno de fail-open continua o da base). Os helpers são os do PR-6a, em `tests/_log_dono_helpers.py`.
 
 Sem teste de comportamento (cobertos só pelo ratchet de `test_log_dono_na_coluna.py` e pelo
 `pyflakes` comparado à main): intent_router `route`, agent_chat `chat`, as voltas de prazo e
@@ -27,9 +27,9 @@ from core.services.ai_chat import runner
 import db.categories as cats
 import db.privacy as privacy
 from conftest import usuario_pagante
-from test_log_dono_conversa_whatsapp import (  # noqa: F401 (banco_real é fixture autouse)
-    AMIGAVEL, GASTO, _conversa, _exportados, _levanta, _linhas, _marca, _sem_vazamento, _uid, _uma,
-    _violacao, _vazou, banco_real)
+from _log_dono_helpers import (  # noqa: F401 (banco_real é fixture autouse)
+    _exportados, _levanta, _linhas, _marca, _sem_vazamento, _uid, _uma, _violacao, _vazou, banco_real)
+from test_log_dono_conversa_whatsapp import AMIGAVEL, GASTO, _conversa
 
 CAUSA = "causa=UniqueViolation sqlstate=23505"
 LAUNCHES = "core.handlers.launches"
