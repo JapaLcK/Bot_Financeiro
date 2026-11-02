@@ -13,6 +13,19 @@
 .lp-auth .assinar-b .lp-auth-text-button { color:var(--lp-muted); font-size:13px; font-weight:500; }
 .assinar-pix { width:100%; margin-top:14px; }
 .lp-auth #s1-pendente a { color:inherit; font-weight:600; text-decoration:underline; }
+/* Só a /assinar (`.assinar-etapas`; a /retomar-pronto também usa .assinar e fica como está), e
+   nela as etapas de formulário (todas menos o S4, que é .largo): título no piso do clamp (30px) e,
+   no desktop, cartão de 640px — iguais em todas, para nada saltar de uma etapa para outra. No S1
+   (texto dos 7 dias) é isso que tira uma linha do título e do subtítulo e põe o Continuar na
+   1ª dobra (1366×768, 1440×789, 1280×800, 390×844); o S1 ainda tem o formulário mais junto. */
+@media (min-width:361px) { .assinar-etapas:not(.largo) .auth-card h1 { font-size:30px; } }
+@media (min-width:701px) { .assinar-etapas:not(.largo) .auth-card { max-width:640px; } }
+#s1 h1 { margin-bottom:8px; }
+#s1 .assinar-sub { margin-bottom:8px; }
+#s1 form > .hint { margin-bottom:16px; }
+#s1 form > .hint a { padding-block:4px; }  /* alvo de toque de 25px; em elemento inline não mexe na linha */
+#s1 .field { margin-bottom:12px; }
+#s1 .checkbox-row { margin:12px 0; }
 @media (max-width:700px) { .assinar { padding-block:28px 36px; min-height:0; } }
 
 /* Página própria (pagamento-pagina.js): celular empilha resumo → caixas → pagamento → botão; ≥880 px, duas colunas. */

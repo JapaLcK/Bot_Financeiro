@@ -461,12 +461,12 @@ def _inline_css_assets(html_text: str, asset_names: tuple[str, ...]) -> str:
 
 
 # Tudo que o "Testar o Piggy agora" põe no HTML: cada `<a data-teste ...>` (com a
-# indentação que o antecede), o `<p id="testar-piggy">` da /precos (que também embrulha
-# um) e o <script> do teste. Sem aninhamento de <a>/<p> no HTML de origem.
+# indentação que o antecede) e o `<p id="testar-piggy">` da /precos (que também embrulha
+# um). Sem aninhamento de <a>/<p> no HTML de origem. O <script> do teste-piggy.js FICA:
+# ele também repassa utm/fbclid aos a[data-utm] (CTAs da /), que existem com o demo desligado.
 _BOTAO_TESTE_RE = re.compile(
     r'\s*<a\b[^>]*\sdata-teste(?=[\s>=/])[^>]*>.*?</a>'
-    r'|<p\b[^>]*\sid="testar-piggy"[^>]*>.*?</p>'
-    r'|\s*<script\b[^>]*teste-piggy\.js[^>]*></script>',
+    r'|<p\b[^>]*\sid="testar-piggy"[^>]*>.*?</p>',
     re.S,
 )
 
@@ -495,6 +495,7 @@ def html_file(
     volta do checkout (?upgrade=success) dispara a conversão.
     `sem_teste=True` tira os botões "Testar o Piggy agora" (demo desligado, ou
     visitante que já tem conta): o link do HTML nunca promete o que o servidor recusa.
+    O teste-piggy.js continua carregado (sem botão, só repassa a UTM dos a[data-utm]).
     """
     text = path.read_text(encoding="utf-8")
     if sem_teste:  # `lp-com-teste` (lp.html) é o CSS que reserva a dobra do 2º botão
