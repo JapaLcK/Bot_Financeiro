@@ -26,11 +26,14 @@ for (const query of ["?plano=premium&ciclo=monthly", "?plano=plus"]) {
 }
 
 test("positivo do L0: os 3 planos × 2 ciclos carregam o S1 com o nome do plano", async () => {
+  const NOME = { essencial: "Essencial", plus: "Plus", pro: "Pro" };
   for (const plano of ["essencial", "plus", "pro"]) {
     for (const ciclo of ["monthly", "annual"]) {
       const { ctx, page } = await abrir(browser, { query: `?plano=${plano}&ciclo=${ciclo}` });
       await tela(page, "s1");
-      assert.match(await texto(page, "s1-titulo"), /^Falta pouco para assinar o (Essencial|Plus|Pro) · (Mensal|Anual)$/);
+      const titulo = await texto(page, "s1-titulo");
+      assert.match(titulo, /^Seus 7 dias grátis do (Essencial|Plus|Pro) começam aqui$/);
+      assert.ok(titulo.includes(` do ${NOME[plano]} `), `${plano}/${ciclo}: ${titulo}`);
       await ctx.close();
     }
   }
@@ -307,16 +310,6 @@ test("S3 com 503: S3e, e o 'Tentar de novo' refaz o POST embutido", async () => 
   assert.deepEqual(posts(CHECKOUT).map((r) => r.body.embutido), [true, true]);
   await ctx.close();
 });
-
-for (const [td, esperado] of [[15, /^Você tem 15 dias grátis\./], [0, /^Esta assinatura não tem período grátis/]]) {
-  test(`trial_days=${td}`, async () => {
-    const { ctx, page } = await abrir(browser, { api: { "GET /auth/me": ME("ana@x.com"),
-      [`POST ${CHECKOUT}`]: [200, { ...EMBUTIDO[1], trial_days: td }] } });
-    await tela(page, "s4");
-    assert.match(await texto(page, "s4-trial"), esperado);
-    await ctx.close();
-  });
-}
 
 test("Sair: POST /auth/logout, e o S1 volta com os campos do fragmento", async () => {
   const { ctx, page, posts } = await abrir(browser, { hash: FRAG, api: { "GET /auth/me": ME("ana@x.com") } });

@@ -205,3 +205,19 @@ test("/retomar/pronto conversão: reload não dispara de novo (URL limpa)", asyn
   assert.deepEqual(await trilha(page), [], "o reload repetiu o Purchase");
   await page.close();
 });
+
+// A /retomar-pronto também usa o assinar.css e o <main class="assinar">: o cartão de 640px e o título
+// de 30px das etapas da /assinar (`.assinar-etapas`) não podem vazar para cá. Valores da main: o
+// cartão de 456px do assinar.css e o h1 do site-auth.css (clamp 30–37px de 2,6vw; 32px no celular).
+// Controle negativo: o seletor antigo (`.assinar:not(.largo)`) deixa os 2 casos vermelhos.
+for (const [w, h, titulo] of [[1366, 768, Math.min(37, Math.max(30, 1366 * 0.026))], [390, 844, 32]]) {
+  test(`/retomar/pronto em ${w}×${h}: cartão e título da main, sem o layout das etapas da /assinar`, async () => {
+    const page = await browser.newPage({ viewport: { width: w, height: h } });
+    await page.goto(`${ORIGIN}/retomar-pronto.html?gw=pix&sid=tok_abc`);
+    const m = await page.evaluate(() => { const c = document.querySelector(".auth-card");
+      return { max: getComputedStyle(c).maxWidth, h1: parseFloat(getComputedStyle(c.querySelector("h1")).fontSize) }; });
+    await page.close();
+    assert.equal(m.max, "456px");
+    assert.ok(Math.abs(m.h1 - titulo) < 0.1, `h1 com ${m.h1}px, a main tem ${titulo}px`);
+  });
+}
