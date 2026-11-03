@@ -2,10 +2,10 @@
 // Aparece uma vez só (pb_cupom_visto), por exit-intent (mouse) ou 15s, o que vier primeiro.
 (function () {
   "use strict";
-  var CHAVE = "pb_cupom_visto";
-  try { if (localStorage.getItem(CHAVE)) return; } catch (e) { /* storage bloqueado: segue */ }
+  const CHAVE = "pb_cupom_visto";
+  try { if (localStorage.getItem(CHAVE)) return; } catch (_e) { /* storage bloqueado: segue */ }
 
-  var timer, aberto = false, anterior = null;
+  let timer, aberto = false, anterior = null;
 
   function agendar() {
     // Logado não é público-alvo; falha da rede = trata como deslogado (pior caso: um pop-up a mais).
@@ -20,7 +20,7 @@
   function saida(e) { if (!e.relatedTarget && e.clientY <= 0) mostrar(); }
 
   // ponytail: base do .pig-modal copiada do modals.js (a / não o carrega); se mudar lá, mude aqui.
-  var CSS =
+  const CSS =
     "#pb-cupom{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;" +
     "background:rgba(8,11,24,.72);font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}" +
     "#pb-cupom .pig-modal{box-sizing:border-box;position:relative;background:#0f1320;border:1px solid rgba(255,255,255,.1);border-radius:16px;" +
@@ -49,13 +49,13 @@
     aberto = true;
     clearTimeout(timer);
     document.removeEventListener("mouseout", saida);
-    try { localStorage.setItem(CHAVE, "1"); } catch (e) { /* ok */ }
+    try { localStorage.setItem(CHAVE, "1"); } catch (_e) { /* ok */ }
     anterior = document.activeElement;
 
-    var st = document.createElement("style");
+    const st = document.createElement("style");
     st.textContent = CSS;
     document.head.appendChild(st);
-    var o = document.createElement("div");
+    const o = document.createElement("div");
     o.id = "pb-cupom";
     o.className = "pig-modal-overlay open";
     // Só texto fixo aqui; nada vindo do usuário entra no innerHTML.
@@ -74,8 +74,8 @@
       '<button type="submit" class="pb-btn">Quero meu desconto</button></form></div>';
     document.body.appendChild(o);
 
-    var form = o.querySelector("form"), erro = o.querySelector(".pb-erro"), btn = o.querySelector(".pb-btn");
-    var email = form.elements.email;
+    const form = o.querySelector("form"), erro = o.querySelector(".pb-erro"), btn = o.querySelector(".pb-btn");
+    const email = form.elements.email;
     email.focus();
 
     function fechar() {
@@ -86,8 +86,8 @@
     function tecla(e) {
       if (e.key === "Escape") { e.preventDefault(); fechar(); return; }
       if (e.key !== "Tab") return;
-      var f = o.querySelectorAll("button,input:not(.pb-hp),a[href]");
-      var a = f[0], z = f[f.length - 1];
+      const f = o.querySelectorAll("button,input:not(.pb-hp),a[href]");
+      const a = f[0], z = f[f.length - 1];
       if (e.shiftKey && document.activeElement === a) { e.preventDefault(); z.focus(); }
       else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus(); }
     }
@@ -104,8 +104,8 @@
       }
       btn.disabled = true;
       // Mesmo cookie/header de contact.js: o CSRF do app exige X-CSRF-Token em todo POST.
-      var csrf = decodeURIComponent((document.cookie.split("; ").find(function (r) { return r.indexOf("csrf_token=") === 0; }) || "").split("=")[1] || "");
-      var h = { "Content-Type": "application/json" };
+      const csrf = decodeURIComponent((document.cookie.split("; ").find(function (r) { return r.indexOf("csrf_token=") === 0; }) || "").split("=")[1] || "");
+      const h = { "Content-Type": "application/json" };
       if (csrf) h["x-csrf-token"] = csrf;
       fetch("/cupom", {
         method: "POST", headers: h,
