@@ -7494,6 +7494,8 @@ function maybeShowTrialBanner() {
     .then((sub) => {
       if (sub && !sub.degraded && sub.active !== true && sub.trial_disponivel === true) el.style.display = "block";
     })
+    // silencio-ok: banner opcional; falha deixa ele escondido, que é a resposta
+    // certa na dúvida. O 401 da sessão vira caixa nos loaders da própria tela.
     .catch(() => {});
 }
 
