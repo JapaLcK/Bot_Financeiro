@@ -115,6 +115,21 @@ test("beforeunload: desligado sem códigos, ligado com o Cofre aberto, desligado
   assert.deepEqual([antes, aberto, depois], [false, true, false]);
 });
 
+test("troca de conta com o Cofre aberto (lib/sessao.ts): recarrega sem perguntar; 'Cancelar' no beforeunload deixava a página escondida e travada", async () => {
+  const p = await abrirSeguranca();
+  await ateOCofre(p);
+  let cargas = 0;
+  p.page.on("load", () => { cargas += 1; });
+  const dialogos = [];
+  p.page.on("dialog", (d) => { dialogos.push(d.type()); d.dismiss().catch(() => {}); }); // "Cancelar", o pior caso
+  await p.page.evaluate(() => { document.cookie = "pb_conta=8; path=/"; }); // a sessão de outra conta (o harness abre com 1)
+  await ate(p.page, () => cargas > 0, "a recarga").catch(() => {}); // sem ela, o assert abaixo diz o estado
+  if (cargas) await p.page.locator(".conta-seguranca").waitFor();
+  const r = { dialogos, cargas, vis: await p.page.evaluate(() => document.documentElement.style.visibility), cofre: await p.cofre.count() };
+  await p.ctx.close();
+  assert.deepEqual(r, { dialogos: [], cargas: 1, vis: "", cofre: 0 });
+});
+
 test("'Copiar todos': copia os códigos (um por linha) e avisa 'Códigos copiados'; sem permissão ou sem clipboard, 'Não foi possível copiar'", async () => {
   const p = await abrirSeguranca();
   await p.ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:1" });

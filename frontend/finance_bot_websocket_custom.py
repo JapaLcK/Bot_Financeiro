@@ -163,6 +163,7 @@ from frontend.routes.settings import router as settings_router
 from frontend.routes.simulator import router as simulator_router
 from frontend.routes.shared import (
     AUTH_COOKIE_NAME,
+    CONTA_COOKIE_NAME,
     DASHBOARD_COOKIE_NAME,
     DASHBOARD_CURRENT_CACHE_TTL_SECONDS as _DASHBOARD_CURRENT_CACHE_TTL_SECONDS,
     DASHBOARD_URL,
@@ -181,6 +182,7 @@ from frontend.routes.shared import (
     jdump,
     limiter,
     make_jwt as _make_jwt,
+    marcar_conta,
     months_pt as _months_pt,
     painel_como_destino,
     parse_date_param as _parse_date_param,
@@ -2911,6 +2913,7 @@ def _set_dashboard_cookie(response: Response, user_id: int, *, jti: str | None =
         samesite="lax",
         max_age=int(DASHBOARD_SESSION_HOURS * 3600),
     )
+    marcar_conta(response, user_id)
     return token
 
 
@@ -3047,6 +3050,7 @@ def _clear_session_cookies(response: Response) -> None:
         _expire_cookie(response, AUTH_COOKIE_NAME, domain)
         _expire_cookie(response, DASHBOARD_COOKIE_NAME, domain)
         _expire_cookie(response, CSRF_COOKIE_NAME, domain)
+        _expire_cookie(response, CONTA_COOKIE_NAME, domain)
     # Refresh cookie tem path restrito — limpa com mesmo path pra remover
     response.delete_cookie(
         REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH,

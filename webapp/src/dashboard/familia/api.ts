@@ -3,6 +3,7 @@
 // O `ref` do membro é opaco: só volta ao servidor (DELETE /familia/membros/{ref}), nunca vira id nem chave de armazenamento.
 import { queryOptions } from "@tanstack/react-query";
 import { DEMO, ErroApi, erroDe, escrever, chamar, instante, meQuery, urlDe, FUSO } from "../lib/v2";
+import { buscar } from "../lib/sessao";
 
 export type Membro = { ref: string; nome: string; status: "ativo" | "suspenso" };
 export type Titular = { papel: "titular"; capacidade: number; membros: Membro[]; convites_ativos: number };
@@ -57,7 +58,7 @@ export const lerDissolucao = async () => dissolucaoDe(await chamar<unknown>("/fa
 async function semCorpo(method: "POST" | "DELETE", path: string, corpo: unknown = {}) {
   const json = { Accept: "application/json", "Content-Type": "application/json" };
   let r: Response;
-  try { r = await fetch(urlDe(path), { method, credentials: "same-origin", headers: window.pbCsrfHeaders?.(json) ?? json, body: JSON.stringify(corpo) }); }
+  try { r = await buscar(urlDe(path), { method, credentials: "same-origin", headers: window.pbCsrfHeaders?.(json) ?? json, body: JSON.stringify(corpo) }); }
   catch { throw new ErroApi(0, "network"); }
   if (r.status === 204) return;
   let body: unknown;

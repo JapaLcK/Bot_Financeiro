@@ -53,6 +53,19 @@ JWT_SECRET = (os.getenv("JWT_SECRET") or "").strip()
 
 AUTH_COOKIE_NAME = "auth_token"
 DASHBOARD_COOKIE_NAME = "dashboard_token"
+# Sinal de troca de conta para o /painel (webapp/src/dashboard/lib/sessao.ts); nunca
+# autenticação nem autorização: o servidor não lê. Gravado com o dashboard_token, no
+# /painel e apagado no fim da sessão.
+CONTA_COOKIE_NAME = "pb_conta"
+
+
+def marcar_conta(response: Response, user_id: int) -> None:
+    # Sem `domain` e com path `/`: dois `pb_conta` (domínios diferentes) recarregariam em laço.
+    # Import tardio: o monólito importa este módulo antes de definir as constantes (affiliates.py).
+    from frontend.finance_bot_websocket_custom import COOKIE_SECURE, DASHBOARD_SESSION_HOURS  # noqa: PLC0415
+    response.set_cookie(CONTA_COOKIE_NAME, str(user_id), httponly=False, secure=COOKIE_SECURE,
+                        samesite="lax", max_age=int(DASHBOARD_SESSION_HOURS * 3600), path="/")
+
 
 # Marca a FAMÍLIA do 401 para o interceptor de `frontend/static/auth-refresh.js`:
 # só o 401 que leva este header é falha de access/dashboard token, o único caso em

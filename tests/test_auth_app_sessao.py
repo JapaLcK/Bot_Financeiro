@@ -48,7 +48,7 @@ def test_login_do_app_nao_manda_cookie_nenhum(monkeypatch):
     enviados = [
         c.split("=", 1)[0] for c in resposta.headers.get_list("set-cookie")
     ]
-    for cookie in ("auth_token", "dashboard_token", "refresh_token"):
+    for cookie in ("auth_token", "dashboard_token", "refresh_token", "pb_conta"):
         assert cookie not in enviados, f"{cookie} foi mandado para o app"
 
 
@@ -58,7 +58,7 @@ def test_login_do_navegador_continua_recebendo_os_tres_cookies(monkeypatch):
     enviados = [
         c.split("=", 1)[0] for c in resposta.headers.get_list("set-cookie")
     ]
-    for cookie in ("auth_token", "dashboard_token", "refresh_token"):
+    for cookie in ("auth_token", "dashboard_token", "refresh_token", "pb_conta"):
         assert cookie in enviados, f"{cookie} sumiu do navegador"
 
 
@@ -120,7 +120,7 @@ def test_cadastro_pelo_google_entrega_credencial_ao_app(monkeypatch):
     corpo = r.json()
     assert corpo["access_token"] and corpo["refresh_token"]
     enviados = [c.split("=", 1)[0] for c in r.headers.get_list("set-cookie")]
-    for cookie in ("auth_token", "dashboard_token", "refresh_token"):
+    for cookie in ("auth_token", "dashboard_token", "refresh_token", "pb_conta"):
         assert cookie not in enviados, f"{cookie} foi mandado para o app"
 
 
