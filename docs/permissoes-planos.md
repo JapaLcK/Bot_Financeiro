@@ -31,6 +31,8 @@ navegação; o Pro recebe também `impacto` e `acoes` (feature `insights_acoes`)
 O cache é um só e o plano vale na leitura: a rota e o card `piggy` do chat passam pela mesma projeção.
 O insight do mês no vermelho (`month_projection`) exige também `forecast` (Plus), na geração e na leitura.
 O insight de reajuste de assinatura (`subscription_increase`) exige também `subscriptions` (Plus), na geração e na leitura.
+O insight do mês fechado com sobra (`positive_result`) segue o gate `insights` e a janela de histórico do plano: quem não
+enxerga os dois meses inteiros não o recebe.
 `PUT /insights/{uid}/estado` (dispensar/útil) passa pelo mesmo gate `insights` antes de ler ou gravar.
 O dashboard Essencial mantém as análises básicas e não solicita os endpoints
 avançados. O resumo semanal é conferido na ativação e em cada envio automático;
