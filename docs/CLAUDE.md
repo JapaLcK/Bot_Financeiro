@@ -2255,7 +2255,7 @@ já enviado antes do PUT não é desfeito.
 
 **PigBank Insights, contrato v1 (PL-06 PR A1).** `/insights/{uid}/current` e o card `piggy` do chat
 devolvem os fatos dos detectores de `db/insights.py` e `core/services/insights_detectores.py` (`budget_warning`,
-`category_spike`, `recurring_increase`, `of_bill_increase`, `salary_burn_fast`, `goal_behind`, `bill_due`, `month_projection`, `subscription_increase`) no contrato de
+`category_spike`, `recurring_increase`, `of_bill_increase`, `salary_burn_fast`, `goal_behind`, `bill_due`, `month_projection`, `subscription_increase`, `positive_result`) no contrato de
 `core/services/insights_contrato.py`: os campos legados (`key`, `type`, `icon`, `title`, `message`,
 `severity`, `action_*`) mais `explicacao` (versao 1: `tipo`, `familia`, `detector`, `calculado_em`,
 `periodo` com `rotulo` e `parcial`, `fonte`, `referencia`, `atual`, `diferenca`, `amostra`), com dinheiro
@@ -2316,6 +2316,24 @@ gate, quem perde o recurso volta a vê-la, e dispensar o reajuste não a ressusc
 o detector entra em `falhas` e a conta do OF continua saindo. Limites: o casamento depende de a Pluggy usar a mesma
 descrição no grupo e na transação (senão saem os dois itens), e passada a janela a conta do OF da mesma assinatura
 pode voltar (issue #1336).
+O `positive_result` (PL-06 B4, família `evolucao_positiva`) é o mês que acabou de fechar (no fuso do app) com sobra
+positiva e maior que a do mês anterior: a sobra é o "Entrou − Saiu" do Resumo do mês, lido por
+`comparacao_periodos.comparar_mes` (sem soma nova; o cartão pela fatura e a caixinha fora). Não é poupança: o texto
+diz "sobra", nunca "guardou", e explica que sobra é o que entrou menos o que saiu no mês, com o cartão pela fatura. Só
+sai com dados suficientes: o plano enxerga os dois meses (`inicio_do_historico`), o mês anterior tem lançamento
+(`sem_base`), o histórico do usuário começa até o dia 1 do mês anterior (`previsao_variavel._inicio_do_historico`) e o
+Resumo não avisa número possivelmente incompleto (`motivos`, como banco desatualizado). Três regras reduzem o risco de
+dado faltando, sem garantir completude: uma conexão do banco que parou (PAUSED ou DELETED,
+`open_finance_state._TERMINAL`) a partir do dia 1 do mês anterior, no fuso do app, também cala, e a que parou antes do
+período comparado não cala (o `updated_at` da conexão terminal é usado como data APROXIMADA da parada: nunca fica
+antes da parada real, mas pode ficar depois, porque a varredura de plano repausa conexão DELETED e regrava o
+`updated_at` (issue #1371); o efeito do erro é calar o aviso por mais tempo, nunca celebrar sem motivo); o mês fechado
+só é avaliado a partir do dia `SOBRA_DESDE_DIA` do mês seguinte, no fuso do app; e o mês base precisa de algum
+lançamento ou compra no cartão nos primeiros `SOBRA_COBERTURA_DIAS` dias (`_inicio_do_historico` com `desde`). Chave
+`positive_result:mes:AAAA-MM` (o mês fechado), `info`, por último no laço e sem vaga reservada (só aparece quando os
+alertas deixam espaço no teto), fica até o fim do mês seguinte ou até ser dispensado, sem `impacto` nem `acoes` no
+Pro, botão "Ver análises". O Repórter chama de sobra outra conta (issue #1360). Limite: o cache não sabe de um
+lançamento novo, então a sobra mostrada pode ficar até um TTL atrasada (D13).
 
 **PigBank Insights, dispensar e útil (PL-06 PR A2).** Tabela `insight_estado` (PK `user_id, chave`;
 `db/insight_estado.py`): cada cálculo registra a chave com a severidade e a medida do ÚLTIMO cálculo

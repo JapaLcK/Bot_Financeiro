@@ -35,6 +35,7 @@ TIPOS: dict[str, tuple[str, dict[str, Any]]] = {
                                       "origem": "saldo de hoje e o que está previsto até o fim do mês"}),
     "subscription_increase": ("assinatura", {"base": "open_finance", "cartao": None,
                                              "origem": "assinaturas detectadas pelo Open Finance"}),
+    "positive_result": ("evolucao_positiva", {"base": "lancamentos", **_FATURA}),
 }
 SO_PRO = ("impacto", "acoes")
 # Recurso de plano que o tipo exige além de `insights`, conferido NA LEITURA (`projetar`): o cache é um só para todos
@@ -136,6 +137,7 @@ def chave(tipo: str, sujeito, periodo: str) -> str:
     - reajuste de assinatura (`subscription_increase`): sujeito o `merchant_key`, período `data do reajuste:valor
       anterior em centavos` (`chave_periodo`): dois serviços do mesmo comerciante no mesmo dia são dois fatos, e a
       correção ou relançamento da cobrança nova não muda a chave.
+    - sobra do mês fechado (`positive_result`): sujeito fixo `mes`, período o mês fechado.
     O sujeito pode ter `:` (`merchant_key` não tira; a meta usa `id:estado`): a chave é opaca, comparada
     inteira. Nunca faça `split(":")` dela.
     Sujeito textual entra por `sujeito()`, que troca por hash o nome com dado pessoal.

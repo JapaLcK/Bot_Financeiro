@@ -10,7 +10,8 @@ consulta 5 do /app, `compute_kpis` das Análises e as tools da IA de meses intei
 card `periodo` do chat; `forecast_month_end`, que lê o mês por `mes_detalhes.ler` e extrapola só o gasto até hoje fora do cartão do Open Finance; `compare_periods`, que lê `totais`/`categorias` daqui, PL-07, e `lancamentos.listar` para a série diária do gasto; `get_top_categories`, `get_largest_expenses` e
 `get_category_spend` pela fatura: `core/services/ai_chat/tools/launches.py`); as pernas dela (`MES_*_SQL`), a
 lista de `GET /api/v2/lancamentos` (`db/lancamentos.py`). `compute_evolution` é cópia em
-consulta única, comparada mês a mês em `tests/test_resumo_mes_regra.py`.
+consulta única, comparada mês a mês em `tests/test_resumo_mes_regra.py`. O `positive_result` dos insights
+(PL-06 B4, a sobra do mês fechado) lê `totais` pelo `comparar_mes`.
 
 `categorias` abre a despesa de `TOTAIS_SQL` por categoria (a soma é o `saiu`); leem dela o `category_spike` dos
 insights (`db/insights.py`, PL-06 B1, mês corrente × anterior inteiro) e
