@@ -3,6 +3,7 @@
 (function () {
   "use strict";
   const CHAVE = "pb_cupom_visto";
+  if (navigator.webdriver) return; // robô/E2E: o modal cobriria a página (testes de / e /precos clicam por baixo)
   try { if (localStorage.getItem(CHAVE)) return; } catch (_e) { /* storage bloqueado: segue */ }
 
   let timer, aberto = false, anterior = null;
