@@ -1,7 +1,8 @@
 /* Repassa utm_* e fbclid da URL de entrada aos links da campanha.
    · a[data-teste] ("Testar o Piggy agora"): href vira /teste + a query, e o clique avisa o Pixel/GA.
    · a[data-utm] (CTAs e cartões de plano da /): a query entra no fim do href de origem; sem
-     utm/fbclid o href fica. Cartão "Indisponível" (sem href) fica de fora.
+     utm/fbclid o href fica. Cartão "Indisponível" (sem href) e CTA mandado à tabela (#planos,
+     Plus indisponível) ficam de fora: só href de outra página leva a campanha.
    Sem JS os hrefs do HTML funcionam igual. Idempotente: o /teste parte sempre de "/teste", cada
    a[data-utm] passa uma vez só (data-utm-base guarda o href original) e o listener entra uma vez. */
 try {
@@ -10,7 +11,7 @@ try {
     if (/^utm_/i.test(nome) || nome === "fbclid") params.append(nome, valor);
   });
   const query = params.toString();
-  document.querySelectorAll("a[data-utm][href]").forEach(function (a) {
+  document.querySelectorAll('a[data-utm][href^="/"]').forEach(function (a) {
     if (a.dataset.utmBase) return;  // 2ª passada não duplica, nem desfaz o /precos que o oferta.js pôs
     const base = a.dataset.utmBase = a.getAttribute("href");
     if (query) a.setAttribute("href", base + (base.includes("?") ? "&" : "?") + query);
