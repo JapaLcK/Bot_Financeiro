@@ -14,7 +14,7 @@ monkeypatchado pra devolver só as conexões do usuário de teste — o DB dos
 testes é compartilhado e não se pausa conexão alheia.
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -255,3 +255,103 @@ class TestTetoPorPlano:
 
         assert ofte.enforce_of_bank_limits()["paused"] == 0
         assert deleted == []
+
+
+def _apagar_pelo_webhook(item_id: str) -> None:
+    """DELETED pelo escritor real (o do webhook `item/deleted`), nunca por SQL cru."""
+    assert update_pluggy_open_finance_item_status(item_id, "DELETED", {"event": "item/deleted"}) == 1
+
+
+def _updated_at(connection_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select updated_at from open_finance_connections where id=%s", (connection_id,))
+            return cur.fetchone()["updated_at"]
+
+
+def _envelhecer(connection_id: int) -> datetime:
+    antigo = datetime(2025, 1, 10, tzinfo=timezone.utc)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("update open_finance_connections set updated_at=%s where id=%s", (antigo, connection_id))
+        conn.commit()
+    return antigo
+
+
+class TestDeletedNaoOcupaVaga:
+    """#1371. Duas camadas, e cada uma tem um teste que só ela segura: o lister tira
+    DELETED da conta (T1, T3, T4) e a pausa não regrava linha terminal (T5, T6)."""
+
+    def test_deleted_de_id_menor_nao_derruba_a_ativa(self, sweep_env, monkeypatch):
+        uid, primeira, deleted = sweep_env
+        _apagar_pelo_webhook(primeira["provider_item_id"])
+        ativa = _make_pluggy_connection(uid, suffix="b")
+        monkeypatch.setattr(plan_service, "get_user_limits", lambda u: {"of_banks_max": 1})
+
+        res = ofte.enforce_of_bank_limits()
+
+        assert res["paused"] == 0
+        assert deleted == []
+        assert _connection_status(ativa["id"]) != "PAUSED"
+        assert _connection_status(primeira["id"]) == "DELETED"
+
+    def test_positivo_com_deleted_o_teto_ainda_derruba_o_excedente(self, sweep_env, monkeypatch):
+        uid, primeira, deleted = sweep_env
+        _apagar_pelo_webhook(primeira["provider_item_id"])
+        b = _make_pluggy_connection(uid, suffix="b")
+        c = _make_pluggy_connection(uid, suffix="c")
+        monkeypatch.setattr(plan_service, "get_user_limits", lambda u: {"of_banks_max": 1})
+
+        res = ofte.enforce_of_bank_limits()
+
+        assert res["paused"] == 1
+        assert deleted == [c["provider_item_id"]]
+        assert _connection_status(b["id"]) != "PAUSED"
+        assert _connection_status(c["id"]) == "PAUSED"
+
+    def test_lister_exclui_deleted(self, user_id):
+        connection = _make_pluggy_connection(user_id)
+        _apagar_pelo_webhook(connection["provider_item_id"])
+        mine = [c for c in list_pluggy_connections_for_trial_sweep() if int(c["user_id"]) == user_id]
+        assert mine == []
+
+    def test_deleted_passa_intacta_pela_varredura(self, sweep_env):
+        _, connection, deleted = sweep_env          # free pelo fixture: teto 0
+        _apagar_pelo_webhook(connection["provider_item_id"])
+        antigo = _envelhecer(connection["id"])
+
+        res = ofte.enforce_of_bank_limits()
+
+        assert res["paused"] == 0
+        assert deleted == []
+        assert _connection_status(connection["id"]) == "DELETED"
+        assert _updated_at(connection["id"]) == antigo
+
+    def test_webhook_no_meio_do_tick_nao_vira_paused(self, sweep_env, monkeypatch):
+        """O DELETE da própria varredura dispara `item/deleted`; se ele grava antes da
+        pausa, a linha fica DELETED com o `updated_at` do webhook e não conta como pausada."""
+        _, connection, _ = sweep_env                # free pelo fixture: teto 0
+        visto = {}
+
+        def _delete_com_webhook(item_id, key=None):
+            _apagar_pelo_webhook(item_id)
+            visto["updated_at"] = _updated_at(connection["id"])
+            return True
+
+        monkeypatch.setattr(ofte, "delete_pluggy_item", _delete_com_webhook)
+
+        res = ofte.enforce_of_bank_limits()
+
+        assert "updated_at" in visto, "a varredura não chegou ao delete"
+        assert res["paused"] == 0
+        assert _connection_status(connection["id"]) == "DELETED"
+        assert _updated_at(connection["id"]) == visto["updated_at"]
+
+    def test_pausa_de_linha_ja_pausada_devolve_zero_e_nao_regrava(self, user_id):
+        """Duas varreduras ao mesmo tempo pausariam a mesma linha."""
+        connection = _make_pluggy_connection(user_id)
+        assert pause_open_finance_connection(connection["id"]) == 1
+        antigo = _envelhecer(connection["id"])
+
+        assert pause_open_finance_connection(connection["id"]) == 0
+        assert _updated_at(connection["id"]) == antigo

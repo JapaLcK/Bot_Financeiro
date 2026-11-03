@@ -185,14 +185,15 @@ def detect_positive_result(user_id: int) -> list[dict[str, Any]]:
     (`sem_base`), o histórico do usuário começa até o dia 1 do mês anterior (`previsao_variavel._inicio_do_historico`)
     e o Resumo não avisa número possivelmente incompleto (`motivos`). Reduzem o risco de dado faltando, sem garantir
     completude: conexão do banco que parou (PAUSED ou DELETED, `_TERMINAL`) a partir do dia 1 do mês anterior, no fuso
-    do app (P6 com a P10 e a P11: o `updated_at` da conexão terminal é usado como data APROXIMADA da parada: nunca
-    fica antes da parada real, mas pode ficar depois, porque a varredura de plano repausa conexão DELETED e regrava o
-    `updated_at` (issue #1371); o efeito do erro é calar o aviso por mais tempo, nunca celebrar sem motivo; o banco
-    que parou antes do período comparado não cala), só a partir do dia `SOBRA_DESDE_DIA` do mês seguinte (P7) e algum
-    lançamento nos primeiros `SOBRA_COBERTURA_DIAS` dias do mês base (P8). Fica no feed o resto do mês seguinte (P2),
-    como `info`, sem `impacto` nem `acoes` (P3), por último no laço (Q4b). O Repórter chama de sobra outra conta (P4,
-    issue #1360). Limite (P9): o cache de insights não sabe de um lançamento novo; a sobra mostrada pode estar até um
-    TTL atrasada (D13). Gate: o de `insights`; `comparar_mes` exige `financial_comparison`, o mesmo tier."""
+    do app (P6 com a P10 e a P11: o `updated_at` da conexão terminal é usado como data APROXIMADA da parada: nunca fica
+    antes da parada real; desde a issue #1371 a varredura de plano não seleciona DELETED e a pausa preserva o estado
+    terminal e o `updated_at` dele (`tests/test_of_trial_expiry.py`); se ainda assim ficar depois da parada, o efeito é
+    calar o aviso por mais tempo, nunca celebrar sem motivo; o banco que parou antes do período comparado não cala), só
+    a partir do dia `SOBRA_DESDE_DIA` do mês seguinte (P7) e algum lançamento nos primeiros `SOBRA_COBERTURA_DIAS` dias
+    do mês base (P8). Fica no feed o resto do mês seguinte (P2), como `info`, sem `impacto` nem `acoes` (P3), por último
+    no laço (Q4b). O Repórter chama de sobra outra conta (P4, issue #1360). Limite (P9): o cache de insights não sabe de
+    um lançamento novo; a sobra mostrada pode estar até um TTL atrasada (D13). Gate: o de `insights`; `comparar_mes`
+    exige `financial_comparison`, o mesmo tier."""
     from datetime import timedelta
 
     from core.services.comparacao_periodos import MESES, comparar_mes
@@ -215,7 +216,8 @@ def detect_positive_result(user_id: int) -> list[dict[str, Any]]:
         no_comeco = _inicio_do_historico(cur, user_id, ini_ant)
         # P6/P10/P11: data APROXIMADA da parada, o `updated_at` da conexão terminal. Os escritores do terminal
         # (pausa por plano e webhook `item/deleted`) gravam `now()`, e sync não toca linha terminal: nunca fica antes
-        # da parada, mas a varredura de plano repausa DELETED e a empurra para depois (#1371), o que só cala a mais.
+        # da parada; a varredura não seleciona DELETED e a pausa não regrava terminal (#1371). Se errar, só cala a mais.
+        # A reconexão pelo widget reativa a linha (status remoto, nunca PAUSED/DELETED), que sai do conjunto lido.
         cur.execute("select max(updated_at) as d from open_finance_connections"
                     f" where user_id = %s and upper(coalesce(status,'')) in {_TERMINAL}", (user_id,))
         parou_em = cur.fetchone()["d"]
