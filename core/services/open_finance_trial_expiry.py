@@ -43,6 +43,11 @@ def enforce_of_bank_limits() -> dict:
     pausada (fica pro próximo tick — nunca marca PAUSED com o item ainda vivo
     lá, senão o slot pago vaza pra sempre).
 
+    DELETED não entra na conta nem na pausa (#1371): o lister já a tira, e a pausa
+    não regrava linha que virou terminal no meio do tick (`paused` só conta a que
+    gravou). Limite conhecido: se a conexão de id menor morre durante o tick, a de
+    id maior, excedente pela foto do início, ainda cai.
+
     ponytail: o arquivo e o teste ainda se chamam `*_trial_expiry`. Renomear
     custa mexer em ~8 referências e engorda o diff de revisão; se outro caso de
     queda de plano entrar aqui, aí vale `git mv` para `plan_downgrade.py`.
@@ -82,7 +87,7 @@ def enforce_of_bank_limits() -> dict:
             except Exception:
                 errors += 1
                 continue
-            pause_open_finance_connection(int(conn["id"]))
-            paused += 1
+            if pause_open_finance_connection(int(conn["id"])):
+                paused += 1
 
     return {"ok": True, "disabled": False, "checked_users": checked, "paused": paused, "errors": errors}

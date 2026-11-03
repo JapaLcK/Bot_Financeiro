@@ -2326,15 +2326,16 @@ sai com dados suficientes: o plano enxerga os dois meses (`inicio_do_historico`)
 Resumo não avisa número possivelmente incompleto (`motivos`, como banco desatualizado). Três regras reduzem o risco de
 dado faltando, sem garantir completude: uma conexão do banco que parou (PAUSED ou DELETED,
 `open_finance_state._TERMINAL`) a partir do dia 1 do mês anterior, no fuso do app, também cala, e a que parou antes do
-período comparado não cala (o `updated_at` da conexão terminal é usado como data APROXIMADA da parada: nunca fica
-antes da parada real, mas pode ficar depois, porque a varredura de plano repausa conexão DELETED e regrava o
-`updated_at` (issue #1371); o efeito do erro é calar o aviso por mais tempo, nunca celebrar sem motivo); o mês fechado
-só é avaliado a partir do dia `SOBRA_DESDE_DIA` do mês seguinte, no fuso do app; e o mês base precisa de algum
-lançamento ou compra no cartão nos primeiros `SOBRA_COBERTURA_DIAS` dias (`_inicio_do_historico` com `desde`). Chave
-`positive_result:mes:AAAA-MM` (o mês fechado), `info`, por último no laço e sem vaga reservada (só aparece quando os
-alertas deixam espaço no teto), fica até o fim do mês seguinte ou até ser dispensado, sem `impacto` nem `acoes` no
-Pro, botão "Ver análises". O Repórter chama de sobra outra conta (issue #1360). Limite: o cache não sabe de um
-lançamento novo, então a sobra mostrada pode ficar até um TTL atrasada (D13).
+período comparado não cala (o `updated_at` da conexão terminal é usado como data APROXIMADA da parada: nunca fica antes
+da parada real; desde a issue #1371 a varredura de plano não seleciona DELETED e a pausa preserva o estado terminal e o
+`updated_at` dele, garantias presas em `tests/test_of_trial_expiry.py`; se ainda assim ficar depois da parada, o efeito
+é calar o aviso por mais tempo, nunca celebrar sem motivo); o mês fechado só é avaliado a partir do dia
+`SOBRA_DESDE_DIA` do mês seguinte, no fuso do app; e o mês base precisa de algum lançamento ou compra no cartão nos
+primeiros `SOBRA_COBERTURA_DIAS` dias (`_inicio_do_historico` com `desde`). Chave `positive_result:mes:AAAA-MM` (o mês
+fechado), `info`, por último no laço e sem vaga reservada (só aparece quando os alertas deixam espaço no teto), fica até
+o fim do mês seguinte ou até ser dispensado, sem `impacto` nem `acoes` no Pro, botão "Ver análises". O Repórter chama de
+sobra outra conta (issue #1360). Limite: o cache não sabe de um lançamento novo, então a sobra mostrada pode ficar até
+um TTL atrasada (D13).
 
 **PigBank Insights, dispensar e útil (PL-06 PR A2).** Tabela `insight_estado` (PK `user_id, chave`;
 `db/insight_estado.py`): cada cálculo registra a chave com a severidade e a medida do ÚLTIMO cálculo

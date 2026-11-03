@@ -516,17 +516,19 @@ def list_pluggy_item_ids(user_id: int) -> list[str]:
 
 
 def list_pluggy_connections_for_trial_sweep() -> list[dict]:
-    """Conexões Pluggy candidatas à varredura de trial vencido (todas as não-PAUSED).
+    """Conexões Pluggy candidatas à varredura de teto do plano: as não-terminais (`_TERMINAL`).
 
-    A resolução de tier (trial ativo? assinatura?) fica no serviço — aqui só se lista
-    quem ainda ocupa slot pago na Pluggy."""
+    PAUSED já saiu da Pluggy, e DELETED foi removida e não ocupa vaga (#1371): contá-la
+    pausaria uma conexão viva no lugar dela. A resolução de tier (trial ativo? assinatura?)
+    fica no serviço — aqui só se lista quem ainda ocupa slot pago na Pluggy."""
+    from .open_finance_state import _TERMINAL  # local: o módulo importa este no topo
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select id, user_id, provider_item_id, status
                 from open_finance_connections
-                where provider='pluggy' and upper(coalesce(status,'')) <> 'PAUSED'
+                where provider='pluggy' and upper(coalesce(status,'')) not in {_TERMINAL}
                 order by user_id, id
                 """
             )
@@ -539,7 +541,11 @@ def pause_open_finance_connection(connection_id: int) -> int:
     Decisão de produto: NÃO apaga nada do que foi importado — contas, transações,
     launches e faturas ficam visíveis; só o sync para ("reative seu banco" vira CTA
     de upgrade). O item na Pluggy é deletado pelo serviço ANTES de chamar isto
-    (libera o slot pago do contrato)."""
+    (libera o slot pago do contrato).
+
+    Linha já terminal (PAUSED/DELETED) não é regravada: devolve 0 e preserva `status`
+    e `updated_at` (#1371; o webhook `item/deleted` pode chegar entre a lista e a pausa)."""
+    from .open_finance_state import _TERMINAL  # local: o módulo importa este no topo
     with get_conn() as conn:
         with conn.cursor() as cur:
             from .bank_movements import _lock_user, reconcile_bank_movements
@@ -548,7 +554,8 @@ def pause_open_finance_connection(connection_id: int) -> int:
             if owner:
                 _lock_user(cur, owner["user_id"])
             cur.execute(
-                "update open_finance_connections set status='PAUSED', updated_at=now() where id=%s",
+                "update open_finance_connections set status='PAUSED', updated_at=now() where id=%s"
+                f" and upper(coalesce(status,'')) not in {_TERMINAL}",
                 (connection_id,),
             )
             updated = cur.rowcount
