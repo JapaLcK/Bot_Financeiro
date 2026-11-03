@@ -64,8 +64,11 @@ def _limpa_baldes():
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
-    boas_vindas, capi, eventos = [], [], []
-    monkeypatch.setattr(email_service, "send_welcome_email", lambda to, *a, **k: boas_vindas.append(to) or True)
+    # `boas_vindas` = o e-mail de conta criada da /assinar; o do cadastro comum
+    # (`send_welcome_email`, que promete o teste e manda para a /precos) não pode sair.
+    boas_vindas, welcome, capi, eventos = [], [], [], []
+    monkeypatch.setattr(email_service, "send_assinar_account_email", lambda to: boas_vindas.append(to) or True)
+    monkeypatch.setattr(email_service, "send_welcome_email", lambda to, *a, **k: welcome.append(to) or True)
     monkeypatch.setattr(meta_capi, "capi_configured", lambda: True)
     monkeypatch.setattr(meta_capi, "send_event", lambda **kw: capi.append(kw))
 
@@ -75,7 +78,7 @@ def env(monkeypatch):
     monkeypatch.setattr(quiz_signup, "log_system_event", _evento)
     shared.limiter.reset()
     _limpa_baldes()
-    yield SimpleNamespace(boas_vindas=boas_vindas, capi=capi, eventos=eventos)
+    yield SimpleNamespace(boas_vindas=boas_vindas, welcome=welcome, capi=capi, eventos=eventos)
     _limpa_baldes()
 
 
@@ -141,22 +144,22 @@ def test_email_novo_cria_conta_sem_senha_logada_e_grava_o_quiz(env):
     assert (conta["phone_e164"], conta["display_name"]) == (normalize_phone_e164(tel), NOME)
     assert (conta["dashboard_profile"], conta["signup_quiz"]["versao"]) == ("dividas", 1)
     assert conta["signup_source"] == "web"
-    assert env.boas_vindas == [email]
+    assert env.boas_vindas == [email] and env.welcome == []
     assert [(e["event_name"], e["email"], e["event_source_url"]) for e in env.capi] == [
         ("CompleteRegistration", email, f"{shared.DASHBOARD_URL}/assinar")]
 
 
-def test_link_code_falha_depois_do_commit_conta_nasce_logada_sem_pii(env, monkeypatch, caplog, capsys):
-    """O `boas_vindas` (e-mail) roda depois do commit da conta: se ele lançasse até a rota,
+def test_email_falha_depois_do_commit_conta_nasce_logada_sem_pii(env, monkeypatch, caplog, capsys):
+    """O e-mail de conta criada roda depois do commit da conta: se ele lançasse até a rota,
     ela respondia 503 sem sessão e o retry caía em `tem_conta` — conta sem senha presa."""
     email, tel = _email(), _telefone()
     chamadas = []
 
-    def explode(user_id, minutes_valid=15):
-        chamadas.append(user_id)
+    def explode(to):
+        chamadas.append(to)
         raise Exception(f"Failing row ({email}, {tel})")
 
-    monkeypatch.setattr(db_signup_quiz.db_support, "boas_vindas", lambda cb, email_, uid: explode(uid))
+    monkeypatch.setattr(email_service, "send_assinar_account_email", explode)
     client = _navegador()
     r = _conta_quiz(client, email, whatsapp=tel)
     assert r.status_code == 200, r.text

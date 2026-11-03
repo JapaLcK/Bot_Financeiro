@@ -329,7 +329,8 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
     (plan_service.TRIAL_DAYS_DEFAULT, exposto em /billing/plans-config) e só
     depois conectar o WhatsApp — prometer uso imediato era falso.
 
-    O trial é 1 por telefone na vida (plan_trials, db/schema.py), e quem sabe a
+    O trial é 1 por telefone na vida (plan_trials, db/schema.py) e só no cartão
+    (o Pix anual não tem), e o corpo diz as duas coisas. Quem sabe a
     resposta pra ESTE usuário é db.plans.is_trial_eligible_for_user — que precisa
     do user_id e de um telefone vinculado, e este e-mail não tem nenhum dos dois
     (a assinatura recebe só o e-mail, e o cadastro por senha nem grava telefone).
@@ -351,7 +352,8 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
     content = f"""
       <p>Olá! 👋</p>
       <p>Sua conta no <strong>PigBank</strong> foi criada com sucesso — falta só
-         escolher o plano que você quer testar por <strong>{dias} dias grátis</strong>.</p>
+         escolher o plano. No cartão, dá pra testar por <strong>{dias} dias grátis</strong>
+         (um teste por número de telefone); no Pix anual não há período grátis.</p>
       <p><strong>1. Ative o seu teste</strong>: escolha o plano que quer
          experimentar. O checkout mostra o que vai ser cobrado, e quando, antes
          de você confirmar — nada é cobrado sem essa confirmação.</p>
@@ -372,7 +374,7 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
     html = _base_html("Bem-vindo ao PigBank!", content)
     text = (
         "Bem-vindo ao PigBank!\n\n"
-        f"Sua conta foi criada — falta escolher o plano que você quer testar por {dias} dias grátis.\n\n"
+        f"Sua conta no PigBank foi criada com sucesso — falta só escolher o plano. No cartão, dá pra testar por {dias} dias grátis (um teste por número de telefone); no Pix anual não há período grátis.\n\n"
         f"1) Ative o teste escolhendo um plano: {base}/precos\n"
         "   O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.\n"
         "2) Conecte o seu WhatsApp — entre no PigBank e toque em Conectar WhatsApp: a mensagem já abre pronta com o seu código, é só enviar.\n"
@@ -380,6 +382,32 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
         "Lá você vai poder mandar: gastei 50 mercado, recebi 1000 salário, saldo, ajuda.\n"
     )
     return send_email(to=to, subject=f"✅ Bem-vindo ao PigBank — ative seus {dias} dias grátis", html_body=html, text_body=text)
+
+
+def send_assinar_account_email(to: str) -> bool:
+    """Conta criada na /assinar (`POST /auth/quiz/conta`, estado `criada`).
+
+    Não reusa `send_welcome_email`: aquele promete o teste grátis e manda para a
+    /precos, e quem está na /assinar já escolheu o plano (e pode ter usado o
+    teste com este telefone, ou ir de Pix anual, que não tem). Sem botão: a
+    /assinar exige plano e ciclo na URL, então não há link de volta que sirva."""
+    content = f"""
+      <p>Olá! 👋</p>
+      <p>Sua conta no <strong>PigBank</strong> foi criada com este e-mail na página de
+         assinatura. Falta só concluir o pagamento para liberar o seu plano.</p>
+      <p>No cartão, o checkout mostra antes da confirmação se há período grátis e quando
+         vem a primeira cobrança; no Pix anual não há período grátis.</p>
+      <p style="font-size:13px">Não foi você? Ignore este e-mail ou fale com {SUPPORT_EMAIL}.</p>
+    """
+    html = _base_html("Sua conta no PigBank foi criada", content)
+    text = (
+        "Sua conta no PigBank foi criada com este e-mail na página de assinatura. "
+        "Falta só concluir o pagamento para liberar o seu plano.\n\n"
+        "No cartão, o checkout mostra antes da confirmação se há período grátis e quando "
+        "vem a primeira cobrança; no Pix anual não há período grátis.\n\n"
+        f"Não foi você? Ignore este e-mail ou fale com {SUPPORT_EMAIL}.\n"
+    )
+    return send_email(to=to, subject="Sua conta no PigBank foi criada", html_body=html, text_body=text)
 
 
 # ─── Unsubscribe helpers ──────────────────────────────────────────────────────
@@ -1144,22 +1172,58 @@ def plan_display_name(plan: str | None) -> str:
     return PLAN_DISPLAY_NAMES.get(plan, "PigBank")
 
 
-def send_pro_welcome_email(to: str, plan: str, trial_end_at, dashboard_url: str = "") -> bool:
+def send_pro_welcome_email(to: str, plan: str, period_end_at, sub_status: str,
+                           caderno_ofertado: bool, dashboard_url: str = "") -> bool:
     """E-mail pós-checkout — usuário acabou de assinar (item 37).
 
     `plan` é o valor LEGADO da coluna `plan` (`essencial`, `pro` = Plus,
     `pro_max` = Pro) — ver `PLAN_DISPLAY_NAMES` logo acima. Existe porque os
     três e-mails desta família diziam "PigBank+" para todo mundo, e quem
     assinava Essencial ou Pro lia o nome de outro plano.
+
+    `sub_status` é o da assinatura no checkout e escolhe o texto: `trialing`
+    promete o período grátis; `active` diz que a primeira cobrança já saiu
+    (sem trial: telefone que já usou o teste, ou cupom); qualquer outro não
+    promete nem um nem outro. `period_end_at` é o fim do trial ou a próxima
+    renovação, conforme o status. `caderno_ofertado` = a sessão levava caderno
+    na metadata (a foto da oferta, não a prova da compra), por isso a frase é
+    condicional. Os dois são obrigatórios: chamador velho quebra alto.
     """
     nome = plan_display_name(plan)
-    trial_end = _fmt_brl_date(trial_end_at)
+    fim = _fmt_brl_date(period_end_at)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
     cta = f'<p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">🐷 Abrir meu dashboard</a></p>'
+    caderno = ("Se você levou um caderno junto, ele "
+               + ("também" if sub_status == "active" else "já")
+               + " foi cobrado hoje, à parte do plano.") if caderno_ofertado else ""
+    if sub_status == "trialing":
+        abertura = (f"Sua assinatura começou agora. Seu <strong>período grátis</strong> vai até <strong>{fim}</strong>: "
+                    "a cobrança do plano só vem depois disso, no cartão que você cadastrou. "
+                    "Cancele antes e o plano não é cobrado.")
+        abertura_txt = f"Sua assinatura começou. Período grátis até {fim}: a cobrança do plano só vem depois."
+        cancelar = "Pra cancelar antes do fim do período grátis, é só mandar <strong>cancelar plano</strong> no bot ou acessar"
+        cancelar_txt = "Pra cancelar antes do fim do período grátis: mande 'cancelar plano' no bot ou acesse"
+        extra = ""
+    elif sub_status == "active":
+        abertura = ("Sua assinatura começou agora, e a primeira cobrança do plano foi feita hoje no cartão que você "
+                    f"cadastrou. A próxima renovação é em <strong>{fim}</strong>.")
+        abertura_txt = ("Sua assinatura começou, e a primeira cobrança do plano foi feita hoje. "
+                        f"Próxima renovação em {fim}.")
+        cancelar = "Pra cancelar a renovação, é só mandar <strong>cancelar plano</strong> no bot ou acessar"
+        cancelar_txt = "Pra cancelar a renovação: mande 'cancelar plano' no bot ou acesse"
+        extra = ("Mudou de ideia? Em até 7 dias você pode desistir e pedir o reembolso integral pelo "
+                 f"{SUPPORT_EMAIL}.")
+    else:
+        abertura = f"Sua assinatura do {nome} foi registrada. A data e o valor da cobrança ficam em {dash}/conta."
+        abertura_txt = abertura
+        cancelar = "Pra cancelar, é só mandar <strong>cancelar plano</strong> no bot ou acessar"
+        cancelar_txt = "Pra cancelar: mande 'cancelar plano' no bot ou acesse"
+        extra = ""
+    fim_ativo = " Você mantém o acesso até o fim do período já pago." if sub_status == "active" else ""
     content = f"""
       <p>🐷✨ <strong>Tá dentro do {nome}!</strong></p>
-      <p>Sua assinatura começou agora. Seu <strong>período grátis</strong> vai até <strong>{trial_end}</strong> —
-      só tem cobrança depois disso, e você pode cancelar quando quiser sem ser cobrado.</p>
+      <p>{abertura}</p>
+      {"".join(f"<p>{t}</p>" for t in (caderno, extra) if t)}
       <p>Agora você desbloqueou:</p>
       <ul>
         <li>Caixinhas e cartões <strong>ilimitados</strong></li>
@@ -1169,14 +1233,15 @@ def send_pro_welcome_email(to: str, plan: str, trial_end_at, dashboard_url: str 
         <li>Piggy IA — converse sobre suas finanças</li>
       </ul>
       {cta}
-      <p style="font-size:13px;color:rgba(255,255,255,.55)">Pra cancelar antes do fim do trial, é só mandar <strong>cancelar plano</strong> no bot ou acessar <a href="{dash}/conta">{dash}/conta</a>.</p>
+      <p style="font-size:13px;color:rgba(255,255,255,.55)">{cancelar} <a href="{dash}/conta">{dash}/conta</a>.{fim_ativo}</p>
     """
     html = _base_html(f"Bem-vindo ao {nome}", content)
     text = (
         f"{nome} ativado!\n\n"
-        f"Sua assinatura começou. Período grátis até {trial_end} — só tem cobrança depois.\n\n"
-        f"Abra o dashboard: {dash}/app\n"
-        f"Pra cancelar antes: mande 'cancelar plano' no bot ou acesse {dash}/conta"
+        f"{abertura_txt}\n"
+        + "".join(f"{t}\n" for t in (caderno, extra) if t)
+        + f"\nAbra o dashboard: {dash}/app\n"
+        f"{cancelar_txt} {dash}/conta.{fim_ativo}"
     )
     return send_email(
         to=to, subject=f"🐷 Tá dentro do {nome}!",

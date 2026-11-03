@@ -13,6 +13,9 @@ de "dinheiro de volta" deixa de dizer que ele conta da cobrança, e reembolso é
 automático. Trial (termos §4): na /precos, todo "dias grátis" diz "no cartão". Negativos
 medidos: a janela em "8 dias" na landing; "Garantia de 7 dias" num <span> e num <div>; o FAQ
 antigo; "Reembolso automático"; um "7 dias grátis" sem "no cartão" na /precos.
+
+O prazo de desistência do e-mail de assinatura `active` não é o trial: a fonte
+dele é `termos.html` §7 (Art. 49 do CDC), e o último teste compara os dois.
 """
 from __future__ import annotations
 
@@ -20,6 +23,7 @@ import pathlib
 import re
 from html.parser import HTMLParser
 
+from core.services import email_service as es
 from core.services.plan_service import TRIAL_DAYS_DEFAULT
 
 FRONTEND = pathlib.Path(__file__).resolve().parent.parent / "frontend"
@@ -157,3 +161,16 @@ def test_todo_dias_gratis_da_precos_e_no_cartao():
     todos = blocos + metas + [t for grupo in (pagina, ilha) for lista in grupo.values() for t in lista]
     sem_cartao = [t for t in todos if "no cartão" not in t]
     assert not sem_cartao, sem_cartao
+
+
+def test_o_prazo_de_desistencia_do_email_active_bate_com_os_termos(monkeypatch):
+    caixa: list[dict] = []
+    monkeypatch.setattr(es, "send_email", lambda **k: caixa.append(k) or True)
+    es.send_pro_welcome_email("a@b.com", "pro", None, "active", False)
+    (msg,) = caixa
+    termos = re.search(r"pedir o reembolso integral em\s+até <strong>(\d+) dias</strong>", _ler("termos.html"))
+    assert termos, "a redação da §7 dos termos mudou: atualize este teste junto"
+    for corpo in (msg["html_body"], msg["text_body"]):
+        email = re.search(r"Em até (\d+) dias você pode desistir", corpo)
+        assert email, corpo
+        assert email.group(1) == termos.group(1), (email.group(1), termos.group(1))

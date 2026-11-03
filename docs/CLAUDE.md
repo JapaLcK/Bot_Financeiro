@@ -1198,7 +1198,8 @@ ou `wa.me/` aparecer em outro `.py`/`.js`/`.html`. As rotas que devolvem `whatsa
 e-mail do fundador passam uma saudação, sem código. **O e-mail de boas-vindas não leva
 código** (vale 15 min e o e-mail é lido depois, e a conta do quiz não tem senha, que o
 `link-code` exige): o botão "Conectar meu WhatsApp" abre `/login?next=%2Fhome`, e lá
-"Conectar WhatsApp" gera o código no clique.
+"Conectar WhatsApp" gera o código no clique. A conta criada na `/assinar` (`/auth/quiz/conta`)
+não recebe esse e-mail: recebe o `send_assinar_account_email`, curto, sem botão e sem promessa de teste.
 
 **PKCE no Google do app nativo** (#604, `core/services/pkce.py`; só S256). O app manda
 `code_challenge` em `google/start?app=2` (inválido → 400), que o guarda no cookie
