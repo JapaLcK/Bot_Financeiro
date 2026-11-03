@@ -162,6 +162,7 @@ def test_todo_dias_gratis_da_precos_e_no_cartao():
     sem_cartao = [t for t in todos if "no cartão" not in t]
     assert not sem_cartao, sem_cartao
 
+
 def test_o_prazo_de_desistencia_do_email_active_bate_com_os_termos(monkeypatch):
     caixa: list[dict] = []
     monkeypatch.setattr(es, "send_email", lambda **k: caixa.append(k) or True)

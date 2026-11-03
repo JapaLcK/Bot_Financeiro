@@ -7476,8 +7476,9 @@ const UPGRADE_MESSAGES = {
 // pra quem é free e não está em trial ativo; some no app iOS (CTA de compra
 // externa = rejeição Apple 3.1.1, a checagem é feita por quem chama). Só mostra
 // com `trial_disponivel === true` do /billing/subscription (1 teste por telefone):
-// resposta incerta não mostra, o mesmo critério de `frontend/oferta.js`. O "Agora
-// não" silencia por TRIAL_BANNER_SNOOZE_DAYS via localStorage.
+// na dúvida esconde, o inverso de `frontend/oferta.js`, que na dúvida mantém a
+// promessa e só rebaixa com `=== false`. O "Agora não" silencia por
+// TRIAL_BANNER_SNOOZE_DAYS via localStorage.
 const TRIAL_BANNER_SNOOZE_KEY = "pb_trial_banner_snooze_until";
 const TRIAL_BANNER_SNOOZE_DAYS = 1;
 

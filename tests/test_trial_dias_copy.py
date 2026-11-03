@@ -30,7 +30,9 @@ OBRIGATORIOS = {
 }
 # frontend/home.html saiu: o único literal era o do #free-banner, removido de
 # propósito (o banner aparece para quem pode não ter direito ao trial). O que
-# sobra lá é `${days} dias grátis`, com o número vindo do backend.
+# sobra lá é `${days} dias grátis`, com o número vindo do `td` da URL de
+# retorno; sem `td` o modal cai num fallback fixo que esta varredura não
+# enxerga (pendência registrada fora deste PR).
 
 
 def _achados() -> dict[str, list[int]]:
