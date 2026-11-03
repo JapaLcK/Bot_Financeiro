@@ -6658,7 +6658,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     clear_past_due_since, int(user_id),
                     nao_mais_novo_que=_event_version(event))
             # Grava mesmo com `_decidiu_acesso` False: a compra aconteceu igual.
-            await _registrar_cadernos(user_id, session)
+            _extras = await _registrar_cadernos(user_id, session)
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.
@@ -6691,9 +6691,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             # Email de boas-vindas Pro (item 37) — `plan_value` é o MESMO que
             # acabou de ser gravado e logado acima (vocabulário legado, de
             # `_stored_plan_for_price`): sem ele o e-mail chamava todo
-            # assinante de PigBank+, que é só o Plus (#351).
+            # assinante de PigBank+, que é só o Plus (#351). `sub_status` escolhe
+            # o texto (trial × cobrado hoje) e `bool(_extras)` diz se a sessão
+            # ofereceu caderno: a metadata é a foto da oferta, não a compra.
             from core.services.email_service import send_pro_welcome_email
-            await _fire_email(user_id, send_pro_welcome_email, plan_value, expires_dt)
+            await _fire_email(user_id, send_pro_welcome_email, plan_value, expires_dt,
+                              sub_status, bool(_extras))
             # E-mail pessoal do fundador, agendado para 3h depois; só na primeira
             # assinatura da conta. `send_founder_email_once` não levanta — o
             # try aqui cobre o `_user_email`.

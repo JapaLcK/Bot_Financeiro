@@ -107,7 +107,7 @@ def test_plus_cobrado_continua_pigbank_mais(capturado):  # noqa: F811
 def test_boas_vindas_e_fim_de_trial_tambem(capturado):  # noqa: F811
     """As outras duas da família — consertar só a cobrança é achar um caso e
     chamar de categoria resolvida (§2)."""
-    assert es.send_pro_welcome_email("a@b.com", "pro_max", PROXIMA)
+    assert es.send_pro_welcome_email("a@b.com", "pro_max", PROXIMA, "trialing", False)
     for parte in _tudo(capturado):
         assert "PigBank Pro" in parte, parte
         assert "PigBank+" not in parte, parte

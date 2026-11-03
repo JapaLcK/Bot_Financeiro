@@ -22,7 +22,7 @@ import db_support
 from core.crypto import hash_pii_optional
 
 from .connection import get_conn
-from .users import create_link_code, get_or_create_canonical_user
+from .users import get_or_create_canonical_user
 
 QUIZ_COOKIE = "quiz_result"
 
@@ -166,11 +166,14 @@ def criar_conta_sem_codigo(email: str, telefone: str | None, nome: str | None, s
 
 
 def boas_vindas_da_conta(email: str, user_id: int) -> None:
-    """link_code + e-mail de boas-vindas da conta de `criar_conta_sem_codigo`. A rota
-    chama só DEPOIS da sessão: se ela falhar, a conta é desfeita e o e-mail de "conta
-    criada" não pode ter saído. Falha aqui não vira 503: a conta já está logada."""
+    """E-mail de "conta criada" da conta de `criar_conta_sem_codigo`
+    (`send_assinar_account_email`, não o `send_welcome_email` do cadastro comum, que
+    promete o teste e manda para a /precos). A rota chama só DEPOIS da sessão: se ela
+    falhar, a conta é desfeita e o e-mail não pode ter saído. Falha aqui não vira 503:
+    a conta já está logada."""
     try:
-        db_support.boas_vindas(create_link_code, email, user_id)
+        from core.services.email_service import send_assinar_account_email
+        send_assinar_account_email(email)
     except Exception as exc:  # só o tipo: a mensagem do psycopg pode trazer e-mail/telefone
         logging.getLogger(__name__).warning("boas_vindas falhou user=%s: %s", user_id, type(exc).__name__)
 

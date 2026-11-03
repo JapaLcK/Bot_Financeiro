@@ -25,9 +25,12 @@ RE = re.compile(
 )
 OBRIGATORIOS = {
     "frontend/precos.html", "frontend/termos.html", "frontend/whatsapp.html",
-    "frontend/dashboard.html", "frontend/home.html",
+    "frontend/dashboard.html",
     "webapp/src/components/ui/comparison-3.tsx", "frontend/precos-app.js",
 }
+# frontend/home.html saiu: o único literal era o do #free-banner, removido de
+# propósito (o banner aparece para quem pode não ter direito ao trial). O que
+# sobra lá é `${days} dias grátis`, com o número vindo do backend.
 
 
 def _achados() -> dict[str, list[int]]:

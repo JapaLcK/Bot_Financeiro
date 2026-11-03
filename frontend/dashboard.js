@@ -7472,9 +7472,11 @@ const UPGRADE_MESSAGES = {
   generic: "Essa feature faz parte dos planos pagos do PigBank. Escolha o que faz mais sentido pra você."
 };
 
-// Banner de trial (B1): oferta proativa dos 30d de Plus pro Grátis. Só aparece
+// Banner de trial (B1): oferta proativa dos 7 dias de Plus pro Grátis. Só aparece
 // pra quem é free e não está em trial ativo; some no app iOS (CTA de compra
-// externa = rejeição Apple 3.1.1, a checagem é feita por quem chama). O "Agora
+// externa = rejeição Apple 3.1.1, a checagem é feita por quem chama). Só mostra
+// com `trial_disponivel === true` do /billing/subscription (1 teste por telefone):
+// resposta incerta não mostra, o mesmo critério de `frontend/oferta.js`. O "Agora
 // não" silencia por TRIAL_BANNER_SNOOZE_DAYS via localStorage.
 const TRIAL_BANNER_SNOOZE_KEY = "pb_trial_banner_snooze_until";
 const TRIAL_BANNER_SNOOZE_DAYS = 1;
@@ -7486,7 +7488,12 @@ function maybeShowTrialBanner() {
     const until = parseInt(localStorage.getItem(TRIAL_BANNER_SNOOZE_KEY) || "0", 10);
     if (until && Date.now() < until) return;  // ainda no período de silêncio
   } catch (_e) { /* localStorage indisponível → mostra assim mesmo */ }
-  el.style.display = "block";
+  fetch(`${API}/billing/subscription`, { credentials: "same-origin" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((sub) => {
+      if (sub && !sub.degraded && sub.active !== true && sub.trial_disponivel === true) el.style.display = "block";
+    })
+    .catch(() => {});
 }
 
 function dismissTrialBanner() {
