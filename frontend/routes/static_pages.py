@@ -5,17 +5,19 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 """
 
 import asyncio
+import hashlib
 import html as _html
 import logging
 import os
 import re
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from core.dashboard_links import link_whatsapp
+from core.pg_text import recusa_veneno
 from core.secure_compare import constant_time_eq
 from frontend.routes.shared import (
     FRONTEND_DIR,
@@ -40,6 +42,17 @@ def _cache_asset_versionado(request: Request) -> str:
     """Cache longo só quando `?v=` é o hash de conteúdo aplicado ao HTML."""
     version = request.query_params.get("v", "")
     return _CACHE_IMUTAVEL if re.fullmatch(r"[0-9a-f]{12}", version) else "no-cache"
+
+
+class CupomBody(BaseModel):
+    email: str = ""
+    consent: bool = False
+    origem: str = ""
+    website: str = ""  # honeypot
+
+    @model_validator(mode="after")
+    def _sem_veneno(self):  # NUL/surrogate -> 422 na borda, nunca 500 no banco
+        return recusa_veneno(self)
 
 
 class ContactBody(BaseModel):
@@ -1431,6 +1444,65 @@ async def contact_submit(request: Request, body: ContactBody):
             detail="Não conseguimos enviar agora. Escreva pra contato@pigbankai.com.",
         )
     return {"ok": True}
+
+
+# Texto que o visitante viu ao marcar o checkbox (guardado como prova do consentimento).
+_CUPOM_CONSENT = "Concordo em receber o cupom por e-mail e aceito os Termos de Uso."
+_CUPOM_EMAIL = re.compile(r"[^\s@]+@[^\s@]+\.[^\s@]+")  # a mesma do quiz_signup/cadastro
+
+
+def _cupom_enviar(email: str, codigo: str) -> None:
+    from core.services.email_service import send_cupom_email
+    from db import cupom_leads
+    log = logging.getLogger(__name__)
+    try:
+        enviado = send_cupom_email(email, codigo, log_recipient=False)
+    except Exception as exc:
+        log.warning("cupom: envio falhou (%s)", type(exc).__name__)
+        enviado = False
+    try:
+        (cupom_leads.marcar_enviado if enviado else cupom_leads.remover)(email)
+    except Exception as exc:  # e-mail já saiu: não desfaz nada, só registra
+        log.warning("cupom: pos-envio falhou (%s)", type(exc).__name__)
+
+
+@router.post("/cupom")
+@limiter.limit("5/hour")
+async def cupom_submit(request: Request, body: CupomBody, background_tasks: BackgroundTasks):
+    """Pop-up do cupom: e-mail + consentimento -> código fixo (env) por e-mail.
+    Resposta idêntica para e-mail novo e repetido (não revela quem já pediu)."""
+    if (body.website or "").strip():  # honeypot: finge sucesso, não faz nada
+        return {"ok": True}
+    email = (body.email or "").strip().lower()
+    if len(email) > 120 or not _CUPOM_EMAIL.fullmatch(email) or not body.consent:
+        raise HTTPException(status_code=400, detail="Informe um e-mail válido e aceite os termos.")
+    codigo = (os.getenv("STRIPE_CUPOM_PRIMEIRA_COMPRA") or "").strip()
+    if not codigo:
+        raise HTTPException(status_code=503, detail="Cupom indisponível no momento.")
+
+    # Import tardio: o monólito importa este módulo antes de definir os helpers.
+    from core.client_ip import rate_limit_key
+    from db import cupom_leads
+    from frontend.finance_bot_websocket_custom import _check_persistent_rate_limit
+
+    ip = rate_limit_key(request)
+    await _check_persistent_rate_limit("cupom", f"ip:{ip}", 5, 3600)
+    await _check_persistent_rate_limit("cupom", "global", 300, 3600)
+
+    # ponytail: sha256 sem sal — IPv4 é pequeno o bastante para reverter por força bruta;
+    # é "não cru", não anonimização. Sal por env se a LGPD pedir.
+    ip_hash = hashlib.sha256(ip.encode()).hexdigest()
+    origem = re.sub(r"[^a-z0-9_-]", "", (body.origem or "").lower())[:30]
+    if await asyncio.to_thread(cupom_leads.registrar, email, _CUPOM_CONSENT, origem, ip_hash):
+        # Envio fora da resposta: novo e repetido respondem no mesmo tempo (sem oráculo).
+        background_tasks.add_task(_cupom_enviar, email, codigo)
+    return {"ok": True}
+
+
+@router.get("/cupom-popup.js")
+async def serve_cupom_popup_js(request: Request):
+    return FileResponse(FRONTEND_DIR / "cupom-popup.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
 
 
 @router.get("/health")
