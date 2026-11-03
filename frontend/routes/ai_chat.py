@@ -108,8 +108,9 @@ async def _fluxo(user_id: int, text: str, monthly_limit: int, cards: tuple[str, 
                 usado = await asyncio.to_thread(db.ai_get_usage_this_month, user_id)
                 emissor({"tipo": "fim", "reply": r.reply, "message_id": r.message_id,
                          "usage": {"used": usado, "limit": monthly_limit}, "chips": r.chips})
-        except Exception:
-            logger.exception("ai_chat stream falhou pra user %s", user_id)
+        except Exception as exc:
+            logger.error("ai_chat stream falhou pra user %s causa=%s sqlstate=%s", user_id,
+                         type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
             emissor({"tipo": "erro", "mensagem": ERRO})
         finally:
             emissor(None)

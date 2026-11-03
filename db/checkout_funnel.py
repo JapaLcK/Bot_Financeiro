@@ -54,7 +54,8 @@ def _record(user_id: int, session_id: str | None, kind: str, *, dedupe_24h: bool
                 )
             conn.commit()
     except Exception as exc:  # nunca derruba o fluxo principal
-        _log.warning("checkout_funnel %s falhou user=%s: %s", kind, user_id, exc)
+        _log.warning("checkout_funnel %s falhou user=%s causa=%s sqlstate=%s", kind, user_id,
+                     type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
 
 
 def record_checkout_started(user_id: int, session_id: str | None) -> None:

@@ -56,6 +56,7 @@ from resend.exceptions import raise_for_code_and_type
 
 import core.services.email_service as email_service
 import db
+from core.services.retomada import mascarar_email
 from db.connection import get_conn
 
 # Capturado no IMPORT do módulo, que acontece na coleção — antes do stub autouse
@@ -162,6 +163,13 @@ def _novos(marca: int, event_type: str) -> list[dict]:
     return linhas
 
 
+def _sem_nem_a_mascara(linha: dict, email: str) -> None:
+    """`log_recipient=False` tira até a máscara (#657 P4): sem ele o `send_email` loga
+    `l•••@dominio`, que a busca pelo endereço inteiro não acha."""
+    assert linha["details"]["to"] == "<destinatário omitido>", linha
+    assert mascarar_email(email) not in linha["message"], linha
+
+
 def _existe_usuario(uid: int) -> bool:
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -214,6 +222,7 @@ def test_t13_email_final_nao_deixa_o_endereco_no_banco(user_id, monkeypatch, mar
         f"o operador precisa saber que o e-mail final saiu, veio {enviado}"
     assert enviado[0]["details"]["subject"] == ASSUNTO_FINAL, \
         f"o assunto é o que sobra no lugar do endereço: {enviado[0]['details']}"
+    _sem_nem_a_mascara(enviado[0], email)
 
 
 # ── T14 ─────────────────────────────────────────────────────────────────────
@@ -410,3 +419,5 @@ def test_t16_email_do_codigo_nao_deixa_codigo_nem_endereco_em_log(monkeypatch, m
         "código ou endereço ficaram em system_event_logs"
     enviado = _novos(marca, "email_sent")
     assert len(enviado) == 1 and enviado[0]["details"]["subject"] == "Seu código para excluir a conta PigBank"
+    _sem_nem_a_mascara(enviado[0], email)
+    assert mascarar_email(email) not in caplog.text, caplog.text

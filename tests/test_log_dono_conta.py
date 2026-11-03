@@ -50,12 +50,16 @@ def _linha(marca: int, uid: int, nivel: str, source: str, prefixo: str, *proibid
     return linha
 
 
-def _a_e_b(caso) -> None:
-    """Roda `caso(uid, marca) -> linha` para A e para B, e prova o isolamento real: a linha de A
-    sai no ZIP de A e não no de B, e some na exclusão de A, deixando a de B."""
-    a, b, marca = _uid(), _uid(), _marca()
-    ids = {uid: caso(uid, marca)["id"] for uid in (a, b)}
-    _isola_e_apaga(a, b, {ids[a]}, ids[b], marca)
+def _a_e_b(caso, novo=_uid) -> None:
+    """Roda `caso(uid, marca) -> linha` (ou uma tupla de linhas) para A e para B (cada conta
+    criada por `novo`), e prova o isolamento real: TODA linha de A sai no ZIP de A e não no de B,
+    e some na exclusão de A, deixando a de B."""
+    a, b, marca = novo(), novo(), _marca()
+    ids = {}
+    for uid in (a, b):
+        linhas = caso(uid, marca)
+        ids[uid] = [x["id"] for x in (linhas if isinstance(linhas, tuple) else (linhas,))]
+    _isola_e_apaga(a, b, set(ids[a]), set(ids[b]), marca)
 
 
 # ── T-A1 auth por HTTP ───────────────────────────────────────────────────────

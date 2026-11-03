@@ -1470,7 +1470,7 @@ dura 24 h (sem `expires_at`): para **tirar** um produto, apague as variáveis, e
 deploy e mais 24 h, e só então arquive o preço no Stripe. Se o Stripe recusar os extras
 (`InvalidRequestError`: preço arquivado, inexistente), o checkout é refeito UMA vez sem
 `optional_items` e sem a foto `ebook*` nos dois metadatas, e loga o erro
-`ebook_oferta_recusada` (mensagem do Stripe e preços, nunca as URLs): a página segue
+`ebook_oferta_recusada` (o `code` do Stripe, ou o tipo quando não houver, e os preços; nunca a mensagem nem as URLs): a página segue
 vendendo o plano e TODOS os extras somem daquela sessão (não só o recusado). Sem extras, ou recusado também sem
 eles, ou erro que não é `InvalidRequestError`, é o 502 de antes. Uma sessão aberta
 criada pelo fallback (sem extras) ou antes de mudar a lista é reaproveitada por até 1 h
@@ -1487,7 +1487,7 @@ embutido: `client_secret`, `return_url`, 1 h, `publishable_key`) **sem**
 (abaixo). Até 3 extras (`extras_assinar.CAIXAS`): `da_env()` filtrado por
 `Price.retrieve(expand=["product"])` (preço ativo, BRL, avulso, produto ativo) ANTES
 de recortar; o que sai, ou uma falha do Stripe ao ler (aí nenhum entra), loga
-`ebook_oferta_recusada` só com os preços, e o plano vende assim mesmo. A foto dos 3 vai
+`ebook_oferta_recusada` só com os preços (na falha, mais o `code` do erro do Stripe, ou o tipo; nunca a mensagem), e o plano vende assim mesmo. A foto dos 3 vai
 nos dois metadatas, como no embutido. Recusa do Stripe na criação é o 502 de antes
 (não há `optional_items` a tirar). A resposta é a do embutido + `pagina: true` +
 `extras: [{posicao, nome, descricao, imagem, valor_centavos, no_carrinho}]` (texto e
@@ -1559,7 +1559,7 @@ checado ANTES do estado. Sessão paga, expirada ou `open` com `expires_at` venci
 o plano e o extra que fica vão pelo `id`, o que entra por `price`, o que sai é omitido;
 nada mudou = sem chamada ao Stripe. O `Session.modify` leva só `line_items` (a foto do
 metadata não muda). Recusa do Stripe no `modify` (`InvalidRequestError`) é 409
-`extra_recusado` + log `ebook_oferta_recusada` só com os preços; qualquer outro
+`extra_recusado` + log `ebook_oferta_recusada` com os preços e o `code` (ou o tipo) do erro; qualquer outro
 `StripeError` (retrieve, list, modify) é 502. Roda sob `_billing_user_lock` (o mesmo
 do checkout), limite de 120/h por IP, CSRF do middleware global, e **não olha a
 flag**: com ela desligada não nasce sessão `elements`, e a página já aberta segue pagável.

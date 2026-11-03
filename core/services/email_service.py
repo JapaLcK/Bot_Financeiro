@@ -19,6 +19,7 @@ from html import escape as _esc
 from typing import Optional
 
 from core.dashboard_links import link_whatsapp
+from core.services.retomada import mascarar_email
 
 logger = logging.getLogger(__name__)
 
@@ -75,20 +76,23 @@ def send_email(
     attachments: lista no formato Resend, ex:
     [{"filename": "x.pdf", "content": <base64 str>, "content_type": "application/pdf"}].
 
-    `log_recipient=False` tira o ENDEREÇO de todo log desta função — o
-    `system_event_logs` (que não tem coluna `user_id`, logo não é levado por
-    cascata nenhuma) e o log de aplicação, que o `_DashboardHandler`
-    (`core/observability.py`) espelha na MESMA tabela a partir de WARNING.
-    Continuam indo o `event_type`, o assunto e o sucesso/falha — e, na falha, o
-    tipo da exceção + o `code` (status HTTP) e o `error_type` do provedor, o
-    bastante para o operador saber que o e-mail saiu e por que não saiu. Existe
-    por um único chamador:
-    `send_account_deletion_completed_email`, o e-mail que sai DEPOIS de a conta
-    ser apagada, cujo destinatário é PII de conta excluída. Default `True`:
-    nenhum outro chamador muda de comportamento nem precisa lembrar do
-    parâmetro.
+    O log leva o endereço MASCARADO (`l•••@dominio`, #657 P4): o
+    `system_event_logs` não tem dono nesta função (a coluna `user_id` fica nula,
+    logo cascata nenhuma leva a linha), e o log de aplicação vai ao stderr e é
+    espelhado na MESMA tabela pelo `_DashboardHandler` a partir de WARNING.
+    `log_recipient=False` tira até a máscara. Continuam indo o `event_type`, o
+    assunto e o sucesso/falha — e, na falha, o tipo da exceção + o `code`
+    (status HTTP) e o `error_type` do provedor, o bastante para o operador saber
+    que o e-mail saiu e por que não saiu. `log_recipient=False` existe por três
+    chamadores: `send_account_deletion_completed_email`, o e-mail que sai DEPOIS
+    de a conta ser apagada, cujo destinatário é PII de conta excluída;
+    `send_account_reauth_code_email`, que precede a exclusão; e
+    `core/services/remarketing.py::send_remarketing_email`. Default `True`: os
+    outros chamadores não precisam lembrar do parâmetro.
     """
-    to_log = to if log_recipient else "<destinatário omitido>"
+    # Fora do `try`: um `to` que não é `str` não pode levantar aqui ("nunca lança exceção").
+    to_log = ((mascarar_email(to) if isinstance(to, str) else "<destinatário inválido>")
+              if log_recipient else "<destinatário omitido>")
     api_key = os.getenv("RESEND_API_KEY", "")
     if not api_key:
         logger.warning("Resend não configurado (RESEND_API_KEY ausente). E-mail para <%s> não enviado.", to_log)
@@ -120,7 +124,7 @@ def send_email(
         _log_email_event("info", "email_sent", f"E-mail enviado para {to_log}", to=to_log, subject=subject)
         return True
     except Exception as exc:
-        # LISTA BRANCA sob `log_recipient=False`: o texto do provedor NÃO é
+        # LISTA BRANCA, com ou sem `log_recipient`: o texto do provedor NÃO é
         # persistido. Ele ecoa o destinatário ("invalid `to` field: …") em formas
         # que substituição literal não alcança — medido em 6 formas, 4 vazavam
         # com `str(exc).replace(to, to_log)`: maiúsculas, domínio em maiúsculas,
@@ -132,12 +136,9 @@ def send_email(
         # API ("validation_error", "missing_api_key", "rate_limit_exceeded"…;
         # `resend/exceptions.py`, dicionário `ERRORS`). O status sozinho não
         # separa `validation_error` de `missing_required_field` no mesmo 422.
-        if log_recipient:
-            erro = str(exc)
-        else:
-            enums = [f"{k}={v}" for k, v in (("code", getattr(exc, "code", None)),
-                                             ("type", getattr(exc, "error_type", None))) if v]
-            erro = " ".join([type(exc).__name__, *enums])
+        enums = [f"{k}={v}" for k, v in (("code", getattr(exc, "code", None)),
+                                         ("type", getattr(exc, "error_type", None))) if v]
+        erro = " ".join([type(exc).__name__, *enums])
         logger.error("Falha ao enviar e-mail para <%s>: %s", to_log, erro)
         _log_email_event("error", "email_failed", f"Falha ao enviar para {to_log}: {erro}", to=to_log, subject=subject, error=erro)
         return False
@@ -1466,7 +1467,8 @@ def send_founder_email_once(user_id: int, to: str, source: str, external_ref: st
                               source="billing", user_id=int(user_id))
         return True
     except Exception as exc:  # noqa: BLE001 — ver docstring
-        logger.error("E-mail do fundador falhou user=%s: %s", user_id, exc)
+        logger.error("E-mail do fundador falhou user=%s causa=%s sqlstate=%s", user_id,
+                     type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return False
 
 

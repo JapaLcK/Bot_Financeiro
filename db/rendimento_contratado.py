@@ -56,8 +56,9 @@ def ler(cur, user_id: int, *, hoje=None) -> dict:
             bases = {b["provider_investment_id"]: {"observed_on": b["observed_on"], "B0": n(b["balance"]),
                                                    "A0": n(b["amount_original"]), "Q0": n(b["quantity"], _quantidade)}
                      for b in rows}
-        except Exception:
-            log.exception("rendimento: leitura da foto-base falhou (user_id=%s)", user_id)
+        except Exception as exc:
+            log.error("rendimento: leitura da foto-base falhou (user_id=%s) causa=%s sqlstate=%s", user_id,
+                      type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
             bases = None
     itens, lidos = [], []
     for p in posicoes:
@@ -119,8 +120,9 @@ def ler(cur, user_id: int, *, hoje=None) -> dict:
         rend["motivos"] = ([] if ativos else ["sem_posicoes"]) + (
             ["banco_desatualizado"] if any(desatualizada(por_id[i], estados[str(i)], limite)
                                            for i in {p["connection_id"] for p in posicoes}) else [])
-    except Exception:
-        log.exception("rendimento: cálculo de rendimentos falhou (user_id=%s)", user_id)
+    except Exception as exc:
+        log.error("rendimento: cálculo de rendimentos falhou (user_id=%s) causa=%s sqlstate=%s", user_id,
+                  type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         rend = None
     return {"tipo": "contratado", "itens": itens, "motivos": [] if itens else ["sem_posicoes_brl"],
             "rendimentos": rend}

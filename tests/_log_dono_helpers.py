@@ -114,13 +114,15 @@ def _limpa(linha: dict, *proibidos: str) -> None:
     assert "traceback" not in (linha["details"] or {}), linha
 
 
-def _isola_e_apaga(a: int, b: int, ids_a: set[int], id_b: int, marca: int) -> None:
-    """As linhas de A saem no ZIP de A e não no de B; a exclusão de A as apaga e deixa a de B."""
+def _isola_e_apaga(a: int, b: int, ids_a: set[int], id_b: int | set[int], marca: int) -> None:
+    """As linhas de A saem no ZIP de A e não no de B; a exclusão de A as apaga e deixa as de B
+    (`id_b`: uma linha ou um conjunto)."""
+    ids_b = id_b if isinstance(id_b, set) else {id_b}
     assert ids_a <= _exportados(a)[1], "a falha de A não saiu na exportação de A"
     assert not ids_a & _exportados(b)[1], "linha de A na exportação de B"
     privacy.delete_user_data(a)
     assert _linhas(marca, "user_id = %s", (a,)) == [], "log de A sobreviveu à exclusão"
-    assert _linhas(marca, "id = %s", (id_b,)), "a exclusão de A levou a linha de B"
+    assert len(_linhas(marca, "id = any(%s)", (list(ids_b),))) == len(ids_b), "a exclusão de A levou linha de B"
 
 
 def _nenhuma(linhas: list[dict], event_type: str, prefixo: str = "") -> None:

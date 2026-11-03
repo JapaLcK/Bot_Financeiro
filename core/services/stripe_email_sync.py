@@ -36,7 +36,7 @@ def _sincronizar(uid: int, key: str) -> bool:
             "error", "stripe_email_sync_recusado",
             "O Stripe recusou o e-mail novo do cliente; a pendência foi fechada.",
             source="billing", user_id=uid,
-            details={"code": exc.code, "param": getattr(exc, "param", None)},
+            details={"code": exc.code or type(exc).__name__, "param": getattr(exc, "param", None)},
         )
         fechar(uid, linha["versao"])
         return False
