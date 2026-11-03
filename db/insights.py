@@ -443,7 +443,8 @@ def compute_active_insights(user_id: int) -> tuple[list[dict[str, Any]], list[st
 
     Detector que quebra não derruba os outros: os itens deles saem, e o nome dele vai em `falhas`.
     """
-    from core.services.insights_detectores import detect_bill_due, detect_month_projection, detect_subscription_increase
+    from core.services.insights_detectores import (
+        detect_bill_due, detect_month_projection, detect_positive_result, detect_subscription_increase)
     ensure_user(user_id)
     out: list[dict[str, Any]] = []
     falhas: list[str] = []
@@ -457,6 +458,7 @@ def compute_active_insights(user_id: int) -> tuple[list[dict[str, Any]], list[st
         _detect_category_spike,
         _detect_salary_burn_fast,
         _detect_goals_behind,
+        detect_positive_result,  # info e por último: só ocupa vaga que os alertas deixam (Q4b da B4)
     ):
         try:
             out.extend(detector(user_id))

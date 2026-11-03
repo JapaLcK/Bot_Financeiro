@@ -104,7 +104,7 @@ function pbPixRefresh() {
     const b = existente || pixCriarCta(plano);
     if (!b) continue;
     const renova = !!pixSub && pixSub.gateway === "pix" && pixSub.plan === plano;
-    pixRotular(b, "ph-lightning", (renova ? "Renovar" : "Pagar") + " no Pix (à vista)");
+    pixRotular(b, "ph-lightning", renova ? "Renovar no Pix (à vista)" : "Pagar no Pix (à vista, sem teste grátis)");
   }
 }
 
@@ -188,7 +188,7 @@ function pixCheckout(plano, retomando) {
   const nome = (PLAN_NAMES && PLAN_NAMES[plano]) || plano;
   // Um `aoFechar` só para os dois estados: o `pixEncerrar` é inerte sem
   // `pixPoll`, então fechar no formulário limpa o documento e mais nada.
-  const ctx = pixOverlay(nome + " anual no Pix", () => {
+  const ctx = pixOverlay(nome + " anual no Pix, sem teste grátis", () => {
     const fechouFormulario = !!pixDoc;
     pixApagarDoc();
     pixEncerrar();
