@@ -1969,7 +1969,9 @@ Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 `limite` (GET só leitura, `{ok, of_banks_max, em_uso, pode_adicionar, code, message}`: se cabe
 um banco NOVO, pela mesma decisão do `_enforce_bank_limit`; o teto nunca vira 402 aqui, mas o
 gate comum de dados sim (402 `subscription_required`/`plan_selection_required` sem plano ativo);
-não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhook
+não barra reconexão e o 402 do `/pluggy-item` continua valendo; `em_uso` conta só conexões
+`pluggy` fora de `_TERMINAL` (PAUSED/DELETED, #1377), o modal espelha em `FORA_DO_TETO` e
+`tests/test_of_limite_route.py` compara as listas)) mais o webhook
 `/open-finance/pluggy/webhook`. O `connect-token` aceita `app_scheme` opcional no corpo
 (`pigbank`, `pigbank-staging` ou `pigbank-dev`; fora da lista, 400), que vira o
 `oauthRedirectUri` `<scheme>://open-finance-volta` da Pluggy; o site não manda o campo.
