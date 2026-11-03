@@ -86,7 +86,7 @@ def test_rodape_nao_manda_para_o_bot(caixa):
         assert "comando" not in parte and "ajuda no bot" not in parte
     assert "porque assinou o PigBank" in caixa["html"]
     # controle positivo: os outros e-mails seguem com o rodapé padrão
-    es.send_pro_welcome_email("a@b.com", "pro", None)
+    es.send_pro_welcome_email("a@b.com", "pro", None, "trialing", False)
     assert "Use o comando <strong>ajuda</strong> no bot" in caixa["html"]
 
 

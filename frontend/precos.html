@@ -7,11 +7,11 @@
 <title>Planos · PigBank</title>
 <meta property="og:type" content="website"/>
 <meta property="og:title" content="Planos · PigBank"/>
-<meta property="og:description" content="Planos PigBank: Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 7 dias grátis pra testar o plano que você escolher."/>
+<meta property="og:description" content="Planos PigBank: Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 7 dias grátis no cartão pra testar o plano que você escolher."/>
 <meta property="og:url" content="https://pigbankai.com/precos"/>
 <meta property="og:image" content="https://pigbankai.com/brand/landing-piggy-cta.webp?v=1"/>
 
-<meta content="Planos PigBank: Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 7 dias grátis pra testar o plano que você escolher." name="description"/>
+<meta content="Planos PigBank: Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 7 dias grátis no cartão pra testar o plano que você escolher." name="description"/>
 <link href="https://pigbankai.com/precos" rel="canonical"/>
 <link href="/favicon.png?v=3" rel="icon" type="image/png"/>
 <link href="/brand/apple-touch-icon.png?v=3" rel="apple-touch-icon"/>
@@ -196,6 +196,11 @@
      mora abaixo do preço, os dois caminhos de compra continuam agrupados antes
      dos benefícios; esta regra só põe o respiro entre eles. */
   #plans-v2 .plan .pix-cta { margin-top: 8px; }
+  /* "Pagar no Pix (à vista, sem teste grátis)" só cabe numa linha com o cartão largo: abaixo de 440px
+     ele alargava o cartão (e a página abaixo de 390px), e com 3 colunas estreitas (901–1279px) o texto passava da borda do botão. */
+  @media (max-width: 439px), (min-width: 901px) and (max-width: 1279px) {
+    #plans-v2 .plan .pix-cta { white-space: normal; text-wrap: balance; }
+  }
 
   /* O overlay é `position: fixed`, então NÃO herda o padding de área segura do
      body (docs/armadilhas.md, "o app é o mesmo site"): ele reserva os quatro
@@ -310,7 +315,7 @@
 <div class="wrap" id="conteudo">
 <section class="section">
 <section aria-labelledby="precos-title" class="lp-plans-intro lp-section-light"><div class="lp-shell lp-plans-intro-grid">
-<div class="lp-plans-intro-copy"><p class="lp-eyebrow">Planos PigBank</p><h1 id="precos-title">Um plano para cada <br/><span class="lp-underline">ritmo de vida.</span></h1><p class="lp-lead">Sua grana organizada no WhatsApp e no painel. Escolha como quer começar.</p><p class="lp-plans-status" id="precos-sub">7 dias grátis pra testar o plano que você escolher. Cancele antes do fim e não paga nada.</p><p class="lp-plans-status" id="testar-piggy">Ainda na dúvida? <a class="lp-text-link" data-teste href="/teste">Testar o Piggy agora</a></p></div>
+<div class="lp-plans-intro-copy"><p class="lp-eyebrow">Planos PigBank</p><h1 id="precos-title">Um plano para cada <br/><span class="lp-underline">ritmo de vida.</span></h1><p class="lp-lead">Sua grana organizada no WhatsApp e no painel. Escolha como quer começar.</p><p class="lp-plans-status" id="precos-sub">7 dias grátis no cartão pra testar o plano que você escolher. Cancele antes do fim e não paga nada.</p><p class="lp-plans-status" id="testar-piggy">Ainda na dúvida? <a class="lp-text-link" data-teste href="/teste">Testar o Piggy agora</a></p></div>
 <div class="lp-plans-mascot"><div aria-hidden="true" class="lp-plans-mascot-bubble"></div><img alt="Piggy com óculos escuros, moletom preto e celular" fetchpriority="high" height="1200" src="/brand/landing-piggy-four-digits.webp?v=1" width="800"/></div>
 </div></section>
 <!-- Escada de planos (Essencial/Plus/Pro) — conteúdo ÚNICO
@@ -410,7 +415,7 @@
         </div>
 
 </div>
-<p class="plans-note" id="plans-note-v2"><i aria-hidden="true" class="ph ph-confetti"></i> Todo plano vem com <strong>7 dias grátis pra testar</strong> (um teste por número). A primeira cobrança só acontece depois do trial. Cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
+<p class="plans-note" id="plans-note-v2"><i aria-hidden="true" class="ph ph-confetti"></i> Todo plano no cartão vem com <strong>7 dias grátis pra testar</strong> (um teste por número). A primeira cobrança só acontece depois do trial. Cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
 <p class="plans-cta"><a href="#comparar">Ver a comparação completa, recurso por recurso <i aria-hidden="true" class="ph ph-caret-right"></i></a></p>
 </section>
 <!-- ══════════════════════════════════════════════════════════════════
@@ -548,7 +553,7 @@ function aplicarDescontoRetomada(r, diasTrial) {
       const txt = card.querySelector(".price-cycle-copy");
       if (!txt) return;
       txt.dataset[copia] = r.trial && diasTrial
-        ? `${diasTrial} dias grátis, depois ${fmt(p[ciclo])} (${r.desconto_pct}% OFF na 1ª cobrança)`
+        ? `${diasTrial} dias grátis no cartão, depois ${fmt(p[ciclo])} (${r.desconto_pct}% OFF na 1ª cobrança)`
         : `${r.desconto_pct}% OFF na 1ª cobrança, depois ${cheio.textContent.trim()}`;
       if (currentCycle === ciclo) txt.textContent = txt.dataset[copia];
     });
@@ -939,7 +944,7 @@ async function cancelChange() {
   // conta está sem plano ativo" a quem nunca teve um.
   if (me.needs_plan_selection) {
     sub.textContent =
-      "Escolha um plano pra continuar: 7 dias grátis pra testar (um teste por número). "
+      "Escolha um plano pra continuar: 7 dias grátis no cartão pra testar (um teste por número). "
       + "O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.";
     return;
   }
@@ -1268,5 +1273,6 @@ enviarViewItemList();
 <script defer="" src="/nav-auth.js?v=7"></script>
 <script defer="" src="/teste-piggy.js?v=1"></script>
 <script defer="" src="/nav-burger.js?v=1"></script>
+<script defer="" src="/cupom-popup.js?v=1"></script>
 </body>
 </html>

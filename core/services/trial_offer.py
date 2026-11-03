@@ -3,7 +3,8 @@ core/services/trial_offer.py — a frase de oferta que é VERDADE para uma conta
 
 UM assunto: o trial é único por telefone NA VIDA (`plan_trials`), então "com
 N dias grátis" não é uma frase que se possa escrever para todo mundo. Aqui mora
-a decisão dos TRÊS estados — elegível / não elegível / não sei — e nada mais.
+a decisão dos TRÊS estados — elegível / não elegível / não sei — e quantos
+dias grátis o checkout dá à conta (`dias_de_trial`).
 
 **Saiu de `core/services/billing_commands.py` quando ganhou o SEGUNDO chamador**,
 e é separação por assunto, não por tamanho: `billing_commands` é o roteamento e
@@ -18,7 +19,27 @@ Importe daqui — não há re-export em `billing_commands`, de propósito (§0.7
 
 from __future__ import annotations
 
+import os
+
 from .billing_commands import _bold
+
+
+def dias_de_trial(user_id: int) -> int:
+    """Quantos dias grátis o checkout dá a ESTA conta agora. Fonte única do
+    create-checkout (`trial_period_days`) e do `trial_disponivel` do
+    GET /billing/subscription (§0.7): o rótulo da / nunca promete o que o
+    checkout não concede.
+
+    v2 (padrão): `trial_days_total()` se o telefone ainda tem direito, senão 0.
+    v2 desligado (freio de emergência): `PRO_TRIAL_DAYS`, sem olhar telefone.
+    Levanta `db.plans.TrialEligibilityError` quando não dá para decidir.
+    """
+    from db import plans
+    from .plan_service import TRIAL_DAYS_DEFAULT, plans_v2_enabled, trial_days_total
+
+    if not plans_v2_enabled():
+        return int(os.getenv("PRO_TRIAL_DAYS", str(TRIAL_DAYS_DEFAULT)))
+    return trial_days_total() if plans.is_trial_eligible_for_user(user_id) else 0
 
 
 def texto_da_oferta(user_id: int, platform: str) -> str:
