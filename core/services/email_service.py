@@ -1280,6 +1280,30 @@ def send_ebook_email(to: str, url: str, dashboard_url: str = "", nome: str | Non
     return send_email(to=to, subject=titulo, html_body=html, text_body=text)
 
 
+def send_cupom_email(to: str, codigo: str, log_recipient: bool = True) -> bool:
+    """Pop-up do cupom (POST /cupom): entrega o código fixo de Promotion Code do
+    Stripe. Divulgação consentida na hora, então o rodapé diz por que chegou.
+    `codigo` vem da env (escapado no HTML); nunca em log."""
+    import html as _htmlmod
+    c = _htmlmod.escape(codigo)
+    link = f"{_public_base_url()}/precos"
+    content = f"""
+      <p>Oi! Aqui está o seu código de desconto na primeira compra:</p>
+      <p style="text-align:center;font-size:26px;font-weight:800;letter-spacing:2px;margin:20px 0">{c}</p>
+      <p>Como usar: no checkout, clique em <b>Adicionar código promocional</b> e cole o código.</p>
+      <p style="text-align:center;margin:24px 0"><a class="btn" href="{link}">Ver os planos</a></p>
+    """
+    footer = "Você recebeu este e-mail porque pediu o cupom no site do PigBank. Enviamos só este e-mail."
+    html = _base_html("Seu cupom do PigBank", content, footer)
+    text = (
+        f"Oi! Seu código de desconto na primeira compra: {codigo}\n\n"
+        "Como usar: no checkout, clique em 'Adicionar código promocional' e cole o código.\n\n"
+        f"Ver os planos: {link}"
+    )
+    return send_email(to=to, subject="Seu cupom do PigBank", html_body=html, text_body=text,
+                      log_recipient=log_recipient)
+
+
 def send_trial_ending_email(to: str, plan: str, trial_end_at, dashboard_url: str = "") -> bool:
     """E-mail 3 dias antes do trial acabar (item 38).
 

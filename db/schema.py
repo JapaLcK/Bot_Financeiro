@@ -3337,6 +3337,18 @@ def init_db():
         """alter table family_budgets add column if not exists gasto_cents bigint not null default 0 check (gasto_cents >= 0)""",
         """alter table family_budgets add column if not exists gasto_mes date""",
         """create unique index if not exists uq_family_budgets_group_categoria on family_budgets (group_id, lower(categoria))""",
+        # Pop-up do cupom (db/cupom_leads.py): uma linha por e-mail (minúsculo), com a prova do
+        # consentimento. `ip_hash` nunca é o IP cru. Fora do user_id de propósito: o visitante não tem conta.
+        """
+        create table if not exists cupom_leads (
+          email text primary key,
+          consent_at timestamptz not null default now(),
+          consent_text text not null,
+          origem text,
+          ip_hash text,
+          sent_at timestamptz
+        )
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks
