@@ -3,6 +3,15 @@
  * o JS só liga ciclo, chat, animações ao rolar e a barra fixa; cada caso abaixo morre se
  * a peça correspondente sair (controles do CLAUDE.md §3: tirar o listener do ciclo
  * deixa "ciclo" vermelho; tirar o armar() deixa "animações" vermelho).
+ * Regra dos CTAs (oferta.js + teste-piggy.js), medido em 2026-11-02: voltar a "qualquer sessão
+ * → /precos" deixa "logado sem assinatura" vermelho; tirar o `sub.degraded` deixa "degraded";
+ * tirar o ramo trial_disponivel false deixa "Assinar o Plus"; olhar o trial antes do active
+ * deixa "ativa (trial false)"; perguntar a assinatura sem sessão ou tirar a trava data-utm-base
+ * deixa "anônimo". Positivo: "logado sem assinatura e com trial" (textos e /assinar intactos).
+ * Layout estreito: tirar o `#hero-cta{flex-wrap:wrap}` do @media 360 deixa "CTAs com …" vermelho
+ * (link em -3..186 a 320); tirar o padding do card do #cta-final (@media 360) deixa o CTA final
+ * com 100px a 320, e o do link (@media 400) deixa 100px a 375 (3 linhas; o teto é 2); tirar o
+ * `#sticky>span>*{white-space:normal}` corta o preço da barra com "Gerenciar meu plano" (43px a 320).
  *
  * Rodar: node --test tests/frontend/oferta.test.mjs
  */
@@ -17,7 +26,8 @@ before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
 after(async () => { await browser?.close(); server?.kill(); });
 
 /** Contexto novo por caso. `erros` junta pageerror e resposta >= 400. */
-async function abrir({ js = true, calmo = false, mobile = false, relogio = false, largura, logado = false, disponivel = {}, planosDepois = 0 } = {}) {
+async function abrir({ js = true, calmo = false, mobile = false, relogio = false, largura, logado = false, disponivel = {}, planosDepois = 0,
+                       assinatura = { active: false, trial_disponivel: true }, query = "" } = {}) {
   const ctx = await browser.newContext({
     viewport: largura ? { width: largura, height: 800 } : mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 },
     javaScriptEnabled: js, reducedMotion: calmo ? "reduce" : "no-preference",
@@ -32,14 +42,19 @@ async function abrir({ js = true, calmo = false, mobile = false, relogio = false
   // o servidor estático não tem o /billing/plans-config: por padrão os três planos estão à venda
   await ctx.route("**/billing/plans-config", async r => (await new Promise(ok => setTimeout(ok, planosDepois)), r.fulfill({ status: 200, contentType: "application/json",
     body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true, ...disponivel }) })));
+  // `assinatura`: corpo do GET /billing/subscription, ou um número = só o status (ex.: 403 sem credencial)
+  const subs = [];
+  await ctx.route("**/billing/subscription", r => (subs.push(r.request().url()), typeof assinatura === "number"
+    ? r.fulfill({ status: assinatura, contentType: "application/json", body: "{}" })
+    : r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(assinatura) })));
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", e => erros.push("pageerror: " + e.message));
   page.on("response", r => { if (r.status() >= 400 && !r.url().endsWith("/auth/validate")) erros.push(`${r.status()} ${r.url()}`); });
   if (relogio) await page.clock.install({ time: new Date("2026-01-01T08:00:00") });
-  await page.goto(`${ORIGIN}/index.html`, { waitUntil: "load" });
+  await page.goto(`${ORIGIN}/index.html${query}`, { waitUntil: "load" });
   if (relogio) await page.clock.pauseAt(new Date("2026-01-01T09:00:00")); // daqui o tempo só anda no runFor
-  return { page, ctx, erros };
+  return { page, ctx, erros, subs };
 }
 
 const visivel = (page, sel) => page.locator(sel + ":visible").first();
@@ -47,7 +62,7 @@ const bolhas = page => page.locator(".ch-msg").count();
 const ir = (page, sel) => page.evaluate(s => document.querySelector(s).scrollIntoView({ block: "start" }), sel);
 const txt = (page, sel) => page.evaluate(s => document.querySelector(s).textContent, sel);
 
-test("ciclo: nasce anual, Mensal troca preço, nota e link, Anual volta", async () => {
+test("ciclo: nasce mensal, Anual troca preço, nota e link, Mensal volta", async () => {
   const { page, ctx, erros } = await abrir();
   const card = '#planos [data-plano="essencial"]';
   const estado = async () => ({
@@ -55,17 +70,17 @@ test("ciclo: nasce anual, Mensal troca preço, nota e link, Anual volta", async 
     nota: (await visivel(page, `${card} span[class^=so-]`).textContent()).trim(),
     href: await visivel(page, `${card} a`).getAttribute("href"),
   });
-  assert.deepEqual(await estado(), { preco: "R$ 8,25", nota: "R$ 99 por ano · 2 meses grátis", href: "/assinar?plano=essencial&ciclo=annual" });
-  const pressed = () => page.$$eval("#planos [data-set]", bs => bs.map(b => `${b.dataset.set}=${b.getAttribute("aria-pressed")}`));
-  assert.deepEqual(await pressed(), ["mensal=false", "anual=true"]);
-
-  await page.click('[data-set="mensal"]');
   assert.deepEqual(await estado(), { preco: "R$ 9,90", nota: "Cobrado por mês", href: "/assinar?plano=essencial&ciclo=monthly" });
+  const pressed = () => page.$$eval("#planos [data-set]", bs => bs.map(b => `${b.dataset.set}=${b.getAttribute("aria-pressed")}`));
   assert.deepEqual(await pressed(), ["mensal=true", "anual=false"]);
 
   await page.click('[data-set="anual"]');
-  assert.equal((await estado()).preco, "R$ 8,25");
+  assert.deepEqual(await estado(), { preco: "R$ 8,25", nota: "R$ 99 por ano · 2 meses grátis", href: "/assinar?plano=essencial&ciclo=annual" });
   assert.deepEqual(await pressed(), ["mensal=false", "anual=true"]);
+
+  await page.click('[data-set="mensal"]');
+  assert.equal((await estado()).preco, "R$ 9,90");
+  assert.deepEqual(await pressed(), ["mensal=true", "anual=false"]);
   assert.deepEqual(erros, []);
   await ctx.close();
 });
@@ -167,11 +182,13 @@ test("barra fixa (390x844): oculta, aparece depois do hero e some em #planos", a
   await ctx.close();
 });
 
-test("sem JS: preços e links anuais, 1ª FAQ aberta, números finais e sem -wait", async () => {
+test("sem JS: preços e links mensais, 1ª FAQ aberta, números finais e sem -wait", async () => {
   const { page, ctx, erros } = await abrir({ js: false });
   const card = '#planos [data-plano="plus"]';
-  assert.equal(await visivel(page, `${card} .pb-d[class*="so-"]`).textContent(), "R$ 16,58");
-  assert.equal(await visivel(page, `${card} a`).getAttribute("href"), "/assinar?plano=plus&ciclo=annual");
+  assert.equal(await visivel(page, `${card} .pb-d[class*="so-"]`).textContent(), "R$ 19,90");
+  assert.equal(await visivel(page, `${card} a`).getAttribute("href"), "/assinar?plano=plus&ciclo=monthly");
+  // os 4 CTAs da campanha (cabeçalho, hero, fim, barra) já saem do HTML na /assinar do Plus mensal
+  assert.deepEqual(await page.$$eval(CTAS_UTM, as => as.map(a => a.getAttribute("href"))), Array(4).fill("/assinar?plano=plus&ciclo=monthly"));
   assert.equal(await page.$eval("details[name=faq]", d => d.open), true);
   assert.equal(await txt(page, "#bento [data-alvo]"), "1.247");
   assert.equal(await txt(page, "#dash [data-alvo]"), "3.412");
@@ -201,7 +218,8 @@ test("links internos: todo #alvo existe, o clique rola até a seção (não salt
 
   const { page, ctx, erros } = await abrir();
   const alvos = await page.$$eval('a[href^="#"]', as => as.map(a => a.getAttribute("href")));
-  assert.ok(alvos.length >= 10, alvos.join());
+  // 7 em 2026-11-02 (os 4 CTAs foram para a /assinar). Remedir: o $$eval acima, em /index.html.
+  assert.ok(alvos.length >= 7, alvos.join());
   for (const h of alvos) assert.ok(await page.$(h), `alvo sem seção: ${h}`);
   const { meio, fim } = await clicarPlanos(page);
   assert.ok(meio > 0 && meio < fim - 50, `rolou ${meio} de ${fim}: saltou em vez de rolar`);
@@ -294,20 +312,102 @@ test("teclado: o 1º Tab é o 'Pular para o conteúdo', que aparece no foco e le
   assert.deepEqual(erros, []);
 });
 
-test("com sessão, os botões de plano levam à /precos (troca de plano do assinante); sem sessão, à /assinar", async () => {
-  const hrefs = async logado => {
-    const { page, ctx, erros } = await abrir({ logado });
-    if (logado) await page.waitForFunction(() => !document.querySelector('[data-plano] a[href^="/assinar"]'));
-    else await page.waitForSelector("#pb-acct-btn", { state: "attached", timeout: 1500 }).catch(() => {});
-    const r = await page.$$eval("[data-plano] a.so-anual, [data-plano] a.so-mensal", as => as.map(a => a.getAttribute("href")));
+// ── Regra dos CTAs (hero, fim, barra) e dos 6 cartões, pelo GET /billing/subscription ────────
+// anônimo / sem assinatura / desconhecido → textos originais e /assinar; trial_disponivel false →
+// "Assinar o Plus" e /assinar; assinatura ativa → "Gerenciar meu plano" e /precos.
+
+const CARTOES = "[data-plano] a.so-anual, [data-plano] a.so-mensal";
+const CTAS_UTM = 'a[data-utm]:not([class*="so-"])';  // os 4 CTAs (cabeçalho, hero, fim, barra), sem os 6 cartões
+const PLUS_MENSAL = "/assinar?plano=plus&ciclo=monthly";
+/** Espera `n` chamadas ao /billing/subscription (até 2 s) e mais 200 ms para o JS assentar. */
+const assentou = async (page, subs, n = 1) => {
+  for (let i = 0; subs.length < n && i < 100; i++) await page.waitForTimeout(20);
+  await page.waitForTimeout(200);
+};
+/** Rótulo e destino dos CTAs com [data-rotulo] (hero, fim, barra), com o nome sem o que é aria-hidden. */
+const ctas = page => page.$$eval("a:has(> [data-rotulo])", as => as.map(a => ({
+  nome: [...a.childNodes].filter(n => !(n.nodeType === 1 && n.getAttribute("aria-hidden") === "true")).map(n => n.textContent).join("").trim(),
+  seta: !!a.querySelector('[aria-hidden="true"]'),
+  href: a.getAttribute("href"),
+})));
+const cartoes = page => page.$$eval(CARTOES, as => as.map(a => a.getAttribute("href")));
+const ORIGINAIS = ["Começar meus 7 dias grátis", "Começar meus 7 dias grátis", "7 dias grátis"];
+
+for (const trial_disponivel of [true, false]) {
+  test(`com assinatura ativa (trial_disponivel ${trial_disponivel}): os 6 cartões e os 3 CTAs levam à /precos com 'Gerenciar meu plano'`, async () => {
+    // com UTM na entrada: o repasse aos cartões (data-utm) não pode desfazer o /precos do assinante
+    const { page, ctx, erros, subs } = await abrir({ logado: true, assinatura: { active: true, trial_disponivel }, query: "?utm_source=fb&fbclid=abc" });
+    await page.waitForFunction(() => !document.querySelector('[data-plano] a[href^="/assinar"], a[data-utm][href^="/assinar"]'));
+    assert.deepEqual(await cartoes(page), Array(6).fill("/precos"));
+    assert.deepEqual(await ctas(page), Array(3).fill({ nome: "Gerenciar meu plano", seta: true, href: "/precos" }));
+    assert.equal(subs.length, 1);
+    // o teste-piggy.js carregado de novo não desfaz o /precos (o data-utm-base trava a 2ª passada)
+    await page.addScriptTag({ url: "/teste-piggy.js" });
+    assert.deepEqual((await ctas(page)).map(c => c.href), Array(3).fill("/precos"));
     await ctx.close();
     assert.deepEqual(erros, []);
-    return r;
-  };
-  assert.deepEqual(await hrefs(true), Array(6).fill("/precos"));
-  const anonimo = await hrefs(false);
-  assert.equal(anonimo.length, 6);
-  for (const h of anonimo) assert.match(h, /^\/assinar\?plano=(essencial|plus|pro)&ciclo=(annual|monthly)$/);
+  });
+}
+
+test("logado sem assinatura e com trial: cartões e CTAs seguem para a /assinar, com os textos originais", async () => {
+  const { page, ctx, erros, subs } = await abrir({ logado: true });
+  await assentou(page, subs);
+  assert.equal(subs.length, 1);
+  assert.equal((await cartoes(page)).filter(h => /^\/assinar\?plano=(essencial|plus|pro)&ciclo=(annual|monthly)$/.test(h)).length, 6);
+  assert.deepEqual(await ctas(page), ORIGINAIS.map(nome => ({ nome, seta: true, href: PLUS_MENSAL })));
+  await ctx.close();
+  assert.deepEqual(erros, []);
+});
+
+test("logado sem assinatura e trial_disponivel false: 'Assinar o Plus' em hero/fim/barra, destino /assinar com a UTM", async () => {
+  const { page, ctx, erros, subs } = await abrir({ logado: true, assinatura: { active: false, trial_disponivel: false },
+    query: "?utm_source=fb&fbclid=abc&foo=1" });
+  await page.waitForFunction(() => [...document.querySelectorAll("[data-rotulo]")].every(s => s.textContent === "Assinar o Plus"));
+  const href = PLUS_MENSAL + "&utm_source=fb&fbclid=abc";
+  assert.deepEqual(await ctas(page), Array(3).fill({ nome: "Assinar o Plus", seta: true, href }));
+  // nome acessível de verdade (a barra fica fora da árvore enquanto aria-hidden, e no desktop nem aparece)
+  assert.equal(await page.getByRole("link", { name: "Assinar o Plus", exact: true }).count(), 2);
+  assert.equal(subs.length, 1);
+  assert.equal((await cartoes(page)).filter(h => h.startsWith("/assinar?")).length, 6);
+  await ctx.close();
+  assert.deepEqual(erros, []);
+});
+
+for (const [nome, assinatura] of [["403 (sem credencial)", 403], ["degraded", { active: false, degraded: true, trial_disponivel: false }],
+                                  ["sem o campo", { active: false }]]) {
+  test(`logado com resposta incerta (${nome}): textos originais e /assinar`, async () => {
+    const { page, ctx, erros, subs } = await abrir({ logado: true, assinatura });
+    await assentou(page, subs);
+    assert.equal(subs.length, 1);
+    assert.deepEqual(await ctas(page), ORIGINAIS.map(nome => ({ nome, seta: true, href: PLUS_MENSAL })));
+    assert.equal((await cartoes(page)).filter(h => h.startsWith("/assinar?")).length, 6);
+    await ctx.close();
+    assert.deepEqual(erros.filter(e => !e.includes("/billing/subscription")), []);
+  });
+}
+
+test("anônimo: nenhuma chamada ao /billing/subscription, textos originais, UTM repassada; sem query o href é o exato", async () => {
+  const comUtm = await abrir({ query: "?utm_source=ig&x=1&UTM_Campaign=a%20b&fbclid=AbC" });
+  await assentou(comUtm.page, comUtm.subs, 0);
+  const href = PLUS_MENSAL + "&utm_source=ig&UTM_Campaign=a+b&fbclid=AbC";
+  assert.deepEqual(await ctas(comUtm.page), ORIGINAIS.map(nome => ({ nome, seta: true, href })));
+  const cab = comUtm.page.locator("nav a.pb-nav-cta");
+  assert.deepEqual([(await cab.textContent()).trim(), await cab.getAttribute("href")], ["7 dias grátis", href]);
+  // carregado 2x: não duplica a query
+  await comUtm.page.addScriptTag({ url: "/teste-piggy.js" });
+  assert.deepEqual(await comUtm.page.$$eval(CTAS_UTM, as => as.map(a => a.getAttribute("href"))), Array(4).fill(href));
+  // os 6 cartões também levam a campanha (B2): o do Pro anual com utm_source e fbclid
+  assert.equal(await comUtm.page.getAttribute('[data-plano="pro"] a.so-anual', "href"), "/assinar?plano=pro&ciclo=annual&utm_source=ig&UTM_Campaign=a+b&fbclid=AbC");
+  assert.equal((await cartoes(comUtm.page)).filter(h => h.endsWith("&utm_source=ig&UTM_Campaign=a+b&fbclid=AbC")).length, 6);
+  assert.equal(comUtm.subs.length, 0);
+  assert.deepEqual(comUtm.erros, []);
+  await comUtm.ctx.close();
+
+  const sem = await abrir({ query: "?x=1" });
+  await assentou(sem.page, sem.subs, 0);
+  assert.deepEqual(await sem.page.$$eval(CTAS_UTM, as => as.map(a => a.getAttribute("href"))), Array(4).fill(PLUS_MENSAL));
+  assert.equal(sem.subs.length, 0);
+  await sem.ctx.close();
 });
 
 test("plano sem price no Stripe (plans-config): os botões dele viram 'Indisponível' sem link; os outros seguem para a /assinar", async () => {
@@ -322,8 +422,8 @@ test("plano sem price no Stripe (plans-config): os botões dele viram 'Indispon�
   assert.deepEqual(erros, []);
 });
 
-test("com sessão e o plans-config chegando depois do /auth/validate, o plano indisponível ainda vira 'Indisponível'", async () => {
-  const { page, ctx, erros } = await abrir({ logado: true, disponivel: { plus_available: false }, planosDepois: 600 });
+test("com assinatura ativa e o plans-config chegando depois do /billing/subscription, o plano indisponível ainda vira 'Indisponível'", async () => {
+  const { page, ctx, erros } = await abrir({ logado: true, assinatura: { active: true }, disponivel: { plus_available: false }, planosDepois: 600 });
   await page.waitForFunction(() => document.querySelectorAll('[data-plano] [aria-disabled="true"]').length === 2, null, { timeout: 5000 });
   const r = await page.$$eval("[data-plano] a.so-anual, [data-plano] a.so-mensal", as => as.map(a => [a.closest("[data-plano]").dataset.plano, a.getAttribute("href"), a.textContent.trim()]));
   await ctx.close();
@@ -331,6 +431,27 @@ test("com sessão e o plans-config chegando depois do /auth/validate, o plano in
   assert.deepEqual(r.filter(([t]) => t !== "plus").map(([, h]) => h), Array(4).fill("/precos"));
   assert.deepEqual(erros, []);
 });
+
+// O `scrollWidth` não pega link vazado (o #hero-cta é nowrap e centraliza): mede cada <a>.
+for (const rotulo of [null, "Assinar o Plus", "Gerenciar meu plano"]) {
+  test(`CTAs com '${rotulo || "Começar meus 7 dias grátis"}': hero dentro da tela, CTA final em até 2 linhas e preço da barra inteiro de 320 a 414`, async () => {
+    for (const largura of [320, 360, 375, 390, 414]) {
+      const { page, ctx } = await abrir({ largura });
+      await page.evaluate(() => document.fonts.ready);
+      if (rotulo) await page.evaluate(t => document.querySelectorAll("[data-rotulo]").forEach(s => { s.textContent = t; }), rotulo);
+      const m = await page.evaluate(() => ({
+        hero: [...document.querySelectorAll("#hero-cta a")].map(a => { const r = a.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.right)]; }),
+        fim: document.querySelector("#cta-final a[data-utm]").getBoundingClientRect().height,
+        // o bloco do preço da barra fixa corta com overflow:hidden: texto cortado = scrollWidth > clientWidth
+        preco: [...document.querySelectorAll("#sticky > span, #sticky > span > *")].map(e => e.scrollWidth - e.clientWidth),
+      }));
+      await ctx.close();
+      for (const [l, r] of m.hero) assert.ok(l >= 0 && r <= largura, `${largura}: link do hero em ${l}..${r}`);
+      assert.ok(m.fim <= 81, `${largura}: CTA final com ${m.fim}px (mais de 2 linhas)`);
+      assert.deepEqual(m.preco, [0, 0, 0], `${largura}: preço da barra fixa cortado`);
+    }
+  });
+}
 
 // ── Imagens: só o topo baixa de cara, e o espaço de cada uma já está reservado ─────────
 
@@ -397,4 +518,46 @@ async function pathAposAbrirStandalone(query) {
 test("PWA instalada (standalone): a / manda para /login; com ?site=1 fica na landing", async () => {
   assert.equal(await pathAposAbrirStandalone(""), "/login");
   assert.equal(await pathAposAbrirStandalone("?site=1"), "/index.html");
+});
+
+// B1: o "Trocar de plano" do S1 tem de chegar à tabela da / também na PWA instalada, onde a / sem
+// `?site=1` manda ao /login. Controle negativo: com href="/#planos" o caso standalone fica vermelho.
+for (const standalone of [false, true]) {
+  test(`'Trocar de plano' na /assinar ${standalone ? "na PWA instalada" : "no navegador"}: o clique abre a / já em #planos`, async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });
+    if (standalone) await ctx.addInitScript(() => { const real = window.matchMedia.bind(window);
+      window.matchMedia = q => /display-mode:\s*standalone/.test(q) ? { matches: true, media: q, addEventListener() {}, removeEventListener() {} } : real(q); });
+    for (const rota of ["**/auth/me", "**/auth/validate", "**/auth/refresh*"]) await ctx.route(rota, r => r.fulfill({ status: 401, contentType: "application/json", body: "{}" }));
+    await ctx.route("**/billing/plans-config", r => r.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+    const page = await ctx.newPage();
+    await page.goto(`${ORIGIN}/assinar.html?plano=pro&ciclo=annual`, { waitUntil: "load" });
+    await page.waitForSelector("#s1:not([hidden])");
+    await Promise.all([page.waitForURL(u => !u.pathname.startsWith("/assinar")), page.click("text=Trocar de plano")]);
+    await page.waitForLoadState("load");
+    await page.waitForTimeout(300);  // a guarda da PWA (1º <script> da /) troca a URL na hora
+    const url = new URL(page.url());
+    const topo = await page.evaluate(() => document.getElementById("planos")?.getBoundingClientRect().top ?? null);
+    await ctx.close();
+    assert.equal(url.pathname, "/", `foi para ${url.pathname}`);
+    assert.ok(topo !== null && Math.abs(topo) < 2, `#planos em ${topo}`);
+  });
+}
+
+test("teste-piggy.js atrasado e o Plus 'Indisponível' antes dele: os cartões restantes ainda levam a UTM", async () => {
+  // Sem o [href] no seletor do teste-piggy, o cartão sem href lança no meio do laço e os do Pro ficam sem UTM.
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await ctx.route("**/auth/validate", r => r.fulfill({ status: 401, contentType: "application/json", body: "{}" }));
+  await ctx.route("**/billing/plans-config", r => r.fulfill({ status: 200, contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: false, pro_available: true }) }));
+  await ctx.route("**/teste-piggy.js*", async r => { await new Promise(ok => setTimeout(ok, 800)); await r.continue(); });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on("pageerror", e => erros.push(e.message));
+  await page.goto(`${ORIGIN}/index.html?utm_source=fb&fbclid=abc`, { waitUntil: "load" });
+  const r = await page.$$eval(CARTOES, as => as.map(a => [a.closest("[data-plano]").dataset.plano, a.getAttribute("href")]));
+  await ctx.close();
+  assert.deepEqual(r.filter(([t]) => t === "plus").map(([, h]) => h), [null, null], "o Plus não virou Indisponível antes do script");
+  assert.deepEqual(r.filter(([t]) => t === "pro").map(([, h]) => h),
+    ["/assinar?plano=pro&ciclo=annual&utm_source=fb&fbclid=abc", "/assinar?plano=pro&ciclo=monthly&utm_source=fb&fbclid=abc"]);
+  assert.deepEqual(erros, []);
 });

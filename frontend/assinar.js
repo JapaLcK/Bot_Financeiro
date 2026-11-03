@@ -163,9 +163,10 @@
     if (g !== gen) return;
     if (!(r.ok && r.d.client_secret && r.d.publishable_key)) return falhaCheckout(r, iniciaS3);
     const td = Number(r.d.trial_days) || 0;
+    $("s4-titulo").hidden = td > 0;
     $("s4-trial").textContent = td > 0
       ? "Você tem " + td + " dias grátis. A cobrança do plano só começa depois, e dá para cancelar antes."
-      : "Esta assinatura não tem período grátis: a cobrança começa hoje.";
+      : "O teste grátis é um por número de telefone. A cobrança começa assim que você confirmar a assinatura.";
     montar(r.d);
     const g4 = gen;  // a geração do S4: se a pessoa já saiu dele, o plans-config tardio não mexe na tela
     cfg.then(function (c) { if (g4 === gen) $("s4-pix").hidden = !(c && c.pix_annual_available === true); });
@@ -307,9 +308,9 @@
     liga();
     const PI = window.PBPurchaseIntent;
     if (!PI || !PI.isValidChoice(plano, ciclo)) { mostra("l0"); return; }
-    // "Plus · Mensal · Cartão" → "Plus · Mensal": os nomes ficam numa fonte só.
-    $("s1-titulo").textContent = "Falta pouco para assinar o "
-      + PI.summary({ plan: plano, cycle: ciclo, method: "card" }).split(" · ").slice(0, 2).join(" · ");
+    // "Plus · Mensal · Cartão" → "Plus": o nome do plano fica numa fonte só (PLAN_NAMES).
+    $("s1-titulo").textContent = "Seus 7 dias grátis do "
+      + PI.summary({ plan: plano, cycle: ciclo, method: "card" }).split(" · ")[0] + " começam aqui";
     const atual = await sessaoViva();
     if (atual && (!dados.email || dados.email.toLowerCase() === atual.toLowerCase())) {
       contaEmail = atual;

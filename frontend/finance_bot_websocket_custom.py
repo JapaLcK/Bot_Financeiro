@@ -5523,24 +5523,16 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
 
     # A elegibilidade só é consultada ao criar uma sessão nova. Reabrir a mesma
     # URL preserva exatamente as condições que o usuário já viu no checkout.
-    from core.services.plan_service import (
-        TRIAL_DAYS_DEFAULT,
-        ai_monthly_limit_for_tier,
-        plans_v2_enabled,
-        trial_days_total,
-    )
-    if plans_v2_enabled():
-        from db.plans import TrialEligibilityError, is_trial_eligible_for_user
-        try:
-            eligible = await asyncio.to_thread(is_trial_eligible_for_user, user_id)
-        except TrialEligibilityError:
-            raise HTTPException(
-                status_code=503,
-                detail="Não consegui confirmar seu período grátis agora. Tenta de novo em instantes.",
-            )
-        trial_days = trial_days_total() if eligible else 0
-    else:
-        trial_days = int(os.getenv("PRO_TRIAL_DAYS", str(TRIAL_DAYS_DEFAULT)))
+    from core.services.plan_service import ai_monthly_limit_for_tier, plans_v2_enabled
+    from core.services.trial_offer import dias_de_trial
+    from db.plans import TrialEligibilityError
+    try:
+        trial_days = await asyncio.to_thread(dias_de_trial, user_id)
+    except TrialEligibilityError:
+        raise HTTPException(
+            status_code=503,
+            detail="Não consegui confirmar seu período grátis agora. Tenta de novo em instantes.",
+        )
 
     # Cota mensal da IA do plano comprado. Plus e Pro têm `ai_monthly_messages:
     # None` em plan_limits.py, o que NÃO é ilimitado: cai no teto global
@@ -5913,6 +5905,15 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
     """Estado da assinatura pro front (/precos): plano/intervalo atual, fim do
     período pago e troca agendada (se houver). Sem assinatura → active: False."""
     await asyncio.to_thread(_exigir_credencial, user_id)
+    # `trial_disponivel` pro rótulo dos CTAs da /: os dias que o checkout daria (§0.7);
+    # falha = campo ausente (o front trata como desconhecido). ValueError = PRO_TRIAL_DAYS
+    # inválido com o v2 desligado: a /precos, o pix-checkout e o /painel leem esta rota.
+    from core.services.trial_offer import dias_de_trial
+    from db.plans import TrialEligibilityError
+    try:
+        trial = {"trial_disponivel": await asyncio.to_thread(dias_de_trial, user_id) > 0}
+    except (TrialEligibilityError, ValueError):
+        trial = {}
     import stripe
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -5921,7 +5922,7 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
     user = await asyncio.to_thread(get_auth_user, user_id) or {}
     if (user.get("last_payment_status") or "") == "grandfathered":
         return {"active": True, "lifetime": True, "plan": "plus", "interval": None,
-                "current_period_end": None, "scheduled_change": None}
+                "current_period_end": None, "scheduled_change": None, **trial}
 
     # PIX ANTES DO STRIPE, e a ordem é o conteúdo (§14 item 12). Quem migrou do
     # cartão fica com `stripe_customer_id` preenchido para sempre — perguntando
@@ -5938,11 +5939,11 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
         return {"active": True, "lifetime": False, "gateway": "pix",
                 "plan": tier_publico(pix["plan_stored"]), "interval": "annual",
                 "current_period_end": pix["ends_at"].date().isoformat(),
-                "scheduled_change": None}
+                "scheduled_change": None, **trial}
 
     cust = user.get("stripe_customer_id")
     if not STRIPE_SECRET_KEY or not cust:
-        return {"active": False}
+        return {"active": False, **trial}
     stripe.api_key = STRIPE_SECRET_KEY
 
     try:
@@ -5950,9 +5951,9 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
     except StripeLookupError:
         # Leitura de estado pode degradar suave: o front mantém os botões
         # padrão e o guard fail-closed do checkout segura qualquer clique.
-        return {"active": False, "degraded": True}
+        return {"active": False, "degraded": True, **trial}
     if sub is None:
-        return {"active": False}
+        return {"active": False, **trial}
 
     plan, interval = _plan_interval_for_price(_sub_price_id(sub))
     period_end = _sub_period_end_ts(sub)
@@ -5988,7 +5989,7 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
 
     return {"active": True, "lifetime": False, "gateway": "stripe", "plan": plan,
             "interval": interval, "current_period_end": period_end_iso,
-            "scheduled_change": scheduled}
+            "scheduled_change": scheduled, **trial}
 
 
 def _grant_pix_vigente(user_id: int) -> dict | None:

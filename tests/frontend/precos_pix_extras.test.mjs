@@ -94,6 +94,8 @@ test("E1: as caixas no formulário; as marcadas vão no POST; o QR mostra o tota
   const caixa = await page.$eval(".pix-form .pp-bump", (b) => ({
     texto: b.textContent, b: b.querySelectorAll("b b").length, imgs: [...b.querySelectorAll("img")].map((i) => i.src) }));
   assert.match(caixa.texto, /Leva junto\? Só nesta compra/);
+  // Pix anual não tem trial: o aviso "cobrado hoje… dias grátis" da /assinar não entra aqui.
+  assert.equal(await page.locator(".pix-ov .pp-bump-aviso").count(), 0, "o aviso do trial entrou no modal do Pix");
   assert.match(caixa.texto, /Saia do <b>vermelho<\/b>/, "o nome do Stripe não entrou como texto");
   assert.equal(caixa.b, 0, "o nome do Stripe virou marcação");
   assert.deepEqual(caixa.imgs, ["https://files.stripe.com/capa.png"], "capa fora de https entrou");

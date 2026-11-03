@@ -311,7 +311,8 @@ def test_subscription_sem_grant_pix_segue_para_o_stripe(user_id, monkeypatch):
     """
     conta(user_id, "free", None)
     corpo = _subscription(monkeypatch, user_id)
-    assert corpo == {"active": False}, corpo
+    # trial_disponivel False: a conta do `conta()` não tem telefone (regra do checkout)
+    assert corpo == {"active": False, "trial_disponivel": False}, corpo
 
 
 def test_plans_config_publica_a_flag_do_pix(monkeypatch):

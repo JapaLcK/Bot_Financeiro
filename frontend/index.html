@@ -104,7 +104,7 @@ a{color:inherit}a:hover{opacity:.85}
 .pb-wbtn{transition:transform .15s ease,box-shadow .15s ease,filter .15s ease}.pb-wbtn:hover{transform:translateY(-1px);filter:brightness(.97);box-shadow:0 4px 12px rgba(11,20,26,0.14)!important}.pb-wbtn:active{transform:scale(.98)}.pb-wbtn:focus-visible{outline:2px solid #111111;outline-offset:3px}
 @media (max-width: 760px){.pb-agents{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important}.pb-agents>div{border-radius:20px!important}.pb-agents>div>div:first-child{height:150px!important;padding-top:14px!important}.pb-agents img{height:136px!important;max-width:94%!important}.pb-agents>div>div:last-child{padding:14px 14px 18px!important;gap:6px!important}.pb-agents .pb-d{font-size:26px!important}.pb-agents>div>div:last-child>span:last-child{font-size:13px!important;line-height:1.45!important}.pb-agents>div:last-child:nth-child(odd){grid-column:1/-1}.pb-agents .pb-agcta{min-height:0!important;padding:16px!important;gap:14px!important;border-radius:20px!important}.pb-agents .pb-agcta .pb-d{font-size:clamp(20px,6.2vw,28px)!important;line-height:1}.pb-agents .pb-agcta a{align-self:stretch!important;justify-content:center;text-align:center;font-size:13px!important;padding:12px 8px!important;min-height:44px!important;line-height:1.2}}
 @media (max-width: 760px){.pb-agents img.pb-agphoto{height:100%!important;max-width:none!important}}
-@media (max-width: 760px){.pb-sticky{display:flex!important;transform:translateY(140%);opacity:0;transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .25s ease;pointer-events:none;bottom:calc(12px + env(safe-area-inset-bottom))!important}.pb-sticky.st-on{transform:none;opacity:1;pointer-events:auto}}@media (max-width: 760px) and (prefers-reduced-motion: reduce){.pb-sticky{transition:none}}
+@media (max-width: 760px){#sticky>span>*{white-space:normal!important}.pb-sticky{display:flex!important;transform:translateY(140%);opacity:0;transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .25s ease;pointer-events:none;bottom:calc(12px + env(safe-area-inset-bottom))!important}.pb-sticky.st-on{transform:none;opacity:1;pointer-events:auto}}@media (max-width: 760px) and (prefers-reduced-motion: reduce){.pb-sticky{transition:none}}
 @media (max-width: 760px){.pb-prova{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important}.pb-prova>div:last-child{grid-column:1/-1}.pb-vcard{border-radius:20px!important}}
 
 /* ===== oferta: o que o runtime fazia em JS virou CSS/atributo ===== */
@@ -133,7 +133,8 @@ img{height:auto}
 .pb-hl>.pb-teste{align-self:flex-start}
 @media (max-width: 760px){.pb-hl>.pb-teste{align-self:stretch;font-size:clamp(12px,3.4vw,14px)!important;padding:14px 12px!important;min-height:48px!important}}
 @media (max-width:480px){.nav .pb-logo-txt{display:none}.nav .pb-acct-lbl{max-width:96px}}
-@media (max-width:360px){.pb-nav-cta{padding:10px 14px!important;font-size:14px!important}.pb-nav-entrar{font-size:14px!important}}
+@media (max-width:360px){.pb-nav-cta{padding:10px 14px!important;font-size:14px!important}.pb-nav-entrar{font-size:14px!important}#hero-cta{flex-wrap:wrap!important}#cta-final>div{padding-inline:28px!important}}
+@media (max-width:400px){#cta-final a[data-utm]{padding-inline:20px!important}}
 </style>
 <style>html.pb-safe body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);box-sizing:border-box}</style>
 <script>
@@ -171,7 +172,7 @@ img{height:auto}
 </div>
 <div class="nav-right" style="display: flex; align-items: center; gap: 14px;">
 <a class="pb-nav-entrar" href="/login" style="text-decoration: none; color: #BDBDBD; font-size: 15px; min-height: 44px; display: inline-flex; align-items: center;">Entrar</a>
-<a class="pb-nav-cta" href="#planos" style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 15px; padding: 12px 22px; border-radius: 999px; min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center;">Começar agora</a>
+<a class="pb-nav-cta" href="/assinar?plano=plus&amp;ciclo=monthly" data-utm style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 15px; padding: 12px 22px; border-radius: 999px; min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center;">7 dias grátis</a>
 </div>
 </nav>
 
@@ -182,14 +183,14 @@ img{height:auto}
 Assistente financeiro com IA no WhatsApp
 </div>
 <h1 class="pb-d pb-u1 pb-h1" style="margin: 0; font-size: clamp(52px, 6.6vw, 100px); line-height: .92;"><span style="display: block; white-space: nowrap;">Seus gastos</span><span style="display: block; white-space: nowrap;">se organizam</span><span style="display: block; white-space: nowrap; color: #FF2D8E;">enquanto</span><span style="display: block; white-space: nowrap; color: #FF2D8E;">você vive.</span></h1>
-<p class="pb-u2" style="margin: 0; font-size: clamp(17px, 1.5vw, 20px); line-height: 1.55; color: #BDBDBD; max-width: 520px;">Conecte seu banco uma vez e o Piggy organiza cada gasto no WhatsApp e num painel completo. O que não passa pelo banco, você manda num áudio.</p>
+<p class="pb-u2" style="margin: 0; font-size: clamp(17px, 1.5vw, 20px); line-height: 1.55; color: #BDBDBD; max-width: 520px;">Manda o gasto no WhatsApp, em texto, áudio ou foto. O Piggy anota, separa por categoria e monta seu painel. Quer no automático? Conecte o banco, só leitura.</p>
 <div class="pb-u2 pb-ctas" id="hero-cta" style="display: flex; flex-wrap: nowrap; align-items: center; gap: 12px;">
-<a href="#planos" style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 17px; padding: 18px 30px; border-radius: 999px; min-height: 58px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 10px; white-space: nowrap;">Quero viver sem planilha <span class="pb-arr">→</span></a>
+<a href="/assinar?plano=plus&amp;ciclo=monthly" data-utm style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 17px; padding: 18px 30px; border-radius: 999px; min-height: 58px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 10px; white-space: nowrap;"><span data-rotulo>Começar meus 7 dias grátis</span><span class="pb-arr" aria-hidden="true">→</span></a>
 <a href="#como-funciona" style="color: #FFFFFF; text-decoration: none; font-weight: 600; font-size: 16px; padding: 18px 24px; border-radius: 999px; min-height: 58px; box-sizing: border-box; display: inline-flex; align-items: center; border: 1px solid #3A3A3A; white-space: nowrap;">Ver como funciona</a>
 </div>
 <a data-teste href="/teste" class="pb-u2 pb-teste" style="color: #FFFFFF; text-decoration: none; font-weight: 600; font-size: 16px; padding: 18px 24px; border-radius: 999px; min-height: 58px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #3A3A3A; white-space: nowrap;">Testar o Piggy agora</a>
 <div class="pb-u3 pb-trust" style="display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 14px; color: #9A9A9A;">
-<span>Garantia de 7 dias</span><span>·</span><span>A partir de R$ 0,33 por dia</span><span>·</span><span>Sem app pra baixar</span>
+<span>Cancele quando quiser</span><span>·</span><span>A partir de R$ 0,33 por dia</span><span>·</span><span>Sem app pra baixar</span>
 </div>
 </div>
 
@@ -908,15 +909,15 @@ Assistente financeiro com IA no WhatsApp
 </section>
 
 <!-- ============ PLANOS ============ -->
-<section id="planos" data-ciclo="anual" style="background: #F6F4F1; padding: 128px 20px;">
+<section id="planos" data-ciclo="mensal" style="background: #F6F4F1; padding: 128px 20px;">
 <div style="max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 48px;">
 <div style="display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; max-width: 860px;">
 <h2 class="pb-d" style="margin: 0; font-size: clamp(48px, 6.5vw, 96px);">Menos que um delivery <span style="color: #FF2D8E;">por mês.</span></h2>
 <p style="margin: 0; font-size: 19px; line-height: 1.55; color: #555555;">Escolha o plano, conecte o WhatsApp e mande o primeiro gasto em 2 minutos.</p>
 </div>
 <div style="display: inline-flex; background: #FFFFFF; border: 1px solid #E4E1DC; border-radius: 999px; padding: 5px; gap: 4px;">
-<button type="button" class="pb-ciclo" data-set="mensal" aria-pressed="false" style="border: none; cursor: pointer; font-family: inherit; font-size: 15px; font-weight: 700; padding: 12px 24px; border-radius: 999px; min-height: 46px;">Mensal</button>
-<button type="button" class="pb-ciclo" data-set="anual" aria-pressed="true" style="border: none; cursor: pointer; font-family: inherit; font-size: 15px; font-weight: 700; padding: 12px 24px; border-radius: 999px; min-height: 46px;">Anual · 2 meses grátis</button>
+<button type="button" class="pb-ciclo" data-set="mensal" aria-pressed="true" style="border: none; cursor: pointer; font-family: inherit; font-size: 15px; font-weight: 700; padding: 12px 24px; border-radius: 999px; min-height: 46px;">Mensal</button>
+<button type="button" class="pb-ciclo" data-set="anual" aria-pressed="false" style="border: none; cursor: pointer; font-family: inherit; font-size: 15px; font-weight: 700; padding: 12px 24px; border-radius: 999px; min-height: 46px;">Anual · 2 meses grátis</button>
 </div>
 <div style="width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; align-items: stretch;">
 <div data-plano="essencial" style="background: #FFFFFF; color: #111111; border: 1px solid #E4E1DC; border-radius: 32px; padding: 34px 30px; display: flex; flex-direction: column; gap: 20px; position: relative;">
@@ -928,8 +929,8 @@ Assistente financeiro com IA no WhatsApp
 <li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>Painel completo no navegador</li>
 <li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>1 banco conectado</li>
 </ul>
-<a href="/assinar?plano=essencial&amp;ciclo=annual" class="pb-plbtn so-anual" style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Começar no Essencial</a>
-<a href="/assinar?plano=essencial&amp;ciclo=monthly" class="pb-plbtn so-mensal" style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Começar no Essencial</a>
+<a href="/assinar?plano=essencial&amp;ciclo=annual" class="pb-plbtn so-anual" data-utm style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Começar no Essencial</a>
+<a href="/assinar?plano=essencial&amp;ciclo=monthly" class="pb-plbtn so-mensal" data-utm style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Começar no Essencial</a>
 </div>
 <div data-plano="plus" style="background: #111111; color: #FFFFFF; border: 1px solid #111111; border-radius: 32px; padding: 34px 30px; display: flex; flex-direction: column; gap: 20px; position: relative;">
 <span style="position: absolute; top: -14px; left: 30px; background: #FF2D8E; color: #111111; border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 800;">Mais escolhido</span>
@@ -942,8 +943,8 @@ Assistente financeiro com IA no WhatsApp
 <li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>Agentes e alertas de gastos</li>
 <li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>Orçamento Doméstico e previsão de 30 dias</li>
 </ul>
-<a href="/assinar?plano=plus&amp;ciclo=annual" class="pb-pulse so-anual" style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Plus</a>
-<a href="/assinar?plano=plus&amp;ciclo=monthly" class="pb-pulse so-mensal" style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Plus</a>
+<a href="/assinar?plano=plus&amp;ciclo=annual" class="pb-pulse so-anual" data-utm style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Plus</a>
+<a href="/assinar?plano=plus&amp;ciclo=monthly" class="pb-pulse so-mensal" data-utm style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Plus</a>
 </div>
 <div data-plano="pro" style="background: #FFFFFF; color: #111111; border: 1px solid #E4E1DC; border-radius: 32px; padding: 34px 30px; display: flex; flex-direction: column; gap: 20px; position: relative;">
 <div style="display: flex; flex-direction: column; gap: 6px;"><span class="pb-d" style="font-size: 40px;">Pro</span><span style="font-size: 15px; color: #555555;">Casal, família e investimentos</span></div>
@@ -954,15 +955,15 @@ Assistente financeiro com IA no WhatsApp
 <li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>5 bancos conectados</li>
 <li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>Previsão de 90 dias</li>
 </ul>
-<a href="/assinar?plano=pro&amp;ciclo=annual" class="pb-plbtn so-anual" style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Pro</a>
-<a href="/assinar?plano=pro&amp;ciclo=monthly" class="pb-plbtn so-mensal" style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Pro</a>
+<a href="/assinar?plano=pro&amp;ciclo=annual" class="pb-plbtn so-anual" data-utm style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Pro</a>
+<a href="/assinar?plano=pro&amp;ciclo=monthly" class="pb-plbtn so-mensal" data-utm style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Pro</a>
 </div>
 </div>
 <div style="width: 100%; background: #111111; color: #FFFFFF; border-radius: 32px; padding: 30px 36px; display: flex; flex-wrap: wrap; align-items: center; gap: 24px 40px; box-sizing: border-box;">
 <img src="/brand/oferta/d6cdf9600304bc874e257d4bc6425236.webp" alt="Piggy fazendo joinha" style="flex: 0 0 auto; width: 120px; height: auto;" width="240" height="276" loading="lazy">
 <div style="flex: 1 1 420px; display: flex; flex-direction: column; gap: 8px;">
-<span class="pb-d" style="font-size: 44px;">Garantia Piggy <span style="color: #FF2D8E;">de 7 dias.</span></span>
-<p style="margin: 0; font-size: 17px; line-height: 1.55; color: #BDBDBD;">Conecta o banco, manda áudio, abre o painel, testa tudo. Se não for pra você, devolvo 100% do seu dinheiro. Sem pergunta e sem ligação.</p>
+<span class="pb-d" style="font-size: 44px;">7 dias grátis. <span style="color: #FF2D8E;">Depois, 7 dias pra pedir reembolso.</span></span>
+<p style="margin: 0; font-size: 17px; line-height: 1.55; color: #BDBDBD;">Primeiro, 7 dias grátis no cartão pra testar tudo: conecta o banco, manda áudio, abre o painel. Cancela antes e não paga nada. Se a primeira cobrança vier e não fizer sentido, você tem mais 7 dias pra pedir 100% de volta pelo suporte. Sem pergunta e sem ligação.</p>
 </div>
 <div style="flex: 1 1 240px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: #BDBDBD;">
 <span>Pagamento seguro · Cancele pelo painel</span>
@@ -1005,7 +1006,7 @@ Assistente financeiro com IA no WhatsApp
 </details>
 <details name="faq" style="border-top: 1px solid #E4E1DC;">
 <summary style="width: 100%; box-sizing: border-box; text-align: left; cursor: pointer; font-family: inherit; color: #111111; font-size: 19px; font-weight: 700; padding: 24px 0; min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">E se eu não gostar?<span class="fq-i" aria-hidden="true" style="flex: 0 0 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;"></span></summary>
-<p style="margin: 0; padding: 0 56px 26px 0; font-size: 17px; line-height: 1.6; color: #555555;">Você tem 7 dias de garantia e recebe 100% de volta.</p>
+<p style="margin: 0; padding: 0 56px 26px 0; font-size: 17px; line-height: 1.6; color: #555555;">Cancela durante os 7 dias grátis e não paga nada. Se a primeira cobrança já veio, você tem 7 dias a partir dela pra pedir 100% de volta pelo suporte@pigbankai.com. No Pix anual não tem teste grátis: os 7 dias contam da confirmação do pagamento.</p>
 </details>
 <details name="faq" style="border-top: 1px solid #E4E1DC;">
 <summary style="width: 100%; box-sizing: border-box; text-align: left; cursor: pointer; font-family: inherit; color: #111111; font-size: 19px; font-weight: 700; padding: 24px 0; min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">O que acontece depois que eu assino?<span class="fq-i" aria-hidden="true" style="flex: 0 0 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;"></span></summary>
@@ -1021,10 +1022,10 @@ Assistente financeiro com IA no WhatsApp
 <div style="max-width: 1240px; margin: 0 auto; background: #FF2D8E; color: #111111; border-radius: 44px; padding: 80px 56px 0; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 32px; overflow: hidden;">
 <div style="flex: 1 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 24px; padding-bottom: 80px;">
 <h2 class="pb-d" style="margin: 0; font-size: clamp(56px, 7.5vw, 112px);">Daqui a 30 dias, você vai saber pra onde foi cada real.</h2>
-<p style="margin: 0; font-size: 19px; line-height: 1.55; max-width: 540px; font-weight: 500;">Conecta uma vez, me manda um áudio quando precisar e deixa o resto comigo. Se em 7 dias não fizer sentido, seu dinheiro volta.</p>
-<a href="#planos" style="align-self: flex-start; background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 18px; padding: 20px 34px; border-radius: 999px; min-height: 62px; box-sizing: border-box; display: inline-flex; align-items: center;">Quero viver sem planilha →</a>
+<p style="margin: 0; font-size: 19px; line-height: 1.55; max-width: 540px; font-weight: 500;">Conecta uma vez, me manda um áudio quando precisar e deixa o resto comigo. Se em 7 dias não fizer sentido, cancela e não paga nada.</p>
+<a href="/assinar?plano=plus&amp;ciclo=monthly" data-utm style="align-self: flex-start; background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 18px; padding: 20px 34px; border-radius: 999px; min-height: 62px; box-sizing: border-box; display: inline-flex; align-items: center;"><span data-rotulo>Começar meus 7 dias grátis</span><span aria-hidden="true">&nbsp;→</span></a>
 <a data-teste href="/teste" style="align-self: flex-start; color: #111111; text-decoration: none; font-weight: 700; font-size: 17px; padding: 18px 30px; border-radius: 999px; min-height: 58px; box-sizing: border-box; display: inline-flex; align-items: center; border: 1.5px solid #111111;">Testar o Piggy agora</a>
-<span style="font-size: 14px; font-weight: 600;">Garantia de 7 dias · Cancele quando quiser</span>
+<span style="font-size: 14px; font-weight: 600;">Cancele quando quiser · Pode pedir reembolso até 7 dias após a 1ª cobrança</span>
 </div>
 <div style="flex: 1 1 300px; display: flex; justify-content: center; align-self: flex-end;">
 <img src="/brand/oferta/0a9dd217fc9aa8c9d45b0c1c0ec872ef.webp" alt="Piggy comemorando de braços para cima" style="width: 100%; max-width: 380px; height: auto; display: block; margin-bottom: 40px;" width="520" height="476" loading="lazy">
@@ -1053,7 +1054,7 @@ Assistente financeiro com IA no WhatsApp
 
 </div>
 <!-- barra fixa mobile -->
-<div class="pb-sticky" id="sticky" aria-hidden="true" style="position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 50; background: rgba(17,17,17,0.92); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); border: 1px solid #2E2E2E; border-radius: 999px; padding: 6px 6px 6px 16px; display: none; align-items: center; justify-content: space-between; gap: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.35); color: #FFFFFF; font-family: 'Archivo', system-ui, sans-serif; box-sizing: border-box;"><span style="display: flex; flex-direction: column; gap: 1px; min-width: 0; overflow: hidden;"><b style="font-size: clamp(12px, 3.5vw, 14px); line-height: 1.2; white-space: nowrap;">A partir de R$ 0,33/dia</b><span style="font-size: clamp(10.5px, 3vw, 11.5px); color: #BDBDBD; white-space: nowrap;">Garantia de 7 dias</span></span><a href="#planos" class="pb-pulse-lite" tabindex="-1" style="flex: 0 0 auto; background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: clamp(13px, 3.8vw, 15px); padding: 0 16px; min-height: 48px; border-radius: 999px; display: inline-flex; align-items: center; white-space: nowrap;">Começar agora →</a></div>
+<div class="pb-sticky" id="sticky" aria-hidden="true" style="position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 50; background: rgba(17,17,17,0.92); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); border: 1px solid #2E2E2E; border-radius: 999px; padding: 6px 6px 6px 16px; display: none; align-items: center; justify-content: space-between; gap: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.35); color: #FFFFFF; font-family: 'Archivo', system-ui, sans-serif; box-sizing: border-box;"><span style="display: flex; flex-direction: column; gap: 1px; min-width: 0; overflow: hidden;"><b style="font-size: clamp(12px, 3.5vw, 14px); line-height: 1.2; white-space: nowrap;">A partir de R$&nbsp;0,33/dia</b><span style="font-size: clamp(10.5px, 3vw, 11.5px); color: #BDBDBD; white-space: nowrap;">Cancele quando quiser</span></span><a href="/assinar?plano=plus&amp;ciclo=monthly" data-utm class="pb-pulse-lite" tabindex="-1" style="flex: 0 0 auto; background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: clamp(13px, 3.8vw, 15px); padding: 0 16px; min-height: 48px; border-radius: 999px; display: inline-flex; align-items: center; white-space: nowrap;"><span data-rotulo>7 dias grátis</span><span aria-hidden="true">&nbsp;→</span></a></div>
 <link rel="stylesheet" href="/phosphor.css?v=1">
 <script src="/nav-auth.js?v=7" defer></script>
 <script src="/nav-burger.js?v=1" defer></script>
