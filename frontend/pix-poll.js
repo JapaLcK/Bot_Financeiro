@@ -45,7 +45,7 @@ function pixModalQr(d, plano, ctx, cadernos) {
   // corpo. O `aoFechar` daquele overlay já chama o `pixEncerrar` — não há
   // listener novo a registrar aqui, e nem um segundo lugar de onde fechar.
   const { box, fechar, titulo } = ctx;
-  titulo.textContent = nome + " anual" + (valor ? " · " + valor : "");
+  titulo.textContent = nome + " anual" + (valor ? " · " + valor : "") + ", sem teste grátis";
   box.replaceChildren(titulo);
 
   // Tudo que morre junto com o código num container só: expirar é trocar o

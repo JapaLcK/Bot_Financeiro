@@ -274,6 +274,7 @@ for (const pix of [true, false]) {
     await page.locator("#stripe-checkout iframe").waitFor();
     assert.equal(await page.locator("#s4-pix").isVisible(), pix);
     if (pix) {
+      assert.equal(await texto(page, "s4-pix"), "Prefere Pix? Plano anual à vista, sem teste grátis");
       await page.click("#s4-pix");
       await page.waitForURL(/\/continuar-compra$/);
       const intent = JSON.parse(await page.evaluate(() => sessionStorage.getItem("pb_purchase_intent_v1")));
@@ -282,6 +283,16 @@ for (const pix of [true, false]) {
     await ctx.close();
   });
 }
+
+test("#s4-pix a 320px: o texto do Pix anual sem teste grátis cabe no botão e na tela", async () => {
+  const { ctx, page } = await abrir(browser, { viewport: { width: 320, height: 640 }, api: { "GET /auth/me": ME("ana@x.com"),
+    "GET /billing/plans-config": [200, { pix_annual_available: true }] } });
+  await tela(page, "s4-pix");
+  const m = await page.$eval("#s4-pix", (b) => ({ corte: b.scrollWidth - b.clientWidth, direita: b.getBoundingClientRect().right,
+    pagina: document.documentElement.scrollWidth - document.documentElement.clientWidth }));
+  await ctx.close();
+  assert.deepEqual([m.corte <= 0, m.direita <= 320, m.pagina], [true, true, 0], JSON.stringify(m));
+});
 
 for (const [nome, resp, alvo, esperado] of [
   ["already_subscribed", [409, { detail: { error: "already_subscribed", message: "x" } }], "f1", "Seu plano já está ativo nesta conta."],

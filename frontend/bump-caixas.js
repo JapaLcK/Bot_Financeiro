@@ -26,8 +26,9 @@
   }
 
   /** As linhas do bump dentro de `box` (vazio). Uma oferta = a versão A do protótipo; duas ou três = uma caixa
-   *  com uma linha cada. Marcada = `no_carrinho === true`. Devolve os checkboxes, na ordem de `extras`. */
-  function montar(box, extras) {
+   *  com uma linha cada. Marcada = `no_carrinho === true`. `aviso` (opcional): uma linha logo abaixo da faixa,
+   *  antes da escolha (a /assinar diz que o caderno é cobrado hoje, mesmo com trial). Devolve os checkboxes. */
+  function montar(box, extras, aviso) {
     const unica = extras.length === 1;
     box.hidden = !extras.length;
     box.classList.toggle("unica", unica);
@@ -36,6 +37,7 @@
     const seta = el("span", "pp-seta", unica ? "➜" : "↓");
     seta.setAttribute("aria-hidden", "true");
     box.appendChild(topo);
+    if (aviso) box.appendChild(el("p", "pp-bump-aviso", aviso));
     if (!unica) topo.appendChild(seta);  // a seta aparece UMA vez: na faixa, ou na linha da oferta única
     return extras.map(function (x) {
       const l = el("label", "pp-linha"), cb = el("input");

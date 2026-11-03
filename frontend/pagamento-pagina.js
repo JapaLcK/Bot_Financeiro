@@ -57,7 +57,9 @@
       if (eu !== atual) return { destroy: function () {} };
       limpa();
       // As caixas são do bump-caixas.js (as mesmas do modal do Pix); sem ele, o throw cai no plano B do assinar.js.
-      const cbs = window.PBBumpCaixas.montar($("pp-bump"), Array.isArray(d.extras) ? d.extras : []);
+      // Com trial, o caderno ainda é cobrado hoje: o aviso vem antes da escolha.
+      const cbs = window.PBBumpCaixas.montar($("pp-bump"), Array.isArray(d.extras) ? d.extras : [],
+        td > 0 ? "Cobrado hoje. Os " + td + " dias grátis valem só para o plano." : "");
       // voo: um /bump, cupom ou pagamento em andamento. temTotal: já chegou um `change` com o total. folha: a da
       // carteira aberta (do `click` ao `cancel`/`confirm`), mostrando o total da sessão: o carrinho não muda por baixo.
       // viuClick: o Stripe já mandou um `click` nesta montagem (o Apple Pay do Safari pode nunca mandar).
