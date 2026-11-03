@@ -96,6 +96,7 @@ TABELA = {
     ("GET", "/d/{code}"): (P, "magic link"), ("GET", "/r/{code}"): (P, "link de afiliado"),
     ("GET", "/i/{code}"): (P, "link de prospect"), ("GET", "/wa"): (P, "abre o WhatsApp"),
     ("GET", "/teste"): (P, "teste do Piggy"), ("GET", "/t/{code}"): (P, "link do teste"),
+    ("POST", "/cupom"): (P, "pop-up do cupom"), ("GET", "/cupom-popup.js"): (P, "asset"),
     ("POST", "/contact"): (P, "formulário"), ("GET", "/health"): (P, "health"),
     ("GET", "/unsubscribe"): (P, "descadastro"), ("POST", "/unsubscribe"): (P, "descadastro"),
     ("GET", "/api/commands-catalog"): (P, "catálogo"), ("GET", "/api/blog/news"): (P, "blog"),
