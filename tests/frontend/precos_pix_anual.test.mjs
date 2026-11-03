@@ -517,9 +517,10 @@ test("PT4: no anual o Plus diz Renovar, os outros Pagar, e nada bate no change-p
     const rotulos = await page.$$eval("[data-pix-cta]", (e) =>
       e.map((b) => [b.dataset.pixCta, b.textContent.trim()]));
     assert.deepEqual(rotulos.map(([p]) => p), ["essencial", "plus", "pro"]);
-    assert.match(rotulos[1][1], /^Renovar no Pix/, `Plus leu "${rotulos[1][1]}"`);
+    // Quem já assina RENOVA (sem trial a perder); quem paga pela 1ª vez lê que o Pix não tem teste grátis.
+    assert.equal(rotulos[1][1], "Renovar no Pix (à vista)", `Plus leu "${rotulos[1][1]}"`);
     for (const i of [0, 2]) {
-      assert.match(rotulos[i][1], /^Pagar no Pix/, `${rotulos[i][0]} leu "${rotulos[i][1]}"`);
+      assert.equal(rotulos[i][1], "Pagar no Pix (à vista, sem teste grátis)", `${rotulos[i][0]} leu "${rotulos[i][1]}"`);
     }
 
     // Nenhum [data-plan-btn] oferece troca: todos desabilitados, e o clique em
@@ -807,9 +808,11 @@ test("PT11: sem amount_cents e sem qr_image não sobra R$ NaN nem quadrado branc
     const { page } = await abrirQr({
       pix: { corpo: { public_token: "tok_x", qr_payload: PAYLOAD, plan: "plus" } },
     });
+    await page.waitForSelector(".pix-code");  // o título lido é o do QR, não o do formulário
     const titulo = await page.textContent("#pix-modal-titulo");
     assert.ok(!titulo.includes("NaN"), `valor ilegível no título: "${titulo}"`);
     assert.match(titulo, /anual/, `o título perdeu o plano: "${titulo}"`);
+    assert.equal(titulo, "Plus anual, sem teste grátis", "o QR sem valor perdeu a ressalva do trial");
     assert.equal(await page.$$eval(".pix-qr", (e) => e.length), 0,
       "sobrou o <img> do QR sem imagem nenhuma");
     // O que importa continua na tela: o copia-e-cola é a ação primária.
@@ -996,6 +999,14 @@ test("PT12a: sem documento o POST não sai, e o erro diz o que fazer", async () 
   await page.close();
 });
 
+// O anual no Pix não tem trial (termos §4): o título do modal diz isso antes do documento.
+// *Negativo: volte o título do pix-checkout.js a `nome + " anual no Pix"` e este caso fica vermelho.*
+test("PT12t: o título do modal do Pix diz que o anual não tem teste grátis", async () => {
+  const { page } = await abrirForm();
+  assert.equal(await page.textContent("#pix-modal-titulo"), "Plus anual no Pix, sem teste grátis");
+  await page.close();
+});
+
 for (const [rotulo, valor] of [
   ["letras", "abcdefghijk"],
   ["10 dígitos", "1112223334"],
@@ -1031,6 +1042,8 @@ for (const [rotulo, digitado, esperado] of [
     assert.equal(corposPix[0].cpf_cnpj, esperado,
       `o corpo do POST levou "${corposPix[0].cpf_cnpj}" em vez de "${esperado}"`);
     assert.equal(await page.inputValue(".pix-code"), PAYLOAD);
+    // O QR troca o título do formulário: a ressalva do trial fica junto do valor.
+    assert.match(await page.textContent("#pix-modal-titulo"), /^Plus anual · R\$\s?[\d.]+,\d{2}, sem teste grátis$/);
     // MESMO modal, não uma segunda caixa: um overlay só, e o formulário sumiu.
     assert.equal(await page.$$eval(".pix-ov", (e) => e.length), 1);
     assert.equal(await page.$$eval(".pix-form", (e) => e.length), 0,
