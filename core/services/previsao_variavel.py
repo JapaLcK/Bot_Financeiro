@@ -95,11 +95,14 @@ def cortar(est: dict, cortes: dict[str, int], valores: dict[str, Decimal] | None
     return linhas, sum((l['economia_mensal'] for l in linhas), Decimal(0))
 
 
-def _inicio_do_historico(cur, uid: int) -> date | None:
+def _inicio_do_historico(cur, uid: int, desde: date = date.min) -> date | None:
+    """O dia do 1º lançamento (a data do banco no OF, senão o dia de `criado_em` no fuso do app) ou da 1ª compra no
+    cartão do usuário, a partir de `desde` (a sobra dos insights mede assim a cobertura do mês base, PL-06 B4)."""
     cur.execute("""select least(
-        (select min(coalesce(posted_at, (criado_em at time zone %s)::date)) from launches where user_id = %s),
-        (select min(purchased_at) from credit_transactions where user_id = %s)) as d""",
-                (_tz().key, uid, uid))
+        (select min(d) from (select coalesce(posted_at, (criado_em at time zone %s)::date) as d
+                             from launches where user_id = %s) l where d >= %s),
+        (select min(purchased_at) from credit_transactions where user_id = %s and purchased_at >= %s)) as d""",
+                (_tz().key, uid, desde, uid, desde))
     return cur.fetchone()['d']
 
 
