@@ -574,8 +574,9 @@ def link_platform_identity(provider: str, external_id: str, target_user_id: int)
         try:
             _confirmar_telefone_do_whatsapp(external_id, target_user_id)
         except Exception as exc:
-            logger.warning("link_platform_identity: marcador do telefone falhou user_id=%s (%s)",
-                           target_user_id, type(exc).__name__)
+            logger.warning("link_platform_identity: marcador do telefone falhou user_id=%s causa=%s sqlstate=%s",
+                           target_user_id, type(exc).__name__, getattr(exc, "sqlstate", None),
+                           extra={"user_id": target_user_id})
     return target_user_id
 
 

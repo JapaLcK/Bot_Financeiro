@@ -175,7 +175,9 @@ def boas_vindas_da_conta(email: str, user_id: int) -> None:
         from core.services.email_service import send_assinar_account_email
         send_assinar_account_email(email)
     except Exception as exc:  # só o tipo: a mensagem do psycopg pode trazer e-mail/telefone
-        logging.getLogger(__name__).warning("boas_vindas falhou user=%s: %s", user_id, type(exc).__name__)
+        logging.getLogger(__name__).warning("boas_vindas falhou user=%s causa=%s sqlstate=%s", user_id,
+                                            type(exc).__name__, getattr(exc, "sqlstate", None),
+                                            extra={"user_id": user_id})
 
 
 def desfazer_conta_sem_codigo(user_id: int, conta_id: int) -> bool:

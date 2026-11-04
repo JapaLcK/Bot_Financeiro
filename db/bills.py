@@ -254,10 +254,10 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None, *,
                         (int(bill_id), int(user_id)),
                     )
                 conn.commit()
-        except Exception:
-            logger.exception(
-                "falha ao devolver a conta %s do usuario %s para pending — "
-                "ela ficou paga sem lançamento", bill_id, user_id)
+        except Exception as exc:
+            logger.error("falha ao devolver a conta %s do usuario %s para pending — ela ficou paga sem"
+                         " lançamento causa=%s sqlstate=%s", bill_id, user_id, type(exc).__name__,
+                         getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         raise
     # Sem marca (a /api/v2 a apagaria na janela) até a ligação gravar; o pool commita.
     with get_conn() as conn, conn.cursor() as cur:

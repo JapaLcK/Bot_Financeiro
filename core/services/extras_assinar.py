@@ -106,8 +106,8 @@ def _na_tela(price) -> dict:
 def _recusa(user_id: int, mensagem: str, precos: list[str], exc=None) -> None:
     from core.system_event_log import log_system_event_sync
     details = {"precos": precos}
-    if exc is not None:
-        details["stripe"] = str(exc)[:500]
+    if exc is not None:   # o `code` do Stripe, ou o tipo (conexão não tem); nunca a mensagem (#657)
+        details["code"] = getattr(exc, "code", None) or type(exc).__name__
     # Só preços: a URL é o acesso ao PDF pago.
     log_system_event_sync("error", "ebook_oferta_recusada", mensagem,
                           source="billing", user_id=int(user_id), details=details)

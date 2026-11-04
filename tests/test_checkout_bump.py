@@ -336,7 +336,8 @@ def test_s_stripe_recusa_o_modify_409_e_log_sem_url(user_id, monkeypatch):
     resp = _bump(client, [1, 3])
     assert resp.status_code == 409 and resp.json()["detail"] == {"error": "extra_recusado"}
     (log,) = _recusas(uid)
-    assert log["precos"] == ["price_x1", "price_x3"] and "inactive" in log["stripe"]
+    assert log["precos"] == ["price_x1", "price_x3"] and log["code"] == "_FakeInvalidRequestError"
+    assert "inactive" not in str(log)            # a mensagem do Stripe fica fora (#657)
     assert "pdf.test" not in str(log)
 
 

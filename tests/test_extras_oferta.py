@@ -232,7 +232,7 @@ def _create_que_recusa(fake, *, sempre=False, erro=None, so_cliente_apagado=Fals
         if sempre or "optional_items" in kw:
             raise _FakeInvalidRequestError(
                 "You cannot specify an optional item with inactive price",
-                param="optional_items[0][price]")
+                param="optional_items[0][price]", code="resource_missing")
         return original.create(**kw)
     fake.checkout = SimpleNamespace(Session=SimpleNamespace(
         create=create, list=original.list, expire=original.expire))
@@ -260,7 +260,8 @@ def test_r1_extra_recusado_refaz_sem_extras_e_sem_a_foto(request, user_id, monke
         assert meta["origem"] == corpo.get("origem", "precos")
     (log,) = _recusas(uid)
     assert log["details"]["precos"] == ["price_x1", "price_x2"]
-    assert "inactive price" in log["details"]["stripe"]
+    assert log["details"]["code"] == "resource_missing"           # o `code`, sem a mensagem (#657 P3)
+    assert "inactive price" not in str(log["details"])
     assert "pdf.test" not in str(log["details"])
 
 

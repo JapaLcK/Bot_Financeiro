@@ -53,8 +53,8 @@ completude):
   * com a coluna preenchida, texto do usuário (`descr=%r`) e o marcador de
     telefone no texto não são conferidos, só o nome e a chave;
   * em `core/services/email_service.py::send_email` o e-mail vai em `to_log`
-    nos `logger.*` e na `message` dos `_log_email_event`, atrás de wrapper:
-    zerar a entrada `_log_email_event`/EVT_PII_NULL NÃO fecha o e-mail;
+    nos `logger.*` e na `message` dos `_log_email_event`, atrás de wrapper: quem
+    o prende MASCARADO é `tests/test_log_dono_conta_billing.py` (T-B5), não esta guarda;
   * chamada com um `mask_phone` ignora o marcador de telefone no texto: um
     segundo número cru ao lado do mascarado só é visto pelo nome da variável;
   * o dono como atributo de objeto (`user.id`, `u.id`): o nome que casa é `id`;
@@ -110,13 +110,25 @@ JUSTIFICADAS: dict[tuple[str, str, str], str] = {
         "o `exc_info=com_traceback` do helper é preso ponto a ponto pela "
         "allowlist de tests/test_log_falha_traceback.py",
     ("core/services/stripe_email_sync.py", "_sincronizar", "EVT_COL_RAW"):
-        "`exc.code`/`exc.param` da `stripe.InvalidRequestError` são o código de catálogo e o "
-        "nome do parâmetro (`resource_missing`/`customer`), sem dado do cliente; o operador "
+        "`exc.code`/`exc.param` da `stripe.InvalidRequestError` são o código de catálogo (ou o "
+        "tipo, quando o `code` vem nulo) e o nome do parâmetro (`resource_missing`/`customer`), "
+        "sem dado do cliente; o operador "
         "precisa deles para separar cliente apagado de e-mail recusado. A mensagem da exceção "
         "não é logada: "
         "tests/test_settings_contact_stripe_sync.py::test_email_recusado_fica_fora_do_log. "
         "Classe cega: TROCAR esta ocorrência por outro texto cru na mesma função (a contagem "
         "fica 1)",
+    ("frontend/finance_bot_websocket_custom.py", "_new_session", "EVT_COL_RAW"):
+        "`exc.code` da `InvalidRequestError` que recusou os extras do checkout (#657 P3), ou o "
+        "tipo quando o `code` vem nulo: o código de catálogo do Stripe, sem dado do cliente, ao "
+        "lado dos `precos`. A mensagem "
+        "não é logada: tests/test_log_dono_conta_billing.py::"
+        "test_tb1_extras_recusados_logam_o_code_sem_a_mensagem. Classe cega: a de cima",
+    ("core/services/email_service.py", "_log_email_event", "EVT_PII_NULL"):
+        "`details.to` sem dono (o `send_email` não recebe uid, #657 P4): o único chamador "
+        "passa o `to_log`, já MASCARADO (`l•••@dominio`) ou omitido: "
+        "tests/test_log_dono_conta_billing.py::test_tb5_send_email_so_loga_o_endereco_mascarado. "
+        "Classe cega: um chamador novo que passe o endereço cru",
 }
 
 

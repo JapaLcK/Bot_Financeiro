@@ -379,7 +379,8 @@ def _decrypt_admin_field(ct: str, fallback, *, purpose: str, admin_user: str,
         )
     except Exception:
         logging.getLogger(__name__).warning(
-            "PII indecifrável no admin: user_id=%s field=%s (chave errada?)", user_id, field
+            "PII indecifrável no admin: user_id=%s field=%s (chave errada?)", user_id, field,
+            extra={"user_id": user_id or None},  # 0 = login sem conta: não é users.id (FK)
         )
         return fallback or "⚠️ indecifrável"
 
@@ -1533,12 +1534,13 @@ def set_account_plan(
                         "set_account_plan gravou auth_accounts mas NAO o grant; "
                         "a reprojecao vai desfazer o ajuste.",
                         source="admin", user_id=int(row["user_id"]),
-                        details={"plan": plan, "months": int(months), "erro": str(exc)[:300]},
+                        details={"plan": plan, "months": int(months), "erro": type(exc).__name__,
+                                 "sqlstate": getattr(exc, "sqlstate", None)},
                     )
                     try:
                         from core.services.admin_notify import _send
                         _send(f"Reparo manual do admin na conta {row['user_id']} "
-                              f"({plan}) NAO virou grant: {str(exc)[:200]}")
+                              f"({plan}) NAO virou grant: {type(exc).__name__}")
                     except Exception:
                         pass
         conn.commit()
