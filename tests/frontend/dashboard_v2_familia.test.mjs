@@ -28,12 +28,12 @@ test("as três visões", async () => {
     await bt("Criar família").waitFor();
   });
   await com({ visao: F.membro }, async ({ texto, bt }) => {
-    assert.equal(await texto(), "Você está numa família. Sair da família");
+    assert.equal(await texto(), "Você está numa família. O que o titular vê Resumo do mês Lançamentos Saldo, contas, Pix e conversas nunca aparecem. Quem viu Ninguém viu nada ainda. Sair da família");
     await bt("Sair da família").waitFor();
   });
   await com({ visao: titular({ membros: [MARIA, JOAO] }) }, async ({ texto, bt, page }) => {
     // só o primeiro nome; selo no suspenso; os lugares contam o titular (2 membros + 1 = 3 de 4)
-    assert.equal(await texto(), "3 de 4 lugares Maria Remover João Suspenso Remover Gerar link de convite Desfazer família");
+    assert.equal(await texto(), "3 de 4 lugares Maria Não compartilha Remover João Suspenso Não compartilha Remover Gerar link de convite Desfazer família");
     assert.equal(await page.getByText("Aparecida").count(), 0);
     await bt("Gerar link de convite").waitFor();
   });
