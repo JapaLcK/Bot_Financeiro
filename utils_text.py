@@ -968,6 +968,8 @@ def parse_money(text: str) -> float | None:
             continue  # "300 numa TV 4K": o "k" depois de outro número é descrição, não valor
         # mesma regra do número comum abaixo: "1.5 mil" = 1500, "1.500 mil" = 1.500.000
         base = parse_money(mm.group(1)) if mm.group(1) else 1.0
+        if base is None:
+            return None  # base malformada ("1,2,3 mil"): recusa, não adivinha
         return round(base * mult + _soma_restos(text, mm.end(), False), 2)  # 0,067 * 1e9 = 67000000.00000001
 
     # pega o primeiro número contínuo (com possíveis separadores)

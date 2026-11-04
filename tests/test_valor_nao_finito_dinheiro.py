@@ -217,3 +217,10 @@ def test_whatsapp_compra_no_cartao_k_e_mil(texto, total):
 
     assert "Compra no Crédito Registrada" in _diga(uid, texto), texto
     assert [float(t) for t in _faturas(uid)] == [total]
+
+
+@pytest.mark.parametrize("texto", ["1,2,3k", "1.2.3 mil", "gastei 1,2,3 mil no cartão"])
+def test_parse_money_base_malformada_recusa_sem_estourar(texto):
+    from utils_text import parse_money
+
+    assert parse_money(texto) is None
