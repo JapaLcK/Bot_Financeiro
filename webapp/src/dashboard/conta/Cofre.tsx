@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { NATIVE, useDialogo } from "../parts/dialog";
 import { ErroApi } from "../lib/v2";
+import { deSaida } from "../lib/sessao";
 
 // O cofre dos códigos de backup do MFA: o servidor os devolve UMA vez e (no regerar) já apagou os antigos, então eles
 // moram AQUI, na memória do módulo (padrão do router.ts), e não em estado de componente nem no cache do React Query.
@@ -54,8 +55,8 @@ export function Cofre() {
   const tem = !!g;
   useEffect(() => {
     if (!tem) return;
-    // Recarregar/fechar a aba com os códigos ainda não concluídos pergunta antes.
-    const f = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    // Recarregar/fechar a aba com os códigos ainda não concluídos pergunta antes; a troca de conta e o logout, não (lib/sessao.ts).
+    const f = (e: BeforeUnloadEvent) => { if (deSaida()) return; e.preventDefault(); e.returnValue = ""; };
     window.addEventListener("beforeunload", f);
     return () => window.removeEventListener("beforeunload", f);
   }, [tem]);

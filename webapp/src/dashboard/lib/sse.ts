@@ -3,6 +3,7 @@
 // (sem `event:`/`id:`). JSON quebrado descarta só aquela linha; o que sobra sem `\n` no fim é lido como a última linha
 // (um proxy pode tirar o `\n\n` final). Safari 14: sem TextDecoderStream, sem AbortSignal.timeout/any.
 import { ErroApi, erroDe, urlDe } from "./v2";
+import { buscar, conferir } from "./sessao";
 
 export async function lerEventos(corpo: ReadableStream<Uint8Array> | null, aoEvento: (bruto: unknown) => void): Promise<void> {
   if (!corpo) throw new Error("resposta sem corpo");
@@ -17,6 +18,7 @@ export async function lerEventos(corpo: ReadableStream<Uint8Array> | null, aoEve
   try {
     for (;;) {
       const { done, value } = await leitor.read();
+      conferir(); // cada pedaço do stream é dado que entra na tela
       if (done) { linha((resto + decoder.decode()).replace(/\r$/, "")); break; }
       const partes = (resto + decoder.decode(value, { stream: true })).split("\n");
       resto = partes.pop()!;
@@ -35,7 +37,7 @@ export async function fluxo(path: string, corpo: unknown, signal: AbortSignal, a
   const json = { Accept: "text/event-stream", "Content-Type": "application/json" };
   let r: Response;
   try {
-    r = await fetch(urlDe(path), { method: "POST", credentials: "same-origin", body: JSON.stringify(corpo), headers: window.pbCsrfHeaders?.(json) ?? json, signal });
+    r = await buscar(urlDe(path), { method: "POST", credentials: "same-origin", body: JSON.stringify(corpo), headers: window.pbCsrfHeaders?.(json) ?? json, signal });
   } catch (e) {
     if (signal.aborted) throw e;
     throw new ErroApi(0, "network");

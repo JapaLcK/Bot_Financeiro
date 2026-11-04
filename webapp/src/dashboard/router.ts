@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import { DEMO } from "./lib/v2";
+import { conferir } from "./lib/sessao";
 
 // Rotas por hash (#/gastos): o protótipo abre de qualquer servidor estático, e cada
 // página tem endereço próprio (voltar do navegador e link compartilhado funcionam).
@@ -63,6 +64,7 @@ const subs = new Set<() => void>();
 window.addEventListener("hashchange", () => {
   const next = current();
   if (next === path) return;
+  try { conferir(); } catch { return; } // a tela nova não abre com o cache da conta anterior
   const swap = () => { path = next; subs.forEach((f) => f()); };
   // Troca de página com View Transition quando o navegador tem; sem ela, troca direto.
   const vt = (document as Document & { startViewTransition?: (cb: () => void) => unknown }).startViewTransition;

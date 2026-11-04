@@ -123,6 +123,16 @@ def test_login_sets_auth_token_cookie(monkeypatch):
     assert "httponly" in refresh
     assert "secure" in refresh
 
+    # pb_conta: o sinal de troca de conta do /painel (lib/sessao.ts), legível pelo JS e nunca lido pelo servidor.
+    marca = cookies["pb_conta"]
+    assert marca["value"] == "123"
+    assert marca["max-age"] == "43200"
+    assert marca["samesite"].lower() == "lax"
+    assert marca["path"] == "/"
+    assert "httponly" not in marca
+    assert "secure" in marca
+    assert "domain" not in marca
+
 
 # ── /auth/refresh: o status responde "a sessão acabou?" ──────────────────────
 #
@@ -328,6 +338,7 @@ def test_logout_expires_auth_and_dashboard_cookies():
     set_cookie = response.headers.get_list("set-cookie")
     assert any(cookie.startswith("auth_token=") and "Max-Age=0" in cookie for cookie in set_cookie)
     assert any(cookie.startswith("dashboard_token=") and "Max-Age=0" in cookie for cookie in set_cookie)
+    assert any(cookie.startswith("pb_conta=") and "Max-Age=0" in cookie for cookie in set_cookie)
 
 
 def test_account_export_requires_password_and_emails_single_use_link(user_id, monkeypatch):

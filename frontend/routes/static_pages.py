@@ -20,6 +20,7 @@ from core.dashboard_links import link_whatsapp
 from core.pg_text import recusa_veneno
 from core.secure_compare import constant_time_eq
 from frontend.routes.shared import (
+    CONTA_COOKIE_NAME,
     FRONTEND_DIR,
     _resolve_page_user_id,
     gate_onboarding,
@@ -28,8 +29,10 @@ from frontend.routes.shared import (
     html_file,
     inject_tracking,
     limiter,
+    marcar_conta,
     painel_como_destino,
     public_site_url,
+    resolve_dashboard_user_id,
     stamp_asset_versions,
 )
 
@@ -132,7 +135,16 @@ def serve_painel(request: Request):
     gate = gate_onboarding(request)
     if gate is not None:
         return gate
-    return html_file(FRONTEND_DIR / "painel.html", pixel=False)
+    resp = html_file(FRONTEND_DIR / "painel.html", pixel=False)  # no-store: o Set-Cookie não fica em cache compartilhado
+    # O marcador é a conta que a /api/v2 vai responder (o dashboard_token), não a do `uid` acima, que prefere o
+    # auth_token: os dois podem ser de contas diferentes (o /d/{code} de conta sem e-mail grava só o dashboard_token).
+    # Sem dashboard_token válido a API dá 401 até o refresh, que grava o marcador certo: aqui ele só expira (um
+    # marcador velho seria adotado pela página como o desta sessão).
+    try:
+        marcar_conta(resp, resolve_dashboard_user_id(request))
+    except HTTPException:
+        resp.delete_cookie(CONTA_COOKIE_NAME, path="/")
+    return resp
 
 
 @router.get("/home")

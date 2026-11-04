@@ -174,7 +174,7 @@ test("troca de conta em outra aba com o bloco fora da tela: o Piggy notou da con
   assert.ok(vistos.every((t) => !t.includes("Segredo da conta A")), "texto da conta A visto depois da troca");
 });
 
-// Mesma troca, mas SEM visibilitychange: o perfil nem foi relido, então o main.tsx não limpou nada. Só o gcTime: 0 tira o dado da A do cache ao desmontar o bloco.
+// Mesma troca, mas SEM visibilitychange: o perfil nem foi relido, então o main.tsx não limpou nada. Só o gcTime: 0 tira o dado da A do cache ao desmontar o bloco (a volta vem uma tarefa depois de o bloco sair, com o GC já feito: o que uma pessoa faz).
 // Também: voltar ao Resumo na MESMA conta mostra o carregando e depois o dado, e entrar uma vez pede /insights uma vez só.
 test("troca de conta sem o perfil ser relido: o Piggy notou da conta A não aparece ao voltar; B chega; e a mesma conta relê sem laço", async () => {
   let uid = 7; let lento = false;
@@ -192,15 +192,19 @@ test("troca de conta sem o perfil ser relido: o Piggy notou da conta A não apar
   lento = true; // a volta à mesma conta demora, para o carregando poder ser visto
   const entradaUnica = pedidos.length;
   // A amostragem começa ANTES de voltar ao Resumo, no mesmo evaluate: sem a ida e volta do Playwright no meio (máquina lenta do CI).
-  const amostra = () => page.evaluate(() => new Promise((ok) => {
-    const v = []; const t0 = Date.now();
-    location.hash = "#/";
-    const i = setInterval(() => {
-      const t = document.querySelector('[data-widget-id="piggy"]')?.textContent ?? "";
-      v.push(t);
-      if (/Aviso da conta B|Segredo da conta A/.test(t) || Date.now() - t0 > 15000) { clearInterval(i); setTimeout(() => ok(v), 300); }
-    }, 20);
-  }));
+  const amostra = () => page.evaluate(async () => {
+    // O gcTime: 0 apaga o cache num setTimeout(0) agendado no commit que desmonta o bloco (a troca de rota é síncrona: reducedMotion do _painel.mjs, sem View Transition); um timer 0 agendado agora roda depois dele, e a volta vem com o GC já feito.
+    await new Promise((ok) => setTimeout(ok, 0));
+    return new Promise((ok) => {
+      const v = []; const t0 = Date.now();
+      location.hash = "#/";
+      const i = setInterval(() => {
+        const t = document.querySelector('[data-widget-id="piggy"]')?.textContent ?? "";
+        v.push(t);
+        if (/Aviso da conta B|Segredo da conta A/.test(t) || Date.now() - t0 > 15000) { clearInterval(i); setTimeout(() => ok(v), 300); }
+      }, 20);
+    });
+  });
   // mesma conta: sai, volta, vê o carregando e depois o dado
   await page.evaluate(() => { location.hash = "#/conta/bancos"; });
   await piggy.waitFor({ state: "detached" });

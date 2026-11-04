@@ -131,6 +131,20 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   cookie `dashboard_token`) → conta agendada para exclusão (403) → gate de plano
   (`_enforce_subscription_gate`, 402) → chave `dashboard_v2_enabled` (404
   `dashboard_v2_disabled`). O user agent não entra.
+- **O cookie `pb_conta=<uid>` não é identidade.** É o sinal de troca de conta do /painel: legível pelo
+  JS (sem `HttpOnly`), `SameSite=Lax`, sem `domain`, path `/`, `secure` igual ao do `dashboard_token`
+  (`marcar_conta` em `frontend/routes/shared.py`). Quem grava: `_set_dashboard_cookie` (toda emissão da
+  sessão) e a resposta HTML de sucesso do `GET /painel` (`no-store`; nunca os redirecionamentos), com o
+  uid do `dashboard_token`, que é quem a /api/v2 responde (não o do `auth_token`, que abre a página); sem
+  `dashboard_token` válido o `/painel` o expira. Quem apaga: `_clear_session_cookies` (logout, exclusão,
+  fim de sessão). **O servidor nunca o lê**: a
+  sessão continua sendo só o `dashboard_token` HttpOnly. O cliente guarda o valor da carga e o confere
+  onde um dado pode entrar na tela; mudou ou sumiu, a página fica escondida e recarrega uma vez (no
+  logout, só se esconde e quem navega é a saída, com um prazo se ela travar depois da resposta do
+  servidor). Onde ele confere, e o caso da sessão de antes do deploy, mora em
+  `webapp/src/dashboard/lib/sessao.ts` (fonte única: não enumere aqui). Presos por
+  `tests/test_marca_conta_cookie.py`, `tests/test_painel_pagina.py` e
+  `tests/frontend/dashboard_v2_troca_de_conta*.test.mjs` (não por `test_api_v2_rotas.py`).
 - Toda rota tem `response_model` (a de SSE, o tipo do item do stream; ver `/eventos`).
 - **Erro** sai no envelope `{"error": {"code", "message", "details"?}}`
   (`api/v2/erros.py`), com os headers da exceção preservados (`WWW-Authenticate` do

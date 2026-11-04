@@ -8,6 +8,7 @@ import { BALANCE_TODAY, MONTHS, netWorth, previousKey, summary } from "./lib/api
 import { COMPARACAO_EXEMPLO } from "./lib/data.js";
 import { readProfile } from "./lib/profiles.js";
 import { aoConferirConta, aoSaberChatIa, contaDaSessao } from "./lib/conversation";
+import { vigiar } from "./lib/sessao";
 import { DEMO, comparacaoQuery, contaQuery, contasQuery, lerContaFresca, escutarLogout, investidoQuery, meQuery, milhaoQuery, orcamentoQuery, orcamentosCategoriaQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
 import type { Assinaturas, Comparacao, Investido, Me, OrcamentoDomestico, OrcamentosCategoria } from "./lib/api-v2.gen";
 import "./styles/index.css";
@@ -106,6 +107,7 @@ if (DEMO) {
 const root = document.getElementById("pigbank-dashboard");
 if (root) {
   if (!DEMO) escutarLogout(); // sair em outra aba derruba o painel (o dashboard.js antigo faz o mesmo)
+  if (!DEMO) vigiar(); // a conta trocou (outra aba, logout + login): esconde e recarrega (lib/sessao.ts)
   createRoot(root).render(
     <StrictMode><QueryClientProvider client={qc}><Entrada><App /></Entrada>{/* irmão do portão: o /me falhar não apaga os códigos de backup do MFA */}<Cofre /></QueryClientProvider></StrictMode>,
   );

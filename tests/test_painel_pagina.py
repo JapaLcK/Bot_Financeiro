@@ -11,10 +11,10 @@ from fastapi.testclient import TestClient
 import db
 import db_support
 import frontend.finance_bot_websocket_custom as dashboard
-from _apoio_auth_app import libera, sessao_de, sql
-from conftest import em_carencia, promote_to_pro
+from _apoio_auth_app import csrf, libera, sessao_de, sql
+from conftest import em_carencia, ensure_user, promote_to_pro
 from core.sessions import revoke_session
-from frontend.routes.shared import AUTH_COOKIE_NAME, DASHBOARD_COOKIE_NAME, FRONTEND_DIR, _asset_hash
+from frontend.routes.shared import AUTH_COOKIE_NAME, CONTA_COOKIE_NAME, DASHBOARD_COOKIE_NAME, FRONTEND_DIR, _asset_hash
 
 UA_APP = "Mozilla/5.0 PigBankApp/1.0"
 
@@ -34,12 +34,14 @@ def pronto(uid, monkeypatch=None):
     return sessao_de(uid)
 
 
-def get(path="/painel", *, auth=None, dash=None, ua=None):
+def get(path="/painel", *, auth=None, dash=None, ua=None, marca=None):
     client = TestClient(dashboard.app)
     if auth:
         client.cookies.set(AUTH_COOKIE_NAME, auth)
     if dash:
         client.cookies.set(DASHBOARD_COOKIE_NAME, dash)
+    if marca:
+        client.cookies.set(CONTA_COOKIE_NAME, marca)
     return client.get(path, headers={"User-Agent": ua} if ua else {}, follow_redirects=False)
 
 
@@ -157,6 +159,73 @@ def test_em_carencia_recebe_a_pagina(monkeypatch, user_id):
     db.mark_onboarding_completed(user_id)
     libera(monkeypatch, user_id)
     serve_a_pagina(get(dash=sessao_de(user_id)["dashboard"]))
+
+
+# ── Marcador de troca de conta (`pb_conta`, webapp/src/dashboard/lib/sessao.ts) ──
+
+def marcas(r):
+    return [h for h in r.headers.get_list("set-cookie") if h.startswith(f"{CONTA_COOKIE_NAME}=")]
+
+
+@pytest.mark.parametrize("antes", [None, "999"])
+def test_painel_grava_o_marcador_da_sessao_sem_cache(monkeypatch, user_id, antes):
+    """Sem marcador (sessão de antes do deploy) ou com o de outra conta: a página regrava o uid da sessão, com no-store."""
+    s = pronto(user_id, monkeypatch)
+    r = get(dash=s["dashboard"], marca=antes)
+    serve_a_pagina(r)  # confere o Cache-Control: no-store (o Set-Cookie não fica em cache compartilhado)
+    [m] = marcas(r)
+    assert m.startswith(f"{CONTA_COOKIE_NAME}={user_id};")
+    assert "httponly" not in m.lower() and "domain" not in m.lower() and "path=/" in m.lower()
+
+
+def test_redirecionamento_do_painel_nao_grava_o_marcador(user_id):
+    assert marcas(get()) == []  # anônimo → login
+    s = pronto(user_id)  # fora da chave → /app
+    r = get(auth=s["access"], dash=s["dashboard"], marca="999")
+    vai_para(r, "/app")
+    assert marcas(r) == []
+
+
+def test_sessao_de_contas_diferentes_nao_ganha_marcador(monkeypatch, user_id):
+    """auth_token de A e dashboard_token de B: o servidor recusa a sessão (o /painel manda ao login) e o /painel não grava
+    marcador de nenhuma das duas; o refresh dela encerra a sessão e expira o marcador. A sessão coerente marca a própria conta."""
+    a, b = user_id, user_id + 1
+    ensure_user(b)
+    pronto(a)
+    pronto(b)
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", f"{a},{b}")
+    sa, sb = sessao_de(a), sessao_de(b)
+    c = TestClient(dashboard.app)
+    c.cookies.set(AUTH_COOKIE_NAME, sa["access"])
+    c.cookies.set(dashboard.REFRESH_COOKIE_NAME, sa["refresh"])
+    c.cookies.set(DASHBOARD_COOKIE_NAME, sb["dashboard"])
+    r = c.get("/painel", follow_redirects=False)
+    assert (r.status_code, r.headers.get("location"), marcas(r)) == (302, "/login?next=/painel", [])
+    rr = c.post("/auth/refresh", headers=csrf(c))
+    assert rr.status_code == 401
+    assert len(marcas(rr)) == 3 and all("max-age=0" in m.lower() for m in marcas(rr)), marcas(rr)  # nos três domínios
+    r2 = get(auth=sa["access"], dash=sa["dashboard"], marca=str(b))
+    serve_a_pagina(r2)
+    assert [m.split(";")[0] for m in marcas(r2)] == [f"{CONTA_COOKIE_NAME}={a}"]
+
+
+def test_so_auth_token_expira_o_marcador(monkeypatch, user_id):
+    """Sem dashboard_token válido a /api/v2 dá 401 até o refresh (que grava o marcador): o /painel não deixa um marcador
+    velho para a página adotar como o desta sessão."""
+    s = pronto(user_id, monkeypatch)
+    r = get(auth=s["access"], marca="999")
+    serve_a_pagina(r)
+    [m] = marcas(r)
+    assert "max-age=0" in m.lower() and "domain" not in m.lower() and "path=/" in m.lower()
+
+
+def test_o_servidor_nao_le_o_marcador(monkeypatch, user_id):
+    """Sessão da conta A com o marcador dizendo outra conta: quem responde é a A (o marcador nunca autentica)."""
+    s = pronto(user_id, monkeypatch)
+    outra = str(user_id + 1)
+    assert get("/auth/dashboard-profile", dash=s["dashboard"], marca=outra).json()["user_id"] == user_id
+    assert get("/api/v2/me", dash=s["dashboard"], marca=outra).status_code == 200
+    assert get("/api/v2/me", marca=str(user_id)).status_code == 401  # só o marcador, sem sessão: nada
 
 
 # ── Anti-loop com a /login (#644) ────────────────────────────────────────────
