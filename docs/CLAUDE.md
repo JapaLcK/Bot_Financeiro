@@ -1709,7 +1709,9 @@ e refeita: alerta "antes RETIDO foi completado", NÃO devolver) e evento fechado
 concede, alerta e deixa o log `pix_excesso_recebido`; retido e depois completado deixa o log
 `pix_retido_completado` (o alerta desse lado não é retentado depois de `paid`), mas só quando o
 alerta de retido foi entregue; senão, só a coluna `completado_pelo_mesmo_pagamento` do runbook
-mostra. Limite conhecido:
+mostra. Segundo pagamento com `payment.id` novo numa cobrança já paga ou estornada (#1257): nenhum
+efeito de compra, um alerta (efeito `pagamento_duplicado_alertado`, log `pix_pagamento_duplicado`) e
+evento fechado. Limite conhecido:
 parcial e integral do mesmo pagamento drenados AO MESMO TEMPO (alerta de retido ainda em voo)
 podem conceder sem o alerta "antes RETIDO foi completado", porque o marcador do retido é lido sem
 lock (lock aninhado esgota o pool, #1260); a coluna `completado_pelo_mesmo_pagamento` do runbook
