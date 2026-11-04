@@ -843,9 +843,9 @@ PT_NUM_ALT_NO_ARTICLE = "|".join(
 )
 # Um "valor" = dígitos OU número por extenso, com "mil/milhão/bilhão/trilhão" opcional e
 # encadeamento por "e" ("cento e vinte", "dez mil", "cem mil e quinhentos").
-# "bi" curto só colado em dígito ("100 bi", "0,5 bi e 100 milhões"); "cem bi"/"de bi" não.
+# "bi"/"k" curtos só colados em dígito ("100 bi", "0,5 bi e 100 milhões"); "cem bi"/"de bi" não.
 _PT_DIG = r"\d[\d.,]*"
-_PT_DIG_BI = rf"{_PT_DIG}(?:\s*{_PT_BI})?"
+_PT_DIG_BI = rf"{_PT_DIG}(?:\s*(?:{_PT_BI}|k\b))?"  # "k" também (#1329): "2x de 1,5k"
 PT_VALUE = (
     rf"(?:r\$\s*)?(?:{_PT_DIG_BI}|{_PT_NUM_ALT}|{_PT_MULT_LONGO})"
     rf"(?:\s+(?:e\s+)?(?:{_PT_DIG_BI}|{_PT_NUM_ALT}|{_PT_MULT_LONGO}))*"

@@ -220,6 +220,15 @@ def test_whatsapp_compra_no_cartao_k_e_mil(texto, total):
     assert [float(t) for t in _faturas(uid)] == [total]
 
 
+# O "Nx de Y" do parcelamento lê o valor pelo PT_VALUE: sem o "k" nele, "2x de 1,5k" virava R$ 3 no total.
+@pytest.mark.parametrize("texto", ["parcelei 2x de 1,5k carro no cartão", "parcelei 2x de 1,5 mil carro no cartão"])
+def test_whatsapp_parcelado_k_e_mil(texto):
+    uid, _ = _usuario_com_cartao()
+
+    _diga(uid, texto)
+    assert sum(float(t) for t in _faturas(uid)) == 3000.0, texto
+
+
 @pytest.mark.parametrize("texto", ["1,2,3k", "1.2.3 mil", "gastei 1,2,3 mil no cartão", "gastei 1k e 1,2,3 no cartão"])
 def test_parse_money_base_malformada_recusa_sem_estourar(texto):
     from utils_text import parse_money
