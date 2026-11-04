@@ -211,7 +211,8 @@ def test_tool_boleto_valor_normal_segue_igual():
 @pytest.mark.parametrize("texto,total", [("gastei 1,5k no cartão", 1500.0), ("gastei 2 k no cartão", 2000.0),
                                          ("gastei 1500 no cartão", 1500.0), ("gastei 2,50 no cartão", 2.5),
                                          ("gastei 1.000,50k no cartão", 1000500.0),  # base inteira, não só "000,50"
-                                         ("gastei 300 numa TV 4K no cartão", 300.0)])  # "4K" depois do valor é descrição
+                                         ("gastei 300 numa TV 4K no cartão", 300.0),  # "4K" depois do valor é descrição
+                                         ("comprei TV 4K por 3 mil reais no cartão", 3000.0)])  # e antes dele também
 def test_whatsapp_compra_no_cartao_k_e_mil(texto, total):
     uid, _ = _usuario_com_cartao()
 
@@ -219,7 +220,7 @@ def test_whatsapp_compra_no_cartao_k_e_mil(texto, total):
     assert [float(t) for t in _faturas(uid)] == [total]
 
 
-@pytest.mark.parametrize("texto", ["1,2,3k", "1.2.3 mil", "gastei 1,2,3 mil no cartão"])
+@pytest.mark.parametrize("texto", ["1,2,3k", "1.2.3 mil", "gastei 1,2,3 mil no cartão", "gastei 1k e 1,2,3 no cartão"])
 def test_parse_money_base_malformada_recusa_sem_estourar(texto):
     from utils_text import parse_money
 

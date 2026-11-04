@@ -926,13 +926,15 @@ def valor_finito(v, teto=VALOR_MAX) -> bool:
         return False
 
 
-def _soma_restos(text: str, pos: int, extenso: bool) -> float:
+def _soma_restos(text: str, pos: int, extenso: bool) -> float | None:
     """Soma os "e <resto>" que seguem a base em `pos`; cada resto leva o PRÓPRIO multiplicador
     ("0,8 bilhão e 300 milhões e 5 mil"). Resto sem multiplicador é o último; frase só se a base é por extenso."""
     total = 0.0
     while (r := _PT_RESTO_RE.match(text, pos)):
         if r.group(1):
-            total += parse_money(r.group(1)) * (_PT_MULT_VALOR[r.group(2).lower()[:4]] if r.group(2) else 1)
+            if (v := parse_money(r.group(1))) is None:
+                return None  # resto malformado ("1k e 1,2,3"): recusa, como a base
+            total += v * (_PT_MULT_VALOR[r.group(2).lower()[:4]] if r.group(2) else 1)
         elif extenso and (n := _pt_words_to_int(r.group(3))) is not None:
             total += n * (_PT_MULT_VALOR[r.group(4).lower()[:4]] if r.group(4) else 1)
         else:
@@ -952,7 +954,8 @@ def parse_money(text: str) -> float | None:
     if sm:
         base = _pt_words_to_int(sm.group(1))
         if base is not None:
-            return round(base * _PT_MULT_VALOR[sm.group(2).lower()[:4]] + _soma_restos(text, sm.end(), True), 2)
+            restos = _soma_restos(text, sm.end(), True)
+            return None if restos is None else round(base * _PT_MULT_VALOR[sm.group(2).lower()[:4]] + restos, 2)
 
     # multiplicador "mil"/"milhão"/"bi": "10 mil" → 10000, "1 mil e 500" → 1500.
     # O dígito antes é OPCIONAL até milhão: "mil reais" (sem número) = 1000 e "um milhão" =
@@ -964,13 +967,17 @@ def parse_money(text: str) -> float | None:
         if not mm.group(1) and (mult > 10**6 or mm.group(2).lower() == "k"):
             # bi/bilhão/trilhão sem número não é valor (hipérbole); "k" solto é letra
             continue
-        if mm.group(2).lower() == "k" and re.search(r"\d", text[:mm.start()]):
-            continue  # "300 numa TV 4K": o "k" depois de outro número é descrição, não valor
+        if mm.group(2).lower() == "k" and (
+            re.search(r"\d", text[:mm.start()])
+            or re.search(r"r\$\s*\d|\d\s*(?:mil|milh|bi|reais|real)", text[mm.end():], re.IGNORECASE)
+        ):
+            continue  # "300 numa TV 4K" / "TV 4K por 3 mil": com outro valor na frase, o "k" é descrição
         # mesma regra do número comum abaixo: "1.5 mil" = 1500, "1.500 mil" = 1.500.000
         base = parse_money(mm.group(1)) if mm.group(1) else 1.0
         if base is None:
             return None  # base malformada ("1,2,3 mil"): recusa, não adivinha
-        return round(base * mult + _soma_restos(text, mm.end(), False), 2)  # 0,067 * 1e9 = 67000000.00000001
+        restos = _soma_restos(text, mm.end(), False)
+        return None if restos is None else round(base * mult + restos, 2)  # 0,067 * 1e9 = 67000000.00000001
 
     # pega o primeiro número contínuo (com possíveis separadores)
     m = re.search(r'(\d[\d.,\s]*)', text)
