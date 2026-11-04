@@ -219,3 +219,23 @@ def test_orfao_so_alerta_no_pagamento(user_id, externo):
     assert len(externo["alerta"]) == 1 and "órfão" in externo["alerta"][0]
     entregar("PAYMENT_CONFIRMED", cob)                      # POSITIVO: o alerta é único
     assert len(externo["alerta"]) == 1
+
+
+@pytest.mark.parametrize("estado", ["canceling", "canceled"])
+def test_pago_em_cobranca_substituida_alerta_o_operador_1x(user_id, externo, estado):
+    """#1268: pago numa cobrança já substituída concede E avisa (pode ter pago 2x)."""
+    cob = montar(estado, user_id)
+    externo["alerta"].clear()
+    entregar("PAYMENT_RECEIVED", cob)
+    assert ler(cob["id"])["status"] == "paid" and _grants(user_id) == 1
+    assert len([a for a in externo["alerta"] if "cobrança substituída" in a]) == 1
+    entregar("PAYMENT_CONFIRMED", cob)                      # reentrega: `nova` é falso
+    assert len([a for a in externo["alerta"] if "cobrança substituída" in a]) == 1
+
+
+def test_pago_em_pending_nao_alerta_substituida(user_id, externo):
+    """POSITIVO: o caminho comum não dispara o aviso."""
+    cob = montar("pending", user_id)
+    entregar("PAYMENT_RECEIVED", cob)
+    assert _grants(user_id) == 1
+    assert not [a for a in externo["alerta"] if "substituída" in a]

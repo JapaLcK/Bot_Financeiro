@@ -746,8 +746,8 @@ Estados de `pix_charges`: `draft` · `creating` · `pending` · `canceling` · `
 | `draft` | → **`paid`** + efeitos + aviso "pago sem QR" (o id remoto vem do evento; #819) | — | — | status inalterado + `[revoke]` | — | — | reconcilia aos 15 min; apaga **só** com lista vazia no Asaas (§10.1) |
 | `creating` | → **`paid`** + efeitos + aviso "pago sem QR" (#819); a reconciliação não resgata: o `_anexar` exige o QR, e o QR falhando é o que deixou a linha aqui | — | — | status inalterado + `[revoke]` | — | — | consulta por `externalReference` |
 | `pending` | → **`paid`** + efeitos de pagamento | → `expired` | → `canceled` | — | — | — | reconcilia; cancela no Asaas após 60 d |
-| `canceling` | → **`paid`** + efeitos (sem alerta hoje, A5) | → `expired` | → `canceled` | — | — | — | repete o `DELETE` |
-| `canceled` | → **`paid`** + efeitos (sem alerta hoje, A5) | no-op | no-op | — | — | — | — |
+| `canceling` | → **`paid`** + efeitos + alerta ao operador (#1268) | → `expired` | → `canceled` | — | — | — | repete o `DELETE` |
+| `canceled` | → **`paid`** + efeitos + alerta ao operador (#1268) | no-op | no-op | — | — | — | — |
 | `expired` | → **`paid`** + efeitos (**tardio válido até 60 d**) | no-op | no-op | — | — | — | cancela no Asaas após 60 d |
 | `paid` | **no-op** (nenhum efeito, §8.2) | no-op | no-op | `PAYMENT_REFUNDED` → `refunded` + `[revoke]` | `PAYMENT_PARTIALLY_REFUNDED` → `refunded_partial`, não revoga, alerta | **no-op** (não revoga; alerta em REQUESTED/DISPUTE) | confere pago × esperado |
 | `paid_orphan` | no-op | no-op | no-op | → `refunded` | → alerta | **no-op** (só alerta) | lista de conciliação |
