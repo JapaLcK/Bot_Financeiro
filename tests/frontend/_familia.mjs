@@ -9,12 +9,17 @@ import { RESPOSTAS } from "./_painel.mjs";
 export const F = RESPOSTAS.familia;
 export const ERRO = (status, code) => (r) => r.fulfill({ status, json: { error: { code, message: "x" } } });
 export const NONCE = F.dissolucao.confirmacao;
+export const E422 = (campo) => (r) => r.fulfill({ status: 422, json: { error: { code: "validation_error", message: "x", details: [{ loc: ["query", campo], msg: "x", type: "value_error" }] } } });
+export const MARIA = { ref: "9f1c2a40-7b1e-4a53-8d3a-0c5d6e7f8a91", nome: "Maria Aparecida Costa", status: "ativo", permissoes: ["agregados"] };
+export const MES = "2026-10"; // o relógio do painel é fixo (_guia.mjs: setFixedTime 2026-10-02); mesAtual() dá este mês
 export const titular = (extra = {}) => ({ ...structuredClone(F.titular), ...extra });
 
 // `s.visao`: null (sem família, 404 not_found) | o corpo do GET. `s.reqs`: toda requisição /api/v2/familia* (método, caminho, corpo, CSRF, content-type).
-// Ganchos (cada um recebe a rota e devolve a resposta, ou nada para seguir): s.get, s.criar, s.convidar, s.revogar, s.remover, s.sair, s.previa, s.dissolver.
+// Ganchos (cada um recebe a rota e devolve a resposta, ou nada para seguir): s.get, s.criar, s.convidar, s.revogar, s.remover, s.sair, s.previa, s.dissolver,
+// e os de dados (PR 6b): s.liberar, s.revogarP, s.historico, s.agregados, s.lancamentos. `holdAgregados` (uma promessa) prende as leituras de membro antes de responder.
+// As permissões de escrita leem e gravam em s.visao.permissoes (membro); o titular é lido de s.visao.membros[].permissoes pelo próprio teste.
 export function servidor({ visao = null } = {}) {
-  const s = { visao, nonce: NONCE, reqs: [], tokens: 0, hold: null, get: null, criar: null, convidar: null, revogar: null, remover: null, sair: null, previa: null, dissolver: null };
+  const s = { visao, nonce: NONCE, reqs: [], tokens: 0, hold: null, get: null, criar: null, convidar: null, revogar: null, remover: null, sair: null, previa: null, dissolver: null, liberar: null, revogarP: null, historico: null, agregados: null, lancamentos: null, holdAgregados: null };
   const vazio = (r) => r.fulfill({ status: 204, body: "" });
   s.antes = async (ctx) => {
     await ctx.route((u) => u.pathname.startsWith("/api/v2/familia"), async (r) => {
@@ -56,6 +61,26 @@ export function servidor({ visao = null } = {}) {
         s.visao = null;
         return vazio(r);
       }
+      if (p === "/permissoes" && m === "POST") {
+        if (await tratou(s.liberar)) return;
+        const e = q.postDataJSON().escopo;
+        s.visao = { ...s.visao, permissoes: [...new Set([...s.visao.permissoes, e])] };
+        return r.fulfill({ json: { permissoes: s.visao.permissoes } });
+      }
+      if (p.startsWith("/permissoes/") && m === "DELETE") {
+        if (await tratou(s.revogarP)) return;
+        const e = p.slice("/permissoes/".length);
+        s.visao = { ...s.visao, permissoes: s.visao.permissoes.filter((x) => x !== e && !(e === "agregados" && x === "lancamentos")) };
+        return r.fulfill({ json: { permissoes: s.visao.permissoes } });
+      }
+      if (p === "/historico" && m === "GET") return (await tratou(s.historico)) || r.fulfill({ json: F.historico_vazio });
+      const dado = /^\/membros\/([^/]+)\/(agregados|lancamentos)$/.exec(p);
+      if (dado && m === "GET") {
+        if (s.holdAgregados) await s.holdAgregados;
+        if (await tratou(dado[2] === "agregados" ? s.agregados : s.lancamentos)) return;
+        const mes = u.searchParams.get("mes");
+        return r.fulfill({ json: dado[2] === "agregados" ? { ...F.agregados, mes } : { ...F.lancamentos, mes, proximo: null } });
+      }
       return r.fulfill({ status: 500, body: "rota fora do contrato: " + m + " " + p });
     });
   };
@@ -81,4 +106,13 @@ export async function abrirFamilia({ width = 1280, height = 800, plano = "plus",
     texto: async () => (await page.locator(".conta-familia").innerText()).replace(/\s+/g, " ").trim(),
     escritas: () => s.reqs.filter((q) => q.metodo !== "GET"),
   };
+}
+
+/** O titular com a Maria (resumo liberado) e o painel dela aberto: o 1º GET de agregados já chegou. */
+export async function abrirVer({ membro = MARIA, ...opts } = {}) {
+  const t = await abrirFamilia({ visao: titular({ membros: [membro] }), ...opts });
+  await t.bt("Ver").click();
+  await t.page.getByText("R$ 1.234,56").first().waitFor();
+  t.dados = (assunto = "") => t.s.reqs.filter((q) => q.metodo === "GET" && q.caminho.startsWith("/membros/") && q.caminho.endsWith(assunto));
+  return t;
 }

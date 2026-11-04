@@ -5,6 +5,8 @@ import { route } from "../router";
 import { Confirma } from "../conta/Confirma";
 import { criarFamilia, familiaQuery, sairDaFamilia } from "./api";
 import { FalhaFamilia, focarTitulo, useEscrita } from "./escrita";
+import { Historico } from "./Historico";
+import { Permissoes } from "./Permissoes";
 import { Titular } from "./Titular";
 
 // Família da Conta (/conta/familia): sem família (criar), membro (sair) ou titular (Titular.tsx). A API é a api/v2/familia.py.
@@ -12,14 +14,16 @@ import { Titular } from "./Titular";
 // O 1º uid que chega não conta como troca (a tela já está montada e relendo). O perfil não relê ao voltar à aba (contaQuery); aqui sim,
 // porque é ele que diz de quem é a família na tela.
 export function ContaFamilia() {
-  const uid = useQuery({ ...contaQuery, refetchOnWindowFocus: true }).data?.user_id;
+  const conta = useQuery({ ...contaQuery, refetchOnWindowFocus: true });
+  const uid = conta.data?.user_id;
+  const perfilFalhou = uid === undefined && conta.isError ? () => void conta.refetch() : undefined; // sem uid as leituras de membro não começam: a tela mostra o erro
   const visto = useRef<number | undefined>(undefined);
   const troca = useRef(0);
   if (uid !== undefined) { if (visto.current !== undefined && uid !== visto.current) troca.current++; visto.current = uid; }
-  return <Tela key={troca.current} />;
+  return <Tela key={troca.current} uid={uid} perfilFalhou={perfilFalhou} />;
 }
 
-function Tela() {
+function Tela({ uid, perfilFalhou }: { uid: number | undefined; perfilFalhou: (() => void) | undefined }) {
   const qc = useQueryClient();
   const q = useQuery(familiaQuery);
   const escrita = useEscrita();
@@ -51,10 +55,12 @@ function Tela() {
   </>;
   else if (d.papel === "membro") corpo = <>
     <p>Você está numa família.</p>
+    <Permissoes permissoes={d.permissoes} escrita={escrita} />
+    <Historico uid={uid} perfilFalhou={perfilFalhou} />
     <button type="button" className="btn btn-ghost" aria-disabled={ocupado || undefined} onClick={() => setSaindo(true)}>Sair da família</button>
     {saindo && <Confirma titulo="Sair da família?" texto="Você perde o acesso ao plano da família." botao="Sair" pendente="Saindo…" fechar={() => setSaindo(false)} agir={sair} />}
   </>;
-  else corpo = <Titular v={d} escrita={escrita} />;
+  else corpo = <Titular v={d} escrita={escrita} uid={uid} perfilFalhou={perfilFalhou} />;
 
   return (
     <>
