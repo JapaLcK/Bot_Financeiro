@@ -213,6 +213,7 @@ def test_tool_boleto_valor_normal_segue_igual():
                                          ("gastei 1.000,50k no cartão", 1000500.0),  # base inteira, não só "000,50"
                                          ("gastei 300 numa TV 4K no cartão", 300.0),  # "4K" depois do valor é descrição
                                          ("comprei TV 4K por 3 mil reais no cartão", 3000.0),  # e antes dele também
+                                         ("comprei TV 4K por mil reais no cartão", 1000.0),  # "mil" sem dígito também
                                          ("gastei 1k e 500 reais no cartão", 1500.0),  # o resto somado não é outro valor
                                          ("gastei 100 k-pop no cartão", 100.0)])  # "k-" é palavra, não mil  # e antes dele também
 def test_whatsapp_compra_no_cartao_k_e_mil(texto, total):

@@ -973,7 +973,7 @@ def parse_money(text: str) -> float | None:
             depois = depois[r.end():]  # "1k e 500 reais": o resto somado não é outro valor
         if mm.group(2).lower() == "k" and (
             re.search(r"\d", text[:mm.start()])
-            or re.search(r"r\$\s*\d|\d\s*(?:mil|milh|bi|reais|real)", depois, re.IGNORECASE)
+            or re.search(rf"r\$\s*\d|\d\s*(?:mil|milh|bi|reais|real)|\b(?:{_PT_MULT_LONGO})\b", depois, re.IGNORECASE)
         ):
             continue  # "300 numa TV 4K" / "TV 4K por 3 mil": com outro valor na frase, o "k" é descrição
         # mesma regra do número comum abaixo: "1.5 mil" = 1500, "1.500 mil" = 1.500.000
