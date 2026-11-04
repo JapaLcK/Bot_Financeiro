@@ -186,9 +186,9 @@ def test_redirecionamento_do_painel_nao_grava_o_marcador(user_id):
     assert marcas(r) == []
 
 
-def test_marcador_e_a_conta_da_api_nao_a_do_auth_token(monkeypatch, user_id):
-    """auth_token de A e dashboard_token de B (o /d/{code} de B sem e-mail com A logado): a /api/v2 responde B, então o
-    /painel marca B; o refresh devolve a sessão de A e o marcador vira A, o que faz a página recarregar."""
+def test_sessao_de_contas_diferentes_nao_ganha_marcador(monkeypatch, user_id):
+    """auth_token de A e dashboard_token de B: o servidor recusa a sessão (o /painel manda ao login) e o /painel não grava
+    marcador de nenhuma das duas; o refresh dela encerra a sessão e expira o marcador. A sessão coerente marca a própria conta."""
     a, b = user_id, user_id + 1
     ensure_user(b)
     pronto(a)
@@ -200,13 +200,12 @@ def test_marcador_e_a_conta_da_api_nao_a_do_auth_token(monkeypatch, user_id):
     c.cookies.set(dashboard.REFRESH_COOKIE_NAME, sa["refresh"])
     c.cookies.set(DASHBOARD_COOKIE_NAME, sb["dashboard"])
     r = c.get("/painel", follow_redirects=False)
-    serve_a_pagina(r)
-    assert [m.split(";")[0] for m in marcas(r)] == [f"{CONTA_COOKIE_NAME}={b}"]
-    assert c.get("/auth/dashboard-profile").json()["user_id"] == b
+    assert (r.status_code, r.headers.get("location"), marcas(r)) == (302, "/login?next=/painel", [])
     rr = c.post("/auth/refresh", headers=csrf(c))
-    assert [m.split(";")[0] for m in marcas(rr)] == [f"{CONTA_COOKIE_NAME}={a}"]
-    novo = next(h for h in rr.headers.get_list("set-cookie") if h.startswith(f"{DASHBOARD_COOKIE_NAME}="))
-    r2 = get(auth=sa["access"], dash=novo.split(";")[0].split("=", 1)[1], marca=str(b))
+    assert rr.status_code == 401
+    assert len(marcas(rr)) == 3 and all("max-age=0" in m.lower() for m in marcas(rr)), marcas(rr)  # nos três domínios
+    r2 = get(auth=sa["access"], dash=sa["dashboard"], marca=str(b))
+    serve_a_pagina(r2)
     assert [m.split(";")[0] for m in marcas(r2)] == [f"{CONTA_COOKIE_NAME}={a}"]
 
 

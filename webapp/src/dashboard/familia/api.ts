@@ -5,24 +5,30 @@ import { queryOptions } from "@tanstack/react-query";
 import { DEMO, ErroApi, erroDe, escrever, chamar, instante, meQuery, urlDe, FUSO } from "../lib/v2";
 import { buscar } from "../lib/sessao";
 
-export type Membro = { ref: string; nome: string; status: "ativo" | "suspenso" };
+export const ESCOPOS = ["agregados", "lancamentos"] as const; // a única lista de escopos (permissoesDe, leitor do histórico, doMembro)
+export type Escopo = (typeof ESCOPOS)[number];
+export type Membro = { ref: string; nome: string; status: "ativo" | "suspenso"; permissoes: Escopo[] };
 export type Titular = { papel: "titular"; capacidade: number; membros: Membro[]; convites_ativos: number };
-export type Visao = Titular | { papel: "membro" } | null; // null = sem família (404 not_found)
+export type Visao = Titular | { papel: "membro"; permissoes: Escopo[] } | null; // null = sem família (404 not_found)
 export type Convite = { token: string; link: string; expira_em: string };
 export type Dissolucao = { membros: number; convites: number; consentimentos: number; confirmacao: string };
 
-const contrato = () => new ErroApi(200, "contrato");
-const objeto = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object";
-const inteiro = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
-const texto = (v: unknown): v is string => typeof v === "string" && v !== "";
+export const contrato = () => new ErroApi(200, "contrato");
+export const objeto = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object";
+export const inteiro = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
+export const primeiroNome = (n: string) => n.replace(/[\u202A-\u202E\u2066-\u2069\u200E\u200F\u061C]/g, "").trim().split(/\s+/)[0] || "Membro";
+export const texto = (v: unknown): v is string => typeof v === "string" && v !== "";
+
+// Ausente vira [] e escopo desconhecido é descartado: falha fechada (um escopo que este código não conhece nunca mostra o "Ver").
+export const permissoesDe = (v: unknown): Escopo[] => Array.isArray(v) ? v.filter((e): e is Escopo => ESCOPOS.includes(e)) : [];
 
 function visaoDe(v: unknown): Visao {
   if (!objeto(v)) throw contrato();
-  if (v.papel === "membro") return { papel: "membro" };
+  if (v.papel === "membro") return { papel: "membro", permissoes: permissoesDe(v.permissoes) };
   if (v.papel !== "titular" || !inteiro(v.capacidade) || !inteiro(v.convites_ativos) || !Array.isArray(v.membros)) throw contrato();
   const membros = v.membros.map((m: unknown) => {
     if (!objeto(m) || !texto(m.ref) || typeof m.nome !== "string" || (m.status !== "ativo" && m.status !== "suspenso")) throw contrato();
-    return { ref: m.ref, nome: m.nome, status: m.status as Membro["status"] };
+    return { ref: m.ref, nome: m.nome, status: m.status as Membro["status"], permissoes: permissoesDe(m.permissoes) };
   });
   return { papel: "titular", capacidade: v.capacidade, membros, convites_ativos: v.convites_ativos };
 }
@@ -80,6 +86,7 @@ export function falhaFamilia(e: unknown): Falha {
   const c = e instanceof ErroApi ? e.code : "";
   if (s === 402) return { texto: "Seu plano não inclui família.", plano: true };
   if (s === 429) return { texto: "Muitas tentativas. Tente de novo mais tarde." };
+  if (c === "aggregates_required") return { texto: "Libere o resumo primeiro." };
   if (c === "full") return { texto: "Todos os lugares estão ocupados." };
   if (c === "confirmation_mismatch") return { texto: "A família mudou. Confira de novo." };
   if (s === 404) return { texto: "Isso não existe mais." };

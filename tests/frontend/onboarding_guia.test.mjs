@@ -68,7 +68,7 @@ async function abrir(viewport, { step, snapshot = () => json({ ok: true, connect
     return ++validates === 1 ? route.fulfill({ ...json({ detail: "x" }, 401), headers: { "WWW-Authenticate": "Bearer" } })
                              : route.fulfill(json({ dashboard_url: "/painel" }));
   });
-  await page.route("**/auth/refresh", (route) => (refresh === "pendura" ? null : route.fulfill(json({ ok: true }))));
+  await page.route("**/auth/refresh", (route) => (refresh === "pendura" ? null : route.fulfill(json({ ok: true, user_id: 1, confirmada: true }))));
   await page.route("**/painel", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<p>painel</p>" }));
   await page.route("**/onboarding/state", async (route) => {
     if (route.request().method() === "GET") return route.fulfill(json({ step, completed: concluido, total_steps: 5, ...estado }));

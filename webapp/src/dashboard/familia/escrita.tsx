@@ -29,6 +29,14 @@ export const FalhaFamilia = ({ falha }: { falha: Falha | null }) => falha && (
   <p role="alert" className="warn fam-falha">{falha.texto}{falha.plano && <> <a href={href("/conta/cobranca")}>Ver cobrança</a></>}</p>
 );
 
+// O perfil (de onde vem o uid) falhou: sem ele as leituras de membro nem começam. Refazer o perfil destrava as duas telas.
+export const PerfilFalhou = ({ tentar }: { tentar: () => void }) => (
+  <div className="empty" role="alert">
+    <p>Não foi possível carregar.</p>
+    <button type="button" className="btn btn-ghost retry" onClick={tentar}>Tentar de novo</button>
+  </div>
+);
+
 // O elemento que tinha o foco saiu da tela (botão que virou outra coisa, linha removida, diálogo que acabou de fechar): o foco cairia no body. Vai ao título.
 export const focarTitulo = () => {
   const a = document.activeElement;

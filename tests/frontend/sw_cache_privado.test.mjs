@@ -253,7 +253,7 @@ function paginaComCache(arquivo, prepara) {
       addEventListener: () => {}, querySelector: () => null, querySelectorAll: () => [],
       createElement: () => ({ style: {}, classList: { add() {}, remove() {} }, appendChild() {} }),
     },
-    setTimeout, clearTimeout, fetch: async () => ({ ok: true, status: 200 }),
+    setTimeout, clearTimeout, fetch: async () => ({ ok: true, status: 200, headers: new Headers() }),
     addEventListener: () => {},
   };
   ctx.window = ctx;
@@ -505,7 +505,10 @@ function fetchPorRota(mapa, autenticacao = []) {
       const status = typeof r === "function" ? r(chamadas) : r;
       const marca = status === 401 && marcados.has(caminho)
         ? { "WWW-Authenticate": 'Bearer realm="pigbank", error="invalid_token"' } : {};
-      return { ok: status >= 200 && status < 300, status, headers: new Headers(marca) };
+      const ok = status >= 200 && status < 300;
+      // O refresh que dá certo diz a conta renovada e que ela foi confirmada.
+      const corpo = caminho === "/auth/refresh" && ok ? { ok: true, user_id: 1, confirmada: true } : {};
+      return { ok, status, headers: new Headers(marca), json: async () => corpo };
     },
   };
 }
@@ -813,7 +816,7 @@ test("caminho absoluto da PROPRIA origem continua sendo interceptado", async () 
   // (URL absoluta, mesma origem) continuar passando pela limpeza.
   const apagados = [];
   const { ctx } = comStorageCheio("static/auth-refresh.js", (c) => {
-    c.fetch = async () => ({ ok: true, status: 200 });
+    c.fetch = async () => ({ ok: true, status: 200, headers: new Headers() });
     c.caches.delete = async (k) => { apagados.push(k); return true; };
   });
 
@@ -913,7 +916,7 @@ test("caminho relativo comum continua sendo interceptado sem o fast-path", async
   // TODOS os cinco donos de logout usam, e ela nao pode deixar de ser nossa.
   const apagados = [];
   const { ctx } = comStorageCheio("static/auth-refresh.js", (c) => {
-    c.fetch = async () => ({ ok: true, status: 200 });
+    c.fetch = async () => ({ ok: true, status: 200, headers: new Headers() });
     c.caches.delete = async (k) => { apagados.push(k); return true; };
   });
 
@@ -960,7 +963,7 @@ test("o metodo sai do objeto Request quando nao vem no init", async () => {
   // limpar — regressao pior que o bug que a checagem conserta.
   const apagados = [];
   const { ctx } = comStorageCheio("static/auth-refresh.js", (c) => {
-    c.fetch = async () => ({ ok: true, status: 200 });
+    c.fetch = async () => ({ ok: true, status: 200, headers: new Headers() });
     c.caches.delete = async (k) => { apagados.push(k); return true; };
   });
 
@@ -976,7 +979,7 @@ test("metodo em minusculo ainda e' POST — `fetch(url, {method:\"post\"})` e' v
   // regressao pior que o 405 que a checagem de metodo conserta.
   const apagados = [];
   const { ctx, local } = comStorageCheio("static/auth-refresh.js", (c) => {
-    c.fetch = async () => ({ ok: true, status: 200 });
+    c.fetch = async () => ({ ok: true, status: 200, headers: new Headers() });
     c.caches.delete = async (k) => { apagados.push(k); return true; };
   });
 

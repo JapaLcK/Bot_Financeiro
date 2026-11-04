@@ -141,6 +141,7 @@ def test_header_falsificado_com_cookie_nao_devolve_token_no_corpo(sessao):
         headers={
             dashboard.APP_CLIENT_HEADER: "app",
             dashboard.CSRF_HEADER_NAME: "t",
+            dashboard.CONTA_HEADER: "-",
         },
     )
     assert r.status_code == 200, r.text
