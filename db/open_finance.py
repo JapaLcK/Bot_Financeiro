@@ -390,15 +390,21 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
 
 def count_open_finance_connections(user_id: int, provider: str = "pluggy") -> int:
     """Quantos bancos o usuário tem conectados (default: só Pluggy reais), pro
-    gate por nº de bancos. Conexão PAUSED (trial vencido) NÃO conta — senão o
-    ex-trialer que assina fica travado de reconectar o próprio banco."""
+    gate por nº de bancos. Conexão terminal (`_TERMINAL`: PAUSED = trial vencido,
+    DELETED = removida na Pluggy) NÃO conta — senão o ex-trialer que assina fica
+    travado de reconectar o próprio banco. O modal (`frontend/open-finance-connect.js`,
+    `FORA_DO_TETO`) espelha a lista, e `tests/test_of_limite_route.py` compara as
+    duas (#1377)."""
+    # Import LOCAL: `open_finance_state` importa `_CursorComTeto` daqui no topo.
+    from .open_finance_state import _TERMINAL
+
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             if provider:
                 cur.execute(
                     "select count(*) as n from open_finance_connections"
-                    " where user_id=%s and provider=%s and upper(coalesce(status,'')) <> 'PAUSED'",
+                    f" where user_id=%s and provider=%s and upper(coalesce(status,'')) not in {_TERMINAL}",
                     (user_id, provider),
                 )
             else:
