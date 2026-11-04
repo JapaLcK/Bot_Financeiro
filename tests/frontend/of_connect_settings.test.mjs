@@ -490,7 +490,7 @@ test("o CTA do modal não estica pelo rodapé nem espreme o nome do banco", asyn
 });
 
 test("conexão PAUSED não consome o teto do plano", async () => {
-  // Espelha a contagem do backend (_ofCountsTowardBankLimit).
+  // Espelha a contagem do backend (count_open_finance_connections).
   const page = await abrirSettings({
     banksMax: 1,
     conexoes: [{ id: 9, provider: "pluggy", institution_name: "Nubank", institution_id: "612", status: "PAUSED" }],
@@ -503,6 +503,68 @@ test("conexão PAUSED não consome o teto do plano", async () => {
     !document.getElementById("bankpick-overlay").classList.contains("open"));
   assert.equal(await pickerAberto(page), false,
     "com a única conexão pausada, o teto não está atingido");
+  await page.__ctx.close();
+});
+
+// #1377: DELETED (removida na Pluggy) sai do teto como PAUSED. Controle negativo:
+// FORA_DO_TETO só com "PAUSED" deixa F1 e F2 vermelhos; o positivo é F3 (e os de UPDATED acima).
+const ITAU_ATIVO = { id: 8, provider: "pluggy", institution_name: "Itaú", institution_id: "601", status: "UPDATED" };
+const NUBANK_REMOVIDO = { id: 9, provider: "pluggy", institution_name: "Nubank", institution_id: "612", status: "DELETED" };
+
+test("conexão DELETED não consome o teto do plano", async () => {
+  const page = await abrirSettings({ banksMax: 1, conexoes: [NUBANK_REMOVIDO] });
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Itaú"]');
+  await page.click("#bankpick-go");
+
+  await page.waitForFunction(() =>
+    !document.getElementById("bankpick-overlay").classList.contains("open"));
+  assert.equal(await pickerAberto(page), false,
+    "com a única conexão removida, o teto não está atingido");
+  await page.__ctx.close();
+});
+
+test("teto cheio: banco que só tem conexão DELETED não é reconexão", async () => {
+  // O seletor sempre cria item novo: deixar passar aqui é autorizar na Pluggy e tomar 402 no /pluggy-item.
+  const page = await abrirSettings({ banksMax: 1, conexoes: [ITAU_ATIVO, NUBANK_REMOVIDO] });
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Nubank"]');
+  await page.click("#bankpick-go");
+
+  await sleep(500);
+  assert.equal(await pickerAberto(page), true,
+    "o Nubank removido não ocupa vaga, mas também não é reconexão: o teto (Itaú) barra antes do widget");
+  await page.__ctx.close();
+});
+
+test("teto cheio com DELETED na lista AINDA reconecta o banco ativo", async () => {
+  const page = await abrirSettings({ banksMax: 1, conexoes: [ITAU_ATIVO, NUBANK_REMOVIDO] });
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Itaú"]');
+  await page.click("#bankpick-go");
+
+  await page.waitForFunction(() =>
+    !document.getElementById("bankpick-overlay").classList.contains("open"));
+  assert.equal(await pickerAberto(page), false, "reconexão do Itaú ativo tem de passar");
+  await page.__ctx.close();
+});
+
+test("conexão ERROR (item_missing) ainda ocupa vaga: banco novo no teto não abre a Pluggy", async () => {
+  // Espelho do A4 de tests/test_of_limite_route.py: só PAUSED e DELETED saem do teto. O teste D
+  // compara as listas; este prende o comportamento (um filtro inline a mais em countsTowardLimit passaria no D).
+  const page = await abrirSettings({
+    banksMax: 1,
+    conexoes: [{ id: 9, provider: "pluggy", institution_name: "Nubank", institution_id: "612", status: "ERROR", status_reason: "item_missing" }],
+  });
+  let tokens = 0;
+  page.on("request", (r) => { if (r.url().includes("/connect-token")) tokens++; });
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Itaú"]');
+  await page.click("#bankpick-go");
+
+  await sleep(500);
+  assert.equal(await pickerAberto(page), true, "conexão com erro ocupa vaga: o teto barra antes do widget");
+  assert.equal(tokens, 0, "nenhum connect-token pode sair com o teto cheio");
   await page.__ctx.close();
 });
 

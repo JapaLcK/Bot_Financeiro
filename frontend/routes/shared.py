@@ -28,6 +28,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from slowapi import Limiter
+from starlette.requests import HTTPConnection
 
 from config.env import load_app_env
 from core.client_ip import rate_limit_key
@@ -53,6 +54,19 @@ JWT_SECRET = (os.getenv("JWT_SECRET") or "").strip()
 
 AUTH_COOKIE_NAME = "auth_token"
 DASHBOARD_COOKIE_NAME = "dashboard_token"
+# Sinal de troca de conta para o /painel (webapp/src/dashboard/lib/sessao.ts); nunca
+# autenticação nem autorização: o servidor não lê. Gravado com o dashboard_token, no
+# /painel e apagado no fim da sessão.
+CONTA_COOKIE_NAME = "pb_conta"
+
+
+def marcar_conta(response: Response, user_id: int) -> None:
+    # Sem `domain` e com path `/`: dois `pb_conta` (domínios diferentes) recarregariam em laço.
+    # Import tardio: o monólito importa este módulo antes de definir as constantes (affiliates.py).
+    from frontend.finance_bot_websocket_custom import COOKIE_SECURE, DASHBOARD_SESSION_HOURS  # noqa: PLC0415
+    response.set_cookie(CONTA_COOKIE_NAME, str(user_id), httponly=False, secure=COOKIE_SECURE,
+                        samesite="lax", max_age=int(DASHBOARD_SESSION_HOURS * 3600), path="/")
+
 
 # Marca a FAMÍLIA do 401 para o interceptor de `frontend/static/auth-refresh.js`:
 # só o 401 que leva este header é falha de access/dashboard token, o único caso em
@@ -461,12 +475,12 @@ def _inline_css_assets(html_text: str, asset_names: tuple[str, ...]) -> str:
 
 
 # Tudo que o "Testar o Piggy agora" põe no HTML: cada `<a data-teste ...>` (com a
-# indentação que o antecede), o `<p id="testar-piggy">` da /precos (que também embrulha
-# um) e o <script> do teste. Sem aninhamento de <a>/<p> no HTML de origem.
+# indentação que o antecede) e o `<p id="testar-piggy">` da /precos (que também embrulha
+# um). Sem aninhamento de <a>/<p> no HTML de origem. O <script> do teste-piggy.js FICA:
+# ele também repassa utm/fbclid aos a[data-utm] (CTAs da /), que existem com o demo desligado.
 _BOTAO_TESTE_RE = re.compile(
     r'\s*<a\b[^>]*\sdata-teste(?=[\s>=/])[^>]*>.*?</a>'
-    r'|<p\b[^>]*\sid="testar-piggy"[^>]*>.*?</p>'
-    r'|\s*<script\b[^>]*teste-piggy\.js[^>]*></script>',
+    r'|<p\b[^>]*\sid="testar-piggy"[^>]*>.*?</p>',
     re.S,
 )
 
@@ -495,6 +509,7 @@ def html_file(
     volta do checkout (?upgrade=success) dispara a conversão.
     `sem_teste=True` tira os botões "Testar o Piggy agora" (demo desligado, ou
     visitante que já tem conta): o link do HTML nunca promete o que o servidor recusa.
+    O teste-piggy.js continua carregado (sem botão, só repassa a UTM dos a[data-utm]).
     """
     text = path.read_text(encoding="utf-8")
     if sem_teste:  # `lp-com-teste` (lp.html) é o CSS que reserva a dobra do 2º botão
@@ -1033,7 +1048,38 @@ def payload_de_sessao(token: str) -> dict | None:
         return None
 
 
+def contas_dos_cookies(conn: HTTPConnection) -> set[int]:
+    """As contas que os cookies `auth_token` e `dashboard_token` dizem ser, por
+    assinatura, prazo e tipo — sem banco. Token vencido ou inválido não conta."""
+    contas = set()
+    for nome in (AUTH_COOKIE_NAME, DASHBOARD_COOKIE_NAME):
+        payload = payload_de_sessao((conn.cookies.get(nome) or "").strip())
+        if payload:
+            contas.add(int(payload["user_id"]))
+    return contas
+
+
+def sessao_divergente(conn: HTTPConnection) -> bool:
+    """True quando as credenciais de sessão do navegador não concordam sobre a conta.
+
+    Contrato: os cookies de sessão de um navegador são de UMA conta. Dois cookies
+    válidos de contas diferentes não são sessão nenhuma — quem chama responde 401
+    e o cliente volta ao login. Compara só a conta, nunca o `jti`. Com `Bearer`
+    (o app, que carrega um token só) não há par a comparar.
+    """
+    if extract_bearer_token(conn):
+        return False
+    if len(contas_dos_cookies(conn)) < 2:
+        return False
+    # INFO, não WARNING: o WARNING vai para o banco a cada request (observability).
+    logging.getLogger(__name__).info("sessao_divergente")
+    return True
+
+
 def resolve_dashboard_user_id(request: Request) -> int:
+    if sessao_divergente(request):
+        raise HTTPException(status_code=401, detail="Sessão inconsistente. Faça login novamente.",
+                            headers=WWW_AUTHENTICATE_401)
     token = (
         extract_bearer_token(request)
         or (request.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
@@ -1306,6 +1352,8 @@ def _resolve_page_user_id(request: Request) -> int | None:
     válido (estado normal — o front só renova o access DEPOIS que o HTML carrega),
     servindo a página sem checar o gate. Devolve None quando nenhum cookie é uma
     sessão válida (aí o próprio HTML manda pro login)."""
+    if sessao_divergente(request):
+        return None
     # 1. auth_token (JWT curto)
     token = get_auth_token_from_request(request, None)
     payload = decode_jwt(token) if token else None

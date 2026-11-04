@@ -390,15 +390,21 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
 
 def count_open_finance_connections(user_id: int, provider: str = "pluggy") -> int:
     """Quantos bancos o usuário tem conectados (default: só Pluggy reais), pro
-    gate por nº de bancos. Conexão PAUSED (trial vencido) NÃO conta — senão o
-    ex-trialer que assina fica travado de reconectar o próprio banco."""
+    gate por nº de bancos. Conexão terminal (`_TERMINAL`: PAUSED = trial vencido,
+    DELETED = removida na Pluggy) NÃO conta — senão o ex-trialer que assina fica
+    travado de reconectar o próprio banco. O modal (`frontend/open-finance-connect.js`,
+    `FORA_DO_TETO`) espelha a lista, e `tests/test_of_limite_route.py` compara as
+    duas (#1377)."""
+    # Import LOCAL: `open_finance_state` importa `_CursorComTeto` daqui no topo.
+    from .open_finance_state import _TERMINAL
+
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             if provider:
                 cur.execute(
                     "select count(*) as n from open_finance_connections"
-                    " where user_id=%s and provider=%s and upper(coalesce(status,'')) <> 'PAUSED'",
+                    f" where user_id=%s and provider=%s and upper(coalesce(status,'')) not in {_TERMINAL}",
                     (user_id, provider),
                 )
             else:
@@ -516,17 +522,19 @@ def list_pluggy_item_ids(user_id: int) -> list[str]:
 
 
 def list_pluggy_connections_for_trial_sweep() -> list[dict]:
-    """Conexões Pluggy candidatas à varredura de trial vencido (todas as não-PAUSED).
+    """Conexões Pluggy candidatas à varredura de teto do plano: as não-terminais (`_TERMINAL`).
 
-    A resolução de tier (trial ativo? assinatura?) fica no serviço — aqui só se lista
-    quem ainda ocupa slot pago na Pluggy."""
+    PAUSED já saiu da Pluggy, e DELETED foi removida e não ocupa vaga (#1371): contá-la
+    pausaria uma conexão viva no lugar dela. A resolução de tier (trial ativo? assinatura?)
+    fica no serviço — aqui só se lista quem ainda ocupa slot pago na Pluggy."""
+    from .open_finance_state import _TERMINAL  # local: o módulo importa este no topo
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select id, user_id, provider_item_id, status
                 from open_finance_connections
-                where provider='pluggy' and upper(coalesce(status,'')) <> 'PAUSED'
+                where provider='pluggy' and upper(coalesce(status,'')) not in {_TERMINAL}
                 order by user_id, id
                 """
             )
@@ -539,7 +547,11 @@ def pause_open_finance_connection(connection_id: int) -> int:
     Decisão de produto: NÃO apaga nada do que foi importado — contas, transações,
     launches e faturas ficam visíveis; só o sync para ("reative seu banco" vira CTA
     de upgrade). O item na Pluggy é deletado pelo serviço ANTES de chamar isto
-    (libera o slot pago do contrato)."""
+    (libera o slot pago do contrato).
+
+    Linha já terminal (PAUSED/DELETED) não é regravada: devolve 0 e preserva `status`
+    e `updated_at` (#1371; o webhook `item/deleted` pode chegar entre a lista e a pausa)."""
+    from .open_finance_state import _TERMINAL  # local: o módulo importa este no topo
     with get_conn() as conn:
         with conn.cursor() as cur:
             from .bank_movements import _lock_user, reconcile_bank_movements
@@ -548,7 +560,8 @@ def pause_open_finance_connection(connection_id: int) -> int:
             if owner:
                 _lock_user(cur, owner["user_id"])
             cur.execute(
-                "update open_finance_connections set status='PAUSED', updated_at=now() where id=%s",
+                "update open_finance_connections set status='PAUSED', updated_at=now() where id=%s"
+                f" and upper(coalesce(status,'')) not in {_TERMINAL}",
                 (connection_id,),
             )
             updated = cur.rowcount

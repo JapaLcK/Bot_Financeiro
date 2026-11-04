@@ -1,5 +1,5 @@
 /* A / (frontend/index.html): só o que precisa de JS. O resto da página é markup.
-   Sem JS a página já mostra o ciclo anual, a 1ª pergunta aberta e os números finais.
+   Sem JS a página já mostra o ciclo mensal, a 1ª pergunta aberta e os números finais.
    Só textContent/setAttribute: nada de innerHTML (o texto das respostas vem do atributo). */
 (function () {
   "use strict";
@@ -17,13 +17,27 @@
     for (const b of planos.querySelectorAll("[data-set]")) b.setAttribute("aria-pressed", String(b === btn));
   });
 
-  // ── Quem já tem sessão escolhe o plano pela /precos, como na home antiga: lá o assinante
-  // troca de plano (/billing/change-plan). A /assinar abre assinatura nova, e com uma ativa
-  // ela para no "Você já é assinante". Sem resposta, fica a /assinar (que recusa com 409).
+  // ── Assinante ativo escolhe o plano pela /precos, como na home antiga: lá ele troca de
+  // plano (/billing/change-plan). A /assinar abre assinatura nova, e com uma ativa ela para
+  // no "Você já é assinante". Os CTAs (hero, fim, barra) e os 6 cartões seguem a mesma regra;
+  // "ativa" é o `active` do /billing/subscription, o mesmo critério do create-checkout.
+  // Sem trial (telefone já usou) o rótulo deixa de prometer os 7 dias, e o destino fica.
+  // Anônimo nem pergunta; resposta incerta (403, erro, degraded, campo ausente) não mexe em nada.
+  // Os 4 CTAs da campanha (cabeçalho, hero, fim, barra): os data-utm que não são cartão de plano.
+  const CTAS = "a[data-utm]:not(.so-anual):not(.so-mensal)";
+  const ROTULO_ASSINANTE = "Gerenciar meu plano";
+  const ROTULO_SEM_TRIAL = "Assinar o Plus";
+  const rotular = (t) => { for (const s of document.querySelectorAll("[data-rotulo]")) s.textContent = t; };
   fetch("/auth/validate", { credentials: "same-origin" })
-    .then((r) => {
-      if (!r.ok) return;
-      for (const a of planos.querySelectorAll('a[href^="/assinar"]')) a.setAttribute("href", "/precos");
+    .then((r) => (r.ok ? fetch("/billing/subscription", { credentials: "same-origin" }) : null))
+    .then((r) => (r && r.ok ? r.json() : null))
+    .then((sub) => {
+      if (!sub || sub.degraded) return;
+      if (sub.active === true) {
+        // Os CTAs também pelo seletor: o Plus indisponível pode já os ter mandado para #planos (abaixo).
+        for (const a of document.querySelectorAll('a[href^="/assinar"], ' + CTAS)) a.setAttribute("href", "/precos");
+        rotular(ROTULO_ASSINANTE);
+      } else if (sub.trial_disponivel === false) rotular(ROTULO_SEM_TRIAL);
     })
     .catch(() => {});
 
@@ -34,6 +48,11 @@
     .then((r) => (r.ok ? r.json() : null))
     .then((cfg) => {
       if (!cfg) return;
+      // Plus indisponível: os CTAs diretos (todos para o Plus) caem na tabela, onde há plano à venda. Só
+      // os que ainda vão à /assinar: o /precos do assinante (fetch acima, em qualquer ordem) fica.
+      if (cfg.plus_available === false) {
+        for (const a of document.querySelectorAll(CTAS)) if (a.getAttribute("href").startsWith("/assinar")) a.setAttribute("href", "#planos");
+      }
       for (const card of planos.querySelectorAll("[data-plano]")) {
         if (cfg[card.dataset.plano + "_available"] !== false) continue;
         // Pela classe, não pelo href: com sessão o outro fetch pode ter trocado o destino para /precos antes.

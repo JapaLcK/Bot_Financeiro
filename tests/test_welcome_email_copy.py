@@ -112,3 +112,25 @@ def test_boas_vindas_nao_garante_quando_a_primeira_cobranca_vem(monkeypatch):
         assert "checkout" in corpo.lower(), (
             f"{campo} não diz que o checkout mostra a cobrança antes de confirmar"
         )
+
+
+def test_boas_vindas_diz_que_o_teste_e_no_cartao_e_um_por_telefone(monkeypatch):
+    """O teste grátis é só no cartão e um por telefone; o Pix anual não tem."""
+    enviado = _capturar(monkeypatch)
+    for campo in ("html_body", "text_body"):
+        corpo = " ".join(enviado[campo].split())
+        for trecho in ("No cartão", "um teste por número de telefone", "Pix anual não há período grátis"):
+            assert trecho in corpo, f"{campo} sem {trecho!r}"
+
+
+def test_conta_da_assinar_nao_promete_teste_nem_manda_para_a_precos(monkeypatch):
+    """`send_assinar_account_email`: quem criou a conta na /assinar já escolheu o plano."""
+    capturado: dict = {}
+    monkeypatch.setattr(email_service, "send_email", lambda **k: capturado.update(k) or True)
+    assert email_service.send_assinar_account_email("novo@example.com") is True
+    assert "dias grátis" not in capturado["subject"]
+    for campo in ("html_body", "text_body"):
+        corpo = " ".join(capturado[campo].split())
+        assert "/precos" not in corpo and "/assinar" not in corpo and "dias grátis" not in corpo, campo
+        assert "Pix anual" in corpo and "Não foi você" in corpo, campo
+        assert email_service.SUPPORT_EMAIL in corpo, campo

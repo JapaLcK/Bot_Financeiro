@@ -7,13 +7,16 @@ B — concordância: em todo estado de A, `pode_adicionar` ⟺ o `_enforce_bank_
     o enforce com item próprio passa enquanto a rota diz False.
 C — caracterização do `_enforce_bank_limit` (escrita e verde ANTES de extrair
     `_veredito_do_teto`; igual depois): prova que a extração foi mecânica.
+D — paridade (§0.7): o `FORA_DO_TETO` do modal é o `_TERMINAL` do servidor (#1377).
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import re
 import uuid
+from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet
@@ -27,11 +30,13 @@ import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
 from conftest import em_carencia, promote_to_pro
 from core.services import billing_copy
-from db import ensure_user
+from db import ensure_user, update_pluggy_open_finance_item_status
 from db.connection import get_conn
+from db.open_finance_state import _TERMINAL
 
 FRASE_V1 = "No plano grátis você conecta 1 banco. Assine o Pro para conectar mais."
 FRASE_1 = "Seu plano conecta até 1 banco. Faça upgrade pra conectar mais: /precos"
+FRASE_2 = "Seu plano conecta até 2 bancos. Faça upgrade pra conectar mais: /precos"
 FRASE_5 = "Seu plano conecta até 5 bancos. Faça upgrade pra conectar mais: /precos"
 
 
@@ -47,6 +52,20 @@ def _semeia(user_id: int, n: int, provider: str = "pluggy", status: str = "UPDAT
             )
         conn.commit()
     return itens
+
+
+def _remove(itens: list[str]) -> None:
+    """DELETED pelo escritor real do webhook `item/deleted`, nunca por SQL cru."""
+    for item in itens:
+        assert update_pluggy_open_finance_item_status(item, "DELETED", {"event": "item/deleted"}) == 1
+
+
+def _item_missing(user_id: int) -> None:
+    # ERROR não é terminal e não tem escritor de teste mais simples que o update direto.
+    _semeia(user_id, 1, status="ERROR")
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update open_finance_connections set status_reason='item_missing' where user_id=%s", (user_id,))
+        conn.commit()
 
 
 def _v1(monkeypatch, gate: bool, pro: bool = False) -> None:
@@ -102,6 +121,18 @@ def test_c_v2_no_teto_recusa(user_id):
     }
 
 
+def test_c_v2_deleted_nao_ocupa_vaga_banco_novo_passa(user_id):
+    promote_to_pro(user_id, "essencial")
+    _remove(_semeia(user_id, 1))
+    _enforce(user_id, "item-novo-1377")
+
+
+def test_c_v2_ativa_no_teto_recusa_banco_novo(user_id):
+    promote_to_pro(user_id, "essencial")
+    _semeia(user_id, 1)
+    assert _recusa(user_id, "item-novo-1377") == {"code": "OF_BANK_LIMIT", "limit": 1, "message": FRASE_1}
+
+
 def test_c_v2_limite_zero_com_item_proprio_passa(user_id):
     em_carencia(user_id)
     (item,) = _semeia(user_id, 1)
@@ -144,12 +175,23 @@ ESTADOS = {
                     (None, 3, True, None, None)),
     "essencial_paused": (lambda u, m: (promote_to_pro(u, "essencial"), _semeia(u, 1, status="PAUSED")),
                          (1, 0, True, None, None)),
+    # #1377: DELETED (removida na Pluggy) sai do teto como PAUSED; ERROR/item_missing continua contando.
+    "plus_deleted_e_ativa": (lambda u, m: (promote_to_pro(u, "pro"), _remove(_semeia(u, 2)[1:])),
+                             (2, 1, True, None, None)),
+    "plus_2_ativas": (lambda u, m: (promote_to_pro(u, "pro"), _semeia(u, 2)),
+                      (2, 2, False, "OF_BANK_LIMIT", FRASE_2)),
+    "essencial_deleted": (lambda u, m: (promote_to_pro(u, "essencial"), _remove(_semeia(u, 1))),
+                          (1, 0, True, None, None)),
+    "essencial_error_item_missing": (lambda u, m: (promote_to_pro(u, "essencial"), _item_missing(u)),
+                                     (1, 1, False, "OF_BANK_LIMIT", FRASE_1)),
     "essencial_mock": (lambda u, m: (promote_to_pro(u, "essencial"), _semeia(u, 1, provider="mock_pluggy")),
                        (1, 0, True, None, None)),
     "v1_desligado_3": (lambda u, m: (promote_to_pro(u), _semeia(u, 3), _v1(m, gate=False)),
                        (None, 3, True, None, None)),
     "v1_ligado_1": (lambda u, m: (promote_to_pro(u), _semeia(u, 1), _v1(m, gate=True)),
                     (1, 1, False, "OF_BANK_LIMIT", FRASE_V1)),
+    "v1_ligado_deleted": (lambda u, m: (promote_to_pro(u), _remove(_semeia(u, 1)), _v1(m, gate=True)),
+                          (1, 0, True, None, None)),
     "v1_pro_1": (lambda u, m: (promote_to_pro(u), _semeia(u, 1), _v1(m, gate=True, pro=True)),
                  (None, 1, True, None, None)),
 }
@@ -228,3 +270,16 @@ def test_b_p1_reconexao_passa_no_teto(user_id):
     (item,) = _semeia(user_id, 1)
     assert _limite(user_id).json()["pode_adicionar"] is False
     _enforce(user_id, item)
+
+
+# ── D: paridade modal × servidor (§0.7) ───────────────────────────────────────
+
+def test_d_modal_espelha_terminal_do_servidor():
+    js = (Path(__file__).resolve().parents[1] / "frontend" / "open-finance-connect.js").read_text(encoding="utf-8")
+    m = re.search(r"const\s+FORA_DO_TETO\s*=\s*\[([^\]]*)\]", js)
+    assert m, "FORA_DO_TETO sumiu de frontend/open-finance-connect.js: o modal deixou de espelhar _TERMINAL"
+    assert set(re.findall(r"[\"']([^\"']+)[\"']", m.group(1))) == set(_TERMINAL), (
+        "FORA_DO_TETO (frontend/open-finance-connect.js) divergiu de _TERMINAL (db/open_finance_state.py): "
+        "mude os dois juntos, senão o modal e o 402 do servidor discordam sobre quem ocupa vaga")
+    corpo = re.search(r"function countsTowardLimit\(conn\) \{(.*?)\n  \}", js, re.S)
+    assert corpo and "FORA_DO_TETO" in corpo.group(1), "countsTowardLimit não usa FORA_DO_TETO: a constante ficou morta"

@@ -503,6 +503,12 @@ _401_RENOVAVEL = {
      "Token de dashboard inválido ou expirado."): True,
     ("frontend/routes/shared.py", "resolve_dashboard_user_id",
      "Sessão encerrada. Faça login novamente."): True,
+    # Credenciais de sessão que não concordam sobre a conta. Família A mesmo
+    # assim: o interceptor tenta renovar, e quem encerra é o `/auth/refresh`,
+    # que recusa a mesma condição (`sessao_divergente`) e limpa os cookies.
+    (_MONO, "_get_current_user", "Sessão inconsistente. Faça login novamente."): True,
+    ("frontend/routes/shared.py", "resolve_dashboard_user_id",
+     "Sessão inconsistente. Faça login novamente."): True,
     # ── família B: 401 de aplicação, o token está ótimo ───────────────────────
     # Senha incorreta em MFA setup/disable, regenerar backup codes e export.
     (_MONO, "auth_mfa_setup", "Senha incorreta."): False,
@@ -535,11 +541,12 @@ _401_RENOVAVEL = {
     ("frontend/routes/retomada.py", "retomada_senha",
      "Link de compra inválido ou expirado."): False,
     # ── família C: 401 que o INTERCEPTOR nem alcança ──────────────────────────
-    # Os dois do `POST /auth/refresh` (montados como `JSONResponse` porque o
+    # Os três do `POST /auth/refresh` (montados como `JSONResponse` porque o
     # `raise` descarta o Set-Cookie da limpeza, #175). O interceptor sai antes
     # deles, no `_isRefreshEndpoint`: renovar o refresh com o refresh é recursão.
     (_MONO, "auth_refresh", "missing_refresh_token"): False,
     (_MONO, "auth_refresh", "invalid_refresh_token"): False,
+    (_MONO, "auth_refresh", "sessao_divergente"): False,
     # Magic link expirado no `GET /d/{code}`: página HTML de NAVEGAÇÃO, não
     # resposta de `fetch`. O `window.fetch` do auth-refresh.js não vê navegação.
     (_MONO, "dashboard_short_link", "<HTMLResponse>"): False,
@@ -797,10 +804,10 @@ def test_401_de_autenticacao_declara_familia():
     # o `headers=` de todos os sítios, as três asserções acima continuariam verdes
     # caso a classificação fosse trocada junto — este número não.
     com_header = sorted(c for c, forma in achados if forma)
-    assert len(com_header) == 8, (
+    assert len(com_header) == 10, (
         f"são {len(com_header)} sítios com `WWW-Authenticate`, e este controle "
-        "espera 8. Se você ADICIONOU um 401 de autenticação legítimo (já "
-        "classificado como True acima), atualize o 8 para o número novo. Se você "
+        "espera 10. Se você ADICIONOU um 401 de autenticação legítimo (já "
+        "classificado como True acima), atualize o 10 para o número novo. Se você "
         f"não mexeu em nenhum 401, alguém apagou um `headers=`: {com_header}"
     )
 
@@ -853,8 +860,8 @@ def test_demo_ligado_as_paginas_levam_ao_teste_e_a_vsl_nao(monkeypatch):
         assert tag and "defer" in tag.group(0), path
     assert 'id="testar-piggy"' in client.get("/precos").text
     assert '<main class="lp lp-com-teste">' in client.get("/lp").text   # a dobra reserva o 2º botão
-    vsl = client.get("/vsl").text   # com o demo ligado a /vsl segue sem botão, script nem dobra extra
-    assert "data-teste" not in vsl and "teste-piggy.js" not in vsl, "a /vsl desvia da compra"
+    vsl = client.get("/vsl").text   # com o demo ligado a /vsl segue sem botão nem dobra extra (o script pode vir: sem botão ele é inerte)
+    assert "data-teste" not in vsl, "a /vsl desvia da compra"
     assert '<main class="lp">' in vsl and 'class="lp lp-com-teste"' not in vsl
     assert 'href="/precos"' in vsl and "quiz.pigbankai.com" not in vsl   # o CTA trocado segue
 
@@ -876,7 +883,6 @@ def test_demo_desligado_nenhuma_pagina_promete_o_teste(monkeypatch):
         for path in (*PAGINAS_DO_TESTE, "/vsl", "/continuar-compra"):
             html = client.get(path).text
             assert "data-teste" not in html and 'id="testar-piggy"' not in html, (path, env)
-            assert "teste-piggy.js" not in html, (path, env)   # sem botão, sem script
             if path == "/":   # a LP nova: o botão sai e o resto (CTAs do hero e do fim) fica
                 assert 'id="hero-cta"' in html and 'id="cta-final"' in html, env
                 assert html.count('href="#planos"') == ligado["/"].count('href="#planos"'), env
@@ -889,6 +895,28 @@ def test_demo_desligado_nenhuma_pagina_promete_o_teste(monkeypatch):
     assert 'id="lp-cta"' in client.get("/lp").text
     home = client.get("/inicio-antiga").text
     assert home.count('href="/cadastro"') >= 4 and 'href="/precos">Ver planos</a>' in home
+
+
+def test_demo_desligado_a_raiz_carrega_o_repasse_de_utm_dos_quatro_ctas(monkeypatch):
+    """Demo desligado é o padrão de produção: o botão do teste sai, mas o teste-piggy.js
+    fica, porque é ele que repassa utm/fbclid aos 4 CTAs e aos 6 cartões (a[data-utm]) da /.
+
+    *Negativo: devolva ao `_BOTAO_TESTE_RE` a alternativa do <script> → vermelho.*"""
+    monkeypatch.delenv("DEMO_DAILY_MAX", raising=False)
+    html = client.get("/").text
+    assert "data-teste" not in html
+    tag = re.search(r'<script[^>]*src="/teste-piggy\.js\?v=\w+"[^>]*>', html)
+    assert tag and "defer" in tag.group(0), "sem o script a UTM da campanha não chega à /assinar"
+    links = re.findall(r'<a\b[^>]*\bdata-utm\b[^>]*>.*?</a>', html, re.S)
+    ctas = [a for a in links if "so-anual" not in a and "so-mensal" not in a]   # sem os 6 cartões
+    assert len(ctas) == 4 and len(links) == 10, links
+    assert all('href="/assinar?plano=plus&amp;ciclo=monthly"' in a for a in ctas), ctas
+    rotulos = [re.sub(r"<[^>]+>|&nbsp;|→", "", a).strip() for a in ctas]
+    assert rotulos == ["7 dias grátis", "Começar meus 7 dias grátis",
+                       "Começar meus 7 dias grátis", "7 dias grátis"], rotulos
+    assert ("Manda o gasto no WhatsApp, em texto, áudio ou foto. O Piggy anota, separa por"
+            " categoria e monta seu painel. Quer no automático? Conecte o banco, só leitura.") in html
+    assert '<section id="planos" data-ciclo="mensal"' in html
 
 
 def test_precos_logado_e_continuar_compra_sem_o_link_do_teste(monkeypatch):

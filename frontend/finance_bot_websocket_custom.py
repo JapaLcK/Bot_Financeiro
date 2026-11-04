@@ -163,12 +163,14 @@ from frontend.routes.settings import router as settings_router
 from frontend.routes.simulator import router as simulator_router
 from frontend.routes.shared import (
     AUTH_COOKIE_NAME,
+    CONTA_COOKIE_NAME,
     DASHBOARD_COOKIE_NAME,
     DASHBOARD_CURRENT_CACHE_TTL_SECONDS as _DASHBOARD_CURRENT_CACHE_TTL_SECONDS,
     DASHBOARD_URL,
     JWT_SECRET,
     WWW_AUTHENTICATE_401,
     authorize_dashboard_access as _authorize_dashboard_access,
+    contas_dos_cookies,
     dashboard_current_cache as _dashboard_current_cache,
     dashboard_current_cache_epoch as _dashboard_current_cache_epoch,
     db_connect,
@@ -181,6 +183,7 @@ from frontend.routes.shared import (
     jdump,
     limiter,
     make_jwt as _make_jwt,
+    marcar_conta,
     months_pt as _months_pt,
     painel_como_destino,
     parse_date_param as _parse_date_param,
@@ -188,6 +191,7 @@ from frontend.routes.shared import (
     _resolve_page_user_id,
     resolve_analytics_window as _resolve_analytics_window,
     resolve_dashboard_user_id as _resolve_dashboard_user_id,
+    sessao_divergente,
     stamp_asset_versions as _stamp_asset_versions,
     vary_accept,
     wants_html,
@@ -2401,9 +2405,18 @@ def _with_security_headers(response: Response) -> Response:
     return response
 
 
+CONTA_HEADER = "X-PB-Conta"
+
+
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
-    return _with_security_headers(await call_next(request))
+    response = await call_next(request)
+    # A conta da sessão que o resolvedor validou, em toda resposta 2xx
+    # autenticada: é com ela que o cliente confirma a continuidade da conta.
+    conta = getattr(request.state, "session_user_id", None)
+    if conta is not None and 200 <= response.status_code < 300:
+        response.headers[CONTA_HEADER] = str(conta)
+    return _with_security_headers(response)
 
 
 def _make_csrf_token() -> str:
@@ -2911,6 +2924,7 @@ def _set_dashboard_cookie(response: Response, user_id: int, *, jti: str | None =
         samesite="lax",
         max_age=int(DASHBOARD_SESSION_HOURS * 3600),
     )
+    marcar_conta(response, user_id)
     return token
 
 
@@ -3047,6 +3061,7 @@ def _clear_session_cookies(response: Response) -> None:
         _expire_cookie(response, AUTH_COOKIE_NAME, domain)
         _expire_cookie(response, DASHBOARD_COOKIE_NAME, domain)
         _expire_cookie(response, CSRF_COOKIE_NAME, domain)
+        _expire_cookie(response, CONTA_COOKIE_NAME, domain)
     # Refresh cookie tem path restrito — limpa com mesmo path pra remover
     response.delete_cookie(
         REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH,
@@ -3094,6 +3109,9 @@ async def _get_current_user(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> int:
+    if sessao_divergente(request):
+        raise HTTPException(status_code=401, detail="Sessão inconsistente. Faça login novamente.",
+                            headers=WWW_AUTHENTICATE_401)
     token = _get_auth_token_from_request(request, creds)
     if not token:
         raise HTTPException(status_code=401, detail="Token não fornecido.",
@@ -3731,11 +3749,12 @@ async def _concluir_login(
 async def auth_logout(request: Request, response: Response):
     # Revoga a sessao corrente (se houver jti no JWT) antes de limpar cookies.
     # Idempotente: token expirado / sem jti / sessao ja revogada = no-op.
+    jti_do_auth = None
     token = _get_auth_token_from_request(request, None)
     if token:
         payload = _decode_jwt(token)
         if payload and payload.get("type") == "auth":
-            jti = payload.get("jti")
+            jti = jti_do_auth = payload.get("jti")
             user_id_raw = payload.get("sub")
             if jti and user_id_raw:
                 try:
@@ -3751,6 +3770,21 @@ async def auth_logout(request: Request, response: Response):
                         jti, type(exc).__name__, getattr(exc, "sqlstate", None),
                         extra={"user_id": user_id_raw},
                     )
+
+    # A sessão do cookie de dashboard também sai, quando não é a mesma do access:
+    # sair encerra toda sessão que este navegador carrega.
+    dash = decode_dashboard_token_full((request.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip())
+    if dash and dash.get("jti") and dash["jti"] != jti_do_auth:
+        try:
+            from core.refresh_tokens import revoke_session_refresh_tokens
+            await asyncio.to_thread(revoke_session, int(dash["user_id"]), dash["jti"])
+            await asyncio.to_thread(revoke_session_refresh_tokens, dash["jti"])
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "logout: falha ao revogar a sessão do dashboard causa=%s sqlstate=%s",
+                type(exc).__name__, getattr(exc, "sqlstate", None),
+                extra={"user_id": dash.get("user_id")},
+            )
 
     # Revoga também o refresh_token APRESENTADO (caso a sessão já não bata —
     # defesa em profundidade). Cookie no navegador, `Authorization` no app: a
@@ -3872,10 +3906,38 @@ async def auth_refresh(request: Request, response: Response):
     #175), então o `_clear_session_cookies` não chegava ao cliente e o
     dashboard_token (12h) sobrevivia ao refresh morto. O usuário ficava preso —
     ver o comentário no primeiro ramo.
+
+    **A conta tem de concordar** (navegador; o canal do app fica de fora). O
+    cliente diz em `X-PB-Conta` a conta que espera (`-` quando ainda não sabe).
+    401 `sessao_divergente`, sem rotacionar nada, quando os cookies de sessão
+    discordam entre si, quando a conta esperada ou a dos cookies não é a dona do
+    refresh, ou quando não há nem uma nem outra para comparar. O sucesso devolve
+    `user_id` e `confirmada` — verdadeiro só quando alguma das duas foi
+    comparada e bateu.
     """
-    refresh_apresentado = (
-        request.cookies.get(REFRESH_COOKIE_NAME) or ""
-    ).strip() or _refresh_token_do_header(request)
+    refresh_cookie = (request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
+    refresh_apresentado = refresh_cookie or _refresh_token_do_header(request)
+    divergente, confirmada = sessao_divergente(request), False
+    if refresh_cookie and not divergente:
+        from core.refresh_tokens import session_of
+        dona = await asyncio.to_thread(session_of, refresh_cookie)
+        if not dona:
+            # Sem dona conhecida não há conta para comparar: não renova.
+            resp = JSONResponse(status_code=401, content={"detail": "invalid_refresh_token"})
+            _limpa_e_reemite_csrf(request, resp)
+            return _no_store(resp)
+        esperada = (request.headers.get(CONTA_HEADER) or "").strip()
+        dos_cookies = contas_dos_cookies(request)
+        divergente = (
+            (esperada not in ("", "-") and esperada != str(dona[0]))
+            or (bool(dos_cookies) and dos_cookies != {dona[0]})
+            or (not esperada and not dos_cookies)
+        )
+        confirmada = esperada == str(dona[0]) or dos_cookies == {dona[0]}
+    if divergente:
+        resp = JSONResponse(status_code=401, content={"detail": "sessao_divergente"})
+        _limpa_e_reemite_csrf(request, resp)
+        return _no_store(resp)
     if not refresh_apresentado:
         token = _get_auth_token_from_request(request, None)
         sessao_viva = bool(token) and (_decode_jwt(token) or {}).get("type") == "auth"
@@ -3923,8 +3985,9 @@ async def auth_refresh(request: Request, response: Response):
         request, response, user_id=user_id, access=access, jti=session_jti,
         refresh=new_refresh,
     )
+    request.state.session_user_id = user_id
     _no_store(response)
-    return {"ok": True, **credenciais}
+    return {"ok": True, "user_id": user_id, "confirmada": confirmada, **credenciais}
 
 
 def _reset_de_senha_em_segundo_plano(email: str) -> None:
@@ -5523,24 +5586,16 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
 
     # A elegibilidade só é consultada ao criar uma sessão nova. Reabrir a mesma
     # URL preserva exatamente as condições que o usuário já viu no checkout.
-    from core.services.plan_service import (
-        TRIAL_DAYS_DEFAULT,
-        ai_monthly_limit_for_tier,
-        plans_v2_enabled,
-        trial_days_total,
-    )
-    if plans_v2_enabled():
-        from db.plans import TrialEligibilityError, is_trial_eligible_for_user
-        try:
-            eligible = await asyncio.to_thread(is_trial_eligible_for_user, user_id)
-        except TrialEligibilityError:
-            raise HTTPException(
-                status_code=503,
-                detail="Não consegui confirmar seu período grátis agora. Tenta de novo em instantes.",
-            )
-        trial_days = trial_days_total() if eligible else 0
-    else:
-        trial_days = int(os.getenv("PRO_TRIAL_DAYS", str(TRIAL_DAYS_DEFAULT)))
+    from core.services.plan_service import ai_monthly_limit_for_tier, plans_v2_enabled
+    from core.services.trial_offer import dias_de_trial
+    from db.plans import TrialEligibilityError
+    try:
+        trial_days = await asyncio.to_thread(dias_de_trial, user_id)
+    except TrialEligibilityError:
+        raise HTTPException(
+            status_code=503,
+            detail="Não consegui confirmar seu período grátis agora. Tenta de novo em instantes.",
+        )
 
     # Cota mensal da IA do plano comprado. Plus e Pro têm `ai_monthly_messages:
     # None` em plan_limits.py, o que NÃO é ilimitado: cai no teto global
@@ -5915,6 +5970,15 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
     """Estado da assinatura pro front (/precos): plano/intervalo atual, fim do
     período pago e troca agendada (se houver). Sem assinatura → active: False."""
     await asyncio.to_thread(_exigir_credencial, user_id)
+    # `trial_disponivel` pro rótulo dos CTAs da /: os dias que o checkout daria (§0.7);
+    # falha = campo ausente (o front trata como desconhecido). ValueError = PRO_TRIAL_DAYS
+    # inválido com o v2 desligado: a /precos, o pix-checkout e o /painel leem esta rota.
+    from core.services.trial_offer import dias_de_trial
+    from db.plans import TrialEligibilityError
+    try:
+        trial = {"trial_disponivel": await asyncio.to_thread(dias_de_trial, user_id) > 0}
+    except (TrialEligibilityError, ValueError):
+        trial = {}
     import stripe
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -5923,7 +5987,7 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
     user = await asyncio.to_thread(get_auth_user, user_id) or {}
     if (user.get("last_payment_status") or "") == "grandfathered":
         return {"active": True, "lifetime": True, "plan": "plus", "interval": None,
-                "current_period_end": None, "scheduled_change": None}
+                "current_period_end": None, "scheduled_change": None, **trial}
 
     # PIX ANTES DO STRIPE, e a ordem é o conteúdo (§14 item 12). Quem migrou do
     # cartão fica com `stripe_customer_id` preenchido para sempre — perguntando
@@ -5940,11 +6004,11 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
         return {"active": True, "lifetime": False, "gateway": "pix",
                 "plan": tier_publico(pix["plan_stored"]), "interval": "annual",
                 "current_period_end": pix["ends_at"].date().isoformat(),
-                "scheduled_change": None}
+                "scheduled_change": None, **trial}
 
     cust = user.get("stripe_customer_id")
     if not STRIPE_SECRET_KEY or not cust:
-        return {"active": False}
+        return {"active": False, **trial}
     stripe.api_key = STRIPE_SECRET_KEY
 
     try:
@@ -5952,9 +6016,9 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
     except StripeLookupError:
         # Leitura de estado pode degradar suave: o front mantém os botões
         # padrão e o guard fail-closed do checkout segura qualquer clique.
-        return {"active": False, "degraded": True}
+        return {"active": False, "degraded": True, **trial}
     if sub is None:
-        return {"active": False}
+        return {"active": False, **trial}
 
     plan, interval = _plan_interval_for_price(_sub_price_id(sub))
     period_end = _sub_period_end_ts(sub)
@@ -5990,7 +6054,7 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
 
     return {"active": True, "lifetime": False, "gateway": "stripe", "plan": plan,
             "interval": interval, "current_period_end": period_end_iso,
-            "scheduled_change": scheduled}
+            "scheduled_change": scheduled, **trial}
 
 
 def _grant_pix_vigente(user_id: int) -> dict | None:
@@ -6661,7 +6725,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     clear_past_due_since, int(user_id),
                     nao_mais_novo_que=_event_version(event))
             # Grava mesmo com `_decidiu_acesso` False: a compra aconteceu igual.
-            await _registrar_cadernos(user_id, session)
+            _extras = await _registrar_cadernos(user_id, session)
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.
@@ -6694,9 +6758,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             # Email de boas-vindas Pro (item 37) — `plan_value` é o MESMO que
             # acabou de ser gravado e logado acima (vocabulário legado, de
             # `_stored_plan_for_price`): sem ele o e-mail chamava todo
-            # assinante de PigBank+, que é só o Plus (#351).
+            # assinante de PigBank+, que é só o Plus (#351). `sub_status` escolhe
+            # o texto (trial × cobrado hoje) e `bool(_extras)` diz se a sessão
+            # ofereceu caderno: a metadata é a foto da oferta, não a compra.
             from core.services.email_service import send_pro_welcome_email
-            await _fire_email(user_id, send_pro_welcome_email, plan_value, expires_dt)
+            await _fire_email(user_id, send_pro_welcome_email, plan_value, expires_dt,
+                              sub_status, bool(_extras))
             # E-mail pessoal do fundador, agendado para 3h depois; só na primeira
             # assinatura da conta. `send_founder_email_once` não levanta — o
             # try aqui cobre o `_user_email`.
@@ -7697,16 +7764,17 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
     # Tambem seta auth_token (cookie principal) com o mesmo jti — permite acessar
     # rotas que exigem auth completa (/api/me, etc) sem precisar logar de novo.
     # Magic link também emite refresh_token (sessão de 14d com idle 7d).
+    sessao_completa = False
     try:
         from core.refresh_tokens import create_refresh_token
         email = (u or {}).get("email") or ""
         if email:
-            auth_jwt = _make_jwt(int(user_id), email, jti=jti)
-            _set_auth_cookie(response, auth_jwt)
             refresh = await asyncio.to_thread(
                 create_refresh_token, int(user_id), jti, ip=ip, user_agent=ua,
             )
+            _set_auth_cookie(response, _make_jwt(int(user_id), email, jti=jti))
             _set_refresh_cookie(response, refresh)
+            sessao_completa = True
     except Exception as exc:
         # Fail-soft — o dashboard ainda funciona com o dashboard_token, mas o
         # user vai "deslogar" ao navegar pra /conta. Logado pra ser visível.
@@ -7714,6 +7782,14 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
             "magic link: não emitiu auth/refresh token — sessão degradada (só dashboard_token)"
             " causa=%s sqlstate=%s", type(exc).__name__, getattr(exc, "sqlstate", None),
             extra={"user_id": user_id},
+        )
+    if not sessao_completa:
+        # O link substitui a sessão inteira deste navegador: o access e o
+        # refresh de uma sessão anterior não ficam ao lado do dashboard novo.
+        _expire_cookie(response, AUTH_COOKIE_NAME)
+        response.delete_cookie(
+            REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH,
+            httponly=True, secure=COOKIE_SECURE, samesite="lax",
         )
     return response
 
@@ -9828,6 +9904,9 @@ app.mount("/api/app", api_nativo_app)
 
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(ws: WebSocket, user_id: int):
+    if sessao_divergente(ws):
+        await ws.close(code=1008)
+        return
     token = (ws.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
     payload = decode_dashboard_token_full(token)
     if not payload or int(payload["user_id"]) != int(user_id):

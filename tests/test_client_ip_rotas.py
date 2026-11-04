@@ -202,7 +202,7 @@ def test_refresh_grava_o_ip_do_visitante_do_refresh():
     _login(login, email)
     refresh = _cliente(V2)
     refresh.cookies.set(dashboard.REFRESH_COOKIE_NAME, login.cookies.get(dashboard.REFRESH_COOKIE_NAME))
-    r = refresh.post("/auth/refresh", headers=CSRF_HDR)
+    r = refresh.post("/auth/refresh", headers={**CSRF_HDR, dashboard.CONTA_HEADER: "-"})
     assert r.status_code == 200, r.text
     # o do login foi consumido (used_at); o vivo é o que o refresh emitiu
     assert _coluna("select ip from auth_refresh_tokens where user_id = %s and used_at is null", uid) == [V2]

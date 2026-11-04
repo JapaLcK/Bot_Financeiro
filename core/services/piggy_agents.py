@@ -296,7 +296,7 @@ def _carteiro_detect_for_user(agent: dict[str, Any], today: date) -> int:
                        coalesce(b.name, r.name, 'Conta') as nome,
                        (b.due_date - %s) as dias
                 from bill_instances b
-                left join recurring_expenses r on r.id = b.recurring_id
+                left join recurring_expenses r on r.id = b.recurring_id and r.user_id = b.user_id
                 where b.user_id = %s
                   and b.status = 'pending'
                   and (b.due_date - %s) in (3, 0)

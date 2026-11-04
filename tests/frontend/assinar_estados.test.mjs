@@ -26,11 +26,14 @@ for (const query of ["?plano=premium&ciclo=monthly", "?plano=plus"]) {
 }
 
 test("positivo do L0: os 3 planos × 2 ciclos carregam o S1 com o nome do plano", async () => {
+  const NOME = { essencial: "Essencial", plus: "Plus", pro: "Pro" };
   for (const plano of ["essencial", "plus", "pro"]) {
     for (const ciclo of ["monthly", "annual"]) {
       const { ctx, page } = await abrir(browser, { query: `?plano=${plano}&ciclo=${ciclo}` });
       await tela(page, "s1");
-      assert.match(await texto(page, "s1-titulo"), /^Falta pouco para assinar o (Essencial|Plus|Pro) · (Mensal|Anual)$/);
+      const titulo = await texto(page, "s1-titulo");
+      assert.match(titulo, /^Seus 7 dias grátis do (Essencial|Plus|Pro) começam aqui$/);
+      assert.ok(titulo.includes(` do ${NOME[plano]} `), `${plano}/${ciclo}: ${titulo}`);
       await ctx.close();
     }
   }
@@ -271,6 +274,7 @@ for (const pix of [true, false]) {
     await page.locator("#stripe-checkout iframe").waitFor();
     assert.equal(await page.locator("#s4-pix").isVisible(), pix);
     if (pix) {
+      assert.equal(await texto(page, "s4-pix"), "Prefere Pix? Plano anual à vista, sem teste grátis");
       await page.click("#s4-pix");
       await page.waitForURL(/\/continuar-compra$/);
       const intent = JSON.parse(await page.evaluate(() => sessionStorage.getItem("pb_purchase_intent_v1")));
@@ -279,6 +283,16 @@ for (const pix of [true, false]) {
     await ctx.close();
   });
 }
+
+test("#s4-pix a 320px: o texto do Pix anual sem teste grátis cabe no botão e na tela", async () => {
+  const { ctx, page } = await abrir(browser, { viewport: { width: 320, height: 640 }, api: { "GET /auth/me": ME("ana@x.com"),
+    "GET /billing/plans-config": [200, { pix_annual_available: true }] } });
+  await tela(page, "s4-pix");
+  const m = await page.$eval("#s4-pix", (b) => ({ corte: b.scrollWidth - b.clientWidth, direita: b.getBoundingClientRect().right,
+    pagina: document.documentElement.scrollWidth - document.documentElement.clientWidth }));
+  await ctx.close();
+  assert.deepEqual([m.corte <= 0, m.direita <= 320, m.pagina], [true, true, 0], JSON.stringify(m));
+});
 
 for (const [nome, resp, alvo, esperado] of [
   ["already_subscribed", [409, { detail: { error: "already_subscribed", message: "x" } }], "f1", "Seu plano já está ativo nesta conta."],
@@ -307,16 +321,6 @@ test("S3 com 503: S3e, e o 'Tentar de novo' refaz o POST embutido", async () => 
   assert.deepEqual(posts(CHECKOUT).map((r) => r.body.embutido), [true, true]);
   await ctx.close();
 });
-
-for (const [td, esperado] of [[15, /^Você tem 15 dias grátis\./], [0, /^Esta assinatura não tem período grátis/]]) {
-  test(`trial_days=${td}`, async () => {
-    const { ctx, page } = await abrir(browser, { api: { "GET /auth/me": ME("ana@x.com"),
-      [`POST ${CHECKOUT}`]: [200, { ...EMBUTIDO[1], trial_days: td }] } });
-    await tela(page, "s4");
-    assert.match(await texto(page, "s4-trial"), esperado);
-    await ctx.close();
-  });
-}
 
 test("Sair: POST /auth/logout, e o S1 volta com os campos do fragmento", async () => {
   const { ctx, page, posts } = await abrir(browser, { hash: FRAG, api: { "GET /auth/me": ME("ana@x.com") } });

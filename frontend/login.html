@@ -164,15 +164,21 @@ if(PB_MFA)history.replaceState(null,'',location.pathname+location.search);
   function err(id,m,ok){var e=document.getElementById(id);e.textContent=m;e.classList.toggle('ok',!!ok);e.classList.add('show')}
   function clrErr(){['login-error','mfa-error'].forEach(function(i){var e=document.getElementById(i);if(e){e.classList.remove('show','ok');e.textContent=''}})}
 
+  // `?aviso=`: a sessão anterior terminou porque a conta não se confirmou
+  // (`static/auth-refresh.js`). Com aviso a página fica no login.
+  var AVISO=new Map([['acao-nao-enviada','A conta desta sessão mudou e a sua última ação não foi enviada. Entre de novo.'],
+    ['sessao-trocada','A conta desta sessão mudou. Entre de novo.']]).get(new URLSearchParams(location.search).get('aviso'));
+  if(AVISO)err('login-error',AVISO);
+
   // Sessão ainda válida (cookie vivo) → pula o login. Essencial no app iOS,
   // que abre sempre em /login; inofensivo no navegador. Access expirado com
   // refresh válido conta como sessão viva (renova e segue). Com `#mfa=` nunca
   // pula (#991): a sessão viva pode ser de OUTRA conta e venceria o código.
-  if(!PB_MFA)(async function(){
+  if(!PB_MFA&&!AVISO)(async function(){
     try{
       var r=await fetch('/auth/validate',{credentials:'same-origin'});
       if(r.status===401){
-        var rf=await fetch('/auth/refresh',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'})});
+        var rf=await fetch('/auth/refresh',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json','X-PB-Conta':'-'})});
         if(!rf.ok)return;
         r=await fetch('/auth/validate',{credentials:'same-origin'});
       }

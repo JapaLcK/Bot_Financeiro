@@ -4,8 +4,14 @@
  *
  * Estratégia: monkey-patch window.fetch. Em request 401 que NÃO seja o próprio
  * /auth/refresh, dispara POST /auth/refresh, e re-tenta a request original.
- * Se refresh falhar, deixa o 401 passar pro caller decidir (geralmente redireciona
- * pra login). Refresh em paralelo é deduplicado.
+ * Se refresh falhar por outro motivo que não a conta, deixa o 401 passar pro caller
+ * decidir (geralmente redireciona pra login). Refresh em paralelo é deduplicado.
+ *
+ * A conta tem de continuar a mesma. O servidor diz a conta da sessão em
+ * `X-PB-Conta` nas respostas 2xx; a página guarda a primeira (`_conta`) e a
+ * manda no refresh. A request só é refeita quando a conta renovada é a desta
+ * página, ou, sem conta conhecida, quando o servidor a confirmou. Fora disso a
+ * sessão termina aqui (`_sessaoNaoConfirmada`).
  *
  * Servido como arquivo externo em /static/auth-refresh.js — incluído via <script>
  * no <head> das páginas autenticadas (dashboard, home, settings, onboarding).
@@ -16,6 +22,7 @@
 (() => {
   const _origFetch = window.fetch;
   let _refreshPromise = null;
+  let _conta = null;
 
   function _isOwnApi(url) {
     if (typeof url !== "string") url = (url && url.url) || "";
@@ -54,6 +61,7 @@
         const csrf = _getCsrfToken();
         const headers = { "Content-Type": "application/json" };
         if (csrf) headers["X-CSRF-Token"] = csrf;
+        headers["X-PB-Conta"] = _conta || "-";
         const r = await _origFetch("/auth/refresh", {
           method: "POST",
           credentials: "same-origin",
@@ -64,9 +72,16 @@
         // refresh falta mas o access token ainda vale — sessão de pé, nada a
         // apagar (finance_bot_websocket_custom.py, #173).
         await _comLimpeza("/auth/refresh", r, "POST");
-        return r.ok;
+        let corpo = {};
+        try { corpo = await r.json(); } catch (_) { /* sem corpo: nada confirmado */ }
+        if (!r.ok) return { ok: false, divergente: r.status === 401 && corpo.detail === "sessao_divergente" };
+        return {
+          ok: true,
+          conta: corpo.user_id == null ? null : String(corpo.user_id),
+          confirmada: corpo.confirmada === true,
+        };
       } catch (_) {
-        return false;
+        return { ok: false };
       } finally {
         // Solta o lock na próxima volta do event loop
         setTimeout(() => { _refreshPromise = null; }, 0);
@@ -344,6 +359,52 @@
     return _comLimpeza(caminho, resp, _metodo(input, init));
   }
 
+  /** Guarda a conta desta página: a da primeira resposta 2xx que a declara. */
+  function _anotaConta(resp) {
+    if (_conta === null && resp.ok) _conta = resp.headers.get("X-PB-Conta") || null;
+    return resp;
+  }
+
+  /**
+   * A conta não se confirmou depois do refresh: a request NÃO é refeita.
+   *
+   * Apaga o estado do aparelho, encerra a sessão no servidor quando a request
+   * era de escrita ou a conta mudou, e vai ao login com o aviso certo. Uma
+   * leitura com a conta só desconhecida vai ao login sem encerrar nada: lá a
+   * sessão coerente é reconhecida e a pessoa volta sozinha.
+   *
+   * Vários 401 em paralelo esperam o mesmo refresh e chegam aqui juntos: eles
+   * somam o que pedem (escrita, conta mudou) e a saída roda uma vez só. A
+   * promessa devolvida nunca resolve — quem chamou não segue sobre a tela
+   * antiga.
+   */
+  let _saindo = false, _saidaEscrita = false, _saidaMudou = false;
+  function _sessaoNaoConfirmada(metodo, mudou) {
+    _saidaEscrita = _saidaEscrita || !["GET", "HEAD", "OPTIONS"].includes(metodo);
+    _saidaMudou = _saidaMudou || mudou;
+    if (!_saindo) {
+      _saindo = true;
+      _limpaEstadoDoDispositivo().then(async function () {
+        if (_saidaEscrita || _saidaMudou) {
+          const headers = {};
+          const csrf = _getCsrfToken();
+          if (csrf) headers["X-CSRF-Token"] = csrf;
+          // Prazo de 3 s: a ida ao login não depende de o servidor responder.
+          // (`AbortSignal.timeout` não existe no iOS 14.)
+          const ac = new AbortController(), prazo = setTimeout(function () { ac.abort(); }, 3000);
+          try {
+            await _origFetch("/auth/logout", { method: "POST", credentials: "same-origin", headers, signal: ac.signal });
+          } catch (_) { /* sem rede ou sem prazo: o login ainda é exigido abaixo */ }
+          clearTimeout(prazo);
+        }
+        const aviso = _saidaEscrita ? "acao-nao-enviada" : _saidaMudou ? "sessao-trocada" : "";
+        location.replace("/login?next=" + encodeURIComponent(location.pathname + location.search)
+          + (aviso ? "&aviso=" + aviso : ""));
+      });
+    }
+    return new Promise(function () {});
+  }
+
   window.fetch = async function(input, init) {
     // Requests pra fora da própria origem (Stripe, CDN, etc) seguem direto
     if (!_isOwnApi(input)) return _origFetch(input, init);
@@ -355,7 +416,7 @@
     // (`location.replace`/`reload`/`href`), e navegação descarta o documento:
     // uma limpeza disparada e esquecida não tem garantia de terminar, e o cache
     // privado sobrevive no aparelho compartilhado (Codex, #170).
-    const resp = await _requestComLimpeza(caminho, input, init);
+    const resp = _anotaConta(await _requestComLimpeza(caminho, input, init));
 
     if (resp.status !== 401) return resp;
 
@@ -363,7 +424,7 @@
     if (_isRefreshEndpoint(input)) return resp;
 
     // Só o 401 de AUTENTICAÇÃO é renovável, e quem marca é o servidor: o
-    // `WWW_AUTHENTICATE_401` de `frontend/routes/shared.py` viaja nos 8 `raise`
+    // `WWW_AUTHENTICATE_401` de `frontend/routes/shared.py` viaja nos `raise`
     // de falha de access/dashboard token. Sem esta linha o status sozinho decidia,
     // e um 401 de aplicação ("Senha incorreta.") virava refresh + RETRY — a senha
     // errada ia duas vezes e queimava dois slots do rate limit da rota (as de
@@ -378,10 +439,15 @@
     // fim de sessão roda lá e não pode ser pulada por um `return` antecipado.
     if (!resp.headers.get("WWW-Authenticate")) return resp;
 
-    // Tenta renovar e refazer a request original
-    const ok = await _doRefresh();
-    if (!ok) return resp;
-    return _requestComLimpeza(caminho, input, init);
+    // Tenta renovar e refazer a request original — só com a conta confirmada.
+    const metodo = _metodo(input, init);
+    const r = await _doRefresh();
+    if (!r.ok) return r.divergente ? _sessaoNaoConfirmada(metodo, true) : resp;
+    if (_conta !== null ? r.conta !== _conta : !r.confirmada) {
+      // Corpo sem `user_id` não prova que a conta mudou: só que não se confirmou.
+      return _sessaoNaoConfirmada(metodo, _conta !== null && r.conta !== null);
+    }
+    return _anotaConta(await _requestComLimpeza(caminho, input, init));
   };
 
   // ── Modo app (iOS/Capacitor) ─────────────────────────────────────────────

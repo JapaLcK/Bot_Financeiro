@@ -47,12 +47,12 @@ for (const [nome, viewport] of [["desktop", { width: 1280, height: 900 }], ["mob
     assert.equal(await mensal.locator(".rm-selo").innerText(), "20% OFF");
     assert.equal(await mensal.locator("s.rm-cheio").evaluate((e) => getComputedStyle(e).textDecorationLine), "line-through");
     assert.ok(await mensal.isVisible(), "o preço estático tem de estar visível (NumberFlow fora)");
-    assert.equal(n(await card.locator(".price-cycle-copy").innerText()), "7 dias grátis, depois R$ 7,92 (20% OFF na 1ª cobrança)");
+    assert.equal(n(await card.locator(".price-cycle-copy").innerText()), "7 dias grátis no cartão, depois R$ 7,92 (20% OFF na 1ª cobrança)");
     await page.click("#cycle-annual");
     const anual = card.locator("[data-price-annual]").first();
     assert.equal(n(await anual.locator("s.rm-cheio").innerText()), "R$ 99");
     assert.match(await anual.innerText(), /R\$\s*79,20/);
-    assert.equal(n(await card.locator(".price-cycle-copy").innerText()), "7 dias grátis, depois R$ 79,20 (20% OFF na 1ª cobrança)");
+    assert.equal(n(await card.locator(".price-cycle-copy").innerText()), "7 dias grátis no cartão, depois R$ 79,20 (20% OFF na 1ª cobrança)");
     assert.equal(await card.locator(".price-eq").isVisible(), false);   // "equivale a" seria o preço cheio
     assert.equal(await page.locator("#plans-v2 .price-flow-host:visible").count(), 0);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "overflow horizontal");

@@ -50,7 +50,7 @@ export async function abrir({ width = 1440, chatIa = true, uid = 1, usage = { us
     if (cota.used >= cota.limit) return r.fulfill({ status: 403, json: { detail: { error: "pro_required", feature: "ai_chat" } } });
     return r.fulfill({ json: { messages: [], usage: cota } });
   });
-  await ctx.route("**/auth/refresh", (r) => { log.push("POST /auth/refresh"); return r.fulfill({ json: { ok: true } }); });
+  await ctx.route("**/auth/refresh", (r) => { log.push("POST /auth/refresh"); return r.fulfill({ json: { ok: true, user_id: 1, confirmada: true } }); });
   await page.exposeFunction("__reg", (s, corpo, csrf) => { log.push(s); if (corpo) posts.push({ corpo, csrf }); });
   await ctx.addInitScript(() => {
     const real = window.fetch.bind(window);

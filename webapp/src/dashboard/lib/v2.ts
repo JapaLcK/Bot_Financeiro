@@ -3,6 +3,7 @@
 import { infiniteQueryOptions, queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
 import type { ErroV2, QueryGet, RotasGet, RotasPost, RotasPut } from "./api-v2.gen";
 import { MONTHS } from "./api";
+import { SessaoTrocada, buscar, conferir, sairPara, travar } from "./sessao";
 
 // O helper de CSRF do auth-refresh.js (carregado antes do bundle no /painel).
 declare global { interface Window { pbCsrfHeaders?: (extra?: Record<string, string>) => Record<string, string> } }
@@ -77,14 +78,15 @@ export const sessaoDe = (e: unknown) => e instanceof ErroApi && (e.status === 40
 export async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   let r: Response;
   try {
-    r = await fetch(urlDe(path), { credentials: "same-origin", ...init });
+    r = await buscar(urlDe(path), { credentials: "same-origin", ...init });
   } catch (e) {
-    if (init.signal?.aborted) throw e;
+    if (init.signal?.aborted || e instanceof SessaoTrocada) throw e; // a troca de conta não vira "network" (nem repete: não é ErroApi)
     throw new ErroApi(0, "network");
   }
   let body: unknown;
   // Corpo cortado pelo sinal numa resposta 2xx é prazo, não resposta vazia (par da linha do `fetch`); o 4xx/5xx cortado mantém o status.
   try { body = await r.json(); } catch (e) { if (r.ok && init.signal?.aborted) throw e; body = undefined; }
+  conferir(); // a conta pode ter trocado enquanto o corpo chegava
   if (r.ok && body !== undefined) return body as T;
   throw erroDe(r, body);
 }
@@ -312,8 +314,9 @@ const LOGOUT_AT = "finbot_logout_at";
 const DEPOIS_DO_LOGOUT = "/?logout=1";
 export function sair(e: { currentTarget: HTMLButtonElement }) {
   e.currentTarget.disabled = true; // o 2º clique não manda outro POST; a página sai de qualquer jeito (fim)
+  travar(DEPOIS_DO_LOGOUT); // o marcador some com a resposta do POST: daqui em diante a troca de conta esconde a página sem recarregar
   try { localStorage.setItem(LOGOUT_AT, String(Date.now())); } catch { /* storage bloqueado: o logout segue */ }
-  const fim = () => location.replace(DEPOIS_DO_LOGOUT);
+  const fim = () => sairPara(DEPOIS_DO_LOGOUT);
   fetch("/auth/logout", { method: "POST", credentials: "same-origin", headers: window.pbCsrfHeaders?.() ?? {} }).then(fim, fim);
 }
-export const escutarLogout = () => window.addEventListener("storage", (e) => { if (e.key === LOGOUT_AT) location.replace(DEPOIS_DO_LOGOUT); });
+export const escutarLogout = () => window.addEventListener("storage", (e) => { if (e.key === LOGOUT_AT) sairPara(DEPOIS_DO_LOGOUT); });

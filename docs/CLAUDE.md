@@ -131,6 +131,20 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   cookie `dashboard_token`) → conta agendada para exclusão (403) → gate de plano
   (`_enforce_subscription_gate`, 402) → chave `dashboard_v2_enabled` (404
   `dashboard_v2_disabled`). O user agent não entra.
+- **O cookie `pb_conta=<uid>` não é identidade.** É o sinal de troca de conta do /painel: legível pelo
+  JS (sem `HttpOnly`), `SameSite=Lax`, sem `domain`, path `/`, `secure` igual ao do `dashboard_token`
+  (`marcar_conta` em `frontend/routes/shared.py`). Quem grava: `_set_dashboard_cookie` (toda emissão da
+  sessão) e a resposta HTML de sucesso do `GET /painel` (`no-store`; nunca os redirecionamentos), com o
+  uid do `dashboard_token`, que é quem a /api/v2 responde (não o do `auth_token`, que abre a página); sem
+  `dashboard_token` válido o `/painel` o expira. Quem apaga: `_clear_session_cookies` (logout, exclusão,
+  fim de sessão). **O servidor nunca o lê**: a
+  sessão continua sendo só o `dashboard_token` HttpOnly. O cliente guarda o valor da carga e o confere
+  onde um dado pode entrar na tela; mudou ou sumiu, a página fica escondida e recarrega uma vez (no
+  logout, só se esconde e quem navega é a saída, com um prazo se ela travar depois da resposta do
+  servidor). Onde ele confere, e o caso da sessão de antes do deploy, mora em
+  `webapp/src/dashboard/lib/sessao.ts` (fonte única: não enumere aqui). Presos por
+  `tests/test_marca_conta_cookie.py`, `tests/test_painel_pagina.py` e
+  `tests/frontend/dashboard_v2_troca_de_conta*.test.mjs` (não por `test_api_v2_rotas.py`).
 - Toda rota tem `response_model` (a de SSE, o tipo do item do stream; ver `/eventos`).
 - **Erro** sai no envelope `{"error": {"code", "message", "details"?}}`
   (`api/v2/erros.py`), com os headers da exceção preservados (`WWW-Authenticate` do
@@ -1128,9 +1142,28 @@ rate limiting via `slowapi` nos endpoints sensíveis (chave `rate_limit_key`, ve
 
 No cliente, `frontend/auth-refresh.js` faz *monkey-patch* de `window.fetch`: em 401
 que não seja o próprio `/auth/refresh`, dispara o refresh, deduplica chamadas
-paralelas e repete a request original. Se o refresh falhar, o 401 passa para o
-chamador decidir. **Esse interceptor é global nas páginas autenticadas** — considere-o
-antes de tratar 401 na mão em qualquer tela.
+paralelas e repete a request original. Se o refresh falhar por outro motivo que não
+a conta, o 401 passa para o chamador decidir. **Esse interceptor é global nas páginas autenticadas** — considere-o
+antes de tratar 401 na mão em qualquer tela. Quando a conta não se confirma depois
+do refresh, a request não é repetida e a promessa de quem chamou não resolve: a
+página vai ao login.
+
+**Os cookies de sessão concordam sobre a conta.** `auth_token` e `dashboard_token`
+válidos de contas diferentes não são sessão: `sessao_divergente`
+(`frontend/routes/shared.py`) faz os resolvedores responderem 401 renovável
+("Sessão inconsistente."), as páginas mandarem ao login e o WebSocket fechar com
+1008; o `Bearer` do app fica fora (um token só). Toda resposta 2xx autenticada leva
+`X-PB-Conta: <user_id>`. No navegador, o `/auth/refresh` recebe em `X-PB-Conta` a
+conta que a página espera (`-` quando ainda não sabe), recusa com 401
+`sessao_divergente` (sem rotacionar, limpando os cookies) quando ela ou a dos
+cookies não é a dona do refresh, ou quando não há nenhuma das duas, e devolve
+`{ok, user_id, confirmada}`. O interceptor só repete a request com a conta
+confirmada; senão limpa o aparelho, vai ao `/login?aviso=…` e a promessa de quem
+chamou não resolve. O `logout` encerra as
+duas sessões quando os cookies trazem `jti` diferentes, e o `/d/{code}` que não
+emite access e refresh expira os de antes: o link substitui a sessão inteira.
+Testes: `tests/test_sessao_divergente*.py` e
+`tests/frontend/auth_refresh_identidade.test.mjs`.
 
 Caminhos de entrada, todos em `/auth/*`: `register` → `verify-email` (código de 6
 dígitos) → `login`; **quiz de venda**: o webhook `POST /xquiz/webhook` (fora de
@@ -1198,7 +1231,8 @@ ou `wa.me/` aparecer em outro `.py`/`.js`/`.html`. As rotas que devolvem `whatsa
 e-mail do fundador passam uma saudação, sem código. **O e-mail de boas-vindas não leva
 código** (vale 15 min e o e-mail é lido depois, e a conta do quiz não tem senha, que o
 `link-code` exige): o botão "Conectar meu WhatsApp" abre `/login?next=%2Fhome`, e lá
-"Conectar WhatsApp" gera o código no clique.
+"Conectar WhatsApp" gera o código no clique. A conta criada na `/assinar` (`/auth/quiz/conta`)
+não recebe esse e-mail: recebe o `send_assinar_account_email`, curto, sem botão e sem promessa de teste.
 
 **PKCE no Google do app nativo** (#604, `core/services/pkce.py`; só S256). O app manda
 `code_challenge` em `google/start?app=2` (inválido → 400), que o guarda no cookie
@@ -1835,6 +1869,8 @@ o 409 "já ativado" do `enable` também vira T2). O S0 corrigiu `_current_sessio
 
 **Telas do Plano Família (PR 6a): `#/conta/familia` e `/familia/entrar`.** Consomem a API acima, sem mudá-la. (1) **Conta → Família** (`webapp/src/dashboard/familia/`: `Familia.tsx`, `Titular.tsx`, `Convite.tsx`, `api.ts`, `escrita.tsx`; `styles/familia.css`): item da Conta para TODOS (5 itens; o "Sair" da sidenav segue à vista em 1280x720; abaixo de 656px de altura os itens do trilho ficam em 30px em TODAS as telas, não só na Família, e o trilho não rola até 625px). Sem família: "Criar família" (402 de qualquer código = "Seu plano não inclui família." + link `#/conta/cobranca`). Membro: "Sair da família" (Confirma; 204 -> `location.assign("/painel")`, porque o plano do membro muda e o `/me` tem de ser relido). Titular: lugares (`membros + 1` de `capacidade`, a conta do servidor), membros só com primeiro nome e selo "Suspenso", Remover (Confirma; `DELETE /familia/membros/${encodeURIComponent(ref)}`), convite e "Desfazer família" em 2 passos (GET da prévia, Confirma "{n} pessoas perdem o acesso.", POST com o `confirmacao` exato; 409 `confirmation_mismatch` = "A família mudou. Confira de novo." e relê; o nonce só vive no estado do diálogo). Convite: o `token`/`link` só em `useState` (nunca storage, URL ou cache; sair da tela o perde e o convite vale até expirar: não há listagem), validade em dd/mm no fuso do painel, Copiar (aviso visível), Compartilhar só com `navigator.share`, Revogar só o recém-gerado; Gerar desabilitado com a família cheia (e 409 `full` vira texto). `chamar` (lib/v2.ts) trata 204 como erro: as escritas sem corpo usam o `semCorpo` de `familia/api.ts`, com o mesmo CSRF e o mesmo `erroDe`. Toda escrita manda `{}` no mínimo, para levar o `Content-Type: application/json` que o CSRF exige. Tipos escritos à mão (a rota não tem OpenAPI), com leitor de borda: resposta fora do contrato = `ErroApi(200, "contrato")`; só 404 `not_found` é "sem família". Fixtures `familia` em `tests/frontend/api_v2_respostas.json` validadas pelos modelos Pydantic (`test_fixture_de_familia_segue_o_modelo`). (2) **`/familia/entrar`** (página própria, HTML+JS à mão, sem React: o hash desconhecido é apagado pelo `router.ts` do painel, então o convite não pode entrar por ele): `frontend/familia-entrar.html|js`, `frontend/familia-convite.js` (`window.PBFamiliaConvite`: `guardar/ler/limpar/destino`). O link do convite é `/familia/entrar#t=<token>`; o `familia-entrar.js` guarda o token no `sessionStorage` (`pb_familia_convite_v1`, **prazo 2 h**, charset `[A-Za-z0-9_-]{1,256}`) e apaga o fragmento (`history.replaceState`) de forma síncrona, antes de qualquer requisição. Servida SEM gate de plano (`html_file(..., pixel=False)`: quem aceita ainda não tem plano, e o GA4 gravaria o fragmento com o token). Fluxo: 401 -> Entrar/Criar conta (sem token nos links); 200 -> "Você já está numa família."; 404 `not_found` -> "Entrando como {e-mail}" (de `/auth/dashboard-profile`) + "Não é você? Sair" + o botão (o aceite exige clique); 403 `password_required` -> "Defina uma senha para continuar.". O aceite limpa o token em 200, 404 `invite_invalid` e 409 `already_in_family`/`full`; NÃO limpa em 402 `family_coverage_required`, 429, 5xx nem rede (o convite segue válido). Login (`postAuth`) e cadastro (`irPraDash`) passam o destino por `PBFamiliaConvite.destino(...)`: com convite pendente e sem compra pendente (`PBPurchaseIntent.pending()` vence) vão ao convite; `?next=` interno do login segue com prioridade; o link do Google é reescrito para `?next=/familia/entrar`, que o `_google_oauth_next_url` aceita (junto de `/continuar-compra`; qualquer outro valor segue ignorado). Pós-aceite o membro sai do gate de plano (recompute no aceite): `tests/test_familia_entrar.py` prova ponta a ponta cadastro novo -> aceite -> `GET /painel` 200 (antes: 302 `/precos?escolha=1`). `robots.txt`: `Disallow: /familia`. Limites declarados: só no aparelho/deploy (Google real, `navigator.share` no iOS, área segura, o link vindo do WhatsApp); o `familia` do `/me` fica velho na aba do titular depois de criar/desfazer (nenhuma tela o lê hoje). Par no outro lado: app no PR 8.
 
+**Telas do Plano Família (PR 6b): permissões, "Quem viu" e a visão do titular** (`familia/dados.ts`, `Permissoes.tsx`, `Historico.tsx`, `VerMembro.tsx`, `MembroLancamentos.tsx`; a casa é o 6c). Consomem `api/v2/familia_dados.py`, sem mudá-la. **Membro** (`#/conta/familia`): dois interruptores "Resumo do mês" e "Lançamentos" (este desabilitado sem o resumo; o estado vem SEMPRE da resposta do servidor, nada otimista: revogar o resumo devolve `[]` e desliga os dois; 409 `aggregates_required` = "Libere o resumo primeiro."), a linha fixa "Saldo, contas, Pix e conversas nunca aparecem." e "Quem viu" (`GET /familia/historico`, "Ver mais" com `antes=<proximo>`; erro nunca mostra a lista velha). **Titular**: cada membro ativo com `agregados` em `permissoes` ganha "Ver" (senão "Não compartilha"; `visaoDe` descarta escopo desconhecido e lê ausente como `[]`: falha fechada). O "Ver" abre o `VerMembro` sobre a lista (a lista fica montada, `hidden`, para não perder o link de convite recém-gerado): seletor de mês (`month-switch`), Entrou/Saiu, categorias, orçamentos (`Linha` de `OrcamentosCategoria`; `null` no mês passado = a seção some) e, se `lancamentos` estiver liberado, os lançamentos de página em página (só depois do resumo). A categoria do lançamento usa o nome das `categorias` do resumo DO MEMBRO, nunca o catálogo do titular. **Isolamento no cliente**: tudo em memória, chave `["conta","familia-membro:<assunto>:<ref>:<mes>",uid]` (a forma que o `main.tsx` já limpa na troca de conta), `gcTime: 0` (sair do painel apaga), `refetchOnWindowFocus: false`, sem intervalo: **cada leitura do titular grava uma linha no histórico do membro**, então nada relê sozinho: nem foco, nem intervalo, nem o aviso do SSE (`meta: { foto: true }` em `leitura`, `dados.ts`: o aviso e a reconexão de `/api/v2/eventos` relêem a lista `GET /familia`, nunca os dados do membro; o `historicoQuery` fica fora porque ler o próprio histórico não grava log). Só o retry de rede/5xx relê (até 3 GETs por leitura): uma resposta perdida DEPOIS do commit do servidor pode duplicar uma linha do log. Nada vai para storage, hash ou console; o `ref` e o cursor só vão ao servidor no path/`pageParam` (o `ref` também está na chave de cache, em memória). **Regra do dono (2026-11-03), vale para TODO evento com o painel aberto** (revogar, liberar pela 1ª vez, religar, suspender, reativar, sair): o painel NUNCA lê sozinho. Mudança para MENOS acesso mostra o texto na hora, sem GET: lista sem `agregados` ou membro não `ativo` = "{Nome} parou de compartilhar."; sem `lancamentos` (só se o painel abriu com ele) = "{Nome} parou de compartilhar os lançamentos.". Mudança para MAIS acesso (religar, reativar, liberar `lancamentos` pela 1ª vez) não muda a tela nem lê: o que o painel pode mostrar é congelado na abertura (`viu` em `VerMembro.tsx`, que traz a tabela estados x eventos) e depois só entram reduções, pegajosas até o titular clicar "Voltar" e "Ver" de novo (remonta e lê com a lista atual). As únicas leituras são: abrir ("Ver"), trocar de mês (debounce de 300 ms), "Ver mais" (e a releitura única da 1ª página que o 422 `cursor` dispara, que nasce de um "Ver mais"), "Tentar de novo" e o retry de rede/5xx (até 3 GETs por leitura). 403 `consent_required` = "{Nome} parou de compartilhar." (o painel de dados sai, a família é relida); 403 só nos lançamentos = a seção vira texto; 404 = "não está mais na família"; 402 = "Seu plano não inclui família."; 422 `mes` = "Sem dados antes de {Nome} entrar." e trava o "Mês anterior"; 422 `cursor` = relê da 1ª página UMA vez (grava mais uma linha no "Quem viu"; a 2ª recusa vira erro); 404 também nos lançamentos relê a família e fecha o painel; o membro que some da lista esquece o painel (voltar com o mesmo ref não reabre). Limites declarados: o dado já na tela só some na próxima leitura (decisão do dono: sem releitura no foco); um GET já em voo quando a permissão cai ainda grava no servidor; o 422 `cursor` grava uma linha a mais no log; o `/painel` não abre sem plano (portão da `Entrada`, inalterado), então "sair/revogar sem plano" e "histórico depois de sair" ficam para o app e para o PR que fechar a API a quem está sem plano; só no deploy: sessão real com duas contas e o log gravado por leitura. Par no outro lado: app no PR 8.
+
 **Fatura com produtos extras:** no `invoice.paid`/`payment_succeeded`, `amount_cents`
 é só o plano: `amount_paid` menos o líquido (`_extras_liquido_cents`) de TODAS as
 linhas cujo `pricing.price_details.price` está entre os preços da foto da metadata da
@@ -1968,7 +2004,9 @@ Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 `limite` (GET só leitura, `{ok, of_banks_max, em_uso, pode_adicionar, code, message}`: se cabe
 um banco NOVO, pela mesma decisão do `_enforce_bank_limit`; o teto nunca vira 402 aqui, mas o
 gate comum de dados sim (402 `subscription_required`/`plan_selection_required` sem plano ativo);
-não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhook
+não barra reconexão e o 402 do `/pluggy-item` continua valendo; `em_uso` conta só conexões
+`pluggy` fora de `_TERMINAL` (PAUSED/DELETED, #1377), o modal espelha em `FORA_DO_TETO` e
+`tests/test_of_limite_route.py` compara as listas)) mais o webhook
 `/open-finance/pluggy/webhook`. O `connect-token` aceita `app_scheme` opcional no corpo
 (`pigbank`, `pigbank-staging` ou `pigbank-dev`; fora da lista, 400), que vira o
 `oauthRedirectUri` `<scheme>://open-finance-volta` da Pluggy; o site não manda o campo.
@@ -2325,15 +2363,16 @@ sai com dados suficientes: o plano enxerga os dois meses (`inicio_do_historico`)
 Resumo não avisa número possivelmente incompleto (`motivos`, como banco desatualizado). Três regras reduzem o risco de
 dado faltando, sem garantir completude: uma conexão do banco que parou (PAUSED ou DELETED,
 `open_finance_state._TERMINAL`) a partir do dia 1 do mês anterior, no fuso do app, também cala, e a que parou antes do
-período comparado não cala (o `updated_at` da conexão terminal é usado como data APROXIMADA da parada: nunca fica
-antes da parada real, mas pode ficar depois, porque a varredura de plano repausa conexão DELETED e regrava o
-`updated_at` (issue #1371); o efeito do erro é calar o aviso por mais tempo, nunca celebrar sem motivo); o mês fechado
-só é avaliado a partir do dia `SOBRA_DESDE_DIA` do mês seguinte, no fuso do app; e o mês base precisa de algum
-lançamento ou compra no cartão nos primeiros `SOBRA_COBERTURA_DIAS` dias (`_inicio_do_historico` com `desde`). Chave
-`positive_result:mes:AAAA-MM` (o mês fechado), `info`, por último no laço e sem vaga reservada (só aparece quando os
-alertas deixam espaço no teto), fica até o fim do mês seguinte ou até ser dispensado, sem `impacto` nem `acoes` no
-Pro, botão "Ver análises". O Repórter chama de sobra outra conta (issue #1360). Limite: o cache não sabe de um
-lançamento novo, então a sobra mostrada pode ficar até um TTL atrasada (D13).
+período comparado não cala (o `updated_at` da conexão terminal é usado como data APROXIMADA da parada: nunca fica antes
+da parada real; desde a issue #1371 a varredura de plano não seleciona DELETED e a pausa preserva o estado terminal e o
+`updated_at` dele, garantias presas em `tests/test_of_trial_expiry.py`; se ainda assim ficar depois da parada, o efeito
+é calar o aviso por mais tempo, nunca celebrar sem motivo); o mês fechado só é avaliado a partir do dia
+`SOBRA_DESDE_DIA` do mês seguinte, no fuso do app; e o mês base precisa de algum lançamento ou compra no cartão nos
+primeiros `SOBRA_COBERTURA_DIAS` dias (`_inicio_do_historico` com `desde`). Chave `positive_result:mes:AAAA-MM` (o mês
+fechado), `info`, por último no laço e sem vaga reservada (só aparece quando os alertas deixam espaço no teto), fica até
+o fim do mês seguinte ou até ser dispensado, sem `impacto` nem `acoes` no Pro, botão "Ver análises". O Repórter chama de
+sobra outra conta (issue #1360). Limite: o cache não sabe de um lançamento novo, então a sobra mostrada pode ficar até
+um TTL atrasada (D13).
 
 **PigBank Insights, dispensar e útil (PL-06 PR A2).** Tabela `insight_estado` (PK `user_id, chave`;
 `db/insight_estado.py`): cada cálculo registra a chave com a severidade e a medida do ÚLTIMO cálculo
