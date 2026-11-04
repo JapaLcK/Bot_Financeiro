@@ -3125,7 +3125,9 @@ def test_281_guarda_de_entrega_prende_o_valor_que_o_reroteamento_mudaria():
     db.ensure_user(uid)
     assert "Quanto foi" in _diga(uid, "paguei a luz")
 
-    _diga(uid, "paguei 132,50. foi isso")
+    # desde o #1324 o valor não infla mais: a cauda "foi isso" vai ao desempate, como "paguei 132. foi isso"
+    assert "1️⃣" in _diga(uid, "paguei 132,50. foi isso")
+    _diga(uid, "1")
 
     lancs = db.list_launches(uid, limit=3)
     assert len(lancs) == 1 and abs(float(lancs[0]["valor"])) == 132.5, lancs
