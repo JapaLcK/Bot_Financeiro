@@ -110,7 +110,7 @@ const chamar = (page, url, init) => page.evaluate(
 test("401 de APLICAÇÃO (senha errada) não renova e não reenvia a senha", async () => {
   const { page, ctx, chamadas } = await abrir({
     "/auth/mfa/setup": r401App,
-    "/auth/refresh": r200({ ok: true }),
+    "/auth/refresh": r200({ ok: true, user_id: 1, confirmada: true }),
   });
 
   const resp = await chamar(page, "/auth/mfa/setup", { method: "POST" });
@@ -131,7 +131,7 @@ test("401 de AUTENTICAÇÃO ainda renova, refaz a request e devolve o RETRY", as
   const { page, ctx, chamadas } = await abrir({
     "/data/42": (route) => route.fulfill(
       ++tentativas === 1 ? r401Auth : r200({ valor: "depois-do-retry" })),
-    "/auth/refresh": r200({ ok: true }),
+    "/auth/refresh": r200({ ok: true, user_id: 1, confirmada: true }),
   });
 
   const resp = await chamar(page, "/data/42");
@@ -154,7 +154,7 @@ test("o RETRY continua passando pela limpeza — DELETE /auth/account renovado",
   const { page, ctx, chamadas } = await abrir({
     "/auth/account": (route) => route.fulfill(
       ++tentativas === 1 ? r401Auth : r200({ scheduled: true })),
-    "/auth/refresh": r200({ ok: true }),
+    "/auth/refresh": r200({ ok: true, user_id: 1, confirmada: true }),
   });
 
   // Estado de aparelho REAL para a limpeza ter o que apagar: o service worker

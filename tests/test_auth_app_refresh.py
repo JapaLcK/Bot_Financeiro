@@ -123,7 +123,8 @@ def test_refresh_do_navegador_com_corpo_vazio_continua_funcionando(sessao):
     client.cookies.set(dashboard.REFRESH_COOKIE_NAME, dados["refresh_token"])
     r = client.post(
         "/auth/refresh",
-        headers={**_csrf(client), "Content-Type": "application/json"},
+        # `-`: a página ainda não sabe a conta (o contrato do `X-PB-Conta`).
+        headers={**_csrf(client), "Content-Type": "application/json", dashboard.CONTA_HEADER: "-"},
     )
     assert r.status_code == 200, r.text
     assert r.json()["ok"] is True
@@ -140,6 +141,7 @@ def test_cookie_tem_precedencia_sobre_o_header(sessao):
         headers={
             **_csrf(client),
             "Authorization": "Bearer rt_um_token_que_nao_existe",
+            dashboard.CONTA_HEADER: "-",
         },
     )
     assert r.status_code == 200, r.text

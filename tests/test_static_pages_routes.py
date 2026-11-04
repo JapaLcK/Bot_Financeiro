@@ -503,6 +503,12 @@ _401_RENOVAVEL = {
      "Token de dashboard inválido ou expirado."): True,
     ("frontend/routes/shared.py", "resolve_dashboard_user_id",
      "Sessão encerrada. Faça login novamente."): True,
+    # Credenciais de sessão que não concordam sobre a conta. Família A mesmo
+    # assim: o interceptor tenta renovar, e quem encerra é o `/auth/refresh`,
+    # que recusa a mesma condição (`sessao_divergente`) e limpa os cookies.
+    (_MONO, "_get_current_user", "Sessão inconsistente. Faça login novamente."): True,
+    ("frontend/routes/shared.py", "resolve_dashboard_user_id",
+     "Sessão inconsistente. Faça login novamente."): True,
     # ── família B: 401 de aplicação, o token está ótimo ───────────────────────
     # Senha incorreta em MFA setup/disable, regenerar backup codes e export.
     (_MONO, "auth_mfa_setup", "Senha incorreta."): False,
@@ -535,11 +541,12 @@ _401_RENOVAVEL = {
     ("frontend/routes/retomada.py", "retomada_senha",
      "Link de compra inválido ou expirado."): False,
     # ── família C: 401 que o INTERCEPTOR nem alcança ──────────────────────────
-    # Os dois do `POST /auth/refresh` (montados como `JSONResponse` porque o
+    # Os três do `POST /auth/refresh` (montados como `JSONResponse` porque o
     # `raise` descarta o Set-Cookie da limpeza, #175). O interceptor sai antes
     # deles, no `_isRefreshEndpoint`: renovar o refresh com o refresh é recursão.
     (_MONO, "auth_refresh", "missing_refresh_token"): False,
     (_MONO, "auth_refresh", "invalid_refresh_token"): False,
+    (_MONO, "auth_refresh", "sessao_divergente"): False,
     # Magic link expirado no `GET /d/{code}`: página HTML de NAVEGAÇÃO, não
     # resposta de `fetch`. O `window.fetch` do auth-refresh.js não vê navegação.
     (_MONO, "dashboard_short_link", "<HTMLResponse>"): False,
@@ -797,10 +804,10 @@ def test_401_de_autenticacao_declara_familia():
     # o `headers=` de todos os sítios, as três asserções acima continuariam verdes
     # caso a classificação fosse trocada junto — este número não.
     com_header = sorted(c for c, forma in achados if forma)
-    assert len(com_header) == 8, (
+    assert len(com_header) == 10, (
         f"são {len(com_header)} sítios com `WWW-Authenticate`, e este controle "
-        "espera 8. Se você ADICIONOU um 401 de autenticação legítimo (já "
-        "classificado como True acima), atualize o 8 para o número novo. Se você "
+        "espera 10. Se você ADICIONOU um 401 de autenticação legítimo (já "
+        "classificado como True acima), atualize o 10 para o número novo. Se você "
         f"não mexeu em nenhum 401, alguém apagou um `headers=`: {com_header}"
     )
 
