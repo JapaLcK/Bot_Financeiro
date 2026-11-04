@@ -41,6 +41,9 @@ purga que apaga tudo — os dois piores que o bug.
 
 import uuid
 
+import pytest
+
+from core.services import admin_notify, pix_drain
 from db.connection import get_conn
 from db.webhook_outbox import (
     RETENCAO_OUTBOX_DIAS,
@@ -274,3 +277,24 @@ def test_purgar_retencao_roda_as_DUAS_purgas(user_id):
     assert _linha(eid)["payload_enc"] is None
     assert contagem["cobrancas_orfas"] >= 1, "`rezerar_rastreio_de_orfas` não foi chamada"
     assert _por_ref(cobranca["external_reference"])["ga_client_id"] is None
+
+
+# ── #1265: compra que travou e foi purgada não fecha em silêncio ─────────────
+
+
+@pytest.mark.parametrize("tipo,falhou,alerta", [
+    ("PAYMENT_RECEIVED", True, True), ("PAYMENT_CONFIRMED", True, True),
+    ("PAYMENT_RECEIVED", False, False),   # nunca tentou: nada travou
+    ("PAYMENT_OVERDUE", True, False),     # não é compra
+])
+def test_purga_de_compra_travada_alerta_e_fecha(monkeypatch, tipo, falhou, alerta):
+    avisos = []
+    monkeypatch.setattr(admin_notify, "notify_pix_alerta", avisos.append)
+    eid = _evt()
+    registrar_evento(eid, tipo, _corpo(), 1)
+    if falhou:
+        registrar_falha(eid, "ReadTimeout")
+    _marcar_purgada(eid)
+    pix_drain.drenar_evento(eid)
+    assert _linha(eid)["processed_at"] is not None
+    assert [eid in a for a in avisos] == ([True] if alerta else [])

@@ -972,7 +972,8 @@ def parse_money(text: str) -> float | None:
     if not m:
         return None
 
-    raw = m.group(1).strip().replace(" ", "")
+    # ponto no fim é o da frase, não decimal nem milhar: "50,00." (#1324)
+    raw = m.group(1).strip().replace(" ", "").rstrip(".")
 
     # normaliza milhares/decimais
     # se tiver vírgula E ponto, decide o decimal pelo último
