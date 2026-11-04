@@ -34,19 +34,19 @@ def cupom_id(stripe_mod, etapa: int, pct: int, price_id: str) -> str:
             product = _sg(product, "id")
         cid = f"rm_e{etapa}_{pct}_{product}"
         try:
-            cupom = stripe_mod.Coupon.retrieve(cid)
+            cupom = stripe_mod.Coupon.retrieve(cid, expand=["applies_to"])
         except stripe_mod.error.InvalidRequestError as exc:
             if getattr(exc, "code", None) != "resource_missing":
                 raise
             try:
                 cupom = stripe_mod.Coupon.create(
                     id=cid, percent_off=pct, duration="repeating", duration_in_months=1,
-                    applies_to={"products": [product]})
+                    applies_to={"products": [product]}, expand=["applies_to"])
             except stripe_mod.error.InvalidRequestError as exc2:   # corrida: outro worker criou
                 if getattr(exc2, "code", None) != "resource_already_exists" \
                         and "already exists" not in str(exc2):
                     raise
-                cupom = stripe_mod.Coupon.retrieve(cid)
+                cupom = stripe_mod.Coupon.retrieve(cid, expand=["applies_to"])
     except stripe_mod.error.StripeError as exc:
         logging.getLogger(__name__).error("retomada_cupom_stripe: %s", exc)
         raise CupomIndisponivel(str(exc)) from exc

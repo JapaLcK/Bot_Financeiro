@@ -202,11 +202,15 @@
     return resp.json();
   }
 
+  // Espelha `_TERMINAL` de `db/open_finance_state.py`; o teste de paridade em
+  // `tests/test_of_limite_route.py` reprova se divergirem (§0.7).
+  const FORA_DO_TETO = ["PAUSED", "DELETED"];
+
   /** Conexões que contam no teto — espelha o backend (`count_open_finance_connections`):
-   *  só provider "pluggy" (mock não conta) e PAUSED não conta. */
+   *  só provider "pluggy" (mock não conta), e PAUSED e DELETED não contam. */
   function countsTowardLimit(conn) {
     return !!conn && conn.provider === "pluggy" &&
-      String(conn.status || "").toUpperCase() !== "PAUSED";
+      FORA_DO_TETO.indexOf(String(conn.status || "").toUpperCase()) === -1;
   }
 
   /**

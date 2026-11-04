@@ -28,6 +28,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from slowapi import Limiter
+from starlette.requests import HTTPConnection
 
 from config.env import load_app_env
 from core.client_ip import rate_limit_key
@@ -1034,7 +1035,38 @@ def payload_de_sessao(token: str) -> dict | None:
         return None
 
 
+def contas_dos_cookies(conn: HTTPConnection) -> set[int]:
+    """As contas que os cookies `auth_token` e `dashboard_token` dizem ser, por
+    assinatura, prazo e tipo — sem banco. Token vencido ou inválido não conta."""
+    contas = set()
+    for nome in (AUTH_COOKIE_NAME, DASHBOARD_COOKIE_NAME):
+        payload = payload_de_sessao((conn.cookies.get(nome) or "").strip())
+        if payload:
+            contas.add(int(payload["user_id"]))
+    return contas
+
+
+def sessao_divergente(conn: HTTPConnection) -> bool:
+    """True quando as credenciais de sessão do navegador não concordam sobre a conta.
+
+    Contrato: os cookies de sessão de um navegador são de UMA conta. Dois cookies
+    válidos de contas diferentes não são sessão nenhuma — quem chama responde 401
+    e o cliente volta ao login. Compara só a conta, nunca o `jti`. Com `Bearer`
+    (o app, que carrega um token só) não há par a comparar.
+    """
+    if extract_bearer_token(conn):
+        return False
+    if len(contas_dos_cookies(conn)) < 2:
+        return False
+    # INFO, não WARNING: o WARNING vai para o banco a cada request (observability).
+    logging.getLogger(__name__).info("sessao_divergente")
+    return True
+
+
 def resolve_dashboard_user_id(request: Request) -> int:
+    if sessao_divergente(request):
+        raise HTTPException(status_code=401, detail="Sessão inconsistente. Faça login novamente.",
+                            headers=WWW_AUTHENTICATE_401)
     token = (
         extract_bearer_token(request)
         or (request.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
@@ -1307,6 +1339,8 @@ def _resolve_page_user_id(request: Request) -> int | None:
     válido (estado normal — o front só renova o access DEPOIS que o HTML carrega),
     servindo a página sem checar o gate. Devolve None quando nenhum cookie é uma
     sessão válida (aí o próprio HTML manda pro login)."""
+    if sessao_divergente(request):
+        return None
     # 1. auth_token (JWT curto)
     token = get_auth_token_from_request(request, None)
     payload = decode_jwt(token) if token else None

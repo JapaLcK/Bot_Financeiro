@@ -151,7 +151,7 @@ test("401 → refresh 200 → o mesmo pedido de novo: o painel monta, com um ref
   const ctx = await contexto();
   let vezes = 0;
   await ctx.route("**/api/v2/me", (r) => (vezes++ === 0 ? erroDoMe(RESPOSTAS.erros["401"])(r) : r.fulfill({ json: RESPOSTAS.me.pro })));
-  await ctx.route("**/auth/refresh", (r) => r.fulfill({ json: { ok: true } }));
+  await ctx.route("**/auth/refresh", (r) => r.fulfill({ json: { ok: true, user_id: 1, confirmada: true } }));
   const { page, n } = await abrir(ctx);
   await montado(page);
   const pagos = await pagosNaTela(page);
