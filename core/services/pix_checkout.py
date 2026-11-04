@@ -302,7 +302,7 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
     """
     from core.services.asaas_customers import TitularRecusado, criar_cliente
     from core.services.email_service import plan_display_name
-    from db.pix_charges import transicionar
+    from db.pix_charges import buscar_por_public_token, transicionar
     from db.pix_charges_saga import attach_pagamento, voltar_para_draft
 
     transicionar(linha["id"], de=("draft",), para="creating")
@@ -335,9 +335,14 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
     except Exception as exc:  # noqa: BLE001 — a linha fica `creating` de propósito
         raise CheckoutIndisponivel("asaas_emissao_falhou") from exc
 
-    attach_pagamento(linha["id"], str(pagamento["id"]),
-                     qr_payload_enc=encrypt_pii_optional(qr["payload"]),
-                     due_date=vence, qr_expires_at=expira(qr))
+    if not attach_pagamento(linha["id"], str(pagamento["id"]),
+                            qr_payload_enc=encrypt_pii_optional(qr["payload"]),
+                            due_date=vence, qr_expires_at=expira(qr)):
+        # Perdeu a corrida (#1271): sem `pending`/QR. `paid` = já pago, não "tenta de novo".
+        atual = buscar_por_public_token(linha["user_id"], linha["public_token"])
+        if atual and atual["status"] == "paid":
+            raise CoberturaJaPaga(atual["plan_stored"], atual["access_expires_at"])
+        raise CheckoutIndisponivel("attach_perdeu_corrida")
     linha = dict(linha, asaas_payment_id=str(pagamento["id"]), status="pending",
                  qr_expires_at=expira(qr))
     return resposta(linha, qr["payload"])
