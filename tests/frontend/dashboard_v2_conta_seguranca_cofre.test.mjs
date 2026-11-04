@@ -130,6 +130,51 @@ test("troca de conta com o Cofre aberto (lib/sessao.ts): recarrega sem perguntar
   assert.deepEqual(r, { dialogos: [], cargas: 1, vis: "", cofre: 0 });
 });
 
+// O logout com o Cofre aberto (a metade `logout !== null` do `deSaida()`): o destino `/?logout=1` é servido aqui, e todo diálogo é
+// recusado ("Cancelar", o pior caso). Se o `beforeunload` perguntasse, a saída nunca chegaria lá.
+async function cofreNoLogout() {
+  const p = await abrirSeguranca();
+  await p.ctx.route((u) => u.pathname === "/", (r) => r.fulfill({ contentType: "text/html", body: "<html><body>saiu</body></html>" }));
+  await ateOCofre(p);
+  const dialogos = [];
+  p.page.on("dialog", (d) => { dialogos.push(d.type()); d.dismiss().catch(() => {}); });
+  // Espera a saída com teto: sem ela, o assert diz onde a página ficou.
+  const saida = () => p.page.waitForURL("**/?logout=1", { timeout: 6000 }).then(() => new URL(p.page.url()).search, () => new URL(p.page.url()).search);
+  return { ...p, dialogos, saida };
+}
+
+test("logout de outra aba com o Cofre aberto: sai para /?logout=1 sem perguntar", async () => {
+  const p = await cofreNoLogout();
+  await p.ctx.route("**/outra-aba", (r) => r.fulfill({ contentType: "text/html", body: "<html></html>" }));
+  const outra = await p.ctx.newPage();
+  await outra.goto(new URL("/outra-aba", p.page.url()).href);
+  await outra.evaluate(() => localStorage.setItem("finbot_logout_at", String(Date.now()))); // o aviso de saída que o lib/v2.ts ouve
+  await outra.evaluate(() => { document.cookie = "pb_conta=; max-age=0; path=/"; }); // e a sessão some, como na resposta do logout
+  const r = { dialogos: p.dialogos, fim: await p.saida() };
+  await p.ctx.close();
+  assert.deepEqual(r, { dialogos: [], fim: "?logout=1" });
+});
+
+test("'Sair' daqui com o Cofre aberto: sai para /?logout=1 sem perguntar", async () => {
+  const p = await cofreNoLogout();
+  await p.ctx.route("**/auth/logout", (r) => r.fulfill({ headers: { "set-cookie": "pb_conta=; Max-Age=0; Path=/" }, json: {} }));
+  const n = await p.page.locator('button[title="Sair"]').count();
+  // O Cofre é modal e deixa o resto inerte: o click vai por script, no mesmo handler do botão.
+  await p.page.evaluate(() => document.querySelector('button[title="Sair"]').click());
+  const r = { n, dialogos: p.dialogos, fim: await p.saida() };
+  await p.ctx.close();
+  assert.deepEqual(r, { n: 1, dialogos: [], fim: "?logout=1" });
+});
+
+test("controle: fora da troca e do logout, recarregar com o Cofre aberto continua perguntando (e 'Cancelar' o mantém)", async () => {
+  const p = await cofreNoLogout();
+  await p.page.evaluate(() => { setTimeout(() => location.reload(), 0); });
+  await ate(p.page, () => p.dialogos.length > 0, "o beforeunload perguntou").catch(() => {}); // sem ele, o assert abaixo diz o estado
+  const r = { dialogos: p.dialogos, cofre: await p.cofre.count() };
+  await p.ctx.close();
+  assert.deepEqual(r, { dialogos: ["beforeunload"], cofre: 1 });
+});
+
 test("'Copiar todos': copia os códigos (um por linha) e avisa 'Códigos copiados'; sem permissão ou sem clipboard, 'Não foi possível copiar'", async () => {
   const p = await abrirSeguranca();
   await p.ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:1" });

@@ -14,6 +14,12 @@ let dona: string | null = null;
 let saindo = false; // a página já sumiu: todo conferir lança
 let logout: string | null = null; // o destino da saída do logout, já pedida: a troca esconde e lança, mas não recarrega
 
+// Na troca ou no logout, o `beforeunload` do Cofre do MFA (o único do /painel) não pergunta: "Cancelar" deixaria a página escondida
+// e travada. O dono aceitou perder os códigos na tela. É ele que consulta isto: um ouvinte de `beforeunload` aqui, desde a carga,
+// atrasaria toda navegação do /painel (o navegador consulta a página antes de sair), e um registrado só na saída rodaria depois do dele
+// (no `window`, a ordem é a de registro, com ou sem captura).
+export const deSaida = () => saindo || logout !== null;
+
 function trocou(): never {
   saindo = true;
   document.documentElement.style.visibility = "hidden";
@@ -64,7 +70,4 @@ export function vigiar() {
   window.addEventListener("pointerdown", barra, true);
   window.addEventListener("click", barra, true);
   window.addEventListener("visibilitychange", barra, true);
-  // Na troca ou no logout, nenhum `beforeunload` (o do Cofre do MFA) pergunta: "Cancelar" deixaria a página escondida e travada. O
-  // dono aceitou perder os códigos na tela. Em captura no `window`, roda antes dos ouvintes comuns dele.
-  window.addEventListener("beforeunload", (e) => { if (saindo || logout !== null) e.stopImmediatePropagation(); }, true);
 }

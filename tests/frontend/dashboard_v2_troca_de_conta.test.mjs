@@ -273,8 +273,8 @@ test("N7b (sem o visibilitychange): com o relógio parado, a aba que some recarr
 
 test("N8 (sem esconder, ou escondendo tarde; sem a trava `saindo`): o /painel novo demora 2,5 s; a página da A some JÁ ao pedir a recarga, e recarrega UMA vez (o intervalo não reinicia a recarga)", async () => {
   const { ctx, page, ir, s, contaA, recarga, pedidos } = await abrir();
-  // A visibilidade no `beforeunload`, que sai no instante em que a recarga é pedida (não no `pagehide`, 2,5 s depois). Em captura no
-  // `window` e registrado antes do da sessão, que corta os outros quando está saindo.
+  // A visibilidade no `beforeunload`, que sai no instante em que a recarga é pedida (não no `pagehide`, 2,5 s depois). Registrado
+  // antes de qualquer ouvinte da página (no `window`, a ordem é a de registro).
   await ctx.addInitScript(() => addEventListener("beforeunload", () => {
     if (sessionStorage.getItem("trocou") && sessionStorage.getItem("vis") === null) sessionStorage.setItem("vis", document.documentElement.style.visibility);
   }, true));
