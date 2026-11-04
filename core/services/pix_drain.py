@@ -215,7 +215,7 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
         nova, falha = _transicionar(cobranca, origens, destino, payment_id)
         if falha:
             return falha
-        if nova and destino == "paid" and cobranca["status"] in ("draft", "creating"):
+        if nova and destino == "paid" and cobranca["status"] in ("draft", "creating", "canceling", "canceled"):
             avisar_pago_sem_qr(cobranca)  # ponytail: perdido se morrer aqui; é só aviso
         cobranca = nova or buscar_por_asaas_payment_id(payment_id) or cobranca
 
