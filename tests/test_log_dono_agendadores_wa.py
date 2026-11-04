@@ -153,7 +153,7 @@ def test_t11_contas_a_falha_numa_etapa_e_b_recebe(monkeypatch, etapa, prefixo, c
             raise _violacao(marcador)
         return [{"id": conta_de[uid], "name": "Luz", "amount": 120, "due_date": date(2026, 10, 3)}]
 
-    def marca_enviado(bill_id, today):
+    def marca_enviado(uid, bill_id, today):
         if etapa == "marcacao" and bill_id == conta_de[a]:
             raise _violacao(marcador)
         marcadas.append(bill_id)

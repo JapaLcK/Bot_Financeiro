@@ -642,7 +642,7 @@ def _bill_reminder_tick() -> None:
                                    type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
             if sent_any:
                 try:
-                    mark_bill_reminder_sent(int(bill["id"]), today)
+                    mark_bill_reminder_sent(int(uid), int(bill["id"]), today)
                 except Exception as exc:
                     logger.warning("WA bill reminder mark error uid=%s bill_id=%s causa=%s sqlstate=%s", uid, bill.get("id"),
                                    type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": uid})
