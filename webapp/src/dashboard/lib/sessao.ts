@@ -11,12 +11,17 @@ const marca = () => document.cookie.split("; ").find((c) => c.startsWith(NOME))?
 let vista = marca();
 // Sessão de antes do deploy (HTML sem o marcador): o uid confirmado pelo servidor na carga, para adotar o marcador quando ele aparecer.
 let dona: string | null = null;
-let saindo = false;
+let saindo = false; // a página já sumiu: todo conferir lança
+let logout: string | null = null; // o destino da saída do logout, já pedida: a troca esconde e lança, mas não recarrega
 
 function trocou(): never {
   saindo = true;
   document.documentElement.style.visibility = "hidden";
-  location.reload();
+  // No logout, o prazo só arma depois que o marcador mudou, isto é, depois da resposta do servidor: se a limpeza do auth-refresh.js
+  // travar, a página não fica escondida para sempre. O que se perde é só a limpeza do SW/Cache Storage (o storage já foi apagado,
+  // de forma síncrona, antes).
+  if (logout === null) location.reload();
+  else { const url = logout; setTimeout(() => location.replace(url), 3000); }
   throw new SessaoTrocada();
 }
 
@@ -28,12 +33,14 @@ export function conferir() {
   trocou();
 }
 
-// Logout (o "Sair" daqui ou o de outra aba): a página já está indo embora, e o reload da troca (o marcador some com a
-// sessão) cancelaria essa navegação. Com a trava ligada, nada mais recarrega. O "Sair" daqui liga a trava já no POST (`travar`): a
-// resposta apaga o marcador e o auth-refresh.js ainda limpa o aparelho antes de devolvê-la, tempo de sobra para o intervalo recarregar.
-export const travar = () => { saindo = true; };
+// Logout (o "Sair" daqui ou o de outra aba): a página vai embora, e o reload da troca (o marcador some com a sessão) cancelaria
+// essa navegação. A trava tira SÓ o reload: enquanto o marcador não muda, a página segue lendo e respondendo a gestos (o POST pode
+// demorar); mudou ou sumiu, ela some e lança como na troca, e quem navega é a saída (ou o prazo do `trocou`, se ela travar). O
+// "Sair" daqui liga a trava já no POST (`travar`): a resposta apaga o marcador e o auth-refresh.js ainda limpa o aparelho antes de
+// devolvê-la.
+export const travar = (url: string) => { logout = url; };
 export function sairPara(url: string) {
-  travar();
+  travar(url);
   location.replace(url);
 }
 
@@ -50,14 +57,14 @@ export function vigiar() {
       .then((r) => (r.ok ? r.json() : null))
       .then((p: { user_id?: number } | null) => { if (p?.user_id != null) dona = String(p.user_id); }, () => undefined);
   }
-  setInterval(() => { try { conferir(); } catch { /* recarregando */ } }, 1000);
+  setInterval(() => { try { conferir(); } catch { /* a página sumiu */ } }, 1000);
   const barra = (e: Event) => { try { conferir(); } catch { e.preventDefault(); e.stopImmediatePropagation(); } };
   window.addEventListener("keydown", barra, true);
   // O `<input type="range">` muda de valor no mousedown/touchstart, antes de qualquer click (e no arrasto por toque não há click).
   window.addEventListener("pointerdown", barra, true);
   window.addEventListener("click", barra, true);
   window.addEventListener("visibilitychange", barra, true);
-  // Saindo, nenhum `beforeunload` (o do Cofre do MFA) pergunta: "Cancelar" deixaria a página escondida e travada. O dono aceitou perder
-  // os códigos na tela. Em captura no `window`, roda antes dos ouvintes comuns dele.
-  window.addEventListener("beforeunload", (e) => { if (saindo) e.stopImmediatePropagation(); }, true);
+  // Na troca ou no logout, nenhum `beforeunload` (o do Cofre do MFA) pergunta: "Cancelar" deixaria a página escondida e travada. O
+  // dono aceitou perder os códigos na tela. Em captura no `window`, roda antes dos ouvintes comuns dele.
+  window.addEventListener("beforeunload", (e) => { if (saindo || logout !== null) e.stopImmediatePropagation(); }, true);
 }

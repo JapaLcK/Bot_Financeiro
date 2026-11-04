@@ -138,14 +138,13 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   uid do `dashboard_token`, que é quem a /api/v2 responde (não o do `auth_token`, que abre a página); sem
   `dashboard_token` válido o `/painel` o expira. Quem apaga: `_clear_session_cookies` (logout, exclusão,
   fim de sessão). **O servidor nunca o lê**: a
-  sessão continua sendo só o `dashboard_token` HttpOnly. O cliente (`webapp/src/dashboard/lib/sessao.ts`)
-  guarda o valor da carga e o confere antes e depois de todo `fetch` do `chamar`, no stream do chat, a
-  cada troca de rota, a cada 1 s e em `click`/`keydown`/`visibilitychange`; mudou ou sumiu, a
-  página fica escondida e recarrega uma vez, sem `beforeunload` (o Cofre do MFA não pergunta) e sem
-  cancelar a saída do logout (`sairPara`). Sessão de antes do deploy (sem o cookie) confirma o uid
-  no `/auth/dashboard-profile` uma vez e adota o marcador só se ele vier igual. Presos por
+  sessão continua sendo só o `dashboard_token` HttpOnly. O cliente guarda o valor da carga e o confere
+  onde um dado pode entrar na tela; mudou ou sumiu, a página fica escondida e recarrega uma vez (no
+  logout, só se esconde e quem navega é a saída, com um prazo se ela travar depois da resposta do
+  servidor). Onde ele confere, e o caso da sessão de antes do deploy, mora em
+  `webapp/src/dashboard/lib/sessao.ts` (fonte única: não enumere aqui). Presos por
   `tests/test_marca_conta_cookie.py`, `tests/test_painel_pagina.py` e
-  `tests/frontend/dashboard_v2_troca_de_conta.test.mjs` (não por `test_api_v2_rotas.py`).
+  `tests/frontend/dashboard_v2_troca_de_conta*.test.mjs` (não por `test_api_v2_rotas.py`).
 - Toda rota tem `response_model` (a de SSE, o tipo do item do stream; ver `/eventos`).
 - **Erro** sai no envelope `{"error": {"code", "message", "details"?}}`
   (`api/v2/erros.py`), com os headers da exceção preservados (`WWW-Authenticate` do

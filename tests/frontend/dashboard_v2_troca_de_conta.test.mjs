@@ -7,8 +7,9 @@
  *   · a conta A é o uid 7 (contas R$ 7.777,77, "Segredo da conta A", mês anterior R$ 7.111,11 / 7.333,33); a B, o uid 8;
  *   · prazos em `performance.now()` do Node: o `abrirPainel` congela o `Date` da página.
  *
- * N1–N8 e L1–L2 falham se a proteção correspondente sair (a mutação está no nome); P1–P3 provam que a mesma conta não recarrega nem
- * pede mais. O pedaço do stream do chat: dashboard_v2_chat_ia.test.mjs; o Cofre do MFA: dashboard_v2_conta_seguranca_cofre.test.mjs.
+ * N1–N8 falham se a proteção correspondente sair (a mutação está no nome); P1–P3 provam que a mesma conta não recarrega nem pede
+ * mais. O logout (L1–L4b): dashboard_v2_troca_de_conta_logout.test.mjs; o pedaço do stream do chat: dashboard_v2_chat_ia.test.mjs; o
+ * Cofre do MFA: dashboard_v2_conta_seguranca_cofre.test.mjs. O `abrir` comum: _troca_de_conta.mjs.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -17,71 +18,16 @@ import { setTimeout as dorme } from "node:timers/promises";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
-import { FRONTEND, RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
+import { FRONTEND, exigeArtefatoEmDia } from "./_painel.mjs";
+import { CONTAS, PIGGY, abrir as abrirConta } from "./_troca_de_conta.mjs";
 import { congelar } from "./_atualizar_banco.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
 after(() => browser?.close());
 
-const A_TXT = ["Segredo da conta A", "7.777,77", "7.111,11", "7.333,33"];
 const B_TXT = "8.888,88";
-const CONTAS = '[data-widget-id="contas"]';
-const PIGGY = '[data-widget-id="piggy"]';
-
-/** O painel da conta A. `s.uid` decide o que as rotas respondem (8 = a B; `null` = deslogado: 401 no perfil e na /api/v2). */
-async function abrir(opts = {}) {
-  const p = await abrirPainel(browser, { perfil: "padrao", marca: "7", ...opts });
-  const s = { uid: 7, insights: null, eventos: null };
-  const { ctx, page } = p;
-  const pedidos = []; // [pathname, é a navegação do documento]
-  let cargas = 0;
-  page.on("load", () => { cargas += 1; });
-  page.on("request", (q) => pedidos.push([new URL(q.url()).pathname, q.isNavigationRequest()]));
-  const perfis = []; // status de cada resposta do perfil
-  page.on("response", (r) => { if (new URL(r.url()).pathname === "/auth/dashboard-profile") perfis.push(r.status()); });
-  await ctx.addInitScript((A) => {
-    const ve = (n) => A.some((a) => (n.textContent || "").includes(a));
-    new MutationObserver((ms) => {
-      if (!sessionStorage.getItem("trocou")) return;
-      for (const m of ms) if ((m.type === "characterData" && ve(m.target)) || [...m.addedNodes].some(ve)) sessionStorage.setItem("viuA", "1");
-    }).observe(document, { childList: true, subtree: true, characterData: true });
-  }, A_TXT);
-  await ctx.route("**/auth/dashboard-profile", (r) => (s.uid === null
-    ? r.fulfill({ status: 401, headers: { "WWW-Authenticate": "Bearer" }, json: { detail: "x" } })
-    : r.fulfill({ json: { user_id: s.uid, display_name: null, email: null, whatsapp_linked: true } })));
-  await ctx.route("**/api/v2/contas", (r) => r.fulfill({ json: { ...RESPOSTAS.contas.todos_os_estados, total: s.uid === 7 ? "7777.77" : "8888.88" } }));
-  await ctx.route((u) => u.pathname === "/api/v2/resumo-do-mes", (r) => {
-    const mes = new URL(r.request().url()).searchParams.get("mes") ?? "2026-10";
-    const ant = s.uid === 7 ? (mes === "2026-10" ? "7111.11" : "7333.33") : "8111.11";
-    return r.fulfill({ json: { ...RESPOSTAS.resumo_do_mes.exato, mes, ate: `${mes}-28`, anterior: { mes: "2026-08", entrou: ant, saiu: "1.00" } } });
-  });
-  await ctx.route("**/api/v2/insights", async (r) => {
-    const uid = s.uid;
-    if (s.insights) await s.insights(r);
-    await r.fulfill({ json: { insights: [{ title: uid === 7 ? "Segredo da conta A" : "Aviso da conta B", message: "x" }] } }).catch(() => {});
-  });
-  // O SSE: pendente para sempre (como o harness), ou, com `s.eventos` (uma promise), um aviso quando ela resolver: a releitura sem gesto.
-  await ctx.route("**/api/v2/eventos", async (r) => {
-    if (!s.eventos) return;
-    await s.eventos;
-    await r.fulfill({ headers: { "content-type": "text/event-stream" }, body: 'data: {"recurso":"tudo"}\n\n' }).catch(() => {});
-  });
-  // Por último (vence): deslogado, toda a /api/v2 dá 401; senão segue para as rotas acima.
-  await ctx.route("**/api/v2/**", (r) => (s.uid === null ? r.fulfill({ status: 401, headers: { "WWW-Authenticate": "Bearer" }, json: { detail: "x" } }) : r.fallback()));
-  const contaA = async () => {
-    await page.locator(CONTAS).getByText("7.777,77").waitFor({ timeout: 20000 });
-    await page.locator(PIGGY).getByText("Segredo da conta A").waitFor({ timeout: 20000 });
-  };
-  const viuA = () => page.evaluate(() => sessionStorage.getItem("viuA"));
-  /** Espera `n` cargas; devolve quanto levou (ms) ou `null` se não veio em `ms`. */
-  const recarga = async (n, ms) => {
-    const t0 = performance.now();
-    while (cargas < n) { if (performance.now() - t0 > ms) return null; await dorme(20); }
-    return performance.now() - t0;
-  };
-  return { ...p, s, pedidos, perfis, cargas: () => cargas, contaA, viuA, recarga };
-}
+const abrir = (opts) => abrirConta(browser, opts);
 
 // O marcador muda no navegador (como o Set-Cookie de outra aba) e o teste marca a troca no mesmo passo. `null` = o cookie sumiu.
 // `acao`, no MESMO evaluate: "resumo" (volta ao Resumo) ou "oculta" (a aba some).
@@ -184,11 +130,12 @@ test("N2d (sem o pointerdown): com o intervalo parado, o arrasto por toque no 'G
   const cdp = await ctx.newCDPSession(page);
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
   const y = b.y + b.height / 2;
-  try {
+  // O ack de um toque enviado com a recarga já pedida nunca chega (medido): vale o que vier antes, a recarga ou o fim do arrasto.
+  await Promise.race([page.waitForRequest((q) => q.isNavigationRequest(), { timeout: 0 }), (async () => {
     await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: b.x + 4, y }] });
     for (let i = 1; i <= 8; i++) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: b.x + 4 + i * b.width * 0.08, y }] });
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  } catch { /* a página já recarregou no meio do arrasto */ }
+  })().catch(() => {})]); // o envio preso rejeita no ctx.close
   const t = await recarga(2, 3000);
   const r = [await viuA(), t !== null];
   await ctx.close();
@@ -345,56 +292,6 @@ test("N8 (sem esconder, ou escondendo tarde; sem a trava `saindo`): o /painel no
   };
   await ctx.close();
   assert.deepEqual(r, { recarregou: true, navegacoes: 1, vis: "hidden" });
-});
-
-// O logout apaga o marcador (`_clear_session_cookies`): o reload da troca não pode cancelar a navegação de saída. O `/` demora 2,5 s.
-async function comSaidaLenta() {
-  const p = await abrir();
-  await p.ctx.route((u) => u.pathname === "/", async (r) => { await dorme(2500); await r.fulfill({ contentType: "text/html", body: "<html><body>saiu</body></html>" }).catch(() => {}); });
-  await p.ir();
-  await p.contaA();
-  return p;
-}
-const ondeTermina = (page) => page.waitForURL("**/?logout=1", { timeout: 6000 }).then(() => page.url(), () => page.url());
-
-test("L1 (sem a trava no `sair` nem no `sairPara`): o 'Sair' daqui termina em /?logout=1, e não no /painel recarregado", async () => {
-  const { ctx, page } = await comSaidaLenta();
-  await ctx.route("**/auth/logout", (r) => r.fulfill({ headers: { "set-cookie": "pb_conta=; Max-Age=0; Path=/" }, json: {} }));
-  await page.locator('button[title="Sair"]').click();
-  const url = await ondeTermina(page);
-  await ctx.close();
-  assert.ok(url.endsWith("/?logout=1"), url);
-});
-
-test("L1b (trava só no `fim` do `sair`): a limpeza do aparelho (auth-refresh.js) demora 1,2 s depois da resposta do logout; o 'Sair' termina em /?logout=1", async () => {
-  const { ctx, page, ir, contaA } = await abrir();
-  await ctx.addInitScript(() => {
-    const sw = navigator.serviceWorker;
-    if (sw) { const real = sw.getRegistrations.bind(sw); sw.getRegistrations = () => new Promise((ok) => setTimeout(() => ok(real()), 1200)); }
-  });
-  await ctx.route((u) => u.pathname === "/", (r) => r.fulfill({ contentType: "text/html", body: "<html><body>saiu</body></html>" }));
-  await ir();
-  await contaA();
-  await ctx.route("**/auth/logout", (r) => r.fulfill({ headers: { "set-cookie": "pb_conta=; Max-Age=0; Path=/" }, json: {} }));
-  await page.locator('button[title="Sair"]').click();
-  await dorme(3700); // sem a trava no começo, o intervalo (1 s) recarrega o /painel antes de a limpeza acabar
-  const url = page.url();
-  await ctx.close();
-  assert.ok(url.endsWith("/?logout=1"), url);
-});
-
-test("L2 (sem a trava no `sairPara`): o 'Sair' de outra aba leva esta a /?logout=1, mesmo com o marcador sumindo no caminho", async () => {
-  const { ctx, page } = await comSaidaLenta();
-  await ctx.route("**/outra-aba", (r) => r.fulfill({ contentType: "text/html", body: "<html></html>" }));
-  const outra = await ctx.newPage();
-  await outra.goto(new URL("/outra-aba", page.url()).href);
-  const saiu = page.waitForRequest((q) => q.isNavigationRequest() && new URL(q.url()).search === "?logout=1");
-  await outra.evaluate(() => localStorage.setItem("finbot_logout_at", String(Date.now()))); // o `sair` da outra aba
-  await saiu;
-  await outra.evaluate(() => { document.cookie = "pb_conta=; max-age=0; path=/"; }); // a resposta do logout dela chega
-  const url = await ondeTermina(page);
-  await ctx.close();
-  assert.ok(url.endsWith("/?logout=1"), url);
 });
 
 test("P1 (conferir sempre recarrega): mesma conta, 3 idas e voltas (Metas), troca de mês e 3 s parado: 1 carga, um GET /insights por entrada, 0 GET de perfil, o bloco de contas volta do cache", async () => {

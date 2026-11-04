@@ -314,7 +314,7 @@ const LOGOUT_AT = "finbot_logout_at";
 const DEPOIS_DO_LOGOUT = "/?logout=1";
 export function sair(e: { currentTarget: HTMLButtonElement }) {
   e.currentTarget.disabled = true; // o 2º clique não manda outro POST; a página sai de qualquer jeito (fim)
-  travar(); // o marcador some com a resposta do POST: daqui até o `fim`, a troca de conta não recarrega
+  travar(DEPOIS_DO_LOGOUT); // o marcador some com a resposta do POST: daqui em diante a troca de conta esconde a página sem recarregar
   try { localStorage.setItem(LOGOUT_AT, String(Date.now())); } catch { /* storage bloqueado: o logout segue */ }
   const fim = () => sairPara(DEPOIS_DO_LOGOUT);
   fetch("/auth/logout", { method: "POST", credentials: "same-origin", headers: window.pbCsrfHeaders?.() ?? {} }).then(fim, fim);
