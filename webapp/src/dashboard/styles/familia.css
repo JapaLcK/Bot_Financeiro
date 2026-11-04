@@ -48,3 +48,16 @@
 .fam-lanc-txt .faint { font-size: 12px; }
 /* Texto vindo do servidor (nome, categoria, descrição, quem viu): a direção dele não vira a da frase em volta. */
 .fam-lista b, .fam-ver-nome, .fam-cats li > span:first-child, .fam-lanc-txt b, .fam-hist b { unicode-bidi: isolate; }
+
+/* PR 6c: a casa (familia/Casa.tsx). Mesmas regras: sem flex gap; grid com row-gap/column-gap ou margem negativa. */
+.fam-casa { row-gap: 20px; }
+.casa-sec { display: grid; row-gap: 12px; width: 100%; min-width: 0; }
+.casa-topo { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; }
+.casa-lista { list-style: none; margin: 0; padding: 0; width: 100%; }
+.casa-lista li { display: grid; row-gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--rule); min-width: 0; overflow-wrap: break-word; word-break: break-word; }
+.casa-lista li:last-child { border-bottom: 0; }
+.casa-lista .num { overflow-wrap: anywhere; }
+.casa-lista .meter.ok > span { background: var(--gain); }
+.casa-lista .faint { font-size: 14px; }
+.casa-nome b { font-size: 16px; font-weight: 500; unicode-bidi: isolate; }
+.casa-nome .selo { display: inline-block; max-width: 14ch; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; line-height: 22px; vertical-align: middle; } /* o .selo é nowrap: um primeiro nome longo cortaria o cartão */

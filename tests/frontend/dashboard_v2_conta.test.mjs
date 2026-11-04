@@ -151,20 +151,19 @@ test("⌘K lista as rotas da Conta", async () => {
   for (const rotulo of ["Perfil", "Cobrança", "Configurações", "Bancos conectados", "Família"]) assert.ok(itens.some((t) => t.includes(rotulo)), rotulo);
 });
 
-// O trilho é sticky, com a altura da janela e sem rolagem: o Sair é o último e tem de estar à vista.
-// 1366×657 é a janela útil de um 1366×768 (barras do navegador). 1280×640 já cai no @media (max-height:650px) (overflow-y:auto, menu da
-// Ajuda fixo), mas o trilho cheio ainda cabe: 625px é a menor altura sem rolar (624 dá railRola=1); um 1280×720 útil (~590px) rola.
-// 1440×745 e 1440×741: o trilho normal (Conta + rodapé) só cabe a partir de 749px (e com a folga de baixo a partir de 769px), então 741–768 têm de ser
-// compactas (com o @media em 740 o rodapé saía da janela: 741→8px cortados); 1440×768 e 1440×769 são os dois lados da fronteira.
-for (const [width, height] of [[1440, 900], [1366, 657], [1280, 640], [1440, 625], [1024, 768], [1181, 657], [1180, 657], [761, 640], [1440, 741], [1440, 745], [1440, 768], [1440, 769]]) {
-  test(`trilho ${width}×${height}: o Sair cabe sem rolar o trilho, nada se sobrepõe e o popover da Ajuda não é cortado`, async () => {
+// O trilho é sticky, com a altura da janela e sem rolagem. O grupo Conta nasce FECHADO fora da Conta (parts/RailConta.tsx): o subtítulo é um botão de 44px e o Sair, fora do grupo, é o último
+// item à vista (o aberto é medido em sidenav_rail_altura.test.mjs). Fechado, o trilho cabe sem rolar até 1366×600 (a Casa, PR 6c, entrou no menu).
+// 1366×657 é a janela útil de um 1366×768 (barras do navegador). 1280×640 e 761×640 já caem no @media (max-height:650px) (overflow-y:auto, menu da Ajuda fixo).
+// 1440×741, 1440×745, 1440×768 e 1440×769 caem na faixa compacta (itens de 32px, até 801px de altura, ver shell.css): o grupo fechado cabe nelas sem rolar.
+for (const [width, height] of [[1440, 900], [1366, 657], [1366, 600], [1280, 640], [1440, 625], [1024, 768], [1181, 657], [1180, 657], [761, 640], [1440, 741], [1440, 745], [1440, 768], [1440, 769]]) {
+  test(`trilho ${width}×${height}: o Sair cabe sem rolar o trilho (grupo Conta fechado), nada se sobrepõe e o popover da Ajuda não é cortado`, async () => {
     const { antes } = conta();
     const { ctx, page } = await abrir({ guia: "concluido", width, height, rota: "/assinaturas", antes });
     await page.locator(".rail-conta").waitFor();
     await page.locator(".rail .ajuda > button").click();
     const r = await page.evaluate(() => {
       const rect = (el) => el.getBoundingClientRect();
-      const rail = document.querySelector(".rail"), sair = [...document.querySelectorAll(".rail-conta button")].at(-1);
+      const rail = document.querySelector(".rail"), sair = document.querySelector('.rail-conta button[title="Sair"]');
       const filhos = [...rail.children].filter((e) => e.getClientRects().length).map(rect);
       const pop = rect(document.querySelector(".rail .ajuda-menu"));
       return {
@@ -209,6 +208,7 @@ for (const [width, height] of [[1440, 500], [1440, 440], [911, 438], [1024, 420]
     const { antes } = conta();
     const { ctx, page } = await abrir({ guia: "concluido", width, height, rota: "/lancamentos", antes });
     await page.locator(".rail-conta").waitFor();
+    await page.locator(".rail-conta-t").click(); // o grupo nasce fechado fora da Conta: as telas da Conta (o último link) estão escondidas
     await page.locator(".rail-conta a").last().focus();
     await page.keyboard.press("Tab");
     const r = await page.evaluate(() => {
@@ -216,7 +216,7 @@ for (const [width, height] of [[1440, 500], [1440, 440], [911, 438], [1024, 420]
       return {
         ehSair: sair.textContent.trim() === "Sair",
         paginaAlta: document.documentElement.scrollHeight > innerHeight,
-        noAlto: s.top >= 0 && s.bottom <= innerHeight,
+        noAlto: s.top >= 0 && s.bottom <= innerHeight + 1, // +1: o scrollTop do foco é inteiro (1280×600 sobra 0,25px)
         porCima: document.elementFromPoint(s.left + s.width / 2, s.top + s.height / 2)?.closest("button") === sair,
       };
     });

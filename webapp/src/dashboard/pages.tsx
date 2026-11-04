@@ -15,6 +15,7 @@ import { ContaCobranca } from "./conta/Cobranca";
 import { ContaConfiguracoes } from "./conta/Configuracoes";
 import { ContaPerfil } from "./conta/Perfil";
 import { ContaFamilia } from "./familia/Familia";
+import { PaginaCasa } from "./familia/Casa";
 import { DEMO, useAgentesLigados } from "./lib/v2";
 import { useMedia } from "./useMedia";
 import { FERRAMENTAS, go, href, route, type Path } from "./router";
@@ -283,5 +284,5 @@ export const PAGES: Record<Path, (p: { s: DashState }) => ReactNode> = {
   "/metas": GoalsPage, "/milhao": Milhao, "/agentes": Agentes, "/patrimonio": Wealthy, "/lancamentos": Launches,
   "/orcamento": Budget, "/orcamentos-categoria": CategoryBudgets, "/ferramentas": Tools, "/piggy": PiggyChat,
   "/conta/perfil": ContaPerfil, "/conta/cobranca": ContaCobranca, "/conta/configuracoes": ContaConfiguracoes, "/conta/bancos": ContaBancos,
-  "/conta/familia": ContaFamilia,
+  "/conta/familia": ContaFamilia, "/casa": PaginaCasa,
 };

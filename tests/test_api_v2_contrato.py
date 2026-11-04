@@ -27,6 +27,7 @@ from api.v2.contas import Contas
 from api.v2.contas_a_pagar import ContasAPagar
 from api.v2.erros import ErroV2
 from api.v2.familia import Convite, Dissolucao, VisaoMembro, VisaoTitular
+from api.v2.familia_casa import Casa
 from api.v2.familia_dados import Agregados, Historico, LancamentosMembro, Permissoes
 from api.v2.gastos import Gastos, GastosDaCategoria
 from api.v2.guia import DICAS, PASSOS, Guia
@@ -286,7 +287,7 @@ def test_fixture_de_familia_segue_o_modelo():
     """As respostas do Plano Família que tests/frontend/_familia.mjs serve; o `model_dump` volta igual (nenhum campo a mais nem a menos)."""
     f = FIXTURES["familia"]
     modelos = {"titular": VisaoTitular, "membro": VisaoMembro, "convite": Convite, "dissolucao": Dissolucao, "permissoes": Permissoes, "historico": Historico,
-               "historico_vazio": Historico, "agregados": Agregados, "agregados_passado": Agregados, "lancamentos": LancamentosMembro}
+               "historico_vazio": Historico, "agregados": Agregados, "agregados_passado": Agregados, "lancamentos": LancamentosMembro, "casa": Casa}
     for nome, modelo in modelos.items():
         m = modelo.model_validate(f[nome])
         assert m.model_dump(mode="json") == {**f[nome], **({"expira_em": m.expira_em.isoformat().replace("+00:00", "Z")} if nome == "convite" else {})}
