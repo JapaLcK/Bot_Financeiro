@@ -384,3 +384,14 @@ def test_conversa_cartao_natural_composto_acima_do_teto_e_recusado():
     _diga(uid, "gastei 0,8 bilhão e 300 milhões no cartão nubank mercado")  # 1,1 bi
     assert _compras(uid) == []
     _grava_50(uid, 0)
+
+
+@pytest.mark.parametrize("texto,valor", [
+    ("gastei 50,00. no mercado", 50.0), ("gastei 1.200,00. no mercado", 1200.0),
+    ("gastei 50 no mercado", 50.0), ("gastei 1.500 no mercado", 1500.0),
+])
+def test_conversa_ponto_final_da_frase_nao_e_decimal(texto, valor):
+    # #1324: "50,00." gravava R$ 5.000 (o ponto final virava separador decimal)
+    uid = usuario_pagante()
+    assert "Despesa registrada" in _diga(uid, texto)
+    assert [float(r["v"]) for r in _conta(LANC, uid)] == [valor]
