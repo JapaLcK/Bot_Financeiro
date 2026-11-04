@@ -1128,9 +1128,28 @@ rate limiting via `slowapi` nos endpoints sensíveis (chave `rate_limit_key`, ve
 
 No cliente, `frontend/auth-refresh.js` faz *monkey-patch* de `window.fetch`: em 401
 que não seja o próprio `/auth/refresh`, dispara o refresh, deduplica chamadas
-paralelas e repete a request original. Se o refresh falhar, o 401 passa para o
-chamador decidir. **Esse interceptor é global nas páginas autenticadas** — considere-o
-antes de tratar 401 na mão em qualquer tela.
+paralelas e repete a request original. Se o refresh falhar por outro motivo que não
+a conta, o 401 passa para o chamador decidir. **Esse interceptor é global nas páginas autenticadas** — considere-o
+antes de tratar 401 na mão em qualquer tela. Quando a conta não se confirma depois
+do refresh, a request não é repetida e a promessa de quem chamou não resolve: a
+página vai ao login.
+
+**Os cookies de sessão concordam sobre a conta.** `auth_token` e `dashboard_token`
+válidos de contas diferentes não são sessão: `sessao_divergente`
+(`frontend/routes/shared.py`) faz os resolvedores responderem 401 renovável
+("Sessão inconsistente."), as páginas mandarem ao login e o WebSocket fechar com
+1008; o `Bearer` do app fica fora (um token só). Toda resposta 2xx autenticada leva
+`X-PB-Conta: <user_id>`. No navegador, o `/auth/refresh` recebe em `X-PB-Conta` a
+conta que a página espera (`-` quando ainda não sabe), recusa com 401
+`sessao_divergente` (sem rotacionar, limpando os cookies) quando ela ou a dos
+cookies não é a dona do refresh, ou quando não há nenhuma das duas, e devolve
+`{ok, user_id, confirmada}`. O interceptor só repete a request com a conta
+confirmada; senão limpa o aparelho, vai ao `/login?aviso=…` e a promessa de quem
+chamou não resolve. O `logout` encerra as
+duas sessões quando os cookies trazem `jti` diferentes, e o `/d/{code}` que não
+emite access e refresh expira os de antes: o link substitui a sessão inteira.
+Testes: `tests/test_sessao_divergente*.py` e
+`tests/frontend/auth_refresh_identidade.test.mjs`.
 
 Caminhos de entrada, todos em `/auth/*`: `register` → `verify-email` (código de 6
 dígitos) → `login`; **quiz de venda**: o webhook `POST /xquiz/webhook` (fora de
