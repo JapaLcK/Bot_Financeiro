@@ -681,3 +681,45 @@ def test_g2_valor_pago_cobre_devido(pago, devido, tol, esperado):
     assert valor_pago_cobre_devido(pago, devido, tol) is esperado
     if tol == 0:  # o default é a tolerância ZERO do dono (D1)
         assert valor_pago_cobre_devido(pago, devido) is esperado
+
+
+# --- #1257: payment_id NOVO numa cobrança já paga/estornada -----------------
+
+@pytest.mark.parametrize("antes", [[], ["PAYMENT_REFUNDED"]])
+def test_j1_segundo_pagamento_na_cobranca_encerrada_nao_repete_compra(user_id, externo, antes):
+    conta(user_id, "free", None)
+    cob = nova_cobranca(user_id)
+    entregar("PAYMENT_RECEIVED", cob)
+    for t in antes:
+        entregar(t, cob)
+    externo["alerta"].clear()
+    base = (externo["ga4"], externo["capi"], externo["email"], len(_pix(user_id)))
+    novo = f"pay_{uuid.uuid4().hex[:12]}"
+    ev = entregar("PAYMENT_RECEIVED", cob, payment_id=novo, valor=0.01)
+    assert (externo["ga4"], externo["capi"], externo["email"], len(_pix(user_id))) == base
+    assert efeitos(novo) == {"pagamento_duplicado_alertado"}
+    assert len(externo["alerta"]) == 1 and "segundo pagamento" in externo["alerta"][0]
+    assert f"`{novo}`" in externo["alerta"][0] and "R$ 0.01" in externo["alerta"][0]
+    e = evento(ev)
+    assert e["processed_at"] is not None and e["attempts"] == 0
+    entregar("PAYMENT_RECEIVED", cob, payment_id=novo, valor=0.01)  # reentrega do novo
+    assert len(externo["alerta"]) == 1
+
+
+def test_j2_reentrega_do_mesmo_payment_id_na_paga_segue_silenciosa(user_id, externo):
+    # mesmo caso do e2 (reentrega com o id original): nenhum alerta, nenhum efeito novo
+    conta(user_id, "free", None)
+    cob = nova_cobranca(user_id)
+    entregar("PAYMENT_RECEIVED", cob)
+    entregar("PAYMENT_RECEIVED", cob)
+    _concedida(user_id, cob, externo)
+    assert externo["alerta"] == []
+
+
+def test_j3_payment_id_novo_em_cobranca_pending_concede(user_id, externo):
+    conta(user_id, "free", None)
+    cob = nova_cobranca(user_id)  # pending com outro asaas_payment_id (QR reemitido)
+    novo = f"pay_{uuid.uuid4().hex[:12]}"
+    entregar("PAYMENT_RECEIVED", cob, payment_id=novo)
+    assert ler(cob["id"])["status"] == "paid" and len(_pix(user_id)) == 1
+    assert COMPRA <= efeitos(novo) and externo["alerta"] == []
