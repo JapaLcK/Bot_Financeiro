@@ -150,6 +150,9 @@ class _FakeStripe:
                 return {"data": []}
 
         self.coupons: dict[str, dict] = {}
+        # Stripe real: applies_to só vem com expand=["applies_to"]
+        self._visivel = lambda c, kw: c if "applies_to" in kw.get("expand", []) else {
+            k: v for k, v in c.items() if k != "applies_to"}
         self.coupon_create_calls = 0
         self.coupon_race = False   # True: o create perde a corrida ("already exists")
 
@@ -160,10 +163,10 @@ class _FakeStripe:
 
         class _Coupon:
             @staticmethod
-            def retrieve(cid):
+            def retrieve(cid, **kw):
                 if cid not in outer.coupons:
                     raise _FakeInvalidRequestError("No such coupon", code="resource_missing")
-                return outer.coupons[cid]
+                return outer._visivel(outer.coupons[cid], kw)
 
             @staticmethod
             def create(**kw):
@@ -179,7 +182,7 @@ class _FakeStripe:
                     "id": kw["id"], "valid": True, "percent_off": float(kw["percent_off"]),
                     "duration": kw["duration"], "duration_in_months": kw["duration_in_months"],
                     "applies_to": kw["applies_to"]}
-                return outer.coupons[kw["id"]]
+                return outer._visivel(outer.coupons[kw["id"]], kw)
 
         self.Price = _Price
         self.Coupon = _Coupon
