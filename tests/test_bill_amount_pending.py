@@ -1827,7 +1827,7 @@ def test_contrato_do_valor_perigoso_recusa(entrada, motivo):
 # propriedade geral, é uma tabela de casos conhecidos.
 FORMAS_QUE_A_MAIN_ACEITA = [
     ("132 mil", 132000.0), ("2,5 mil", 2500.0), ("10 mil", 10000.0),
-    ("3 milhoes", 3000000.0), ("132 mil reais", 132000.0), ("132k", 132.0),
+    ("3 milhoes", 3000000.0), ("132 mil reais", 132000.0), ("132k", 132000.0),
     ("paguei 132", 132.0), ("gastei 132", 132.0), ("foi 132 mil", 132000.0),
     ("ficou em 132", 132.0), ("deu 132 no total", 132.0),
     ("foi uns 132 no total", 132.0), ("total 132", 132.0),

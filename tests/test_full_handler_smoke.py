@@ -730,7 +730,7 @@ _COM_CAUDA = {"deu 132 no total", "foi uns 132 no total",
     ("10 mil", 10000.0),            # saída literal do Whisper no áudio
     ("3 milhoes", 3000000.0),       # idem
     ("132 mil reais", 132000.0),
-    ("132k", 132.0),                # o que a `main` extrai daqui é 132
+    ("132k", 132000.0),             # "k" = mil (decisão do dono, #1329)
     ("paguei 132", 132.0),
     ("gastei 132", 132.0),
     ("foi 132 mil", 132000.0),
