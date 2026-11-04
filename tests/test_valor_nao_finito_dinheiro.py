@@ -209,7 +209,9 @@ def test_tool_boleto_valor_normal_segue_igual():
 # #1329: "k" é mil ("1,5k" = R$ 1.500, decisão do dono). Controle negativo: sem `|k\b` no `_PT_MULT` a fatura
 # fica R$ 1,50. Positivo: o número por extenso e o decimal comum seguem iguais.
 @pytest.mark.parametrize("texto,total", [("gastei 1,5k no cartão", 1500.0), ("gastei 2 k no cartão", 2000.0),
-                                         ("gastei 1500 no cartão", 1500.0), ("gastei 2,50 no cartão", 2.5)])
+                                         ("gastei 1500 no cartão", 1500.0), ("gastei 2,50 no cartão", 2.5),
+                                         ("gastei 1.000,50k no cartão", 1000500.0),  # base inteira, não só "000,50"
+                                         ("gastei 300 numa TV 4K no cartão", 300.0)])  # "4K" depois do valor é descrição
 def test_whatsapp_compra_no_cartao_k_e_mil(texto, total):
     uid, _ = _usuario_com_cartao()
 

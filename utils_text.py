@@ -959,11 +959,13 @@ def parse_money(text: str) -> float | None:
     # 1000000 — senão cairia no número contínuo abaixo e pegaria um valor errado
     # (ex.: "parcelei mil reais em 10 vezes" pegaria o "10" de "10 vezes").
     # Precisa vir antes do número contínuo.
-    for mm in re.finditer(rf'\b(\d+(?:[.,]\d+)?\s*)?({_PT_MULT})\b', text or "", re.IGNORECASE):
+    for mm in re.finditer(rf'\b(\d+(?:[.,]\d+)*\s*)?({_PT_MULT})\b', text or "", re.IGNORECASE):
         mult = _PT_MULT_VALOR[mm.group(2).lower()[:4]]
         if not mm.group(1) and (mult > 10**6 or mm.group(2).lower() == "k"):
             # bi/bilhão/trilhão sem número não é valor (hipérbole); "k" solto é letra
             continue
+        if mm.group(2).lower() == "k" and re.search(r"\d", text[:mm.start()]):
+            continue  # "300 numa TV 4K": o "k" depois de outro número é descrição, não valor
         # mesma regra do número comum abaixo: "1.5 mil" = 1500, "1.500 mil" = 1.500.000
         base = parse_money(mm.group(1)) if mm.group(1) else 1.0
         return round(base * mult + _soma_restos(text, mm.end(), False), 2)  # 0,067 * 1e9 = 67000000.00000001
