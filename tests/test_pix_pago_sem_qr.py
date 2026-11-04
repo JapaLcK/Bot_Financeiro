@@ -38,6 +38,7 @@ from _billing_grants_helpers import conta, garantir_system_event_logs
 from _dreno_pix_helpers import efeitos, evento, ler, mundo_externo
 from _pix_checkout_helpers import PRECO, _comprar, _linhas, asaas_falso, vendavel  # noqa: F401
 from core.services.pix_checkout import CheckoutIndisponivel
+from core.services.pix_pricing import CoberturaJaPaga
 from db.connection import get_conn
 from db.pix_charges_saga import attach_pagamento
 from db.plan_grants import list_grants
@@ -255,3 +256,66 @@ def test_referencia_de_terceiro_nao_toca_em_nada_nosso(user_id, vendavel, asaas_
     assert evento(corpo["id"])["processed_at"] is not None
     assert ler(linha["id"])["status"] == "creating" and _grants(user_id) == []
     assert externo["alerta"] == [] and externo["email"] == 0
+
+
+def _corrida(monkeypatch, user_id, destino):
+    """Embrulha o `obter_qr_pix`: antes de devolver o QR, a linha sai de `creating`."""
+    import core.services.asaas as a
+    from datetime import datetime, timedelta, timezone
+    from db.pix_charges import transicionar
+    real = a.obter_qr_pix
+
+    def _qr(pid):
+        linha = _linhas(user_id)[-1]
+        if destino == "paid":   # pelo mesmo `transicionar` do dreno
+            ini = datetime.now(timezone.utc)
+            transicionar(linha["id"], de=("creating",), para="paid", access_starts_at=ini,
+                         access_expires_at=ini + timedelta(days=365), apagar_qr=True)
+        else:
+            _sql("update pix_charges set status = %s where id = %s and user_id = %s",
+                 (destino, linha["id"], user_id))
+        return real(pid)
+    monkeypatch.setattr(a, "obter_qr_pix", _qr)
+
+
+def test_emitir_que_perde_a_corrida_para_canceled_da_503(user_id, vendavel, asaas_falso, monkeypatch):
+    conta(user_id, "free", None)
+    _corrida(monkeypatch, user_id, "canceled")
+    with pytest.raises(CheckoutIndisponivel) as e:
+        _comprar(user_id)
+    assert "attach_perdeu_corrida" in str(e.value) or getattr(e.value, "codigo", None) == "attach_perdeu_corrida"
+    assert _linhas(user_id)[-1]["status"] == "canceled"
+
+
+def test_emitir_que_perde_a_corrida_para_paid_vira_ja_pago_409(user_id, vendavel, asaas_falso,
+                                                              monkeypatch):
+    """O cliente nao ve 503 (que o levaria a um 2o QR de mais um ano): a rota devolve o 409."""
+    conta(user_id, "free", None)
+    _corrida(monkeypatch, user_id, "paid")
+    with pytest.raises(CoberturaJaPaga) as e:
+        _comprar(user_id)
+    assert e.value.ERRO == "pix_future_purchase_conflict" and e.value.plano == "pro_max"
+    assert _linhas(user_id)[-1]["status"] == "paid"
+
+
+def test_emitir_sem_corrida_devolve_pending_com_qr(user_id, vendavel, asaas_falso):
+    conta(user_id, "free", None)
+    r = _comprar(user_id)
+    assert r["qr_payload"].startswith("000201-") and _linhas(user_id)[-1]["status"] == "pending"
+
+
+def test_corrida_perdida_para_paid_pela_rota_real_409_com_plano_publico(user_id, vendavel, asaas_falso,
+                                                                       monkeypatch):
+    """Pela ROTA: 409 + corpo que a tela lê (plano PUBLICO, data ISO)."""
+    conta(user_id, "free", None)
+    monkeypatch.setattr(rotas.shared, "resolve_dashboard_user_id", lambda req: user_id)
+    _corrida(monkeypatch, user_id, "paid")
+    c = TestClient(dashboard.app)
+    tk = "t-csrf"
+    c.cookies.set(dashboard.CSRF_COOKIE_NAME, tk)
+    r = c.post("/billing/pix/checkout", headers={dashboard.CSRF_HEADER_NAME: tk},
+               json={"plan": "pro", "cpf_cnpj": "52998224725"})
+    d = r.json().get("detail")
+    assert r.status_code == 409, r.text
+    assert d["error"] == "pix_future_purchase_conflict" and d["plan"] == "pro"
+    assert d["covered_until"][:4].isdigit()
