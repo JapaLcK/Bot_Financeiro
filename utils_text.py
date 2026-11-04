@@ -819,7 +819,8 @@ _PT_MULT_LONGO = r"milh[oõ]es|milh[aã]o|bilh[oõ]es|bilh[aã]o|trilh[oõ]es|tr
 # "bi" curto só vale depois de dígito ("2 bi"); por extenso "um bi" é artigo + gíria.
 _PT_BI = r"bi\b(?!-)"  # "bi-cicleta" (hífen) não é "bi"
 # "k" de mil ("1,5k", "2 k"), como o "bi": só depois de dígito (decisão do dono, #1329). "kg" não casa.
-_PT_MULT = rf"{_PT_MULT_LONGO}|{_PT_BI}|k\b"
+_PT_K = r"k\b(?!-)"  # "k-pop" não é mil
+_PT_MULT = rf"{_PT_MULT_LONGO}|{_PT_BI}|{_PT_K}"
 _PT_MULT_VALOR = {"k": 10**3, "mil": 10**3, "milh": 10**6, "bi": 10**9, "bilh": 10**9, "tril": 10**12}
 _PT_SPELLED_MULT_RE = re.compile(rf"\b({_PT_PHRASE})\s+({_PT_MULT_LONGO})\b", re.IGNORECASE)
 # Numeral completo do RESTO ("1.234,56", "1.500", "0.5", "500"): termina em dígito, então o ponto/vírgula
@@ -845,7 +846,7 @@ PT_NUM_ALT_NO_ARTICLE = "|".join(
 # encadeamento por "e" ("cento e vinte", "dez mil", "cem mil e quinhentos").
 # "bi"/"k" curtos só colados em dígito ("100 bi", "0,5 bi e 100 milhões"); "cem bi"/"de bi" não.
 _PT_DIG = r"\d[\d.,]*"
-_PT_DIG_BI = rf"{_PT_DIG}(?:\s*(?:{_PT_BI}|k\b))?"  # "k" também (#1329): "2x de 1,5k"
+_PT_DIG_BI = rf"{_PT_DIG}(?:\s*(?:{_PT_BI}|{_PT_K}))?"  # "k" também (#1329): "2x de 1,5k"
 PT_VALUE = (
     rf"(?:r\$\s*)?(?:{_PT_DIG_BI}|{_PT_NUM_ALT}|{_PT_MULT_LONGO})"
     rf"(?:\s+(?:e\s+)?(?:{_PT_DIG_BI}|{_PT_NUM_ALT}|{_PT_MULT_LONGO}))*"
@@ -967,9 +968,12 @@ def parse_money(text: str) -> float | None:
         if not mm.group(1) and (mult > 10**6 or mm.group(2).lower() == "k"):
             # bi/bilhão/trilhão sem número não é valor (hipérbole); "k" solto é letra
             continue
+        depois = text[mm.end():]
+        while (r := _PT_RESTO_RE.match(depois)):
+            depois = depois[r.end():]  # "1k e 500 reais": o resto somado não é outro valor
         if mm.group(2).lower() == "k" and (
             re.search(r"\d", text[:mm.start()])
-            or re.search(r"r\$\s*\d|\d\s*(?:mil|milh|bi|reais|real)", text[mm.end():], re.IGNORECASE)
+            or re.search(r"r\$\s*\d|\d\s*(?:mil|milh|bi|reais|real)", depois, re.IGNORECASE)
         ):
             continue  # "300 numa TV 4K" / "TV 4K por 3 mil": com outro valor na frase, o "k" é descrição
         # mesma regra do número comum abaixo: "1.5 mil" = 1500, "1.500 mil" = 1.500.000
