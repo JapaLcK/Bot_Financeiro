@@ -263,7 +263,7 @@ test("404 nos lançamentos: a família é relida uma vez e o painel fecha, sem G
 // mutação: tirar o `useEffect` que limpa `aberto` (Titular.tsx): o mesmo ref que volta na lista reabre o painel e lê sem "Ver"
 test("o membro sai da lista com o painel aberto e volta com o mesmo ref: painel fechado, nenhum GET de dados", async () => {
   const ev = sseManual();
-  await com({ membro: TUDO, antes: ev.antes }, async ({ page, s, secao, bt }) => {
+  await com({ membro: TUDO, antes: ev.antes }, async ({ page, s, bt }) => {
     await page.locator(".fam-lanc").first().or(page.getByText("Nenhum lançamento")).first().waitFor();
     await pausa(page, 400);
     const d0 = dadosN(s);

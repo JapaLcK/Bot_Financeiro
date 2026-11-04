@@ -74,7 +74,7 @@ test("409 aggregates_required vira texto; 404 relê a família; o switch volta a
 // mutação: o "Ver mais" sem `antes` (dados.ts), o item sem o fuso de São Paulo (Historico.tsx)
 test("histórico: vazio, itens com data no fuso, 'Ver mais' com antes=<proximo>", async () => {
   await com({ visao: membro() }, async ({ secao }) => { await secao.getByText("Ninguém viu nada ainda.").waitFor(); });
-  await com({ visao: membro(), antes: (_c, s) => { s.historico = (r) => { const antes = new URL(s.reqs.at(-1).url).searchParams.get("antes"); return r.fulfill({ json: antes ? { itens: [{ quando: "2026-10-30T02:10:00+00:00", quem: "Dona Josefina", escopo: "agregados", mes: "2026-09" }], proximo: null } : F.historico }); }; } }, async ({ page, s, secao, bt }) => {
+  await com({ visao: membro(), antes: (_c, s) => { s.historico = (r) => { const antes = new URL(s.reqs.at(-1).url).searchParams.get("antes"); return r.fulfill({ json: antes ? { itens: [{ quando: "2026-10-30T02:10:00+00:00", quem: "Dona Josefina", escopo: "agregados", mes: "2026-09" }], proximo: null } : F.historico }); }; } }, async ({ s, secao, bt }) => {
     await secao.getByText("Carlos viu o resumo de novembro de 2026").waitFor();
     const txt = await secao.innerText();
     assert.ok(txt.includes("Carlos viu os lançamentos de outubro de 2026"), txt);

@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { navegador } from "./_guia.mjs";
-import { ERRO, F, MARIA, abrirFamilia, abrirVer, titular } from "./_familia.mjs";
+import { MARIA, abrirFamilia, abrirVer, titular } from "./_familia.mjs";
 
 const browser = navegador();
 void browser;
@@ -37,7 +37,7 @@ for (const [w, h] of [[1280, 800], [768, 1024], [390, 844]]) {
 test("perfil 500: 'Quem viu' e o painel do titular mostram o erro, sem GET de membro; 'Tentar de novo' refaz o perfil e carrega", async () => {
   let ok = false;
   const antes = perfil((r) => (ok ? r.fulfill({ json: PERFIL }) : r.fulfill({ status: 500, body: "x" })));
-  await com(() => abrirFamilia({ visao: { papel: "membro", permissoes: [] }, antes, esperar: false }), async ({ page, s, bt, secao }) => {
+  await com(() => abrirFamilia({ visao: { papel: "membro", permissoes: [] }, antes, esperar: false }), async ({ s, bt, secao }) => {
     await secao.getByText("Não foi possível carregar.").waitFor({ timeout: 7000 }); // 2 retentativas (1 s + 2 s)
     assert.ok(!(await secao.innerText()).includes("Carregando"));
     assert.equal(s.reqs.filter((q) => q.caminho === "/historico").length, 0);
@@ -133,7 +133,7 @@ test("ida e volta rápida no mês: nenhum GET novo, e durante o atraso o dado n�
 // mutação: tirar o replace de controles bidi do primeiroNome (api.ts); positivo: o nome limpo continua no diálogo
 test("controles de direção no nome não chegam ao diálogo 'Remover'", async () => {
   const sujo = { ...MARIA, nome: "‮abc Costa" };
-  await com(() => abrirFamilia({ visao: titular({ membros: [sujo] }) }), async ({ page, bt, dlg }) => {
+  await com(() => abrirFamilia({ visao: titular({ membros: [sujo] }) }), async ({ bt, dlg }) => {
     await bt("Remover").click();
     await dlg().getByRole("heading", { name: "Remover abc?" }).waitFor();
     assert.ok(!/[‪-‮⁦-⁩]/.test(await dlg().innerText()));
