@@ -818,8 +818,9 @@ _PT_PHRASE = rf"(?:{_PT_NUM_ALT})(?:\s+e\s+(?:{_PT_NUM_ALT})|\s+(?:{_PT_NUM_ALT}
 _PT_MULT_LONGO = r"milh[oõ]es|milh[aã]o|bilh[oõ]es|bilh[aã]o|trilh[oõ]es|trilh[aã]o|mil"
 # "bi" curto só vale depois de dígito ("2 bi"); por extenso "um bi" é artigo + gíria.
 _PT_BI = r"bi\b(?!-)"  # "bi-cicleta" (hífen) não é "bi"
-_PT_MULT = rf"{_PT_MULT_LONGO}|{_PT_BI}"
-_PT_MULT_VALOR = {"mil": 10**3, "milh": 10**6, "bi": 10**9, "bilh": 10**9, "tril": 10**12}
+# "k" de mil ("1,5k", "2 k"), como o "bi": só depois de dígito (decisão do dono, #1329). "kg" não casa.
+_PT_MULT = rf"{_PT_MULT_LONGO}|{_PT_BI}|k\b"
+_PT_MULT_VALOR = {"k": 10**3, "mil": 10**3, "milh": 10**6, "bi": 10**9, "bilh": 10**9, "tril": 10**12}
 _PT_SPELLED_MULT_RE = re.compile(rf"\b({_PT_PHRASE})\s+({_PT_MULT_LONGO})\b", re.IGNORECASE)
 # Numeral completo do RESTO ("1.234,56", "1.500", "0.5", "500"): termina em dígito, então o ponto/vírgula
 # final de frase ("1 mil e 500." / "1 mil e 500, no mercado") fica de fora. O valor passa por `parse_money`.
@@ -960,8 +961,8 @@ def parse_money(text: str) -> float | None:
     # Precisa vir antes do número contínuo.
     for mm in re.finditer(rf'\b(\d+(?:[.,]\d+)?\s*)?({_PT_MULT})\b', text or "", re.IGNORECASE):
         mult = _PT_MULT_VALOR[mm.group(2).lower()[:4]]
-        if not mm.group(1) and mult > 10**6:
-            # bi/bilhão/trilhão sem número não é valor (hipérbole)
+        if not mm.group(1) and (mult > 10**6 or mm.group(2).lower() == "k"):
+            # bi/bilhão/trilhão sem número não é valor (hipérbole); "k" solto é letra
             continue
         # mesma regra do número comum abaixo: "1.5 mil" = 1500, "1.500 mil" = 1.500.000
         base = parse_money(mm.group(1)) if mm.group(1) else 1.0

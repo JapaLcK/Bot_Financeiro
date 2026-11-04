@@ -204,3 +204,14 @@ def test_tool_boleto_valor_normal_segue_igual():
 
     assert "Boleto anotado" in msg
     assert len(_conta("select 1 from bill_instances where user_id=%s", uid)) == 1
+
+
+# #1329: "k" é mil ("1,5k" = R$ 1.500, decisão do dono). Controle negativo: sem `|k\b` no `_PT_MULT` a fatura
+# fica R$ 1,50. Positivo: o número por extenso e o decimal comum seguem iguais.
+@pytest.mark.parametrize("texto,total", [("gastei 1,5k no cartão", 1500.0), ("gastei 2 k no cartão", 2000.0),
+                                         ("gastei 1500 no cartão", 1500.0), ("gastei 2,50 no cartão", 2.5)])
+def test_whatsapp_compra_no_cartao_k_e_mil(texto, total):
+    uid, _ = _usuario_com_cartao()
+
+    assert "Compra no Crédito Registrada" in _diga(uid, texto), texto
+    assert [float(t) for t in _faturas(uid)] == [total]
