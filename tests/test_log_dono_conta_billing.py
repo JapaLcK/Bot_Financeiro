@@ -43,7 +43,6 @@ import db.checkout_funnel as funnel
 import db.open_finance as open_finance
 import db.rendimento_contratado as rendimento
 import db.users as users
-import db_support
 import frontend.finance_bot_websocket_custom as dashboard
 from _apoio_auth_app import sessao_de
 from _log_dono_helpers import (  # noqa: F401 (banco_real é fixture autouse)
@@ -243,7 +242,7 @@ def test_tb4_cadastro_com_o_boas_vindas_falhando_cria_a_conta_sem_o_email_no_log
 def test_tb4_boas_vindas_e_vinculo_engolem(monkeypatch):
     def caso(uid, marca):
         mark, email, wa = _marcador(), db.get_auth_user(uid)["email"], f"5511{uid % 10**9:09d}"
-        monkeypatch.setattr(db_support, "boas_vindas", _levanta(mark))
+        monkeypatch.setattr(email_service, "send_assinar_account_email", _levanta(f"{mark} {email}"))
         assert boas_vindas_da_conta(email, uid) is None
         quiz = _linha(marca, uid, "warning", "db.signup_quiz", "boas_vindas falhou", mark, email)
         users.bind_identity("whatsapp", wa, uid)
