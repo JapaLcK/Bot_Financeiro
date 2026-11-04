@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { navegador } from "./_guia.mjs";
-import { ERRO, MARIA, abrirFamilia, abrirVer, titular } from "./_familia.mjs";
+import { ERRO, MARIA, abrirFamilia, abrirVer, sse, titular } from "./_familia.mjs";
 
 const browser = navegador();
 void browser;
@@ -16,17 +16,6 @@ const com = async (opts, fn) => {
   const t = await abrirVer(opts);
   try { await fn(t); assert.deepEqual(t.erros, [], "pageerror"); } finally { await t.ctx.close(); }
 };
-// O SSE de mentira: a 1ª conexão fica presa até `solta()`; as duas primeiras respostas terminam (o navegador reconecta em 300 ms), a 3ª não.
-function sse() {
-  const e = { hits: 0 };
-  const preso = new Promise((ok) => { e.solta = ok; });
-  e.antes = (ctx) => ctx.route("**/api/v2/eventos", async (r) => {
-    const n = ++e.hits;
-    if (n === 1) await preso;
-    r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: `retry: ${n < 3 ? 300 : 600000}\ndata: {"recurso":"tudo"}\n\n` }).catch(() => {});
-  });
-  return e;
-}
 const familias = (s) => s.reqs.filter((q) => q.metodo === "GET" && q.caminho === "").length;
 const dadosN = (s) => s.reqs.filter((q) => q.metodo === "GET" && q.caminho.startsWith("/membros/")).length;
 const pausa = (page, ms = 1800) => page.waitForTimeout(ms);

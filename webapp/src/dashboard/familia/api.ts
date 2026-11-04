@@ -61,7 +61,7 @@ export const gerarConvite = async () => conviteDe(await escrever<unknown>("POST"
 export const lerDissolucao = async () => dissolucaoDe(await chamar<unknown>("/familia/dissolucao", GET()));
 
 // Escrita que responde 204 sem corpo: o `chamar` trata 204 como erro (espera JSON), então esta tem o próprio fetch, com o mesmo CSRF e o mesmo erro.
-async function semCorpo(method: "POST" | "DELETE", path: string, corpo: unknown = {}) {
+export async function semCorpo(method: "POST" | "DELETE", path: string, corpo: unknown = {}) {
   const json = { Accept: "application/json", "Content-Type": "application/json" };
   let r: Response;
   try { r = await buscar(urlDe(path), { method, credentials: "same-origin", headers: window.pbCsrfHeaders?.(json) ?? json, body: JSON.stringify(corpo) }); }

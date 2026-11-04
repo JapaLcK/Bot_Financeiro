@@ -1,26 +1,19 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
-import { ErroApi, contaQuery } from "../lib/v2";
+import { useEffect, useState } from "react";
+import { ErroApi } from "../lib/v2";
 import { route } from "../router";
 import { Confirma } from "../conta/Confirma";
 import { criarFamilia, familiaQuery, sairDaFamilia } from "./api";
-import { FalhaFamilia, focarTitulo, useEscrita } from "./escrita";
+import { FalhaFamilia, focarTitulo, useDonoDaTela, useEscrita } from "./escrita";
 import { Historico } from "./Historico";
 import { Permissoes } from "./Permissoes";
 import { Titular } from "./Titular";
 
 // Família da Conta (/conta/familia): sem família (criar), membro (sair) ou titular (Titular.tsx). A API é a api/v2/familia.py.
-// O `key` muda quando o uid muda: trocar de conta com a página aberta limpa o que o resetQueries (main.tsx) não alcança: o erro de ação (`falha` do useEscrita) e o diálogo Sair aberto (`saindo`).
-// O 1º uid que chega não conta como troca (a tela já está montada e relendo). O perfil não relê ao voltar à aba (contaQuery); aqui sim,
-// porque é ele que diz de quem é a família na tela.
+// De quem é a tela e o `key` por uid: `useDonoDaTela` (escrita.tsx).
 export function ContaFamilia() {
-  const conta = useQuery({ ...contaQuery, refetchOnWindowFocus: true });
-  const uid = conta.data?.user_id;
-  const perfilFalhou = uid === undefined && conta.isError ? () => void conta.refetch() : undefined; // sem uid as leituras de membro não começam: a tela mostra o erro
-  const visto = useRef<number | undefined>(undefined);
-  const troca = useRef(0);
-  if (uid !== undefined) { if (visto.current !== undefined && uid !== visto.current) troca.current++; visto.current = uid; }
-  return <Tela key={troca.current} uid={uid} perfilFalhou={perfilFalhou} />;
+  const { uid, perfilFalhou, chave } = useDonoDaTela();
+  return <Tela key={chave} uid={uid} perfilFalhou={perfilFalhou} />;
 }
 
 function Tela({ uid, perfilFalhou }: { uid: number | undefined; perfilFalhou: (() => void) | undefined }) {

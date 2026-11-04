@@ -10239,6 +10239,17 @@
       ],
       "proximo": "41"
     },
+    "casa": {
+      "mes": "2026-10",
+      "metas": [
+        { "ref": "m1", "nome": "Viagem", "alvo": "5000.00", "guardado": "1234.56", "falta": "3765.44", "percentual": 24, "prazo": "2026-12-31", "autor": "Ana", "versao": 1 },
+        { "ref": "m2", "nome": "Reserva", "alvo": "1000.00", "guardado": "1000.00", "falta": "0.00", "percentual": 100, "prazo": null, "autor": null, "versao": 3 }
+      ],
+      "orcamentos": [
+        { "ref": "o1", "categoria": "Mercado", "limite": "800.00", "gasto": "350.00", "restante": "450.00", "autor": "", "versao": 2 },
+        { "ref": "o2", "categoria": "Luz", "limite": "200.00", "gasto": "250.00", "restante": "-50.00", "autor": "Ana", "versao": 1 }
+      ]
+    },
     "historico_vazio": { "itens": [], "proximo": null },
     "agregados": {
       "mes": "2026-11",
