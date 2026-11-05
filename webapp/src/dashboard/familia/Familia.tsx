@@ -25,7 +25,7 @@ function Tela({ uid, perfilFalhou }: { uid: number | undefined; perfilFalhou: ((
 
   const sessao = q.error instanceof ErroApi && q.error.status === 401;
   const d = q.isError ? undefined : q.data; // erro de carga nunca mostra o dado velho; `null` = sem família
-  const criar = () => rodar(async () => { await criarFamilia(); await qc.invalidateQueries({ queryKey: familiaQuery.queryKey }); });
+  const criar = () => rodar(async () => { await criarFamilia(); void qc.invalidateQueries({ queryKey: familiaQuery.queryKey }); }); // sem `await`: a releitura (5xx = ~3 s de retries; pendurada = nunca) não prende o botão
   const sair = async () => {
     // Sucesso: a página recarrega em /painel (o plano do membro muda, o /me precisa ser lido de novo). `rodar` já guarda a falha.
     if (await rodar(sairDaFamilia)) location.assign("/painel");
