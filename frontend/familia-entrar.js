@@ -64,12 +64,15 @@
   function codigo(corpo) { return (corpo && corpo.error && corpo.error.code) || ""; }
   function json(r) { return r.json().catch(function () { return null; }); }
 
+  function senhaObrigatoria() { return mostrar("Defina uma senha para continuar.", "", [{ texto: "Definir senha", href: "/home", primario: true }]); }
+
   function falha(r, corpo) { // erro do aceite: a regra de limpar o token mora aqui
     const c = codigo(corpo);
     if (r.status === 404 && c === "invite_invalid") { C.limpar(); return mostrar("Convite inválido", "Esse convite não vale mais. Peça um novo link.", [PAINEL]); }
     if (r.status === 409 && c === "already_in_family") { C.limpar(); return mostrar("Você já está numa família.", "", [PAINEL]); }
     if (r.status === 409 && c === "full") { C.limpar(); return mostrar("Família cheia", "Não há lugar nesta família.", [PAINEL]); }
     if (r.status === 402 && c === "family_coverage_required") return mostrar("Convite indisponível agora.", "Tente de novo mais tarde.", [tentar]);
+    if (r.status === 403 && c === "password_required") return senhaObrigatoria();
     if (r.status === 429) return mostrar("Muitas tentativas", "Tente de novo mais tarde.", [tentar]);
     mostrar("Não foi possível entrar", GENERICO, [tentar]); // rede, 5xx e o resto: o token fica
   }
@@ -96,8 +99,9 @@
       if (r.ok) { C.limpar(); return mostrar("Você já está numa família.", "", [PAINEL]); }
       return json(r).then(function (corpo) {
         const c = codigo(corpo);
-        if (r.status === 403 && c === "password_required") return mostrar("Defina uma senha para continuar.", "", [{ texto: "Definir senha", href: "/home", primario: true }]);
-        if (r.status === 404 && c === "not_found") return confirmar();
+        if (r.status === 403 && c === "password_required") return senhaObrigatoria();
+        // 404: sem família. 402: sem plano (o convidado típico), o plano vem com o aceite; quem já tem família recebe 409 lá.
+        if ((r.status === 404 && c === "not_found") || r.status === 402) return confirmar();
         mostrar("Não foi possível abrir o convite", GENERICO, [tentar]);
       });
     }, function () { mostrar("Não foi possível abrir o convite", GENERICO, [tentar]); });

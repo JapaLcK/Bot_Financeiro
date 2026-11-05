@@ -200,20 +200,19 @@ TABELA = {
     ("POST", "/api/app/gastos-fixos"): (B, "usuario_do_app"),
     # ── Plano Família (api/v2/familia.py, nos dois prefixos) ──
     **{(m, f"{pre}{p}"): (B, gate) for pre, gate in (("/api/v2", "usuario_atual"), ("/api/app", "usuario_do_app"))
-       for m, p in (("POST", "/familia"), ("POST", "/familia/convites"),
+       for m, p in (("GET", "/familia"), ("POST", "/familia"), ("POST", "/familia/convites"),
                     ("DELETE", "/familia/convites"), ("DELETE", "/familia/membros/{ref}"),
                     ("GET", "/familia/dissolucao"), ("POST", "/familia/dissolucao"))},
-    # sem gate de plano (quem não tem plano aceita, vê e sai), COM a perna da senha: `usuario_logado`/`usuario_sessao`
+    # sem gate de plano (quem não tem plano aceita, sai e revoga), COM a perna da senha: `usuario_logado`/`usuario_sessao`
     **{(m, f"{pre}{p}"): (B, "usuario_logado (sem assinatura, com credencial)") for pre in ("/api/v2", "/api/app")
-       for m, p in (("GET", "/familia"), ("POST", "/familia/sair"), ("POST", "/familia/convites/aceitar"))},
-    # PR 4 (api/v2/familia_dados.py): consentimento do membro (usuario_logado) e leitura do titular (usuario_atual)
-    **{(m, f"{pre}{p}"): (B, "usuario_logado (sem assinatura, com credencial)") for pre in ("/api/v2", "/api/app")
-       for m, p in (("POST", "/familia/permissoes"), ("DELETE", "/familia/permissoes/{escopo}"),
-                    ("GET", "/familia/historico"))},
+       for m, p in (("POST", "/familia/sair"), ("POST", "/familia/convites/aceitar"),
+                    ("DELETE", "/familia/permissoes/{escopo}"))},
+    # PR 4 (api/v2/familia_dados.py): conceder e ler o histórico pedem plano; as leituras do titular também
     **{(m, f"{pre}{p}"): (B, gate) for pre, gate in (("/api/v2", "usuario_atual"), ("/api/app", "usuario_do_app"))
-       for m, p in (("GET", "/familia/membros/{ref}/agregados"), ("GET", "/familia/membros/{ref}/lancamentos"))},
-    # PR 5 (api/v2/familia_casa.py): a casa. Leitura sem plano (usuario_logado), escrita com plano.
-    **{(m, f"{pre}{p}"): (B, "usuario_logado (sem assinatura, com credencial)") for pre in ("/api/v2", "/api/app")
+       for m, p in (("POST", "/familia/permissoes"), ("GET", "/familia/historico"),
+                    ("GET", "/familia/membros/{ref}/agregados"), ("GET", "/familia/membros/{ref}/lancamentos"))},
+    # PR 5 (api/v2/familia_casa.py): a casa. Leitura e escrita com plano.
+    **{(m, f"{pre}{p}"): (B, gate) for pre, gate in (("/api/v2", "usuario_atual"), ("/api/app", "usuario_do_app"))
        for m, p in (("GET", "/familia/casa"),)},
     **{(m, f"{pre}{p}"): (B, gate) for pre, gate in (("/api/v2", "usuario_atual"), ("/api/app", "usuario_do_app"))
        for m, p in (("POST", "/familia/casa/metas"), ("PUT", "/familia/casa/metas/{ref}"),
