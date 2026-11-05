@@ -3,7 +3,7 @@
 Qualquer membro ativo (titular incluso) lê e edita. `ref` é o tipo + id da linha (`m12` meta, `o12` orçamento), sempre
 resolvido com o grupo do chamador:
 ref de outro grupo, inexistente, malformado, ex-membro e quem não tem família dão o mesmo 404 `not_found`.
-Leitura com `usuario_logado` (sem plano vê); escritas com `usuario_atual` (sem plano 402). Escrita devolve a `Casa`
+Leitura e escritas com `usuario_atual` (sem plano 402). Escrita devolve a `Casa`
 inteira; `PUT` troca o item inteiro e exige a `versao` lida (409 `edit_conflict`); movimento soma sempre.
 Só BRL, implícito. Nenhum dado pessoal sai: `autor` é primeiro nome ou null (não é mais membro).
 """
@@ -18,7 +18,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from api.v2.familia import Vazio, _erro, _sem_corpo
 from api.v2.lancamentos import _DATA, _VALOR, _recusa, _valor
 from api.v2.metas import Nome, _data_alvo, _nome
-from api.v2.sessao import usuario_atual, usuario_logado
+from api.v2.sessao import usuario_atual
 from db import family as fam
 from db import family_house as house
 from db.categories import CATEGORY_NAME_MAX_LEN
@@ -123,7 +123,7 @@ def _escreve(uid: int, escrita, *args) -> Casa:
 
 
 @router.get("/familia/casa", response_model=Casa)
-def ver(resposta: Response, uid: int = Depends(usuario_logado)) -> Casa:
+def ver(resposta: Response, uid: int = Depends(usuario_atual)) -> Casa:
     resposta.headers["Cache-Control"] = "no-store"
     try:
         return _monta(house.casa(uid))
