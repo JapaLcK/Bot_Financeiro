@@ -14,7 +14,7 @@
 
 ## O que é o projeto
 
-Assistente financeiro pessoal usado por **WhatsApp** (canal principal), **Discord** e
+Assistente financeiro pessoal usado por **WhatsApp** (canal principal) e
 por um **dashboard web**. Registra despesa e receita em linguagem natural, categoriza
 com IA, e cobre cartão de crédito, parcelamentos, caixinhas, metas, orçamentos,
 boletos, recorrentes, investimentos com CDI, importação de extrato (OFX/CSV/PDF) e
@@ -31,8 +31,8 @@ tomadas". App iOS em Capacitor carregando o próprio site.
 ## Mapa do repositório
 
 ```
-launch.py                 — entrypoint do Railway: carrega o ambiente e vira o uvicorn ($PORT)
-bot.py                    — bot do Discord (fora do launch.py desde o PR 5a; não roda)
+launch.py                 — entrypoint do Procfile e local: carrega o ambiente e vira o uvicorn ($PORT); o Railway usa start command próprio
+bot.py                    — bot do Discord (não roda: serviço `Core` do Railway desligado em 2026-11-06)
 ai_router.py              — chamada à OpenAI (modelo em OPENAI_MODEL, default gpt-6-luna)
 parsers.py                — parse de linguagem natural ("gastei 50 mercado")
 statement_import.py       — importação de extrato (OFX/CSV/PDF)
@@ -3126,7 +3126,7 @@ Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches
 | Serviço | Para quê | Onde |
 |---|---|---|
 | WhatsApp **Cloud API oficial** (`graph.facebook.com`) | canal principal | `adapters/whatsapp/` |
-| Discord | fora do `launch.py` desde o PR 5a do dashboard v2: o código segue e não roda | `adapters/discord/`, `bot.py` |
+| Discord | desligado: o serviço `Core` do Railway, que rodava `python bot.py`, parou em 2026-11-06. O código segue, e o pacote `discord` continua no caminho de import do WhatsApp (`core/reports/reports_daily.py`) | `adapters/discord/`, `bot.py` |
 | OpenAI | categorização, chat, agentes | `ai_router.py`, `core/services/ai_chat/` |
 | Stripe | assinaturas | billing no monólito |
 | Pluggy | Open Finance | `core/services/pluggy*.py` |
