@@ -1,11 +1,11 @@
 """
-launch.py — Ponto de entrada único para Railway.
+launch.py — Ponto de entrada do Procfile e do ambiente local.
 
 Carrega o ambiente e se substitui (execv) pelo uvicorn do dashboard FastAPI,
-que escuta em $PORT (Railway expõe como URL pública). Sem processo pai no
-meio, o SIGTERM do Railway chega direto ao uvicorn.
+que escuta em $PORT. Sem processo pai no meio, o SIGTERM chega direto ao uvicorn.
 
-O bot do Discord (bot.py) saiu daqui no PR 5a do dashboard v2 e não roda mais.
+O Railway não passa por aqui: o start command do serviço `Dashboard/whatsapp`
+sobe o uvicorn direto e vale no lugar do Procfile.
 """
 import os
 import sys

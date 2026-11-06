@@ -73,7 +73,7 @@ const erro = (r, nome) => { const e = RESPOSTAS.erros[nome]; return r.fulfill({ 
 
 // `falha`: nome do erro, ou (corpo, i) => nome|undefined por POST; "perdida" grava a marca e
 // derruba a resposta. `trava.p`: promessa que segura o POST enquanto estiver posta.
-async function abrir({ width = 1440, plano = "plus", perfil = "economizar", hash = "#/", cookie = true, get, falha, trava, raiz, url = PAINEL } = {}) {
+async function abrir({ width = 1440, plano = "plus", perfil = "economizar", hash = "#/", cookie = true, get, falha, trava, raiz, url = PAINEL, relogio } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 760 ? 900 : 812 }, reducedMotion: "reduce", timezoneId: "America/Sao_Paulo" });
   await servir(ctx, raiz, { plano, perfil });
   await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil); // o protótipo lê daqui
@@ -98,6 +98,7 @@ async function abrir({ width = 1440, plano = "plus", perfil = "economizar", hash
     });
   }
   const page = await ctx.newPage();
+  if (relogio) await page.clock.install({ time: new Date("2026-10-02T15:00:00Z") }); // timers falsos: `page.clock.runFor` adianta o prazo da releitura
   const tudo = [];
   page.on("request", (r) => {
     const p = new URL(r.url()).pathname;
@@ -440,6 +441,23 @@ test("Desfazer que falha: mensagem fixa, o Desfazer fica; a segunda tentativa tr
   assert.equal(r.desfazer, 1);
   assert.deepEqual(posts.map((p) => p.corpo.status), ["ignorar", "nenhuma", "nenhuma"]);
   assert.equal(r.depois, "Desfeito.");
+});
+
+test("POST 500 e recarga pendurada: no prazo (30 s) os botões destravam e o aviso é de falha", async () => {
+  let posts = 0;
+  const get = (r) => (posts ? new Promise(() => {}) : r.fulfill({ json: RESPOSTAS.assinaturas.cheia }));
+  const { ctx, page, posts: enviados } = await abrir({ hash: "#/assinaturas", relogio: true, get, falha: () => { posts++; return "500"; } });
+  await pronta(page);
+  await clicar(page, SERV, "Netflix", "Ignorar");
+  while (!enviados.length) await page.waitForTimeout(20);
+  await page.waitForTimeout(300);
+  const antes = await page.locator(`${SERV} .sub-acoes button`).evaluateAll((bs) => bs.map((b) => b.disabled));
+  await page.clock.runFor(31000);
+  await page.locator(".sub-aviso p", { hasText: "salvar" }).waitFor();
+  const depois = await page.locator(`${SERV} .sub-acoes button`).evaluateAll((bs) => bs.map((b) => b.disabled));
+  await ctx.close();
+  assert.ok(antes.length && antes.every(Boolean), `não estavam travados com a recarga no ar: ${JSON.stringify(antes)}`);
+  assert.ok(depois.length && depois.every((d) => !d), JSON.stringify(depois));
 });
 
 test("falha numa ação depois de outra que deu certo: o Desfazer da anterior fica e funciona", async () => {

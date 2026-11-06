@@ -1,14 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ErroApi, contaQuery, contasQuery } from "../lib/v2";
+import { ErroApi, comPrazoLeitura, contaQuery, contasQuery } from "../lib/v2";
 import { bancosValidos, disponiveis } from "../lib/bancos";
 import { ICON } from "../lib/brand";
 import { ATUALIZANDO_SOZINHO, FALHA } from "../lib/atualizarBanco";
 import { TituloDaPagina } from "../parts/Info";
 import { useAtualizarBanco } from "../parts/usarAtualizarBanco";
 import { route } from "../router";
-import { ContaTrocada, bancosQuery, comPrazoLeitura, conectoresQuery, conexoesQuery, desconectarBanco, limiteQuery, uidValido, type Conexao } from "./api";
+import { ContaTrocada, bancosQuery, conectoresQuery, conexoesQuery, desconectarBanco, limiteQuery, uidValido, type Conexao } from "./api";
 import { BancoCard, SEM_RECONEXAO, nomeDoBanco } from "./BancoCard";
 import { BancoDetalhe } from "./BancoDetalhe";
 import { Confirma } from "./Confirma";

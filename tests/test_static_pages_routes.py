@@ -927,17 +927,16 @@ def test_quiz_e_faq_dizem_o_que_o_manual_cobre_com_e_sem_banco():
     *Negativo: volte o texto antigo no quiz.html ou no index.html → vermelho.*"""
     quiz = client.get("/quiz").text
     # A entrada da opção no array do quiz: o texto tem de ser a resposta DESTA opção.
-    assert ('["Anoto no bloco de notas às vezes", 1, "", "Pode continuar mandando do seu jeito. Com banco'
-            " conectado, texto, áudio ou foto servem pro dinheiro vivo; as movimentações disponibilizadas"
-            ' pelo banco conectado são importadas automaticamente."]') in quiz
+    assert ('["Anoto no bloco de notas às vezes", 1, "", "Com o banco conectado, nem precisa anotar.'
+            ' E o gasto em dinheiro você me manda num áudio."]') in quiz
     assert "do seu jeito: texto, áudio ou foto do cupom" not in quiz
     assert "chega sozinh" not in quiz
     home = client.get("/").text
     sem_banco = "mas é o jeito automático. Sem banco, você lança pelo WhatsApp com texto, áudio ou foto do comprovante."
-    assert f"Tudo bem: não é obrigatório, {sem_banco}</p>" in home    # bloco "Prefere não conectar"
     faq = home.split("Preciso conectar o banco?", 1)[1].split("</details>", 1)[0]   # só o <details> desta pergunta
     assert f">Não é obrigatório, {sem_banco}</p>" in faq
     assert "100% pelo WhatsApp" not in home
+    assert "Prefere não conectar o banco?" not in home
 
 
 def test_precos_logado_e_continuar_compra_sem_o_link_do_teste(monkeypatch):
