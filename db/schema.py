@@ -2245,7 +2245,8 @@ def init_db():
         create table if not exists affiliate_commissions (
           id bigserial primary key,
           affiliate_id bigint not null references affiliates(id) on delete cascade,
-          referred_user_id bigint not null references users(id) on delete cascade,
+          -- Nulo = o indicado excluiu a conta: a comissão fica, desvinculada do usuário.
+          referred_user_id bigint references users(id) on delete set null,
           stripe_invoice_id text not null unique,
           invoice_amount_cents bigint not null,
           amount_cents bigint not null,
@@ -2254,6 +2255,16 @@ def init_db():
           payout_id bigint references affiliate_payouts(id) on delete set null,
           created_at timestamptz not null default now()
         )
+        """,
+        # Mesma guarda do `drop not null` de `affiliate_referrals`, e pelo mesmo motivo.
+        """
+        do $$ begin
+          if exists (select 1 from pg_attribute
+                      where attrelid = 'affiliate_commissions'::regclass
+                        and attname = 'referred_user_id' and attnotnull) then
+            alter table affiliate_commissions alter column referred_user_id drop not null;
+          end if;
+        end $$
         """,
         """
         create index if not exists idx_affiliate_commissions_affiliate
@@ -2279,6 +2290,57 @@ def init_db():
         """
         create index if not exists idx_affiliate_referral_payments_referral
           on affiliate_referral_payments (referral_id)
+        """,
+        # Pendência de reembolso (db/affiliate_reviews.py): 1 linha por fatura reembolsada, sem
+        # `user_id` nem dado do indicado. A linha é também a notificação pendente: `notified_at`
+        # nulo. Os eventos só crescem: reembolso maior reabre a pendência sem apagar o ajuste.
+        """
+        create table if not exists affiliate_refund_reviews (
+          id bigserial primary key,
+          stripe_invoice_id text not null unique,
+          commission_id bigint references affiliate_commissions(id) on delete cascade,  -- nulo só em `no_commission`
+          tipo text not null check (tipo in ('partial', 'total')),
+          refunded_cents bigint not null,          -- acumulado; maior = fato novo
+          amount_cents bigint,                     -- valor ORIGINAL da comissão; nunca reescrito
+          approved_cents bigint,                   -- valor aprovado na revisão parcial
+          recovery_cents bigint,                   -- quanto falta recuperar
+          recovery_closed_cents bigint not null default 0,  -- já encerrado: reabrir não cobra de novo
+          status text not null default 'open'
+            check (status in ('no_commission', 'open', 'recovery', 'resolved')),
+          refunded_at timestamptz,
+          notified_at timestamptz,                 -- só com `_send` True; não libera nada
+          notify_claimed_until timestamptz,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_affiliate_refund_reviews_status
+          on affiliate_refund_reviews (status, notified_at)
+        """,
+        """
+        create index if not exists idx_affiliate_refund_reviews_commission
+          on affiliate_refund_reviews (commission_id)
+        """,
+        """
+        create table if not exists affiliate_refund_review_events (
+          id bigserial primary key,
+          review_id bigint not null references affiliate_refund_reviews(id) on delete cascade,
+          action text not null check (action in ('partial_approved', 'payout_rejected', 'payment_recorded',
+            'paid_before_refund', 'auto_reversed', 'commission_reversed', 'recovery_recovered',
+            'recovery_waived', 'reopened')),
+          actor text not null,                     -- username do admin, 'sistema' ou 'script'
+          before_cents bigint,
+          after_cents bigint,
+          payout_id bigint,
+          event_on date,
+          receipt_ref text,
+          justification text,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_affiliate_refund_review_events_review
+          on affiliate_refund_review_events (review_id, id)
         """,
 
         # ─── Prospecção (lead engine do Instagram) ───────────────────────────────

@@ -1,18 +1,33 @@
-"""Pagamentos de indicado na Stripe que o registro não tem, e os reembolsos antigos deles.
+"""Reembolsos que a Stripe já fez e o sistema não viu: pendências, comissões e pagamentos de indicado.
 
-Completa `affiliate_referral_payments` com o que o `init_db` não alcança: fatura de plano sem
-comissão (afiliado 0% ou desativado, renovação, webhook perdido) e reembolso anterior ao
-`charge.refunded`. Idempotente: rodar de novo não duplica nem rebaixa rótulo.
+ATENÇÃO: `--aplicar` PODE ALTERAR SALDOS. Duas passadas, nesta ordem:
 
-Dinheiro: NÃO estorna comissão antiga e não toca em saque. Contestação fica só na contagem,
-porque a cobrança não diz se foi perdida. Conta excluída não volta: sem titular não há cliente.
-Só imprime contagens.
+1. Comissões (`status <> 'reversed'`), antes de tudo: a passada de rótulo, morrendo no meio, deixaria
+   `total` sem pendência. Sobre comissões, e não sobre clientes, porque conta excluída só existe aqui.
+   Reembolso total confirmado = ao menos uma cobrança, nenhuma contestada, todas devolvidas por
+   inteiro. Alguma devolvida, mas não todas, é parcial. Categorias:
+     a_estornar      total, comissão `pending` e sem saque: lista id e valor, e o total.
+     segue_revisao   parcial, ou total com a comissão em saque ou paga: lista id e valor.
+     sem_confirmacao exceção, `payment_record`, erro da API, sem cobrança ou disputa: lista id e
+                     motivo (só o tipo), e nada muda.
+     ja_registrada   a pendência já existe: só conta, e nada muda.
+   `--aplicar` não confia na classificação: chama `registrar_reembolso`, a mesma função do webhook,
+   que decide sob as travas com o estado de agora. Comissão que entrou em saque depois da simulação
+   vira pendência, sem estorno. A linha impressa diz o que aconteceu.
+
+2. Clientes: completa `affiliate_referral_payments` com o que o `init_db` não alcança, fatura de
+   plano sem comissão (afiliado 0% ou desativado, renovação, webhook perdido) e reembolso anterior
+   ao `charge.refunded`. Contestação aqui fica só na contagem, porque a cobrança não diz se foi
+   perdida. Conta excluída não volta: sem titular não há cliente.
+
+Idempotente: rodar de novo não duplica pendência, evento nem rótulo. Não imprime fatura, cliente nem
+indicado: só ids de comissão, valores e contagens.
 
 Rodar (o dono, na raiz do repositório, com a chave de produção):
     DATABASE_URL='postgres://...' STRIPE_SECRET_KEY='...' .venv/bin/python scripts/backfill_afiliado_pagamentos.py
 Sem `--aplicar` é simulação: lê a Stripe e o banco e não grava nada.
 
-Teste: tests/test_afiliado_reembolso.py.
+Teste: tests/test_afiliado_reembolso.py e tests/test_afiliado_pendencia.py.
 """
 import argparse
 import os
@@ -34,7 +49,75 @@ from core.services.extras_assinar import (  # noqa: E402
     linhas_da_fatura,
 )
 from db.affiliate_payments import marcar_reembolso, registrar_pagamento  # noqa: E402
+from db.affiliate_reviews import registrar_reembolso  # noqa: E402
 from db.connection import get_conn  # noqa: E402
+
+
+class _SemConfirmacao(Exception):
+    """A Stripe não confirma o reembolso. O texto é o motivo, nunca dado da fatura."""
+
+
+def _comissoes() -> list[dict]:
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            select c.id, c.stripe_invoice_id as fatura, c.status, c.payout_id, c.amount_cents,
+                   exists (select 1 from affiliate_refund_reviews r
+                            where r.stripe_invoice_id = c.stripe_invoice_id) as registrada
+              from affiliate_commissions c
+             where c.status <> 'reversed'
+             order by c.id
+            """).fetchall()
+
+
+def _datas_de_reembolso(stripe, cobranca) -> list[int]:
+    return [r["created"] for r in stripe.Refund.list(charge=cobranca["id"], limit=100)["data"]]
+
+
+def _reembolso_confirmado(stripe, fatura_id: str, chave: str) -> tuple[str | None, int, datetime | None]:
+    """O tipo, o devolvido e a data pelo critério do `--aplicar`: estornar dinheiro exige `all`."""
+    cobrancas = list(cobrancas_da_fatura(fatura_id, chave))
+    if not cobrancas:
+        raise _SemConfirmacao("sem_cobranca")
+    if any(c["disputed"] for c in cobrancas):
+        raise _SemConfirmacao("disputa")
+    tipos = [tipo_do_reembolso(c) for c in cobrancas]
+    if not any(tipos):
+        return None, 0, None
+    datas = [d for c, t in zip(cobrancas, tipos) if t for d in _datas_de_reembolso(stripe, c)]
+    return ("total" if all(t == "total" for t in tipos) else "partial",
+            sum(c["amount_refunded"] for c in cobrancas),
+            datetime.fromtimestamp(max(datas), timezone.utc) if datas else None)
+
+
+def _comissao(stripe, c: dict, chave: str, aplicar: bool, n: Counter) -> None:
+    tipo, devolvido, quando = _reembolso_confirmado(stripe, c["fatura"], chave)
+    if tipo is None:
+        return
+    solta = c["status"] == "pending" and c["payout_id"] is None
+    categoria = "a_estornar" if tipo == "total" and solta else "segue_revisao"
+    desfecho = ""
+    if aplicar:
+        linha = registrar_reembolso(c["fatura"], tipo, devolvido, quando, ator="script")
+        desfecho = f" · pendência {linha['status'] if linha else 'nenhuma'}"
+    n[categoria] += 1
+    n[f"{categoria}_cents"] += c["amount_cents"]
+    print(f"{categoria}: comissão {c['id']} · R$ {c['amount_cents'] / 100:.2f}{desfecho}")
+
+
+def _passar_comissoes(stripe, chave: str, aplicar: bool, n: Counter) -> None:
+    for c in _comissoes():
+        if c["registrada"]:
+            n["ja_registrada"] += 1
+            continue
+        try:
+            _comissao(stripe, c, chave, aplicar, n)
+        except _SemConfirmacao as exc:
+            n["sem_confirmacao"] += 1
+            print(f"sem_confirmacao: comissão {c['id']} · {exc}")
+        except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer o id da fatura
+            n["sem_confirmacao"] += 1
+            print(f"sem_confirmacao: comissão {c['id']} · {type(exc).__name__}")
 
 
 def _clientes() -> list[dict]:
@@ -78,7 +161,7 @@ def _reembolso(stripe, fatura_id: str, chave: str, n: Counter) -> tuple[str | No
         tipos.add(tipo)
         n["contestadas_para_conferir"] += bool(cobranca["disputed"])
         if tipo:
-            datas += [r["created"] for r in stripe.Refund.list(charge=cobranca["id"], limit=100)["data"]]
+            datas += _datas_de_reembolso(stripe, cobranca)
     quando = datetime.fromtimestamp(max(datas), timezone.utc) if datas else None
     return ("total" if "total" in tipos else "partial" if "partial" in tipos else None), quando
 
@@ -106,6 +189,7 @@ def rodar(aplicar: bool = False) -> Counter:
     chave = os.environ["STRIPE_SECRET_KEY"]
     stripe.api_key = chave
     n: Counter = Counter()
+    _passar_comissoes(stripe, chave, aplicar, n)
     for linha in _clientes():
         n["clientes"] += 1
         try:

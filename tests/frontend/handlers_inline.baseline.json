@@ -10,6 +10,9 @@
       "createAffiliate",
       "dismissEvent",
       "navigateToFilter",
+      "openRecordedForm",
+      "openRecoveryForm",
+      "openReviewForm",
       "openUserDetail",
       "openUsersModal",
       "payoutAction",
@@ -17,6 +20,8 @@
       "setUsersStatus",
       "showPayoutPix",
       "showUsersList",
+      "submitAffForm",
+      "syncAffResult",
       "toggleAffiliateStatus",
       "toggleExpand"
     ],

@@ -63,6 +63,16 @@ def test_admin_affiliate_status_topo_nao_objeto_da_400(corpo):
     assert r.status_code == 400, r.text
 
 
+@pytest.mark.parametrize("caminho", [
+    f"payouts/{INEXISTENTE}/payment-recorded", f"refund-reviews/{INEXISTENTE}/approve",
+    f"refund-reviews/{INEXISTENTE}/close-recovery",
+])
+@pytest.mark.parametrize("corpo", NAO_OBJETOS, ids=IDS)
+def test_admin_pendencia_topo_nao_objeto_da_400(corpo, caminho):
+    r = _post_bruto(_admin_client(), f"/admin/api/affiliates/{caminho}", corpo)
+    assert r.status_code == 400, r.text
+
+
 # --------------------------------------------------------------------------
 # Grupo Pluggy: recusa com 400 (era 500)
 # --------------------------------------------------------------------------

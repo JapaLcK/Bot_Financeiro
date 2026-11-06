@@ -5,7 +5,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { startServer } from "./_server.mjs";
-import { ATIVA, COM_SAQUE, ZERO } from "./_afiliado.mjs";
+import { ATIVA, COM_SAQUE, EM_REVISAO, ZERO } from "./_afiliado.mjs";
 
 let ORIGIN, server, browser;
 before(async () => { ({ proc: server, origin: ORIGIN } = await startServer()); browser = await chromium.launch(); });
@@ -63,7 +63,7 @@ test("os quadros, o código com copiar, a regra certa e os rótulos do pagamento
   try {
     await naArea(page);
     const labels = await page.locator("#affiliate-stats .stat-label").allInnerTexts();
-    assert.deepEqual(labels.map((l) => l.toLowerCase()), ["cadastros indicados", "clientes que pagaram", "comissões geradas", "disponível pra saque", "em carência", "em saque", "já pago"]);
+    assert.deepEqual(labels.map((l) => l.toLowerCase()), ["cadastros indicados", "clientes que pagaram", "comissões geradas", "disponível pra saque", "em carência", "em revisão", "em saque", "já pago"]);
     const area = await page.locator("#affiliate-view").innerText();
     assert.match(area, /10% da primeira cobrança do plano no cartão/);
     assert.match(area, /Pix não gera comissão/);
@@ -316,6 +316,23 @@ test("'Mostrando as mais recentes' só no limite da API: 50 comissões e 20 saqu
   } finally { await b.ctx.close(); }
 });
 
+// mutação: tirar o quadro "Em revisão", o `c.in_review` de `_affiliateCommissionStatus` ou o "ajustada de"
+for (const [nome, width, height] of [["desktop", 1280, 800], ["celular", 390, 844]]) {
+  test(`reembolso em análise (${nome}): quadro, selo e 'ajustada de'`, async () => {
+    const { ctx, page } = await abrir({ corpo: EM_REVISAO, width, height });
+    try {
+      await naArea(page);
+      const tile = page.locator("#affiliate-stats .stat-tile", { hasText: /em revisão/i });
+      assert.match(await tile.locator(".stat-value").innerText(), /100,00/);
+      assert.match(await tile.innerText(), /reembolso de cliente em análise/);
+      const corpo = await page.locator("#affiliate-body").innerText();
+      assert.match(corpo, /em revisão/);
+      assert.match(corpo, /ajustada de R\$\s*100,00/);
+      assert.match(corpo, /pagamento reembolsado/);
+    } finally { await ctx.close(); }
+  });
+}
+
 // mutação: tirar o quadro "Em saque" de `_renderAffiliateView`
 test("o quadro 'Em saque' traz o valor", async () => {
   const { ctx, page } = await abrir({ corpo: COM_SAQUE });
@@ -336,13 +353,13 @@ test("comissão em saque mostra 'em saque' e o botão fica desligado", async () 
   } finally { await ctx.close(); }
 });
 
-// mutação: tirar o `flex-wrap`/`min-width:0` dos inputs: os 7 quadros e o link longo passam da tela
+// mutação: tirar o `flex-wrap`/`min-width:0` dos inputs: os 8 quadros e o link longo passam da tela
 for (const [width, height] of [[390, 844], [320, 568]]) {
-  test(`${width}x${height}: os 7 quadros e o link longo cabem, sem rolagem lateral`, async () => {
+  test(`${width}x${height}: os 8 quadros e o link longo cabem, sem rolagem lateral`, async () => {
     const { ctx, page } = await abrir({ width, height, corpo: { ...ATIVA, link: `${ATIVA.link}/${"x".repeat(60)}` } });
     try {
       await naArea(page);
-      assert.equal(await page.locator("#affiliate-stats .stat-tile").count(), 7);
+      assert.equal(await page.locator("#affiliate-stats .stat-tile").count(), 8);
       const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, tiles: [...document.querySelectorAll("#affiliate-stats .stat-tile")].filter((t) => t.getBoundingClientRect().right > innerWidth + 0.5).length }));
       assert.ok(m.sw <= m.cw, JSON.stringify(m));
       assert.equal(m.tiles, 0);

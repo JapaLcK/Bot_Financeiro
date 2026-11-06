@@ -79,6 +79,7 @@ def mundo(monkeypatch):
     monkeypatch.setattr(stripe.InvoicePayment, "list", staticmethod(listar))
     monkeypatch.setattr(stripe.Charge, "retrieve", staticmethod(cobranca))
     monkeypatch.setattr(stripe.Subscription, "retrieve", staticmethod(lambda sid, **k: m.subs[sid]))
+    monkeypatch.setenv("ADMIN_NOTIFY_WEBHOOK_URL", "https://discord.com/api/webhooks/1/x")
     monkeypatch.setattr(admin_notify, "_send", lambda msg: m.alertas.append(msg) or True)
     return m
 
@@ -243,10 +244,11 @@ def test_falha_no_rotulo_repete_e_nao_perde_nada(mundo, monkeypatch):
     c = _afiliado()
     com = _paga(c)
     objeto = _cobranca(com.fatura)
-    import core.services.afiliado_reembolso as modulo
+    import db.affiliate_reviews as modulo
     with monkeypatch.context() as m:
-        m.setattr(modulo, "marcar_reembolso", lambda *a: 1 / 0)
+        m.setattr(modulo, "_rotular", lambda *a: 1 / 0)
         assert _enviar("charge.refunded", objeto).status_code == 500
+    assert _status(com)["status"] == "pending"  # rótulo e estorno na mesma transação
     assert _enviar("charge.refunded", objeto).status_code == 200
     assert _numeros(c) == (1, 1, 1, 1, 0) and _status(com)["status"] == "reversed"
 
@@ -262,19 +264,6 @@ def test_em_saque_nao_muda_e_avisa(mundo):
     assert [p["status"] for p in _saques(c)] == ["requested"]
     assert _numeros(c) == (1, 1, 1, 1, 0)
     assert len(mundo.alertas) == 1 and f"saque `{saque['id']}`" in mundo.alertas[0]
-
-
-def test_falha_no_alerta_repete_o_aviso_na_reentrega(mundo, monkeypatch):
-    """A comissão vem antes do rótulo: com o rótulo primeiro, a reentrega acharia `total` e calaria."""
-    c = _afiliado()
-    com = _paga(c)
-    request_payout(c.aff["id"])
-    objeto = _cobranca(com.fatura)
-    with monkeypatch.context() as m:
-        m.setattr(admin_notify, "notify_afiliado_alerta", lambda msg: 1 / 0)
-        assert _enviar("charge.refunded", objeto).status_code == 500
-    assert _enviar("charge.refunded", objeto).status_code == 200
-    assert len(mundo.alertas) == 1 and _numeros(c) == (1, 1, 1, 1, 0)
 
 
 def test_ja_paga_nao_muda_e_avisa(mundo):
@@ -313,7 +302,8 @@ def test_rejeicao_estorna_so_a_comissao_reembolsada(mundo):
     assert reject_payout(saque)
     assert _status(reembolsada)["status"] == "reversed"
     assert _status(parcial) == _status(intacta) == {"status": "pending", "payout_id": None}
-    assert _me(c)["stats"]["available"] == 90
+    s = _me(c)["stats"]
+    assert (s["available"], s["review"]) == (40, 50)  # a parcial volta para a revisão, não para o saldo
 
 
 def test_rejeicao_sem_reembolso_devolve_tudo(mundo):
@@ -332,22 +322,6 @@ def test_rejeicao_nao_le_o_rotulo_de_outro_afiliado(mundo):
     assert marcar_reembolso("stripe", com.fatura, "total", AGORA)
     assert reject_payout(request_payout(a.aff["id"])["id"])
     assert _status(com) == {"status": "pending", "payout_id": None}
-
-
-def test_rejeicao_entre_a_comissao_e_o_rotulo_nao_escapa(mundo, monkeypatch):
-    """A rejeição leu antes do rótulo e devolveu: quem fecha é o estorno depois do rótulo."""
-    c = _afiliado()
-    com = _paga(c)
-    saque = request_payout(c.aff["id"])["id"]
-    real = modulo_reembolso.marcar_reembolso
-
-    def rejeita_antes(*a):
-        assert reject_payout(saque)
-        return real(*a)
-
-    monkeypatch.setattr(modulo_reembolso, "marcar_reembolso", rejeita_antes)
-    _reembolsa(com.fatura)
-    assert _status(com) == {"status": "reversed", "payout_id": None}
 
 
 def test_reembolso_no_meio_da_rejeicao_espera_a_trava(mundo, monkeypatch):
@@ -489,12 +463,17 @@ def test_alerta_nao_leva_dado_do_indicado(mundo):
     assert [p for p in (com.fatura, com.indicado.email, str(com.indicado.uid)) if p in mundo.alertas[0]] == []
 
 
-def test_evento_fora_de_ordem_e_no_op_e_nao_atrapalha_o_pagamento(mundo):
+def test_evento_fora_de_ordem_guarda_a_pendencia_e_nao_atrapalha_o_pagamento(mundo):
     c = _afiliado()
     ind = _indicado(c)
-    _reembolsa("in_adiantada")
-    assert registrar_pagamento(ind.uid, "stripe", "in_adiantada", 100, AGORA)
-    assert _numeros(c) == (1, 1, 0, 0, 0)  # limite declarado: quem repara é o script
+    fatura = f"in_{uuid.uuid4().hex[:12]}"
+    _reembolsa(fatura)
+    assert registrar_pagamento(ind.uid, "stripe", fatura, 100, AGORA)
+    assert _numeros(c) == (1, 1, 0, 0, 0)  # limite declarado: o rótulo depende da linha, quem repara é o script
+    with get_conn() as conn:
+        assert conn.execute("select status from affiliate_refund_reviews where stripe_invoice_id = %s",
+                            (fatura,)).fetchone()["status"] == "no_commission"
+    assert mundo.alertas == []
 
 
 # ── Corrida com o saque ──────────────────────────────────────────────────────
@@ -603,7 +582,7 @@ class _StripeDoScript(_FakeStripe):
     def __init__(self):
         super().__init__()
         self.faturas, self.cobrancas, self.quebra, self.assinaturas = {}, {}, set(), {}
-        self.reembolsos = {}
+        self.reembolsos, self.pagamentos = {}, {}
         outer = self
 
         class Invoice:
@@ -617,7 +596,11 @@ class _StripeDoScript(_FakeStripe):
         class InvoicePayment:
             @staticmethod
             def list(invoice, api_key, limit):
-                return {"data": [{"status": "paid", "payment": {"type": "payment_intent", "payment_intent": invoice}}]}
+                pagamentos = outer.pagamentos.get(
+                    invoice, [{"status": "paid", "payment": {"type": "payment_intent", "payment_intent": invoice}}])
+                if isinstance(pagamentos, Exception):
+                    raise pagamentos
+                return {"data": pagamentos}
 
         class PaymentIntent:
             @staticmethod
@@ -664,7 +647,7 @@ def test_script_sem_aplicar_nao_grava(script):
     assert _linhas(c) == []
 
 
-def test_script_aplica_e_e_idempotente_e_nao_estorna_comissao(script):
+def test_script_aplica_e_e_idempotente_e_estorna_a_comissao_solta(script):
     c = _afiliado()
     com = _comissao(c, 60)  # comissão antiga, sem linha no registro
     novo = _indicado(c)
@@ -677,7 +660,7 @@ def test_script_aplica_e_e_idempotente_e_nao_estorna_comissao(script):
     assert (n["faturas_novas"], n["reembolsos_total"], n["reembolsos_partial"], n["contestadas_para_conferir"]) == (3, 1, 1, 1)
     achado = {x["payment_ref"]: (x["amount_cents"], x["refund_status"]) for x in _linhas(c)}
     assert achado == {com.fatura: (60_000, "total"), "in_sem_comissao": (50_000, "none"), "in_parcial": (40_000, "partial")}
-    assert _status(com)["status"] == "pending"  # dinheiro: o script não estorna
+    assert _status(com)["status"] == "reversed"  # total confirmado, comissão solta: `a_estornar`
 
     n = script.rodar(aplicar=True)
     assert (n["faturas_novas"], n["faturas_ja_no_registro"]) == (0, 3)

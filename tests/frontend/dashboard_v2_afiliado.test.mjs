@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { navegador } from "./_guia.mjs";
 import { PROTOTIPO, RAIZ, servir } from "./_painel.mjs";
-import { ABAIXO, ATIVA, COM_SAQUE, DESATIVADA, REJEITADO, ZERO, comAfiliado, quadros, servidor } from "./_afiliado.mjs";
+import { ABAIXO, ATIVA, COM_SAQUE, DESATIVADA, EM_REVISAO, REJEITADO, ZERO, comAfiliado, quadros, servidor } from "./_afiliado.mjs";
 
 const browser = navegador();
 const itemLateral = (page) => page.locator(".rail-list a", { hasText: "Afiliado" });
@@ -50,7 +50,7 @@ test("o /me diz afiliado e a API diz 404 (cadastro removido): o mesmo estado, se
 });
 
 // mutação: tirar a rota `/afiliado` de ROUTES: sem item; tirar de NO_MONTH: o seletor de mês aparece; `noMenu` fora do App.tsx: a lateral não lista
-test("afiliado: o item entre Casa e Ferramentas, aria-current, sem seletor de mês, e os 7 quadros com os números da fixture", async () => {
+test("afiliado: o item entre Casa e Ferramentas, aria-current, sem seletor de mês, e os 8 quadros com os números da fixture", async () => {
   await comAfiliado(browser(), {}, async (t) => {
     await t.page.locator(".afil-quadros").waitFor();
     const itens = await t.page.locator(".rail-list a").evaluateAll((a) => a.map((e) => e.textContent.trim()));
@@ -60,7 +60,7 @@ test("afiliado: o item entre Casa e Ferramentas, aria-current, sem seletor de m�
     assert.equal(await t.page.locator(".month-switch").count(), 0, "NO_MONTH");
     assert.deepEqual(await quadros(t.page), {
       "Cadastros indicados": "12", "Clientes que pagaram": "6", "Comissões geradas": "R$ 350,00", "Em carência": "R$ 30,00",
-      "Disponível": "R$ 120,00", "Em saque": "R$ 0,00", "Já pago": "R$ 200,00",
+      "Em revisão": "R$ 0,00", "Disponível": "R$ 120,00", "Em saque": "R$ 0,00", "Já pago": "R$ 200,00",
     });
     assert.match(await t.page.locator(".afil-quadros").innerText(), /1 reembolsado/);
     assert.match(await t.page.locator(".afil-quadros").innerText(), /libera 30 dias/);
@@ -191,6 +191,26 @@ test("comissão em saque mostra 'em saque'; o quadro Em saque traz o valor", asy
     assert.equal(await t.page.locator("#afil-saques ~ .afil-lista .selo").first().innerText(), "em análise");
   });
 });
+
+// mutação: tirar o quadro de `Area`, o `c.in_review` de `situacao` ou o `original_amount` de Historico.tsx
+for (const [nome, width, height] of [["desktop", 1280, 800], ["celular", 390, 844]]) {
+  test(`reembolso em análise (${nome}): quadro, selo, 'ajustada de' e o selo do pagamento reembolsado`, async () => {
+    await comAfiliado(browser(), { corpo: EM_REVISAO, width, height }, async (t) => {
+      await t.page.locator("#afil-comissoes ~ .afil-lista").waitFor();
+      const q = await quadros(t.page);
+      assert.equal(q["Em revisão"], "R$ 100,00");
+      assert.equal(q["Disponível"], "R$ 70,00");
+      assert.match(await t.page.locator(".afil-quadros").innerText(), /reembolso de cliente em análise/);
+      const itens = t.page.locator("#afil-comissoes ~ .afil-lista li");
+      assert.match(await itens.nth(0).innerText(), /em revisão/);
+      assert.doesNotMatch(await itens.nth(0).innerText(), /ajustada de/);
+      assert.match(await itens.nth(1).innerText(), /ajustada de R\$ 100,00/);
+      assert.match(await itens.nth(1).innerText(), /R\$ 60,00/);
+      assert.match(await itens.nth(2).innerText(), /paga[\s\S]*pagamento reembolsado/);
+      assert.equal(await t.page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+    });
+  });
+}
 
 // mutação: tirar o `p.note &&` de Historico.tsx: a rejeição fica sem o motivo
 test("saque rejeitado mostra o motivo", async () => {

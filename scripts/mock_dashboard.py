@@ -32,7 +32,8 @@ async def afiliado():
     modo = os.environ.get("MOCK_AFILIADO", "")
     if modo not in ("ativa", "desativada", "zero"):
         return JSONResponse({"detail": "Você não faz parte do programa de afiliados."}, status_code=404)
-    comissao = {"id": 1, "invoice_amount": 59.9, "amount": 5.99, "status": "pending",
+    comissao = {"id": 1, "invoice_amount": 59.9, "amount": 5.99, "original_amount": None, "in_review": False,
+                "status": "pending",
                 "available_at": "2026-01-01T12:00:00+00:00", "payout_id": None,
                 "payment_refund": "partial", "created_at": "2025-12-02T12:00:00+00:00"}
     return {"code": "ANA2026", "status": "disabled" if modo == "desativada" else "active",
@@ -40,7 +41,7 @@ async def afiliado():
             "commission_percent": 0 if modo == "zero" else 10.0,
             "has_pix_key": False, "min_payout": 50.0, "hold_days": 30,
             "stats": {"referrals": 12, "paying_clients": 6, "refunded_clients": 1,
-                      "generated": 390.0, "held": 30.0, "available": 120.0,
+                      "generated": 390.0, "held": 30.0, "available": 120.0, "review": 0.0,
                       "requested": 40.0, "paid": 200.0, "refunds": {"total": 1, "partial": 1}},
             "commissions": [comissao], "payouts": []}
 

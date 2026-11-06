@@ -2184,6 +2184,22 @@ async def lifespan(app: FastAPI):
                 print(f"[stripe_email] erro: {exc}", file=sys.stderr)
             await asyncio.sleep(300)
 
+    async def _afiliado_alerta_worker():
+        """Reenvia ao admin as pendências de reembolso de afiliado ainda sem aviso, a cada
+        5 min, a 1ª volta sem delay: é a retomada depois de reinício. Laço próprio, como o do
+        e-book. Inerte sem `ADMIN_NOTIFY_WEBHOOK_URL`. Ver `core/services/afiliado_reembolso.py`."""
+        from core.services.afiliado_reembolso import reenviar_pendentes  # noqa: PLC0415
+        while True:
+            try:
+                n = await asyncio.to_thread(reenviar_pendentes)
+                if n:
+                    print(f"[afiliado] {n} aviso(s) de reembolso entregue(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[afiliado] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(300)
+
     async def _remarketing_worker():
         """Régua de remarketing do checkout abandonado, a cada 5 min. Inerte sem
         `REMARKETING_DESDE` (nem consulta o banco). Ver `core/services/remarketing.py`."""
@@ -2300,6 +2316,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
+                asyncio.create_task(_afiliado_alerta_worker(), name="afiliado_alerta_worker"),
                 asyncio.create_task(_remarketing_worker(), name="remarketing_worker"),
                 asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
                 asyncio.create_task(_tarefa_finito_checks(), name="finito_checks"),
@@ -7448,7 +7465,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
 
     elif event["type"] in ("charge.refunded", "charge.dispute.closed"):
         # Reembolso de indicado de afiliado. Sem try: nada aqui segura grant nem comissão de
-        # outro evento, tudo é idempotente, e a falha vira 5xx e reentrega, como o `retrieve`.
+        # outro evento, tudo é idempotente, e falha de banco ou da Stripe vira 5xx e reentrega.
         from core.services.afiliado_reembolso import tratar_evento
         await asyncio.to_thread(tratar_evento, event)
 

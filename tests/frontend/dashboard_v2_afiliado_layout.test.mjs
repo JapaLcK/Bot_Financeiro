@@ -32,12 +32,12 @@ const confere = (m, tam) => {
   assert.deepEqual(m.fora, [], `${tam}: fora do cartão`);
   assert.deepEqual(m.baixos, [], `${tam}: controle abaixo de 44 px`);
   assert.deepEqual(m.cortados, [], `${tam}: número cortado no quadro`);
-  assert.equal(m.quadros, 7, tam);
+  assert.equal(m.quadros, 8, tam);
 };
 
 for (const [width, height] of TAMANHOS) {
   // mutação: tirar `word-break: break-all` de `.afil-copia code`, ou o `min-height: 44px` de `.afiliado .btn`: o link estoura ou o botão fica com 36 px
-  test(`${width}x${height}: sem rolagem lateral, link longo no cartão, alvos de 44 px, 7 quadros inteiros`, async () => {
+  test(`${width}x${height}: sem rolagem lateral, link longo no cartão, alvos de 44 px, 8 quadros inteiros`, async () => {
     await comAfiliado(browser(), { width, height, corpo: LONGA }, async (t) => {
       await t.page.locator(".afil-quadros").waitFor();
       const m = await medir(t.page);
@@ -102,11 +102,11 @@ for (const [width, height] of [[390, 844], [320, 568]]) {
 }
 
 // mutação: voltar a `auto-fit` na `.afil-quadros`: na página sem plano, sem trilho, os quadros ficam 5+2
-test("1280x800: os quadros ficam 4+3, com e sem o trilho", async () => {
+test("1280x800: os quadros ficam 4+4, com e sem o trilho", async () => {
   const fileiras = (page) => page.locator(".afil-quadros > div").evaluateAll((d) => { const t = {}; d.forEach((e) => { const y = Math.round(e.getBoundingClientRect().top); t[y] = (t[y] ?? 0) + 1; }); return Object.values(t); });
-  await comAfiliado(browser(), {}, async (t) => { await t.page.locator(".afil-quadros").waitFor(); assert.deepEqual(await fileiras(t.page), [4, 3]); });
+  await comAfiliado(browser(), {}, async (t) => { await t.page.locator(".afil-quadros").waitFor(); assert.deepEqual(await fileiras(t.page), [4, 4]); });
   const t = await abrirSemPlano(browser(), {});
-  try { await t.page.locator(".afil-quadros").waitFor(); assert.deepEqual(await fileiras(t.page), [4, 3]); } finally { await t.ctx.close(); }
+  try { await t.page.locator(".afil-quadros").waitFor(); assert.deepEqual(await fileiras(t.page), [4, 4]); } finally { await t.ctx.close(); }
 });
 
 // controle: a medição enxerga o estouro quando o CSS da área sai (senão ela não mede nada)

@@ -30,6 +30,11 @@ _WEBHOOK_URL_ENV = "ADMIN_NOTIFY_WEBHOOK_URL"
 _REQUEST_TIMEOUT_SECONDS = 5.0
 
 
+def canal_configurado() -> bool:
+    """Há para onde mandar? Quem tem pendência para reenviar olha isto antes de reivindicar."""
+    return bool((os.getenv(_WEBHOOK_URL_ENV) or "").strip())
+
+
 def _detect_provider(url: str) -> str:
     """Decide o formato do payload pelo host da URL."""
     if "hooks.slack.com" in url:
@@ -148,7 +153,7 @@ def notify_security_alert(message: str) -> bool:
 
 def notify_afiliado_alerta(message: str) -> bool:
     """Reembolso de indicado que a comissão não acompanhou sozinha. Mensagem já formatada,
-    sem dado do indicado. Reentrega pode repeti-lo, como em `notify_pix_alerta`."""
+    sem dado do indicado. True só com entrega confirmada: `reenviar_pendentes` tenta de novo."""
     return _send(message)
 
 def notify_pix_alerta(message: str) -> bool:

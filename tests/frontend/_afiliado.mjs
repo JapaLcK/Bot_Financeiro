@@ -8,12 +8,12 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { FRONTEND, ORIGIN, RESPOSTAS, abrirPainel, servir } from "./_painel.mjs";
 
-const comissao = (id, extra) => ({ id, invoice_amount: 59.9, amount: 5.99, status: "pending", available_at: "2026-09-20T12:00:00.000000+00:00", payout_id: null, payment_refund: "none", created_at: "2026-08-21T12:00:00.000000+00:00", ...extra });
+const comissao = (id, extra) => ({ id, invoice_amount: 59.9, amount: 5.99, original_amount: null, in_review: false, status: "pending", available_at: "2026-09-20T12:00:00.000000+00:00", payout_id: null, payment_refund: "none", created_at: "2026-08-21T12:00:00.000000+00:00", ...extra });
 
 /** Ana: afiliada ativa, 12 cadastros, 6 pagantes (1 reembolsado), R$ 120,00 para sacar. */
 export const ATIVA = {
   code: "ANA2026", status: "active", link: "https://pigbankai.com/r/ANA2026", commission_percent: 10, has_pix_key: false, min_payout: 50, hold_days: 30,
-  stats: { referrals: 12, held: 30, available: 120, requested: 0, paid: 200, generated: 350, paying_clients: 6, refunded_clients: 1, refunds: { total: 2, partial: 1 } },
+  stats: { referrals: 12, held: 30, available: 120, review: 0, requested: 0, paid: 200, generated: 350, paying_clients: 6, refunded_clients: 1, refunds: { total: 2, partial: 1 } },
   commissions: [
     comissao(1, { available_at: "2026-10-20T12:00:00+00:00" }),
     comissao(2),
@@ -25,13 +25,23 @@ export const ATIVA = {
   payouts: [{ id: 8, amount: 200, status: "paid", requested_at: "2026-09-01T12:00:00+00:00", paid_at: "2026-09-03T12:00:00+00:00", note: null }],
 };
 export const DESATIVADA = { ...ATIVA, status: "disabled" };
-export const ZERO = { ...ATIVA, commission_percent: 0, commissions: [], payouts: [], stats: { ...ATIVA.stats, held: 0, available: 0, requested: 0, paid: 0, generated: 0, refunds: { total: 0, partial: 0 }, refunded_clients: 0 } };
+export const ZERO = { ...ATIVA, commission_percent: 0, commissions: [], payouts: [], stats: { ...ATIVA.stats, held: 0, available: 0, review: 0, requested: 0, paid: 0, generated: 0, refunds: { total: 0, partial: 0 }, refunded_clients: 0 } };
 export const ABAIXO = { ...ATIVA, stats: { ...ATIVA.stats, available: 49.99 } };
 export const COM_SAQUE = {
   ...ATIVA,
   stats: { ...ATIVA.stats, available: 0, requested: 120, generated: 350 },
   commissions: [comissao(2, { payout_id: 9 })],
   payouts: [{ id: 9, amount: 120, status: "requested", requested_at: "2026-10-01T12:00:00+00:00", paid_at: null, note: null }],
+};
+/** Reembolso parcial: R$ 100 fora do saque até a revisão, e uma comissão já ajustada pelo admin. */
+export const EM_REVISAO = {
+  ...ATIVA,
+  stats: { ...ATIVA.stats, available: 70, review: 100, generated: 400 },
+  commissions: [
+    comissao(10, { amount: 100, invoice_amount: 1000, in_review: true, payment_refund: "partial" }),
+    comissao(11, { amount: 60, original_amount: 100, invoice_amount: 1000, payment_refund: "partial" }),
+    comissao(12, { status: "paid", amount: 200, invoice_amount: 2000, payment_refund: "total" }),
+  ],
 };
 export const REJEITADO = { ...ATIVA, payouts: [{ id: 7, amount: 90, status: "rejected", requested_at: "2026-09-10T12:00:00+00:00", paid_at: null, note: "Chave Pix não encontrada" }] };
 

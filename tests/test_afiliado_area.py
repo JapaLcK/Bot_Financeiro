@@ -9,7 +9,7 @@ pagos e 15 estornados; geradas = 410.
 Controles negativos (rodados à mão, §3 do `CLAUDE.md`):
   - tire a trava de `request_payout` → vermelho em `test_trava_*`.
   - troque a trava por `for update` → vermelho em `test_trava_nao_segura_o_webhook`.
-  - volte `paid_cents` à soma de comissões → vermelho em `test_ja_pago_*`.
+  - volte `paid_cents` à soma de comissões → vermelho em `test_ja_pago_conta_so_*`.
   - volte `requested_cents` à soma de comissões → vermelho em `test_em_saque_*`.
 Controle positivo do isolamento: B saca o dele depois da tentativa de A.
 """
@@ -402,9 +402,9 @@ def test_ja_pago_nao_encolhe_quando_o_indicado_exclui_a_conta():
 
     db.delete_user_data(comissao.indicado.uid)
 
-    with get_conn() as conn:  # sem a cascata este teste não mediria nada
-        assert conn.execute("select 1 from affiliate_commissions where id = %s",
-                            (comissao.id,)).fetchone() is None
+    with get_conn() as conn:  # a comissão fica, sem a pessoa
+        assert conn.execute("select referred_user_id from affiliate_commissions where id = %s",
+                            (comissao.id,)).fetchone() == {"referred_user_id": None}
     s = _me(c)["stats"]
     assert (s["paid"], s["generated"]) == (100, 100)
 
@@ -427,11 +427,11 @@ def test_em_saque_nao_encolhe_quando_o_indicado_exclui_a_conta():
     assert (s["requested"], s["paid"], s["generated"]) == (0, 100, 100)
 
 
-def test_rejeicao_depois_da_exclusao_devolve_so_a_comissao_que_sobrou():
+def test_rejeicao_depois_da_exclusao_devolve_a_comissao_inteira():
     c, saque = _saque_de_100_e_indicado_de_60_excluido()
     assert reject_payout(saque)
     s = _me(c)["stats"]
-    assert (s["available"], s["requested"], s["paid"], s["generated"]) == (40, 0, 0, 40)
+    assert (s["available"], s["requested"], s["paid"], s["generated"]) == (100, 0, 0, 100)
 
 
 def test_ja_pago_conta_so_o_saque_pago_e_so_o_do_afiliado():

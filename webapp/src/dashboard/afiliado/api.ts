@@ -8,9 +8,9 @@ const STATUS_COMISSAO = ["pending", "paid", "reversed"] as const;
 const REEMBOLSOS = ["none", "partial", "total"] as const;
 const STATUS_SAQUE = ["requested", "paid", "rejected"] as const;
 
-export type Comissao = { id: number; invoice_amount: number; amount: number; status: (typeof STATUS_COMISSAO)[number]; available_at: string; payout_id: number | null; payment_refund: (typeof REEMBOLSOS)[number]; created_at: string };
+export type Comissao = { id: number; invoice_amount: number; amount: number; original_amount: number | null; in_review: boolean; status: (typeof STATUS_COMISSAO)[number]; available_at: string; payout_id: number | null; payment_refund: (typeof REEMBOLSOS)[number]; created_at: string };
 export type Pedido = { id: number; amount: number; status: (typeof STATUS_SAQUE)[number]; requested_at: string; note: string | null };
-export type Stats = { referrals: number; paying_clients: number; refunded_clients: number; generated: number; held: number; available: number; requested: number; paid: number; refunds: { total: number; partial: number } };
+export type Stats = { referrals: number; paying_clients: number; refunded_clients: number; generated: number; held: number; available: number; review: number; requested: number; paid: number; refunds: { total: number; partial: number } };
 export type Afiliado = { code: string; link: string; status: "active" | "disabled"; commission_percent: number; has_pix_key: boolean; min_payout: number; hold_days: number; stats: Stats; commissions: Comissao[]; payouts: Pedido[] };
 
 const valor = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
@@ -18,8 +18,8 @@ const data = (v: unknown): v is string => texto(v) && Number.isFinite(instante(v
 const um = <T extends string>(v: unknown, lista: readonly T[]): v is T => lista.includes(v as T);
 
 function comissaoDe(c: unknown): Comissao {
-  if (!objeto(c) || !inteiro(c.id) || !valor(c.invoice_amount) || !valor(c.amount) || !um(c.status, STATUS_COMISSAO) || !data(c.available_at) || !(c.payout_id === null || inteiro(c.payout_id)) || !um(c.payment_refund, REEMBOLSOS) || !data(c.created_at)) throw contrato();
-  return { id: c.id, invoice_amount: c.invoice_amount, amount: c.amount, status: c.status, available_at: c.available_at, payout_id: c.payout_id, payment_refund: c.payment_refund, created_at: c.created_at };
+  if (!objeto(c) || !inteiro(c.id) || !valor(c.invoice_amount) || !valor(c.amount) || !(c.original_amount === null || valor(c.original_amount)) || typeof c.in_review !== "boolean" || !um(c.status, STATUS_COMISSAO) || !data(c.available_at) || !(c.payout_id === null || inteiro(c.payout_id)) || !um(c.payment_refund, REEMBOLSOS) || !data(c.created_at)) throw contrato();
+  return { id: c.id, invoice_amount: c.invoice_amount, amount: c.amount, original_amount: c.original_amount, in_review: c.in_review, status: c.status, available_at: c.available_at, payout_id: c.payout_id, payment_refund: c.payment_refund, created_at: c.created_at };
 }
 
 function pedidoDe(p: unknown): Pedido {
@@ -29,8 +29,8 @@ function pedidoDe(p: unknown): Pedido {
 
 function statsDe(s: unknown): Stats {
   if (!objeto(s) || !objeto(s.refunds) || !inteiro(s.refunds.total) || !inteiro(s.refunds.partial) || !inteiro(s.referrals) || !inteiro(s.paying_clients) || !inteiro(s.refunded_clients)
-    || !valor(s.generated) || !valor(s.held) || !valor(s.available) || !valor(s.requested) || !valor(s.paid)) throw contrato();
-  return { referrals: s.referrals, paying_clients: s.paying_clients, refunded_clients: s.refunded_clients, generated: s.generated, held: s.held, available: s.available, requested: s.requested, paid: s.paid, refunds: { total: s.refunds.total, partial: s.refunds.partial } };
+    || !valor(s.generated) || !valor(s.held) || !valor(s.available) || !valor(s.review) || !valor(s.requested) || !valor(s.paid)) throw contrato();
+  return { referrals: s.referrals, paying_clients: s.paying_clients, refunded_clients: s.refunded_clients, generated: s.generated, held: s.held, available: s.available, review: s.review, requested: s.requested, paid: s.paid, refunds: { total: s.refunds.total, partial: s.refunds.partial } };
 }
 
 function afiliadoDe(v: unknown): Afiliado {
@@ -72,6 +72,7 @@ export const dia = (iso: string) => DIA.format(instante(iso));
 export function situacao(c: Comissao): { rotulo: string; classe?: "gain" | "warn" } {
   if (c.status === "reversed") return { rotulo: "estornada", classe: "warn" };
   if (c.status === "paid") return { rotulo: "paga", classe: "gain" };
+  if (c.in_review) return { rotulo: "em revisão" };
   if (c.payout_id !== null) return { rotulo: "em saque" };
   if (instante(c.available_at) <= Date.now()) return { rotulo: "disponível", classe: "gain" };
   return { rotulo: `libera ${validade(c.available_at)}` };

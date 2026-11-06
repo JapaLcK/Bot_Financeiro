@@ -2209,14 +2209,20 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
 
     @app.get("/admin/api/affiliates")
     async def admin_affiliates_overview(username: str = Depends(_get_current_admin)):
-        """Lista afiliados (com saldos) + pedidos de saque em aberto."""
+        """Lista afiliados (com saldos), pedidos de saque, pendências e recuperações."""
+        from db.affiliate_reviews import listar_admin, listar_historico
         from db.affiliates import admin_list_affiliates, admin_list_payouts
 
         affiliates = await asyncio.to_thread(admin_list_affiliates)
         payouts = await asyncio.to_thread(admin_list_payouts, None, 100)
+        pendencias = await asyncio.to_thread(listar_admin)
+        historico = await asyncio.to_thread(listar_historico)
         return JSONResponse(content=_json_safe({
             "affiliates": [_decrypt_affiliate_row(r, username) for r in affiliates],
             "payouts": [_decrypt_affiliate_row(r, username) for r in payouts],
+            "refund_reviews": [r for r in pendencias if r["status"] == "open"],
+            "refund_recoveries": [r for r in pendencias if r["status"] == "recovery"],
+            "refund_history": historico,
         }))
 
     @app.post("/admin/api/affiliates")
@@ -2317,6 +2323,8 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         row = await asyncio.to_thread(get_payout, payout_id)
         if not row:
             raise HTTPException(status_code=404, detail="Saque não encontrado.")
+        if row["blocked"]:
+            raise HTTPException(status_code=409, detail="Este saque tem reembolso de cliente em análise.")
 
         payout = _decrypt_affiliate_row(row, username)  # registra o acesso à PII
         pix_key = (payout.get("pix_key") or "").strip()
@@ -2342,7 +2350,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         payout_id: int, request: Request, username: str = Depends(_get_current_admin)
     ):
         """Marca o saque como pago (Pix já feito por fora). Body: {"note": "..."}"""
-        from db.affiliates import mark_payout_paid
+        from db.affiliates import SaqueComPendencia, mark_payout_paid
 
         try:
             payload = await request.json()
@@ -2362,7 +2370,10 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         # não replace() inline porque "o que o Postgres aceita" tem de ter uma
         # fonte só (CLAUDE.md §0.7).
         note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
-        ok = await asyncio.to_thread(mark_payout_paid, payout_id, note)
+        try:
+            ok = await asyncio.to_thread(mark_payout_paid, payout_id, note)
+        except SaqueComPendencia as exc:
+            raise HTTPException(status_code=409, detail=detalhe_seguro(exc))
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
         await log_system_event(
@@ -2399,7 +2410,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         # não replace() inline porque "o que o Postgres aceita" tem de ter uma
         # fonte só (CLAUDE.md §0.7).
         note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
-        ok = await asyncio.to_thread(reject_payout, payout_id, note)
+        ok = await asyncio.to_thread(reject_payout, payout_id, note, username)
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
         await log_system_event(
@@ -2418,7 +2429,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         """Estorna uma comissão (fatura reembolsada/chargeback no Stripe)."""
         from db.affiliates import reverse_commission
 
-        ok = await asyncio.to_thread(reverse_commission, commission_id)
+        ok = await asyncio.to_thread(reverse_commission, commission_id, username)
         if not ok:
             raise HTTPException(
                 status_code=409,
@@ -2430,6 +2441,112 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             f"Comissão {commission_id} estornada.",
             source="affiliates",
             details={"commission_id": commission_id},
+        )
+        return {"ok": True}
+
+    # Referência do comprovante e justificativa ficam só no evento: logs abaixo levam apenas ids.
+    @app.post("/admin/api/affiliates/payouts/{payout_id}/payment-recorded")
+    async def admin_affiliate_payment_recorded(
+        payout_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """O Pix saiu antes do reembolso. Body: {"justification", "paid_on", "receipt_ref"}."""
+        from core.services.afiliado_reembolso import dia_em_brasilia, validar_comprovante, validar_justificativa
+        from db.affiliates import SaqueSemPendencia, get_payout, registrar_pagamento_realizado
+
+        payload = await _json_object_body(request)
+        row = await asyncio.to_thread(get_payout, payout_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Saque não encontrado.")
+        try:
+            justificativa = validar_justificativa(payload.get("justification"))
+            pago_em, referencia = validar_comprovante(
+                payload.get("paid_on"), payload.get("receipt_ref"), dia_em_brasilia(row["requested_at"]))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
+        try:
+            ok = await asyncio.to_thread(
+                registrar_pagamento_realizado, payout_id, pago_em, justificativa, referencia, username)
+        except SaqueSemPendencia as exc:
+            raise HTTPException(status_code=409, detail=detalhe_seguro(exc))
+        if not ok:
+            raise HTTPException(status_code=409, detail="Saque já processado.")
+        await log_system_event(
+            "warning",
+            "affiliate_payment_recorded",
+            f"Saque {payout_id} registrado como pago antes do reembolso.",
+            source="affiliates",
+            details={"payout_id": payout_id},
+        )
+        return {"ok": True}
+
+    @app.post("/admin/api/affiliates/refund-reviews/{review_id}/approve")
+    async def admin_affiliate_review_approve(
+        review_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """Fecha a revisão parcial. Body: {"approved_cents", "refunded_cents", "justification"};
+        `refunded_cents` é o que o admin viu: valor velho dá 409."""
+        from core.services.afiliado_reembolso import validar_justificativa
+        from db.affiliate_reviews import PendenciaMudou, resolver_parcial
+
+        payload = await _json_object_body(request)
+        aprovado, visto = payload.get("approved_cents"), payload.get("refunded_cents")
+        if type(aprovado) is not int or type(visto) is not int:  # `type`: `true` é `int` para `isinstance`
+            raise HTTPException(status_code=422, detail="Valor inválido: informe centavos inteiros.")
+        try:
+            justificativa = validar_justificativa(payload.get("justification"))
+            ok = await asyncio.to_thread(resolver_parcial, review_id, username, aprovado, justificativa, visto)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
+        except PendenciaMudou as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        if not ok:
+            raise HTTPException(status_code=404, detail="Pendência não encontrada.")
+        await log_system_event(
+            "warning",
+            "affiliate_refund_review_approved",
+            f"Revisão de reembolso {review_id} fechada.",
+            source="affiliates",
+            details={"review_id": review_id},
+        )
+        return {"ok": True}
+
+    @app.post("/admin/api/affiliates/refund-reviews/{review_id}/close-recovery")
+    async def admin_affiliate_review_close_recovery(
+        review_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """Encerra a recuperação. Body: {"result", "justification", "recovered_on", "receipt_ref"}."""
+        from core.services.afiliado_reembolso import dia_em_brasilia, validar_comprovante, validar_justificativa
+        from db.affiliate_reviews import PendenciaMudou, encerrar_recuperacao, refunded_at_da_pendencia
+
+        payload = await _json_object_body(request)
+        resultado = payload.get("result")
+        if resultado not in ("recovered", "waived"):
+            raise HTTPException(status_code=422, detail="Resultado inválido.")
+        data = referencia = None
+        try:
+            justificativa = validar_justificativa(payload.get("justification"))
+            if resultado == "waived":
+                if payload.get("recovered_on") is not None or payload.get("receipt_ref") is not None:
+                    raise ValueError("Recuperação dispensada não leva data nem referência.")
+            else:
+                quando = await asyncio.to_thread(refunded_at_da_pendencia, review_id)
+                data, referencia = validar_comprovante(
+                    payload.get("recovered_on"), payload.get("receipt_ref"), quando and dia_em_brasilia(quando))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
+        try:
+            ok = await asyncio.to_thread(
+                encerrar_recuperacao, review_id, resultado, username, justificativa, data, referencia)
+        except PendenciaMudou as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        if not ok:
+            raise HTTPException(status_code=404, detail="Pendência não encontrada.")
+        await log_system_event(
+            "warning",
+            "affiliate_recovery_closed",
+            f"Recuperação {review_id} encerrada: {resultado}.",
+            source="affiliates",
+            details={"review_id": review_id, "result": resultado},
         )
         return {"ok": True}
 
