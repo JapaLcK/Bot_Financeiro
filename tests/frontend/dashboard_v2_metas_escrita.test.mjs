@@ -174,6 +174,24 @@ test("apagar: segundo passo no diálogo, só depois do Confirmar apagar vai o PO
 });
 
 // O grupo do duplo clique: a guarda síncrona (useRef) é a única que vale no mesmo tick, antes do re-render.
+test("POST ok e releitura da lista pendurada (relógio falso): o diálogo fecha depois do prazo, não fica em Salvando", async () => {
+  const { ctx, page, posts, form, salvar } = await abrir({ relogio: "instalado" });
+  let pendurar = false;
+  await ctx.route(/\/api\/v2\/metas$/, (r) => (pendurar && r.request().method() === "GET" ? new Promise(() => {}) : r.fallback()));
+  await page.getByRole("button", { name: "Nova meta" }).click();
+  await form.getByLabel("Nome").fill("Carro");
+  await form.getByLabel("Quanto quer juntar").fill("1500");
+  pendurar = true;
+  await salvar.click();
+  while (!posts.length) await page.waitForTimeout(20);
+  await page.waitForTimeout(300);
+  const aberto = await page.locator(".meta-form[open]").count();
+  await page.clock.runFor(31000);
+  await fechado(page);
+  await ctx.close();
+  assert.equal(aberto, 1, "fechou antes do prazo: a releitura não está sendo esperada");
+});
+
 test("duplo clique e duplo Enter no mesmo instante = 1 POST; depois de terminar, o próximo salvar passa", async () => {
   const { ctx, page, posts, form, salvar } = await abrir({ resp: async (r, b) => { await demora(300); return r.fulfill({ json: { id: b.id ?? 99 } }); } });
   await page.getByRole("button", { name: "Nova meta" }).click();

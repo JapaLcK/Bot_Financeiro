@@ -37,7 +37,7 @@ export function useEscrita(mes: string) {
     mutationKey: CHAVE_ESCRITA, retry: false, networkMode: "always",
     mutationFn: (a: Escrita) => "potes" in a ? apiPost("/orcamento-domestico/potes", a.potes) : apiPost("/orcamento-domestico/renda", a.renda),
     onSuccess: (r) => qc.setQueryData(orcamentoQuery(mes).queryKey, r),
-    onError: () => qc.invalidateQueries({ queryKey: ["orcamento-domestico"] }), // resposta perdida: relê o que o servidor tem
+    onError: () => { void qc.invalidateQueries({ queryKey: ["orcamento-domestico"] }); }, // resposta perdida: relê o que o servidor tem; sem devolver a promessa (o TanStack a espera e uma releitura pendurada prenderia a escrita)
   });
   return { mutate: m.mutate, mutateAsync: m.mutateAsync, isError: m.isError, erro: m.isError ? falhaDoOrcamento(m.error).geral : "" };
 }

@@ -46,7 +46,7 @@ export function OrcamentoCategoriaForm({ orcamento, orcamentos, limite, fechar }
     mutationKey: CHAVE_ESCRITA, retry: false, networkMode: "always",
     mutationFn: (a: Escrita) => a.apagar ? apiPost("/orcamentos-categoria/apagar", { categoria: a.categoria }) : apiPost("/orcamentos-categoria", { categoria: a.categoria, valor: a.valor }),
     onSuccess: (r: OrcamentosCategoria) => qc.setQueryData(orcamentosCategoriaQuery.queryKey, r),
-    onError: () => qc.invalidateQueries({ queryKey: ["orcamentos-categoria"] }), // resposta perdida: relê o que o servidor tem
+    onError: () => { void qc.invalidateQueries({ queryKey: ["orcamentos-categoria"] }); }, // resposta perdida: relê o que o servidor tem; sem devolver a promessa (o TanStack a espera e uma releitura pendurada prenderia a escrita)
   });
   const pendente = useIsMutating({ mutationKey: CHAVE_ESCRITA }) > 0;
   const naTela = useRef(false); // o botão clicado (Apagar, Voltar) sai do DOM: o foco vai para o controle seguinte

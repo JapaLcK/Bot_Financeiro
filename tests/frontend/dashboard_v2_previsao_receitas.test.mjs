@@ -227,6 +227,29 @@ test("POST no ar: Sim, Não e Desfazer travados; só destravam DEPOIS da releitu
   assert.ok(depois.length >= 3 && depois.every((d) => !d), JSON.stringify(depois));
 });
 
+// A releitura que nunca responde não prende os botões: passados os 30 s do `comPrazoLeitura` (relógio instalado, sem esperar de verdade) eles destravam.
+const ERRO500 = { status: 500, json: { error: { code: "internal", message: "Internal Server Error" } } };
+for (const [nome, post, alertaEsperado, falado] of [
+  ["POST 500", ERRO500, "Não deu para salvar. Tente de novo.", ""],
+  ["POST ok", undefined, "", "Empresa Alfa Ltda: confirmada."],
+]) {
+  test(`${nome} e releitura pendurada: os botões destravam no prazo e o resultado aparece`, async () => {
+    const { ctx, page, posts } = await abrir({ relogio: "instalado", post: () => post, get: (n) => (n ? new Promise(() => {}) : undefined) });
+    await page.getByRole("button", { name: /^Sim/ }).click();
+    while (!posts.length) await page.waitForTimeout(20);
+    await page.waitForTimeout(300);
+    const antes = await botoesDasCaixas(page);
+    await page.clock.runFor(31000);
+    await page.waitForFunction(() => ![...document.querySelectorAll("#avisos-topo button, #w-previsao-receitas-respondidas button")].some((b) => b.disabled), null, { timeout: 5000 });
+    const aviso = await alerta(page);
+    const dita = await dito(page);
+    await ctx.close();
+    assert.ok(antes.length >= 2 && antes.every(Boolean), `não estavam travados com a releitura no ar: ${JSON.stringify(antes)}`);
+    assert.equal(aviso, alertaEsperado);
+    assert.equal(dita, falado);
+  });
+}
+
 test("sair da página com o POST no ar e voltar: os botões nascem travados e destravam ao responder", async () => {
   let soltar;
   const trava = new Promise((ok) => { soltar = ok; });
