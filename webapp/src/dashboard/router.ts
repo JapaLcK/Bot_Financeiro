@@ -16,7 +16,7 @@ export const ROUTES = [
   { path: "/metas", label: "Metas", short: "Metas", icon: "ph-target", title: "Metas" },
   { path: "/patrimonio", label: "Patrimônio", short: "Patrimônio", icon: "ph-wallet", title: "Patrimônio" },
   { path: "/lancamentos", label: "Lançamentos", short: "Extrato", icon: "ph-receipt", title: "Lançamentos" },
-  // A casa do grupo (familia/Casa.tsx): metas e orçamentos que a família divide. Item próprio do menu (fora da Conta); sem família a tela mostra o caminho para criar uma. O protótipo (DEMO) não tem conta nem família: ver ATIVAS.
+  // A casa do grupo (familia/CasaPagina.tsx): metas e orçamentos que a família divide. Item próprio do menu (fora da Conta); sem família a tela mostra o caminho para criar uma. O protótipo (DEMO) não tem conta nem família: ver ATIVAS.
   { path: "/casa", label: "Casa", short: "Casa", icon: "ph-heart", title: "Casa" },
   // Fora do RAIL (menu lateral e Menu do celular): abre pelo card de Ferramentas e pelo ⌘K.
   { path: "/orcamento", label: "Orçamento doméstico", short: "Orçamento", icon: "ph-house", title: "Orçamento doméstico" },

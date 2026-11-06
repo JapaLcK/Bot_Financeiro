@@ -49,7 +49,7 @@
 /* Texto vindo do servidor (nome, categoria, descrição, quem viu): a direção dele não vira a da frase em volta. */
 .fam-lista b, .fam-ver-nome, .fam-cats li > span:first-child, .fam-lanc-txt b, .fam-hist b { unicode-bidi: isolate; }
 
-/* PR 6c: a casa (familia/Casa.tsx). Mesmas regras: sem flex gap; grid com row-gap/column-gap ou margem negativa. */
+/* PR 6c: a casa (familia/CasaPagina.tsx). Mesmas regras: sem flex gap; grid com row-gap/column-gap ou margem negativa. */
 .fam-casa { row-gap: 20px; }
 .casa-sec { display: grid; row-gap: 12px; width: 100%; min-width: 0; }
 .casa-topo { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; }
