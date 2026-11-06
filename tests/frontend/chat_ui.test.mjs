@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setup, ask } from './agent_chat_fixture.mjs';
+import { ID_DA_MENSAGEM } from './_chat_ia.mjs';
+
+// O corpo do POST /ai/chat sem o `client_message_id` (aleatório por mensagem; conferido à parte).
+const semId = requests => requests.map(r => { const resto = { ...r }; delete resto.client_message_id; return resto; });
 
 async function openPiggy(page) {
   await page.evaluate(() => togglePiggy());
@@ -33,7 +37,7 @@ test('Piggy e agentes compartilham interface e alternam sem perder mensagens ou 
     await openPiggy(page);
     assert.equal(await page.inputValue('#piggy-input'), 'Rascunho do Piggy');
     assert.equal(requests.length, 1);
-    assert.deepEqual(piggyRequests, [{ message: 'Resumo do mês' }]);
+    assert.deepEqual(semId(piggyRequests), [{ message: 'Resumo do mês' }]);
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
@@ -94,7 +98,11 @@ test('Piggy abre com cota sem misturar histórico externo e reload limpa apenas 
     assert.equal(await page.locator('.piggy-msg').count(), 0);
     assert.equal(await page.inputValue('#piggy-input'), '');
     await askPiggy(page, 'Pergunta depois do reload');
-    assert.deepEqual(piggyRequests, [{ message: 'Minha primeira pergunta' }, { message: 'Pergunta depois do reload' }]);
+    assert.deepEqual(semId(piggyRequests), [{ message: 'Minha primeira pergunta' }, { message: 'Pergunta depois do reload' }]);
+    // ADR 0006 (PR-B (b)): um id por mensagem, no formato que o servidor aceita; duas mensagens, dois ids.
+    const ids = piggyRequests.map(r => r.client_message_id);
+    assert.ok(ids.every(id => ID_DA_MENSAGEM.test(id)), JSON.stringify(ids));
+    assert.notEqual(ids[0], ids[1]);
     assert.equal(usageRequests.length, 2);
   } finally { await page.close(); }
 });

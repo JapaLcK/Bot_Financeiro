@@ -166,7 +166,7 @@ def test_valor_abreviado_no_audio(ana, liga, monkeypatch):
 
 
 def test_valor_abreviado_na_fila_devolve_o_item(ana, liga, monkeypatch):
-    """A resposta "2,2k" ao "quanto foi o aluguel?" não grava 2,20: o item volta e o número inteiro grava."""
+    """A resposta "2,2k" ao "quanto foi o aluguel?" não grava: T10, o item volta e o número inteiro grava."""
     from tests._declaracao_b import fala
     fala(monkeypatch, ana, "paguei o aluguel e paguei a academia no pix")
     assert pendencia(ana) == "multi_launch_values"

@@ -19,8 +19,10 @@ from utils_text import PT_NUM_ALT_NO_ARTICLE, _PT_NUM_WORDS, agrupamento_de_milh
 
 _LIMITE = 1000  # P0: despesa não tem 1000 caracteres; acima disso recusa (T15) em vez de analisar só uma parte
 
-# Valor abreviado ("2,2k", "dois k", "2kk", "1,5 mi", "50 centavos", "cinquenta centavos", "25 cents"): o parser lê 2,2 / 2 / 50
-# (e "trinta reais e cinquenta centavos" vira R$ 80). Recusa também o que parece abreviação mas não é ("anel 18k",
+# Valor abreviado ("2,2k", "dois k", "2kk", "1,5 mi", "50 centavos", "cinquenta centavos", "25 cents"): T10, porque a
+# declaração pelo roteador grava sem confirmação. Desde o #1395 o parser lê "2,2k" como 2200, mas segue lendo "dois k" e
+# "2kk" como 2, "1,5 mi" como 1,5, "50 centavos" como 50 (e "trinta reais e cinquenta centavos" vira R$ 80). Revisão junto
+# da #1315, na #1404. Recusa também o que parece abreviação mas não é ("anel 18k",
 # "99 centavos"): recusar não custa nada, gravar errado custa apagar e relançar.
 _ABREVIADO_RE = re.compile(r"(?<![\w.,])\d[\d.,]*\s*(?:kk?|mi)\b|(?<!\w)(?:\w+\s+)?kk?(?!\w)"
                            r"|(?:\S+\s+)?\bcent(?:avos?|s)?\b", re.IGNORECASE)
