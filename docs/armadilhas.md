@@ -403,9 +403,18 @@ fixo de toda mudança de layout.
   (contagens da produção em 2026-10-09, só contagens: remedir antes de citar). Medir o formato num conector real antes de fixar convenção de sinal. E
   `Transfer - Internal` no cartão é o **pagamento da fatura** (a saída igual está na conta
   corrente), não transferência: `pagamento_no_cartao` (`db/open_finance.py`).
-- **`launch.py` vira o uvicorn** (`os.execv`, que atende o `$PORT` do Railway): um `web`
-  no Procfile, um processo, e o SIGTERM chega direto ao uvicorn. O `bot.py` do Discord
-  saiu dele no PR 5a do dashboard v2 e não roda mais.
+- **No Railway o start command vale no lugar do Procfile.** O `Dashboard/whatsapp` sobe o
+  uvicorn direto e o `account-deletion-job` roda o próprio script, sem passar pelo
+  `launch.py`. Ele só vale no Procfile e no ambiente local, onde vira o uvicorn
+  (`os.execv`), e o SIGTERM chega direto ao uvicorn. Conferir o que roda se faz no Railway
+  (`railway environment config --json`), não neste repositório.
+- **O bot do Discord não roda, e isso vale desde 2026-11-06.** O `bot.py` saiu do
+  `launch.py` no PR 5a do dashboard v2, mas seguiu no ar pelo serviço `Core`, com start
+  command próprio, e subia a cada merge. O `Core` foi desconectado do repositório e parado
+  nos dois ambientes, sem apagar o serviço nem as variáveis. O `-e` do
+  `railway service source disconnect` só resolve o serviço: rodado com `-e staging`, ele
+  desconectou a produção. O `Core` do staging segue apontando para a branch
+  `refactor/pockets-cog`, que não existe mais, então merge na `main` não o alcança.
 - **Tarefas de fundo sobem no startup do app** quando `RUN_BACKGROUND_TASKS != "0"`
   (agendadores de investimento, Open Finance, engajamento, cobrança recorrente, poda
   das tabelas de token/challenge, índices das FKs…; esta última, `fk_indexes`, roda uma vez
