@@ -10230,6 +10230,60 @@
       "link": "https://pigbankai.com/familia/entrar#t=tok-ABC_def-123",
       "expira_em": "2026-11-08T15:00:00Z"
     },
-    "dissolucao": { "membros": 2, "convites": 1, "consentimentos": 0, "metas": 0, "orcamentos": 0, "confirmacao": "nonce-abc123" }
+    "dissolucao": { "membros": 2, "convites": 1, "consentimentos": 0, "metas": 0, "orcamentos": 0, "confirmacao": "nonce-abc123" },
+    "permissoes": { "permissoes": ["agregados"] },
+    "historico": {
+      "itens": [
+        { "quando": "2026-11-02T17:30:00+00:00", "quem": "Carlos", "escopo": "agregados", "mes": "2026-11" },
+        { "quando": "2026-11-01T12:05:00+00:00", "quem": "Carlos", "escopo": "lancamentos", "mes": "2026-10" }
+      ],
+      "proximo": "41"
+    },
+    "casa": {
+      "mes": "2026-10",
+      "metas": [
+        { "ref": "m1", "nome": "Viagem", "alvo": "5000.00", "guardado": "1234.56", "falta": "3765.44", "percentual": 24, "prazo": "2026-12-31", "autor": "Ana", "versao": 1 },
+        { "ref": "m2", "nome": "Reserva", "alvo": "1000.00", "guardado": "1000.00", "falta": "0.00", "percentual": 100, "prazo": null, "autor": null, "versao": 3 }
+      ],
+      "orcamentos": [
+        { "ref": "o1", "categoria": "Mercado", "limite": "800.00", "gasto": "350.00", "restante": "450.00", "autor": "", "versao": 2 },
+        { "ref": "o2", "categoria": "Luz", "limite": "200.00", "gasto": "250.00", "restante": "-50.00", "autor": "Ana", "versao": 1 }
+      ]
+    },
+    "historico_vazio": { "itens": [], "proximo": null },
+    "agregados": {
+      "mes": "2026-11",
+      "entrou": "1234.56",
+      "saiu": "789.10",
+      "categorias": [
+        { "chave": "mercado", "nome": "Mercado", "emoji": "🛒", "icone": "shopping-cart", "cor": "#16A34A", "valor": "450.00", "quantidade": 6 },
+        { "chave": "transporte", "nome": "Transporte", "emoji": "🚌", "icone": "bus", "cor": "#2563EB", "valor": "120.50", "quantidade": 9 }
+      ],
+      "orcamentos": {
+        "itens": [
+          { "categoria": "Mercado", "chave": "mercado", "emoji": "🛒", "icone": "shopping-cart", "cor": "#16A34A", "teto": "600.00", "gasto": "450.00", "restante": "150.00", "usado_pct": "75.00", "status": "verde" }
+        ],
+        "total": { "teto": "600.00", "gasto": "450.00", "restante": "150.00", "usado_pct": "75.00", "em_risco": 0 }
+      },
+      "historico_desde": "2026-10-20",
+      "motivos": ["inicio_do_historico"]
+    },
+    "agregados_passado": {
+      "mes": "2026-10",
+      "entrou": "2000.00",
+      "saiu": "1500.25",
+      "categorias": [],
+      "orcamentos": null,
+      "historico_desde": null,
+      "motivos": []
+    },
+    "lancamentos": {
+      "mes": "2026-11",
+      "itens": [
+        { "data": "2026-11-02", "tipo": "saida", "valor": "89.90", "moeda": "BRL", "descricao": "Compra no mercado", "categoria": "mercado", "parcela": null },
+        { "data": "2026-11-01", "tipo": "entrada", "valor": "1234.56", "moeda": "BRL", "descricao": "Salário", "categoria": null, "parcela": { "n": 1, "total": 3 } }
+      ],
+      "proximo": "Z0FBQUFB-cursor_opaco=="
+    }
   }
 }

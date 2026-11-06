@@ -56,12 +56,15 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * `/comparacao` responde a fixture de nome `comparacao` (padrão `aberto`) no Plus e no Pro e, como o
  * servidor (`financial_comparison`), o 403 `pro_required` nos outros. `/cartoes`, `/parcelas` e `/rendimento` (sem gate de plano) e `/renda` e `/insights` (Plus e Pro; 403 `pro_required` nos outros)
  * respondem as fixtures de mesmo nome (padrão `padrao`).
+ * O cookie `pb_conta` (o marcador de troca de conta, `lib/sessao.ts`) nasce com `marca` (padrão "1", o `user_id` do perfil acima;
+ * `null` = sem o cookie, a sessão de antes do deploy): sem ele a carga faria um GET a mais do perfil.
  * Registrar de novo vale para as próximas requisições (atraso, falha, troca de
  * resposta): no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "em_dia", orcamento = "padrao", milhao = "padrao", orcamentosCategoria = "padrao", patrimonio = "continuo", comparacao = "aberto", cartoes = "padrao", parcelas = "padrao", renda = "padrao", insights = "padrao", rendimento = "padrao" } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { marca = "1", plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "em_dia", orcamento = "padrao", milhao = "padrao", orcamentosCategoria = "padrao", patrimonio = "continuo", comparacao = "aberto", cartoes = "padrao", parcelas = "padrao", renda = "padrao", insights = "padrao", rendimento = "padrao" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
+  if (marca !== null) await ctx.addCookies([{ name: "pb_conta", value: marca, url: ORIGIN }]);
   let atual = perfil;
   await ctx.route("**/*", (r) => {
     const url = new URL(r.request().url());

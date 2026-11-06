@@ -153,8 +153,10 @@ def drenar_evento(event_id: str) -> None:
 
 def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
     """O dreno propriamente dito. `None` = concluído; tupla = falha retentável."""
-    if evt["payload_enc"] is None:
-        return None  # purgado (§13.3): fecha o evento e sai, sem falhar
+    if evt["payload_enc"] is None:  # purgado (§13.3): fecha sem falhar; compra que travou avisa (#1265)
+        if evt["event_type"] in ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED") and evt["attempts"]:
+            admin_notify.notify_pix_alerta(f"⚠️ **Pix: compra purgada sem processar** `{event_id}` — {evt['attempts']} tentativas; conferir acesso.")
+        return None
     dados = _payload(evt["payload_enc"])
     pagamento = dados.get("payment") if isinstance(dados.get("payment"), dict) else {}
     payment_id = pagamento.get("id")
@@ -213,7 +215,7 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
         nova, falha = _transicionar(cobranca, origens, destino, payment_id)
         if falha:
             return falha
-        if nova and destino == "paid" and cobranca["status"] in ("draft", "creating"):
+        if nova and destino == "paid" and cobranca["status"] in ("draft", "creating", "canceling", "canceled"):
             avisar_pago_sem_qr(cobranca)  # ponytail: perdido se morrer aqui; é só aviso
         cobranca = nova or buscar_por_asaas_payment_id(payment_id) or cobranca
 

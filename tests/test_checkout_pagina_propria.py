@@ -301,7 +301,8 @@ def test_e_retrieve_que_falha_vende_o_plano_sem_caixas(user_id, monkeypatch):
         assert not [k for k in meta if k.startswith("ebook")]
     (log,) = _recusas(uid)
     assert log["precos"] == ["price_x1", "price_x2", "price_x3"]
-    assert "conexão caiu" in log["stripe"] and "pdf.test" not in str(log)
+    assert log["code"] == "_FakeStripeError"                      # sem `code`: o tipo (#657)
+    assert "conexão caiu" not in str(log) and "pdf.test" not in str(log)
 
 
 def test_e_invalid_request_em_elementos_e_502_sem_keyerror(user_id, monkeypatch):

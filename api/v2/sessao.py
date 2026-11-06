@@ -45,6 +45,6 @@ def usuario_sessao(request: Request) -> int:
 
 
 def usuario_logado(request: Request) -> int:
-    """Logado e na allowlist da v2, SEM exigir assinatura. Existe para o Plano Família: aceite, GET /familia e sair
-    (quem não tem plano ainda aceita, vê e sai). `tests/test_api_v2_rotas.py` reprova qualquer outra rota que a use."""
+    """Logado e na allowlist da v2, SEM exigir assinatura. Existe para o Plano Família: aceite, sair e revogar
+    permissão (quem não tem plano ainda aceita, sai e reduz o que liberou; ver e conceder pedem plano). `tests/test_api_v2_rotas.py` reprova qualquer outra rota que a use."""
     return _exigir_v2(usuario_sessao(request))

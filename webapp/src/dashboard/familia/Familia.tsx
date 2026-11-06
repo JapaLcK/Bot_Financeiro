@@ -1,25 +1,22 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
-import { ErroApi, contaQuery } from "../lib/v2";
+import { useEffect, useState } from "react";
+import { ErroApi } from "../lib/v2";
 import { route } from "../router";
 import { Confirma } from "../conta/Confirma";
 import { criarFamilia, familiaQuery, sairDaFamilia } from "./api";
-import { FalhaFamilia, focarTitulo, useEscrita } from "./escrita";
+import { FalhaFamilia, focarTitulo, useDonoDaTela, useEscrita } from "./escrita";
+import { Historico } from "./Historico";
+import { Permissoes } from "./Permissoes";
 import { Titular } from "./Titular";
 
 // Família da Conta (/conta/familia): sem família (criar), membro (sair) ou titular (Titular.tsx). A API é a api/v2/familia.py.
-// O `key` muda quando o uid muda: trocar de conta com a página aberta limpa o que o resetQueries (main.tsx) não alcança: o erro de ação (`falha` do useEscrita) e o diálogo Sair aberto (`saindo`).
-// O 1º uid que chega não conta como troca (a tela já está montada e relendo). O perfil não relê ao voltar à aba (contaQuery); aqui sim,
-// porque é ele que diz de quem é a família na tela.
+// De quem é a tela e o `key` por uid: `useDonoDaTela` (escrita.tsx).
 export function ContaFamilia() {
-  const uid = useQuery({ ...contaQuery, refetchOnWindowFocus: true }).data?.user_id;
-  const visto = useRef<number | undefined>(undefined);
-  const troca = useRef(0);
-  if (uid !== undefined) { if (visto.current !== undefined && uid !== visto.current) troca.current++; visto.current = uid; }
-  return <Tela key={troca.current} />;
+  const { uid, perfilFalhou, chave } = useDonoDaTela();
+  return <Tela key={chave} uid={uid} perfilFalhou={perfilFalhou} />;
 }
 
-function Tela() {
+function Tela({ uid, perfilFalhou }: { uid: number | undefined; perfilFalhou: (() => void) | undefined }) {
   const qc = useQueryClient();
   const q = useQuery(familiaQuery);
   const escrita = useEscrita();
@@ -28,7 +25,7 @@ function Tela() {
 
   const sessao = q.error instanceof ErroApi && q.error.status === 401;
   const d = q.isError ? undefined : q.data; // erro de carga nunca mostra o dado velho; `null` = sem família
-  const criar = () => rodar(async () => { await criarFamilia(); await qc.invalidateQueries({ queryKey: familiaQuery.queryKey }); });
+  const criar = () => rodar(async () => { await criarFamilia(); void qc.invalidateQueries({ queryKey: familiaQuery.queryKey }); }); // sem `await`: a releitura (5xx = ~3 s de retries; pendurada = nunca) não prende o botão
   const sair = async () => {
     // Sucesso: a página recarrega em /painel (o plano do membro muda, o /me precisa ser lido de novo). `rodar` já guarda a falha.
     if (await rodar(sairDaFamilia)) location.assign("/painel");
@@ -51,10 +48,12 @@ function Tela() {
   </>;
   else if (d.papel === "membro") corpo = <>
     <p>Você está numa família.</p>
+    <Permissoes permissoes={d.permissoes} escrita={escrita} />
+    <Historico uid={uid} perfilFalhou={perfilFalhou} />
     <button type="button" className="btn btn-ghost" aria-disabled={ocupado || undefined} onClick={() => setSaindo(true)}>Sair da família</button>
     {saindo && <Confirma titulo="Sair da família?" texto="Você perde o acesso ao plano da família." botao="Sair" pendente="Saindo…" fechar={() => setSaindo(false)} agir={sair} />}
   </>;
-  else corpo = <Titular v={d} escrita={escrita} />;
+  else corpo = <Titular v={d} escrita={escrita} uid={uid} perfilFalhou={perfilFalhou} />;
 
   return (
     <>

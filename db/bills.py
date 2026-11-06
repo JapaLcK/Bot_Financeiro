@@ -74,7 +74,7 @@ def get_bill(user_id: int, bill_id: int) -> dict[str, Any] | None:
                        b.due_date, b.amount, b.status, b.paid_at, b.paid_amount,
                        b.launch_id, coalesce(r.variable_amount, false) as variable_amount
                 from bill_instances b
-                left join recurring_expenses r on r.id = b.recurring_id
+                left join recurring_expenses r on r.id = b.recurring_id and r.user_id = b.user_id
                 where b.user_id = %s and b.id = %s
                 """,
                 (user_id, int(bill_id)),
@@ -254,10 +254,10 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None, *,
                         (int(bill_id), int(user_id)),
                     )
                 conn.commit()
-        except Exception:
-            logger.exception(
-                "falha ao devolver a conta %s do usuario %s para pending — "
-                "ela ficou paga sem lançamento", bill_id, user_id)
+        except Exception as exc:
+            logger.error("falha ao devolver a conta %s do usuario %s para pending — ela ficou paga sem"
+                         " lançamento causa=%s sqlstate=%s", bill_id, user_id, type(exc).__name__,
+                         getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         raise
     # Sem marca (a /api/v2 a apagaria na janela) até a ligação gravar; o pool commita.
     with get_conn() as conn, conn.cursor() as cur:
@@ -269,12 +269,12 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None, *,
     return get_bill(user_id, bill_id)
 
 
-def mark_bill_reminder_sent(bill_id: int, sent_on: date) -> None:
+def mark_bill_reminder_sent(user_id: int, bill_id: int, sent_on: date) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update bill_instances set reminder_last_sent_on=%s where id=%s",
-                (sent_on, int(bill_id)),
+                "update bill_instances set reminder_last_sent_on=%s where user_id=%s and id=%s",
+                (sent_on, int(user_id), int(bill_id)),
             )
         conn.commit()
 
@@ -330,7 +330,7 @@ def list_due_bill_reminders(user_id: int, today: date, days_before: int = 3) -> 
                        b.due_date, b.amount, b.status, b.reminder_last_sent_on,
                        coalesce(r.variable_amount, false) as variable_amount
                 from bill_instances b
-                left join recurring_expenses r on r.id = b.recurring_id
+                left join recurring_expenses r on r.id = b.recurring_id and r.user_id = b.user_id
                 where b.user_id = %s
                   and b.status = 'pending'
                   and (b.reminder_last_sent_on is null or b.reminder_last_sent_on <> %s)

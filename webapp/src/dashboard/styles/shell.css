@@ -64,20 +64,25 @@
   .rail-list .ajuda-menu button:hover { background: var(--plane-3); }
 }
 
-/* Conta (App.tsx): presa embaixo do trilho (o margin-top:auto era do .rail-foot, que agora fecha a coluna). */
+/* Conta (parts/RailConta.tsx): presa embaixo do trilho (o margin-top:auto era do .rail-foot, que agora fecha a coluna). */
 .rail-conta { margin-top: auto; display: grid; gap: 2px; }
 .rail-conta button:disabled, .menu-telas-conta button:disabled { opacity: 0.5; cursor: default; } /* Sair já clicado */
-.rail-conta-t { margin: 0; padding: 0 12px 4px; font-size: 11.5px; color: var(--ink-3); }
+/* O subtítulo é o botão que recolhe o grupo (parts/RailConta.tsx): 44px de alvo, o texto pequeno de sempre e a seta que gira (a mesma do .grupo, panels.css). */
+.rail-conta .rail-conta-t { height: 44px; justify-content: space-between; font-size: 11.5px; color: var(--ink-3); }
+.rail-conta-t .ph-caret-right { font-size: 11px; transition: transform var(--t-fast) ease; }
+.rail-conta-t[aria-expanded="true"] .ph-caret-right { transform: rotate(90deg); }
 /* Trilho mais baixo que a coluna: com a Conta de 5 itens (a Família é o 5º) o trilho normal (Conta + rodapé) só cabe a partir de 787px (1440×786 corta 1px,
-   1440×780 corta 7px), então 786px é o último compacto. Um 1366×768 deixa ~657px e o trilho não rola. Itens e espaços menores. */
-@media (max-height: 786px) {
+   1440×780 corta 7px), então 786px é o último compacto. Um 1366×768 deixa ~657px e o trilho não rola. Itens e espaços menores.
+   Com o grupo Conta ABERTO (RailConta.tsx, só numa tela da Conta) o menu tem a Casa a mais e o subtítulo de 44px: o Sair ficava cortado sem rolagem em 787–801px e em 657–669px (medido),
+   então o compacto vai até 801px e o de 30px até 669px. Fechado (o padrão), o trilho cabe sem rolar a partir de 600px. */
+@media (max-height: 801px) {
   .rail { gap: 14px; padding: 14px 14px 12px; }
   .rail-list a, .rail-list button, .rail-conta a, .rail-conta button { height: 32px; }
   .rail-list { gap: 0; }
   .rail-conta ul { gap: 0; }
 }
-/* Os 5 itens da Conta a 32px pedem 657px; abaixo de 656px os itens baixam a 30px e o trilho segue sem rolar até 625px (624 rola 1px). */
-@media (max-height: 656px) {
+/* Fechado, os itens a 32px cabem até 560px (o grupo aberto, ver acima, pede 670px); abaixo de 669px baixam a 30px. */
+@media (max-height: 669px) {
   .rail-list a, .rail-list button, .rail-conta a, .rail-conta button { height: 30px; }
 }
 /* Janela baixa demais até para isso (zoom, janela pequena): o trilho rola e o Sair se alcança com Tab. O overflow cortaria o menu da Ajuda,
@@ -161,6 +166,7 @@
   :root { --rail-w: 72px; --gutter: 28px; }
   .brand span, .rail-label { display: none; }
   .rail-list a, .rail-list button, .rail-conta a, .rail-conta button { justify-content: center; padding: 0; }
+  .rail-conta .rail-conta-t { justify-content: center; margin: 0 -2px; width: calc(100% + 4px); } /* a coluna de ícones tem 43px: o alvo do subtítulo chega a 44 */
   .rail-list i, .rail-conta i { font-size: 19px; }
   .brand { justify-content: center; padding: 4px 0; }
   .rail-foot { display: none; }

@@ -173,21 +173,23 @@ def test_cliente_apagado_fecha_sem_retentar(conta, stripe_fake):
     assert stripe_fake.de(c.cus) == [b]
 
 
-def test_email_recusado_fica_fora_do_log(conta, stripe_fake):
+@pytest.mark.parametrize("code, esperado", [("email_invalid", "email_invalid"), (None, "InvalidRequestError")],
+                         ids=["com-code", "sem-code"])
+def test_email_recusado_fica_fora_do_log(conta, stripe_fake, code, esperado):
     """A `JUSTIFICADAS` de `stripe_email_sync._sincronizar` (tests/test_log_dono_na_coluna.py):
-    o `code`/`param` ficam no `details`; a mensagem e o corpo da resposta do Stripe, que repetem
-    o e-mail, não."""
+    o `code` (ou o tipo, quando o Stripe não manda `code`) e o `param` ficam no `details`; a
+    mensagem e o corpo da resposta do Stripe, que repetem o e-mail, não."""
     c = conta()
     b = c.novo("b")
-    corpo = {"error": {"code": "email_invalid", "param": "email", "message": f"Invalid email address: {b}"}}
+    corpo = {"error": {"code": code, "param": "email", "message": f"Invalid email address: {b}"}}
     stripe_fake.erro = stripe.InvalidRequestError(
-        f"Invalid email address: {b}", "email", code="email_invalid", http_status=400,
+        f"Invalid email address: {b}", "email", code=code, http_status=400,
         http_body=json.dumps(corpo), json_body=corpo)
     assert c.patch(email=b).status_code == 200
     sincronizar_pendentes()
-    (log,) = _sql("select message || details::text as d from system_event_logs"
+    (log,) = _sql("select message || details::text as d, details from system_event_logs"
                   " where event_type = 'stripe_email_sync_recusado' and user_id = %s", (c.uid,))
-    assert "email_invalid" in log["d"] and b not in log["d"] and c.email not in log["d"], log
+    assert log["details"]["code"] == esperado and b not in log["d"] and c.email not in log["d"], log
 
 
 # ── S5: A → B → C termina em C ───────────────────────────────────────────────

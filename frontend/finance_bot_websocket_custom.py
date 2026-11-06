@@ -163,6 +163,7 @@ from frontend.routes.settings import router as settings_router
 from frontend.routes.simulator import router as simulator_router
 from frontend.routes.shared import (
     AUTH_COOKIE_NAME,
+    CONTA_COOKIE_NAME,
     DASHBOARD_COOKIE_NAME,
     DASHBOARD_CURRENT_CACHE_TTL_SECONDS as _DASHBOARD_CURRENT_CACHE_TTL_SECONDS,
     DASHBOARD_URL,
@@ -182,6 +183,7 @@ from frontend.routes.shared import (
     jdump,
     limiter,
     make_jwt as _make_jwt,
+    marcar_conta,
     months_pt as _months_pt,
     painel_como_destino,
     parse_date_param as _parse_date_param,
@@ -2922,6 +2924,7 @@ def _set_dashboard_cookie(response: Response, user_id: int, *, jti: str | None =
         samesite="lax",
         max_age=int(DASHBOARD_SESSION_HOURS * 3600),
     )
+    marcar_conta(response, user_id)
     return token
 
 
@@ -3058,6 +3061,7 @@ def _clear_session_cookies(response: Response) -> None:
         _expire_cookie(response, AUTH_COOKIE_NAME, domain)
         _expire_cookie(response, DASHBOARD_COOKIE_NAME, domain)
         _expire_cookie(response, CSRF_COOKIE_NAME, domain)
+        _expire_cookie(response, CONTA_COOKIE_NAME, domain)
     # Refresh cookie tem path restrito — limpa com mesmo path pra remover
     response.delete_cookie(
         REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH,
@@ -4624,8 +4628,8 @@ async def auth_account_export_download(request: Request, token: str):
                 )
         except Exception as exc:
             logging.getLogger(__name__).warning(
-                "Falha ao enviar e-mail de confirmação de export para user_id=%s: %s",
-                user_id, exc,
+                "Falha ao enviar e-mail de confirmação de export para user_id=%s causa=%s sqlstate=%s",
+                user_id, type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id},
             )
         await log_system_event(
             "info",
@@ -5712,7 +5716,8 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
                 "error", "ebook_oferta_recusada",
                 "Stripe recusou os produtos extras; checkout refeito sem eles.",
                 source="billing", user_id=int(user_id),
-                details={"stripe": str(exc)[:500], "precos": [p for p, _ in extras]})
+                details={"code": exc.code or type(exc).__name__,  # sem `code`: o tipo; nunca a mensagem
+                         "precos": [p for p, _ in extras]})
             del kwargs["optional_items"]
             for meta in (metadata, subscription_data["metadata"]):
                 for chave in para_metadata(extras):
@@ -5897,9 +5902,10 @@ async def billing_create_checkout(
         return result
     except HTTPException:
         raise
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "billing_checkout_lock_failed user=%s", user_id)
+    except Exception as exc:
+        logging.getLogger(__name__).error(
+            "billing_checkout_lock_failed user=%s causa=%s sqlstate=%s", user_id,
+            type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         raise HTTPException(
             status_code=503,
             detail="Não consegui iniciar o checkout agora. Tenta de novo em instantes.",
@@ -6159,7 +6165,8 @@ async def billing_change_plan(
             ],
         )
     except stripe.error.StripeError as exc:
-        logging.getLogger(__name__).error("change_plan_stripe_error user=%s: %s", user_id, exc)
+        logging.getLogger(__name__).error("change_plan_stripe_error user=%s causa=%s sqlstate=%s", user_id,
+                                          type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         raise HTTPException(status_code=502, detail="Não foi possível trocar seu plano agora. Tente novamente em instantes.")
 
     effective_iso = datetime.fromtimestamp(period_end, tz=timezone.utc).date().isoformat()
@@ -6216,7 +6223,8 @@ async def billing_cancel_change(request: Request, user_id: int = Depends(_get_cu
     try:
         await asyncio.to_thread(stripe.SubscriptionSchedule.release, sched_id)
     except stripe.error.StripeError as exc:
-        logging.getLogger(__name__).error("cancel_change_stripe_error user=%s: %s", user_id, exc)
+        logging.getLogger(__name__).error("cancel_change_stripe_error user=%s causa=%s sqlstate=%s", user_id,
+                                          type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         raise HTTPException(status_code=502, detail="Não foi possível desfazer a troca agora. Tente novamente em instantes.")
     await log_system_event(
         "info", "billing_plan_change_cancelled",
@@ -8111,7 +8119,8 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
             except psycopg.errors.CheckViolation:
                 raise
             except Exception as exc:
-                logging.getLogger(__name__).error("registrar_parcelamento user=%s: %s", user_id, exc)
+                logging.getLogger(__name__).error("registrar_parcelamento user=%s causa=%s sqlstate=%s", user_id,
+                                                  type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
                 raise HTTPException(status_code=500, detail="Erro ao registrar parcelamento. Tente novamente.") from exc
 
             info, total = (result[0], result[1]) if isinstance(result, tuple) else (result, valor)

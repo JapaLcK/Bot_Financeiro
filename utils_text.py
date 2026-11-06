@@ -818,8 +818,10 @@ _PT_PHRASE = rf"(?:{_PT_NUM_ALT})(?:\s+e\s+(?:{_PT_NUM_ALT})|\s+(?:{_PT_NUM_ALT}
 _PT_MULT_LONGO = r"milh[oõ]es|milh[aã]o|bilh[oõ]es|bilh[aã]o|trilh[oõ]es|trilh[aã]o|mil"
 # "bi" curto só vale depois de dígito ("2 bi"); por extenso "um bi" é artigo + gíria.
 _PT_BI = r"bi\b(?!-)"  # "bi-cicleta" (hífen) não é "bi"
-_PT_MULT = rf"{_PT_MULT_LONGO}|{_PT_BI}"
-_PT_MULT_VALOR = {"mil": 10**3, "milh": 10**6, "bi": 10**9, "bilh": 10**9, "tril": 10**12}
+# "k" de mil ("1,5k", "2 k"), como o "bi": só depois de dígito (decisão do dono, #1329). "kg" não casa.
+_PT_K = r"k\b(?!-)"  # "k-pop" não é mil
+_PT_MULT = rf"{_PT_MULT_LONGO}|{_PT_BI}|{_PT_K}"
+_PT_MULT_VALOR = {"k": 10**3, "mil": 10**3, "milh": 10**6, "bi": 10**9, "bilh": 10**9, "tril": 10**12}
 _PT_SPELLED_MULT_RE = re.compile(rf"\b({_PT_PHRASE})\s+({_PT_MULT_LONGO})\b", re.IGNORECASE)
 # Numeral completo do RESTO ("1.234,56", "1.500", "0.5", "500"): termina em dígito, então o ponto/vírgula
 # final de frase ("1 mil e 500." / "1 mil e 500, no mercado") fica de fora. O valor passa por `parse_money`.
@@ -842,9 +844,9 @@ PT_NUM_ALT_NO_ARTICLE = "|".join(
 )
 # Um "valor" = dígitos OU número por extenso, com "mil/milhão/bilhão/trilhão" opcional e
 # encadeamento por "e" ("cento e vinte", "dez mil", "cem mil e quinhentos").
-# "bi" curto só colado em dígito ("100 bi", "0,5 bi e 100 milhões"); "cem bi"/"de bi" não.
+# "bi"/"k" curtos só colados em dígito ("100 bi", "0,5 bi e 100 milhões"); "cem bi"/"de bi" não.
 _PT_DIG = r"\d[\d.,]*"
-_PT_DIG_BI = rf"{_PT_DIG}(?:\s*{_PT_BI})?"
+_PT_DIG_BI = rf"{_PT_DIG}(?:\s*(?:{_PT_BI}|{_PT_K}))?"  # "k" também (#1329): "2x de 1,5k"
 PT_VALUE = (
     rf"(?:r\$\s*)?(?:{_PT_DIG_BI}|{_PT_NUM_ALT}|{_PT_MULT_LONGO})"
     rf"(?:\s+(?:e\s+)?(?:{_PT_DIG_BI}|{_PT_NUM_ALT}|{_PT_MULT_LONGO}))*"
@@ -925,13 +927,15 @@ def valor_finito(v, teto=VALOR_MAX) -> bool:
         return False
 
 
-def _soma_restos(text: str, pos: int, extenso: bool) -> float:
+def _soma_restos(text: str, pos: int, extenso: bool) -> float | None:
     """Soma os "e <resto>" que seguem a base em `pos`; cada resto leva o PRÓPRIO multiplicador
     ("0,8 bilhão e 300 milhões e 5 mil"). Resto sem multiplicador é o último; frase só se a base é por extenso."""
     total = 0.0
     while (r := _PT_RESTO_RE.match(text, pos)):
         if r.group(1):
-            total += parse_money(r.group(1)) * (_PT_MULT_VALOR[r.group(2).lower()[:4]] if r.group(2) else 1)
+            if (v := parse_money(r.group(1))) is None:
+                return None  # resto malformado ("1k e 1,2,3"): recusa, como a base
+            total += v * (_PT_MULT_VALOR[r.group(2).lower()[:4]] if r.group(2) else 1)
         elif extenso and (n := _pt_words_to_int(r.group(3))) is not None:
             total += n * (_PT_MULT_VALOR[r.group(4).lower()[:4]] if r.group(4) else 1)
         else:
@@ -951,28 +955,41 @@ def parse_money(text: str) -> float | None:
     if sm:
         base = _pt_words_to_int(sm.group(1))
         if base is not None:
-            return round(base * _PT_MULT_VALOR[sm.group(2).lower()[:4]] + _soma_restos(text, sm.end(), True), 2)
+            restos = _soma_restos(text, sm.end(), True)
+            return None if restos is None else round(base * _PT_MULT_VALOR[sm.group(2).lower()[:4]] + restos, 2)
 
     # multiplicador "mil"/"milhão"/"bi": "10 mil" → 10000, "1 mil e 500" → 1500.
     # O dígito antes é OPCIONAL até milhão: "mil reais" (sem número) = 1000 e "um milhão" =
     # 1000000 — senão cairia no número contínuo abaixo e pegaria um valor errado
     # (ex.: "parcelei mil reais em 10 vezes" pegaria o "10" de "10 vezes").
     # Precisa vir antes do número contínuo.
-    for mm in re.finditer(rf'\b(\d+(?:[.,]\d+)?\s*)?({_PT_MULT})\b', text or "", re.IGNORECASE):
+    for mm in re.finditer(rf'\b(\d+(?:[.,]\d+)*\s*)?({_PT_MULT})\b', text or "", re.IGNORECASE):
         mult = _PT_MULT_VALOR[mm.group(2).lower()[:4]]
-        if not mm.group(1) and mult > 10**6:
-            # bi/bilhão/trilhão sem número não é valor (hipérbole)
+        if not mm.group(1) and (mult > 10**6 or mm.group(2).lower() == "k"):
+            # bi/bilhão/trilhão sem número não é valor (hipérbole); "k" solto é letra
             continue
+        depois = text[mm.end():]
+        while (r := _PT_RESTO_RE.match(depois)):
+            depois = depois[r.end():]  # "1k e 500 reais": o resto somado não é outro valor
+        if mm.group(2).lower() == "k" and (
+            re.search(r"\d", text[:mm.start()])
+            or re.search(rf"r\$\s*\d|\d\s*(?:mil|milh|bi|reais|real)|\b(?:{_PT_MULT_LONGO})\b", depois, re.IGNORECASE)
+        ):
+            continue  # "300 numa TV 4K" / "TV 4K por 3 mil": com outro valor na frase, o "k" é descrição
         # mesma regra do número comum abaixo: "1.5 mil" = 1500, "1.500 mil" = 1.500.000
         base = parse_money(mm.group(1)) if mm.group(1) else 1.0
-        return round(base * mult + _soma_restos(text, mm.end(), False), 2)  # 0,067 * 1e9 = 67000000.00000001
+        if base is None:
+            return None  # base malformada ("1,2,3 mil"): recusa, não adivinha
+        restos = _soma_restos(text, mm.end(), False)
+        return None if restos is None else round(base * mult + restos, 2)  # 0,067 * 1e9 = 67000000.00000001
 
     # pega o primeiro número contínuo (com possíveis separadores)
     m = re.search(r'(\d[\d.,\s]*)', text)
     if not m:
         return None
 
-    raw = m.group(1).strip().replace(" ", "")
+    # ponto no fim é o da frase, não decimal nem milhar: "50,00." (#1324)
+    raw = m.group(1).strip().replace(" ", "").rstrip(".")
 
     # normaliza milhares/decimais
     # se tiver vírgula E ponto, decide o decimal pelo último

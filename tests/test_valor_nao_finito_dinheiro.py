@@ -204,3 +204,36 @@ def test_tool_boleto_valor_normal_segue_igual():
 
     assert "Boleto anotado" in msg
     assert len(_conta("select 1 from bill_instances where user_id=%s", uid)) == 1
+
+
+# #1329: "k" é mil ("1,5k" = R$ 1.500, decisão do dono). Controle negativo: sem `|k\b` no `_PT_MULT` a fatura
+# fica R$ 1,50. Positivo: o número por extenso e o decimal comum seguem iguais.
+@pytest.mark.parametrize("texto,total", [("gastei 1,5k no cartão", 1500.0), ("gastei 2 k no cartão", 2000.0),
+                                         ("gastei 1500 no cartão", 1500.0), ("gastei 2,50 no cartão", 2.5),
+                                         ("gastei 1.000,50k no cartão", 1000500.0),  # base inteira, não só "000,50"
+                                         ("gastei 300 numa TV 4K no cartão", 300.0),  # "4K" depois do valor é descrição
+                                         ("comprei TV 4K por 3 mil reais no cartão", 3000.0),  # e antes dele também
+                                         ("comprei TV 4K por mil reais no cartão", 1000.0),  # "mil" sem dígito também
+                                         ("gastei 1k e 500 reais no cartão", 1500.0),  # o resto somado não é outro valor
+                                         ("gastei 100 k-pop no cartão", 100.0)])  # "k-" é palavra, não mil  # e antes dele também
+def test_whatsapp_compra_no_cartao_k_e_mil(texto, total):
+    uid, _ = _usuario_com_cartao()
+
+    assert "Compra no Crédito Registrada" in _diga(uid, texto), texto
+    assert [float(t) for t in _faturas(uid)] == [total]
+
+
+# O "Nx de Y" do parcelamento lê o valor pelo PT_VALUE: sem o "k" nele, "2x de 1,5k" virava R$ 3 no total.
+@pytest.mark.parametrize("texto", ["parcelei 2x de 1,5k carro no cartão", "parcelei 2x de 1,5 mil carro no cartão"])
+def test_whatsapp_parcelado_k_e_mil(texto):
+    uid, _ = _usuario_com_cartao()
+
+    _diga(uid, texto)
+    assert sum(float(t) for t in _faturas(uid)) == 3000.0, texto
+
+
+@pytest.mark.parametrize("texto", ["1,2,3k", "1.2.3 mil", "gastei 1,2,3 mil no cartão", "gastei 1k e 1,2,3 no cartão"])
+def test_parse_money_base_malformada_recusa_sem_estourar(texto):
+    from utils_text import parse_money
+
+    assert parse_money(texto) is None

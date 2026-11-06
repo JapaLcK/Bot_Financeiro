@@ -159,3 +159,51 @@ test("trocar de conta: o diálogo Sair da família aberto não reaparece para a 
     await dlg().waitFor({ state: "detached" });
   });
 });
+
+// mutação: voltar o `await reler()` num `agir` de Titular.tsx (remover ou dissolver): a confirmação fica presa em "Removendo…"/"Desfazendo…" ~3 s com a releitura em 5xx, e para sempre com ela pendurada
+for (const [nome, ler] of [["500", () => ERRO(500, "x")], ["pendurada", () => () => new Promise(() => {})]]) {
+  for (const [acao, botao, abre] of [["remover", "Remover", ({ page }) => page.getByRole("button", { name: "Remover" }).click()], ["desfazer", "Desfazer", ({ bt }) => bt("Desfazer família").click()]]) {
+    test(`${acao} OK + releitura ${nome}: a confirmação fecha em menos de 1 s, 1 escrita e não volta`, async () => {
+      await com({ visao: titular({ membros: [MARIA] }) }, async (t) => {
+        await abre(t);
+        t.s.get = ler();
+        const t0 = Date.now();
+        await t.dlg().getByRole("button", { name: botao, exact: true }).click();
+        await t.dlg().waitFor({ state: "detached", timeout: 1000 });
+        assert.ok(Date.now() - t0 < 1000, `fechou em ${Date.now() - t0} ms`);
+        assert.equal(t.escritas().length, 1);
+        await t.page.waitForTimeout(300);
+        assert.equal(await t.dlg().count(), 0, "a confirmação ressuscitou");
+        assert.equal(t.escritas().length, 1);
+      });
+    });
+  }
+}
+
+// positivo: a escrita que falha continua mostrando o erro (e fechando a confirmação), como antes
+for (const [acao, botao, gancho, abre] of [["remover", "Remover", "remover", ({ page }) => page.getByRole("button", { name: "Remover" }).click()], ["desfazer", "Desfazer", "dissolver", ({ bt }) => bt("Desfazer família").click()]]) {
+  test(`${acao} com a escrita em 500: o erro aparece na tela e a confirmação fecha`, async () => {
+    await com({ visao: titular({ membros: [MARIA] }) }, async (t) => {
+      t.s[gancho] = ERRO(500, "x");
+      await abre(t);
+      await t.dlg().getByRole("button", { name: botao, exact: true }).click();
+      await t.secao.getByRole("alert").waitFor();
+      await t.dlg().waitFor({ state: "detached" });
+      assert.equal(t.escritas().length, 1);
+    });
+  });
+}
+
+// mutação: voltar o `await` da releitura em `criar` (Familia.tsx): o botão fica `aria-disabled` ~3 s com a releitura em 5xx, e para sempre com ela pendurada, com o POST já concluído
+for (const [nome, ler] of [["500", () => ERRO(500, "x")], ["pendurada", () => () => new Promise(() => {})]]) {
+  test(`criar OK + releitura ${nome}: o botão destrava em menos de 1 s, 1 POST`, async () => {
+    await com({}, async (t) => {
+      t.s.criar = async () => { t.s.get = ler(); }; // só arma a releitura ruim; a resposta 201 padrão segue
+      const t0 = Date.now();
+      await t.bt("Criar família").click();
+      await t.page.waitForFunction(() => { const b = [...document.querySelectorAll("button")].find((x) => x.textContent === "Criar família"); return b && !b.hasAttribute("aria-disabled"); }, null, { timeout: 1000, polling: 50 }).catch(() => {});
+      assert.ok(Date.now() - t0 < 1000 && (await t.bt("Criar família").getAttribute("aria-disabled")) === null, `ainda travado após ${Date.now() - t0} ms`);
+      assert.equal(t.escritas().length, 1);
+    });
+  });
+}

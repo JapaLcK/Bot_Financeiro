@@ -118,7 +118,7 @@ def _visao_titular(uid: int) -> VisaoTitular:
 
 
 @router.get("/familia", response_model=VisaoTitular | VisaoMembro)
-def ver(uid: int = Depends(usuario_logado)):
+def ver(uid: int = Depends(usuario_atual)):
     v = views.my_family(uid)
     if not v:
         raise _nao_achado()

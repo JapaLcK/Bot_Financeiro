@@ -503,9 +503,10 @@ def register_auth_user_impl(
 
         dashboard_url = os.getenv("DASHBOARD_URL", "")
         send_welcome_email(email, link_code, dashboard_url)
-    except Exception as email_exc:
+    except Exception as exc:
         logging.getLogger(__name__).warning(
-            "Falha ao enviar e-mail de boas-vindas para <%s>: %s", email, email_exc
+            "Falha ao enviar e-mail de boas-vindas user=%s causa=%s sqlstate=%s", user_id,
+            type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id},
         )
 
     return {"user_id": user_id, "link_code": link_code}

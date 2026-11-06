@@ -39,7 +39,7 @@ def test_t1_sem_familia_e_404_em_tudo(w):
     erro(w.chamar(w.u2, "GET", "/familia/casa"), 404, "not_found")
     for rota in ROTAS:
         erro(_chama(w, w.u2, rota), 404, "not_found")
-    erro(w.chamar(w.u, "GET", "/familia/casa"), 404, "not_found")  # free e solto: a leitura não pede plano
+    erro(w.chamar(w.u, "GET", "/familia/casa"), 402, "plan_selection_required")  # free e solto: a leitura pede plano (o 402 vem antes do 404)
 
 
 def test_t2_ref_de_outro_grupo_e_404_e_o_item_fica_igual(w):
@@ -147,26 +147,26 @@ def test_t8_grupo_dissolvido_da_404_para_todos_e_o_novo_nasce_vazio(w):
     assert casa(w, w.ta) | {"mes": 0} == {"mes": 0, "metas": [], "orcamentos": []}
 
 
-def test_t13_sem_plano_ve_mas_nao_edita(w):
+def test_t13_sem_plano_nao_ve_nem_edita(w):
     ref = meta(w, w.ta, "Reforma")
     fam.accept_invite(fam.create_invite(w.ta), w.u)  # u é free: só tem plano pelo grant da família
     assert casa(w, w.u)["metas"][0]["ref"] == ref
     revoke_members(w.ta, "teste")  # grupo suspenso: u perde o grant e fica sem plano próprio
-    assert casa(w, w.u)["metas"][0]["ref"] == ref  # vê
+    erro(w.chamar(w.u, "GET", "/familia/casa"), 402, "plan_selection_required")  # não vê
     for rota in ROTAS:
         erro(_chama(w, w.u, rota, ref if "/metas" in rota[1] else "1"), 402, "plan_selection_required")
     assert linha("family_goals", ref)["guardado_cents"] == 0 and len(casa(w, w.ta)["metas"]) == 1
     assert w.chamar(w.ma1, "POST", f"/familia/casa/metas/{ref}/movimentos", json={"tipo": "somar", "valor": "1"}).status_code == 200  # plano próprio
 
 
-def test_t13b_titular_sem_plano_ve_o_que_perderia_e_nao_edita(w):
+def test_t13b_titular_sem_plano_nao_ve_nem_edita(w):
     from _billing_grants_helpers import conta
     ref = meta(w, w.ta, "Reforma")
     conta(w.ta, "free", None, "")
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("update plan_grants set status = 'revoked' where user_id = %s and source <> 'family'", (w.ta,))
         conn.commit()
-    assert casa(w, w.ta)["metas"][0]["ref"] == ref
+    erro(w.chamar(w.ta, "GET", "/familia/casa"), 402, "plan_selection_required")
     erro(_chama(w, w.ta, ROTAS[0]), 402, "plan_selection_required")
     erro(_chama(w, w.ta, ROTAS[2], ref), 402, "plan_selection_required")
     assert linha("family_goals", ref) is not None

@@ -12,6 +12,9 @@ Excesso concede e alerta (o operador devolve a diferença à mão); pagamento
 antes retido e depois completado também alerta, para ninguém devolver. Soma de
 parciais e "desconto autorizado" não são reconhecidos automaticamente: o
 operador concede em /admin (runbook em `docs/CLAUDE.md`).
+
+Cobrança fora das origens (`paid`, estornada) com `payment_id` DIFERENTE do dela
+(#1257): alerta e retém, para não repetir Purchase/e-mail sob o id novo.
 """
 
 from __future__ import annotations
@@ -84,7 +87,27 @@ def _alertar_uma_vez(cobranca, payment_id, event_id, mensagem: str, *,
 def conferir_valor(cobranca, origens, valor, payment_id, event_id) -> bool:
     """`True` = o dreno segue; `False` = RETIDO (o dreno fecha o evento)."""
     if cobranca["status"] not in origens:
-        return True  # nada a transicionar (ex.: `paid` reentregue): sem alerta falso
+        antigo = cobranca["asaas_payment_id"]
+        if payment_id and antigo and payment_id != antigo:
+            # #1257: OUTRO pagamento numa cobrança já paga/estornada: efeitos de compra
+            # rodariam de novo sob o payment_id novo (2º Purchase). Fecha sem efeitos.
+            pago = centavos_do_valor(valor)
+            log_system_event_sync(
+                "warning", "pix_pagamento_duplicado",
+                "Segundo pagamento Pix na mesma cobrança: nenhum efeito de compra.",
+                source="pix", user_id=cobranca["user_id"],
+                details={"charge_id": cobranca["id"], "status": cobranca["status"],
+                         "payment_id": payment_id,
+                         "pago_cents": pago if pago is not None else "ilegivel"})
+            recebido = f"R$ {pago / 100:.2f}" if pago is not None else "valor ilegível"
+            _alertar_uma_vez(
+                cobranca, payment_id, event_id,
+                f"⚠️ **Pix: segundo pagamento na mesma cobrança** `{cobranca['id']}`"
+                f" (`{cobranca['status']}`) — pagamento `{payment_id}` de {recebido};"
+                " nenhum efeito de compra rodou. Confira no Asaas e devolva.",
+                marcador="pagamento_duplicado_alertado")
+            return False
+        return True  # reentrega (`paid`): sem alerta falso
     pago = centavos_do_valor(valor)
     devido = total_cents(cobranca)
     detalhes = {"charge_id": cobranca["id"], "devido_cents": devido,

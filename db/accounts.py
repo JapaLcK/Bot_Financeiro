@@ -2603,11 +2603,11 @@ def carteira_exibida(user_id: int, fallback=None):
     try:
         from .open_finance import get_consolidated_balance
         return get_consolidated_balance(user_id)["manual"]
-    except Exception:
+    except Exception as exc:
         # `extra=` na MESMA chamada: sem a coluna `user_id` a linha sobrevive à
         # exclusão da conta carregando o id (gate de tests/test_log_falha_user_id.py).
-        logger.exception("carteira exibida falhou (user_id=%s)", user_id,
-                         extra={"user_id": user_id})
+        logger.error("carteira exibida falhou (user_id=%s) causa=%s sqlstate=%s", user_id,
+                     type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         return get_balance(user_id) if fallback is None else fallback
 
 

@@ -187,6 +187,25 @@ test("troca de conta no meio do stream: nada de A aparece para B e nenhum DELETE
   await page.context().close();
 });
 
+test("marcador `pb_conta` muda no meio do stream (lib/sessao.ts, sem o conferir por pedaço do sse.ts): o pedaço seguinte de A não entra na tela", async () => {
+  const { page, flux } = await abrir();
+  await enviar(page, "segredo de A?");
+  await flux.espera(1);
+  await flux.push(0, delta("parte 1 "));
+  await esperaTexto(page, "parte 1");
+  // No MESMO evaluate: o marcador vira o de outra conta e o próximo pedaço chega, antes de o intervalo de 1 s olhar o marcador.
+  await page.evaluate((pedaco) => {
+    new MutationObserver(() => { if (document.body.textContent.includes("SEGREDO-DE-A")) sessionStorage.setItem("viuA", "1"); })
+      .observe(document, { childList: true, subtree: true, characterData: true });
+    document.cookie = "pb_conta=8; path=/";
+    window.__sse.reqs[0].ctrl.enqueue(new TextEncoder().encode(pedaco));
+  }, delta("SEGREDO-DE-A parte 2"));
+  await page.waitForEvent("load", { timeout: 3000 }).catch(() => {}); // o reload da troca
+  const viu = await page.evaluate(() => sessionStorage.getItem("viuA"));
+  await page.context().close();
+  assert.equal(viu, null);
+});
+
 test("troca de conta: o `fim` atrasado de A não mexe no turno nem na cota de B", async () => {
   const { page, conta, flux } = await abrir();
   await enviar(page, "pergunta de A");

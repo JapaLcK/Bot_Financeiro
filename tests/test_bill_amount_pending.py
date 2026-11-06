@@ -1827,7 +1827,7 @@ def test_contrato_do_valor_perigoso_recusa(entrada, motivo):
 # propriedade geral, é uma tabela de casos conhecidos.
 FORMAS_QUE_A_MAIN_ACEITA = [
     ("132 mil", 132000.0), ("2,5 mil", 2500.0), ("10 mil", 10000.0),
-    ("3 milhoes", 3000000.0), ("132 mil reais", 132000.0), ("132k", 132.0),
+    ("3 milhoes", 3000000.0), ("132 mil reais", 132000.0), ("132k", 132000.0),
     ("paguei 132", 132.0), ("gastei 132", 132.0), ("foi 132 mil", 132000.0),
     ("ficou em 132", 132.0), ("deu 132 no total", 132.0),
     ("foi uns 132 no total", 132.0), ("total 132", 132.0),
@@ -3125,7 +3125,9 @@ def test_281_guarda_de_entrega_prende_o_valor_que_o_reroteamento_mudaria():
     db.ensure_user(uid)
     assert "Quanto foi" in _diga(uid, "paguei a luz")
 
-    _diga(uid, "paguei 132,50. foi isso")
+    # desde o #1324 o valor não infla mais: a cauda "foi isso" vai ao desempate, como "paguei 132. foi isso"
+    assert "1️⃣" in _diga(uid, "paguei 132,50. foi isso")
+    _diga(uid, "1")
 
     lancs = db.list_launches(uid, limit=3)
     assert len(lancs) == 1 and abs(float(lancs[0]["valor"])) == 132.5, lancs

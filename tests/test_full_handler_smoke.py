@@ -720,7 +720,7 @@ def test_multi_launch_texto_sem_valor_ainda_abandona(pro_small_uid, spy_ai):
 # na regra do dono. Antes um curto-circuito as resolvia; agora pagam o turno.
 _COM_CAUDA = {"deu 132 no total", "foi uns 132 no total",
               "paguei 132 - da luz", "gastei 50 - mercado",
-              "paguei 132. foi isso",
+              "paguei 132. foi isso", "paguei 132,50. foi isso",
               "132 no boleto", "132 — luz", "132. da luz"}
 
 
@@ -730,7 +730,7 @@ _COM_CAUDA = {"deu 132 no total", "foi uns 132 no total",
     ("10 mil", 10000.0),            # saída literal do Whisper no áudio
     ("3 milhoes", 3000000.0),       # idem
     ("132 mil reais", 132000.0),
-    ("132k", 132.0),                # o que a `main` extrai daqui é 132
+    ("132k", 132000.0),             # "k" = mil (decisão do dono, #1329)
     ("paguei 132", 132.0),
     ("gastei 132", 132.0),
     ("foi 132 mil", 132000.0),
@@ -1277,7 +1277,8 @@ def test_controle_negativo_traco_de_prosa_como_sinal_recusa(
 
 @pytest.mark.parametrize("resposta,inflado", [
     ("paguei 132. foi isso", None), ("132. da luz", None),
-    ("paguei 132,50. foi isso", 13250.0), ("1.234,56, foi isso", None),
+    # 132,50: desde o #1324 o próprio `parse_money` descarta o ponto final, então não infla mais
+    ("paguei 132,50. foi isso", 132.5), ("1.234,56, foi isso", None),
 ])
 def test_controle_negativo_pontuacao_so_no_fim_da_mensagem(
         pro_small_uid, spy_ai, monkeypatch, resposta, inflado):

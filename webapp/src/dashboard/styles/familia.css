@@ -13,3 +13,51 @@
 .fam-acoes { display: flex; flex-wrap: wrap; margin: -8px 0 0 -8px; }
 .fam-acoes > .btn { margin: 8px 0 0 8px; }
 .fam-falha { font-size: 14px; }
+
+/* PR 6b: permissões, histórico e a visão do titular. Sem flex gap: grid com row-gap/column-gap ou margem negativa (como .fam-acoes). */
+.fam-corpo:not([hidden]) { display: contents; } /* a lista fica montada sob o painel; aberta, não cria caixa */
+.fam-acoes-membro { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; margin: -4px 0 0 -8px; }
+.fam-acoes-membro > * { margin: 4px 0 0 8px; }
+.fam-acoes-membro > .faint { font-size: 14px; }
+.conta-familia h2, .conta-familia h3 { margin: 0; font-size: 16px; font-weight: 600; overflow-wrap: break-word; word-break: break-word; }
+.conta-familia h3 { font-size: 14px; color: var(--ink-2); }
+.fam-perm, .fam-hist-sec, .fam-ver, .fam-ver > section { display: grid; row-gap: 12px; width: 100%; min-width: 0; }
+.fam-ver { justify-items: start; }
+.fam-ver > section { justify-items: stretch; }
+.fam-perm ul { list-style: none; margin: 0; padding: 0; }
+.fam-perm li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 14px; min-height: 44px; }
+.fam-perm label { padding: 10px 0; }
+.fam-perm .notif-switch:disabled { opacity: .45; cursor: default; }
+.fam-perm .faint, .fam-hist-sec .faint, .fam-ver .faint { font-size: 14px; }
+.fam-hist { list-style: none; margin: 0; padding: 0; width: 100%; }
+.fam-hist li { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--rule); font-size: 14px; overflow-wrap: break-word; word-break: break-word; }
+.fam-hist li:last-child { border-bottom: 0; }
+.fam-ver .month-switch { max-width: 100%; }
+.fam-ver .month-title { min-width: 0; flex: 1 1 auto; }
+.fam-valores { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); row-gap: 8px; column-gap: 16px; width: 100%; margin: 0; }
+.fam-valores div { min-width: 0; }
+.fam-valores dt { font-size: 13px; color: var(--ink-3); }
+.fam-valores dd { margin: 2px 0 0; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+.fam-cats { list-style: none; margin: 0; padding: 0; }
+.fam-cats li { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--rule); font-size: 14px; overflow-wrap: break-word; word-break: break-word; }
+.fam-cats li:last-child { border-bottom: 0; }
+.fam-lanc-lista { list-style: none; margin: 0; padding: 0; }
+.fam-lanc { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; word-break: break-word; }
+.fam-lanc-txt { display: grid; row-gap: 4px; min-width: 0; }
+.fam-lanc-txt b { font-size: 14px; }
+.fam-lanc-txt .faint { font-size: 12px; }
+/* Texto vindo do servidor (nome, categoria, descrição, quem viu): a direção dele não vira a da frase em volta. */
+.fam-lista b, .fam-ver-nome, .fam-cats li > span:first-child, .fam-lanc-txt b, .fam-hist b { unicode-bidi: isolate; }
+
+/* PR 6c: a casa (familia/Casa.tsx). Mesmas regras: sem flex gap; grid com row-gap/column-gap ou margem negativa. */
+.fam-casa { row-gap: 20px; }
+.casa-sec { display: grid; row-gap: 12px; width: 100%; min-width: 0; }
+.casa-topo { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; }
+.casa-lista { list-style: none; margin: 0; padding: 0; width: 100%; }
+.casa-lista li { display: grid; row-gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--rule); min-width: 0; overflow-wrap: break-word; word-break: break-word; }
+.casa-lista li:last-child { border-bottom: 0; }
+.casa-lista .num { overflow-wrap: anywhere; }
+.casa-lista .meter.ok > span { background: var(--gain); }
+.casa-lista .faint { font-size: 14px; }
+.casa-nome b { font-size: 16px; font-weight: 500; unicode-bidi: isolate; }
+.casa-nome .selo { display: inline-block; max-width: 14ch; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; line-height: 22px; vertical-align: middle; } /* o .selo é nowrap: um primeiro nome longo cortaria o cartão */
