@@ -81,7 +81,7 @@ def test_detector_em_falha_nao_grava_o_cache_nem_diz_sem_destaques(llm, monkeypa
     c = _http(uid)
     r = c.get(f"/insights/{uid}/current").json()
     assert [i["type"] for i in r["insights"]] == ["goal_behind"] and r["motivo"] is None  # o que funcionou sai
-    assert ai_patterns.ler_insights(uid) is None  # nada no cache: o card `piggy` diz "ainda não está pronto"
+    assert ai_patterns.ler_insights(uid) is None  # nada no cache: o próximo pedido recalcula
     sem_meta = _usuario("pro_max")
     _orcamento_apertando(sem_meta)
     vazio = _http(sem_meta).get(f"/insights/{sem_meta}/current").json()
@@ -107,16 +107,18 @@ def test_pro_ve_acoes_e_quem_cai_para_plus_nao_ve_sem_recalcular(llm, monkeypatc
     # positivo: o Pro recebe o impacto e a ação calculados em código
     assert it["impacto"] == {"tipo": "restante", "valor": 10.0}
     assert it["acoes"][0]["valores"] == {"orcamento_valor": 100.0, "gasto_valor": 90.0}
-    recalculos = []
+    recalculos, real = [], db.compute_active_insights
     monkeypatch.setattr("db.compute_active_insights", lambda *a: recalculos.append(a) or ([], []))
     promote_to_pro(uid, "pro")  # Plus, sem limpar o cache de 6 h
     plus = c.get(f"/insights/{uid}/current").json()
     assert plus["insights"] and all(_sem_pro(i) for i in plus["insights"])
     assert plus["insights"][0]["explicacao"] == it["explicacao"]  # o Plus segue com a explicação
+    assert recalculos == []  # veio do cache
+    monkeypatch.setattr("db.compute_active_insights", real)  # o card `piggy` gera na hora (D13)
     r, (bloco,), _ = mostrar(uid, card="piggy")
-    assert all(_sem_pro(i) for i in r["abas"][0]["insights"])
+    assert r["abas"][0]["insights"] and all(_sem_pro(i) for i in r["abas"][0]["insights"])
     assert all(_sem_pro(i) for i in bloco["abas"][0]["recursos"]["insights"]["insights"])
-    assert recalculos == [] and llm == []  # veio do cache
+    assert llm == []
 
 
 def test_o_insight_de_um_usuario_nao_aparece_para_o_outro(llm):

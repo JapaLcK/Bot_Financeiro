@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ErroApi, NOME_DO_PLANO, usePlan } from "../lib/v2";
+import { ErroApi, NOME_DO_PLANO, comPrazoLeitura, usePlan } from "../lib/v2";
 import { href, route } from "../router";
-import { abrirPortal, cobrancaQuery, comPrazoLeitura, desfazerTroca, falhaCobranca, type Falha } from "./api";
+import { abrirPortal, cobrancaQuery, desfazerTroca, falhaCobranca, type Falha } from "./api";
 
 const SELO = { monthly: "Mensal", annual: "Anual" };
 const ERRO_PORTAL = "Não foi possível abrir o gerenciamento da assinatura agora. Tente novamente em instantes.";

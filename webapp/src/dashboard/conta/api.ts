@@ -2,7 +2,7 @@
 // Dado pessoal: só na memória do React Query, nunca em storage. O contrato é do servidor
 // (frontend/routes/settings.py), então os tipos são escritos aqui, não gerados.
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
-import { DEMO, ErroApi, FUSO, NOME_DO_PLANO, apiGet, chamar, escrever, instante, lerContaFresca, meQuery } from "../lib/v2";
+import { DEMO, ErroApi, FUSO, NOME_DO_PLANO, apiGet, chamar, comPrazoLeitura, escrever, instante, lerContaFresca, meQuery } from "../lib/v2";
 import type { Conector } from "../lib/bancos";
 import { guardarCodigos } from "./Cofre";
 import type { Refresh } from "../lib/atualizarBanco";
@@ -151,13 +151,6 @@ export const mfaStatusQuery = queryOptions({
   enabled: !DEMO,
 });
 
-// Espera uma releitura contra o prazo de 30 s (as consultas não recebem signal): a que sobra termina no cache, sem efeito.
-// Estouro ou rejeição = null, e quem espera (o modal do MFA, o diálogo das sessões) não fica preso numa leitura que nunca responde.
-export const comPrazoLeitura = <T,>(p: Promise<T>) => {
-  let prazo: ReturnType<typeof setTimeout>;
-  return Promise.race([p.catch(() => null), new Promise<null>((ok) => { prazo = setTimeout(() => ok(null), 30000); })])
-    .finally(() => clearTimeout(prazo));
-};
 // A releitura do status depois de um enable ambíguo.
 export const lerStatusMfa = (qc: QueryClient) => comPrazoLeitura(qc.fetchQuery(mfaStatusQuery));
 

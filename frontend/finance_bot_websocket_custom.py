@@ -4927,7 +4927,6 @@ async def auth_google_callback(
     decide login / vincular / criar pendente, e redireciona o usuário.
     """
     import logging as _logging
-    import traceback as _traceback
 
     from core.services.google_oauth import (
         GoogleOAuthError,
@@ -5083,8 +5082,8 @@ async def auth_google_callback(
         return success_response
 
     except Exception as exc:
-        _log.error("Falha inesperada no /auth/google/callback: %s\n%s",
-                   exc, _traceback.format_exc())
+        _log.error("Falha inesperada no /auth/google/callback: causa=%s sqlstate=%s",
+                   type(exc).__name__, getattr(exc, "sqlstate", None))
         return _erro(
             "falha",
             f"Falha inesperada no login Google ({type(exc).__name__}). Veja o terminal do servidor.",

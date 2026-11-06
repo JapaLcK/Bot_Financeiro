@@ -212,10 +212,8 @@ def test_mata_passo_da_tool():
     assert streaming._PASSOS["list_metas"] == "Vendo suas metas"
 
 
-def test_mata_sufixo_do_piggy_nao_vaza_para_outros_cards(kn, monkeypatch):
+def test_mata_card_indisponivel_leva_a_mensagem_crua(kn, monkeypatch):
     k, _ = kn
-    r, blocos, _ = mostrar(k, card="piggy")  # sem o cache: a dica "ainda não está pronta" leva o sufixo
-    assert r["error"] == "indisponivel" and "Diga que ainda não estão prontas" in r["message"] and not blocos
     real = cards.registro()
 
     def recusa(uid, a):
