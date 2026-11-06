@@ -453,6 +453,18 @@ def _desliga_abertura_geral(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _oferta_campanha_fora_da_janela(monkeypatch):
+    """O relógio real ligaria a campanha de 23 a 30/11/2026 (sem env, de propósito) e os testes de preço cheio
+    e de `allow_promotion_codes` ficariam vermelhos no CI (mesma classe da #1235). Teste da campanha liga a sua
+    data com `monkeypatch.setattr(oferta_campanha, "_agora", ...)`. Nome depois de `_auto_cleanup_orphan_users`."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from core.services import oferta_campanha
+    fora = datetime(2026, 10, 1, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    monkeypatch.setattr(oferta_campanha, "_agora", lambda: fora)
+
+
+@pytest.fixture(autouse=True)
 def _zera_rate_limit_em_memoria():
     """Storage do slowapi zerado por teste — ele é EM MEMÓRIA e vale pela sessão
     inteira do pytest, então teto de rota vaza de um arquivo para o outro.

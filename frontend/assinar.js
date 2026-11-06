@@ -169,7 +169,14 @@
       : "O teste grátis é um por número de telefone. A cobrança começa assim que você confirmar a assinatura.";
     montar(r.d);
     const g4 = gen;  // a geração do S4: se a pessoa já saiu dele, o plans-config tardio não mexe na tela
-    cfg.then(function (c) { if (g4 === gen) $("s4-pix").hidden = !(c && c.pix_annual_available === true); });
+    cfg.then(function (c) { oferta(c); if (g4 === gen) $("s4-pix").hidden = !(c && c.pix_annual_available === true); });
+  }
+
+  /** Frase da campanha (Black Friday) do plano e ciclo da URL, no S1 e no S4. Texto pronto do servidor; Essencial não tem chave. */
+  function oferta(c) {
+    const t = c?.campanha?.textos?.[plano];
+    if (!t) return;
+    ["s1-oferta", "s4-oferta"].forEach(function (id) { $(id).textContent = ciclo === "annual" ? t.frase_anual : t.frase_mensal; $(id).hidden = false; });
   }
 
   /** Desfecho de um create-checkout que não deu certo, embutido (S3) ou hospedado (H). */
@@ -323,13 +330,17 @@
         const em = await Promise.race([
           fetch("/billing/plans-config", { credentials: "same-origin" })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (j) { return j?.retomada?.email; }),
+            .then(function (j) { oferta(j); return j?.retomada?.email; }),
           new Promise(function (ok) { setTimeout(ok, 4000); }),
         ]);
         if (em) { contaEmail = em; iniciaS3(); return; }
       } catch (_) { /* sem retomada: S1 */ }
     }
     me = atual || null;  // S1a: e-mail digitado ≠ conta logada
+    if (atual !== "") {  // o ramo sem sessão acima já leu o plans-config; aqui só a frase, sem segurar o S1
+      fetch("/billing/plans-config", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; }).then(oferta).catch(function () {});
+    }
     mostra("s1");
   });
 })();

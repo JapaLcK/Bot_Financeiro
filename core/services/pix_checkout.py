@@ -39,6 +39,7 @@ from datetime import date, datetime, timedelta, timezone
 from core.crypto import encrypt_pii_optional
 from core.observability import log_system_event_sync
 from core.services import asaas
+from core.services.oferta_campanha import pct_da_oferta
 from core.services.pix_checkout_resposta import (
     VENCIMENTO_DIAS, expira, qr_da_linha, qr_vivo, resposta)
 from core.services.pix_extras import escolher, total_cents
@@ -205,7 +206,7 @@ def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
     if preco is None:
         raise CheckoutIndisponivel("preco_anual_nao_configurado")
 
-    if desconto_pct:   # ANTES do piso `min_cents` (em `plano_da_cobranca`); cadernos seguem cheios
+    if desconto_pct := pct_da_oferta(plan_stored, desconto_pct):   # o maior (link, campanha); ANTES do piso; cadernos cheios
         from core.services.retomada import com_desconto  # noqa: PLC0415
         preco = com_desconto(preco, desconto_pct)
 
@@ -263,9 +264,9 @@ def _criar_ou_substituir(user_id, plan_stored, venda, stripe_sub, rastreio, foto
     # perder, e `pending` não volta para a reconciliação — devolver o mesmo
     # código expirado prendia o cliente sem cobrança pagável para sempre. Cadernos:
     # só o MESMO conjunto de ids (a ordem não importa); outro conjunto substitui.
-    # `price_cents` (já com desconto, antes do crédito): QR de outro valor nunca volta.
+    # `price_cents` (já com desconto, antes do crédito): QR mais caro que a venda não volta.
     if (qr_vivo(ativa) and ativa["plan"] == plan_stored
-            and ativa["price_cents"] == venda["price_cents"]
+            and ativa["price_cents"] <= venda["price_cents"]
             and {e["price"] for e in ativa["extras"]} == {e["price"] for e in foto}):
         return None
     _cancelar_remota(ativa)

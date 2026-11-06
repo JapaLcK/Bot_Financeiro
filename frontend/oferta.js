@@ -28,10 +28,32 @@
   const ROTULO_ASSINANTE = "Gerenciar meu plano";
   const ROTULO_SEM_TRIAL = "Assinar o Plus";
   const rotular = (t) => { for (const s of document.querySelectorAll("[data-rotulo]")) s.textContent = t; };
+  // Campanha (Black Friday, textos prontos do plans-config): só depois de SABER que não há assinatura ativa
+  // (anônimo = 401 do validate; ou o /billing/subscription respondeu `active: false`), em qualquer ordem dos
+  // dois fetches. Incerto = a página fica como está. Sem JS também.
+  let anonimo = false, semAssinatura = false, textosCampanha = null, pintada = false;
+  const campanha = () => {
+    if (pintada || !semAssinatura || !textosCampanha) return;
+    pintada = true;
+    const f = $("#oferta-faixa");
+    f.textContent = textosCampanha.frase;
+    f.hidden = false;
+    for (const [tier, t] of Object.entries(textosCampanha.textos)) {
+      const card = $(`[data-plano="${tier}"]`, planos);
+      const poe = (sel, txt) => { const e = card && $(sel, card); if (e) e.textContent = txt; };
+      poe(".pb-d.so-anual", t.anual_mes);
+      poe(".pb-d.so-mensal", t.mensal);
+      poe("span.so-anual:not(.pb-d)", t.linha_anual);
+      poe("span.so-mensal:not(.pb-d)", t.linha_mensal);
+    }
+    $('[data-set="anual"]', planos)?.click();   // na campanha o #planos abre em Anual
+  };
   fetch("/auth/validate", { credentials: "same-origin" })
-    .then((r) => (r.ok ? fetch("/billing/subscription", { credentials: "same-origin" }) : null))
+    .then((r) => { anonimo = r.status === 401; return r.ok ? fetch("/billing/subscription", { credentials: "same-origin" }) : null; })
     .then((r) => (r && r.ok ? r.json() : null))
     .then((sub) => {
+      semAssinatura = anonimo || (!!sub && !sub.degraded && sub.active === false);
+      campanha();
       if (!sub || sub.degraded) return;
       if (sub.active === true) {
         // Os CTAs também pelo seletor: o Plus indisponível pode já os ter mandado para #planos (abaixo).
@@ -48,6 +70,8 @@
     .then((r) => (r.ok ? r.json() : null))
     .then((cfg) => {
       if (!cfg) return;
+      textosCampanha = cfg.campanha;
+      campanha();
       // Plus indisponível: os CTAs diretos (todos para o Plus) caem na tabela, onde há plano à venda. Só
       // os que ainda vão à /assinar: o /precos do assinante (fetch acima, em qualquer ordem) fica.
       if (cfg.plus_available === false) {

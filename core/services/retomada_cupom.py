@@ -1,4 +1,5 @@
 """Cupom Stripe do desconto de retomada (docs/plano-remarketing.md, PR 6b).
+Etapa 0 = campanha (`oferta_campanha`): `rm_e{retomada_etapa or 0}_40_{produto}` (e1-e3 com link).
 
 Um cupom por (etapa, %, produto), com ID FIXO: `repeating` por 1 mês cobre a 1ª cobrança real
 (dia 7 com trial, imediata sem trial) e não pega a renovação; `once` seria gasto na fatura de
@@ -40,7 +41,7 @@ def cupom_id(stripe_mod, etapa: int, pct: int, price_id: str) -> str:
                 raise
             try:
                 cupom = stripe_mod.Coupon.create(
-                    id=cid, percent_off=pct, duration="repeating", duration_in_months=1,
+                    id=cid, name=f"{pct}% OFF", percent_off=pct, duration="repeating", duration_in_months=1,
                     applies_to={"products": [product]}, expand=["applies_to"])
             except stripe_mod.error.InvalidRequestError as exc2:   # corrida: outro worker criou
                 if getattr(exc2, "code", None) != "resource_already_exists" \

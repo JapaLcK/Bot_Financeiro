@@ -1134,3 +1134,12 @@ Enquanto o dono não decidir qual das duas vale, "a matriz do §11 e o §8.2 con
 1. ~~**`ASAAS_MIN_CHARGE_CENTS`** medido no Sandbox~~ — **FECHADA em 2026-09-05: 500 (R$ 5,00)**, medida contra o Sandbox e gravada no `.env` da raiz. O mínimo incide sobre o LÍQUIDO (§7). Sem a env a venda continua 503, e o caso 54 continua valendo.
 2. **`RETENCAO_PAGAMENTO_DIAS`: VALIDAR os 1825 dias (5 anos) propostos** — não mais "definir o prazo". Proposto pelo coordenador em 2026-09-05, com a fundamentação (Código Civil 206 §5º I, CTN 173/174, CDC 27) e a ressalva de que é raciocínio e não parecer, no §13.1. O 1b deixa de estar bloqueado por ausência de número e passa a ter um default explicável. **Duas perguntas ao contador podem AUMENTÁ-LO**: nota fiscal dessas cobranças, e obrigação acessória (SPED/DIRF/ECD) — se houver, alinhar ao maior. Enquanto a env for `None`, nada de pagamento é apagado e a política diz "pelo prazo exigido pela legislação aplicável", sem número.
 3. **Tarifa efetiva por cobrança** — R$ 0,00 no Pix dinâmico é **condição atual da conta**, registrada como nota operacional; nenhuma linha de lógica a assume.
+
+## Campanha Black Friday 2026 no Pix (40% em Plus e Pro)
+
+De 23/11/2026 00:00 a 30/11/2026 23:59:59 (Brasília, fim exclusivo em 01/12), `criar_checkout` aplica 40% sobre o
+preço anual de Plus e Pro (planos gravados `pro` e `pro_max`): 11940 e 29940 centavos. Essencial e cadernos ficam
+cheios. A regra mora em `core/services/oferta_campanha.py` (`pct_da_oferta`: o maior entre o link de retomada e a
+campanha, nunca a soma), sem env. O desconto entra antes do piso `min_cents`. Na substituição de QR, `<=`: QR mais
+barato que a venda atual não é trocado (QR cheio de antes da janela é, no clique novo; QR de 40% sobrevive ao corte).
+Migração cartão para Pix segue permitida na campanha; `retomada_sem_migracao` vale só pelo link.
