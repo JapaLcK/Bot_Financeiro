@@ -1373,6 +1373,24 @@ def _resolve_page_user_id(request: Request) -> int | None:
         return None
 
 
+def destino_sem_plano(user_id: int) -> str:
+    """Para onde vai quem está sem plano: a regra única do gate de página e do pós-login.
+
+    Afiliado vai à área dele (/afiliado), não à /precos: o saldo continua dele
+    (`frontend/routes/affiliates.py`, sem gate de assinatura). Afiliado sem credencial vai à
+    /recuperar-senha: é ela que cria a senha da conta só de link mágico, e a API segue em 403
+    até lá; o /afiliado a devolveria ao /app, e o gate do /app a ela de novo (laço). Falha
+    aqui cai na /precos, como quem não é afiliado: não pode derrubar o login nem as páginas."""
+    try:
+        from db import conta_sem_credencial
+        from db.affiliates import get_affiliate_by_user
+        if get_affiliate_by_user(user_id):
+            return "/recuperar-senha" if conta_sem_credencial(user_id) else "/afiliado"
+    except Exception:
+        logging.getLogger(__name__).warning("destino_sem_plano falhou", exc_info=True)
+    return "/precos?escolha=1"
+
+
 def gate_plan_selection(request: Request, *, exige_direito: bool = True):
     """Gate de PÁGINA do cadastro: obriga a escolher um plano na /precos antes
     de servir o HTML do dashboard (home/app/settings). É o enforcement REAL —
@@ -1491,9 +1509,9 @@ def gate_plan_selection(request: Request, *, exige_direito: bool = True):
         # e, com `exige_direito=False`, a segunda nem é avaliada — a /settings
         # não paga o SELECT do direito.
         if needs_plan_selection(user_id):
-            return RedirectResponse(url="/precos?escolha=1", status_code=302)
+            return RedirectResponse(url=destino_sem_plano(user_id), status_code=302)
         if exige_direito and not has_app_access(user_id):
-            return RedirectResponse(url="/precos?escolha=1", status_code=302)
+            return RedirectResponse(url=destino_sem_plano(user_id), status_code=302)
     except Exception:
         # Nunca trava a navegação por erro no gate; o backstop de dados (402) e o
         # redirect em JS seguem valendo como rede de segurança. É o "não sei" do

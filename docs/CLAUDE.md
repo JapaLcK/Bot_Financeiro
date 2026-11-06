@@ -2552,6 +2552,15 @@ e gestão do programa de afiliados (comissões, payouts, PIX). As páginas
 `admin-login.html` e `admin-dashboard.html` **não carregam app-mode nem o shim de área
 segura**, de propósito.
 
+As telas da área do próprio afiliado são `#/afiliado` no `/painel` (`webapp/src/dashboard/afiliado/`; o item do
+menu só aparece com `afiliado` no `/api/v2/me`, filtro único `noMenu` em `router.ts`), a seção do `/app`
+(`dashboard.js`, `_renderAffiliateView`) e `GET /afiliado` (`frontend/routes/static_pages.py`), a mesma tela sem o
+resto do painel para quem está sem plano; com plano, a rota manda a `/painel#/afiliado`. O destino de quem está sem
+plano tem regra única, `destino_sem_plano` (`frontend/routes/shared.py`), chamada por `gate_plan_selection` e por
+`_post_login_url`: afiliado vai ao `/afiliado`, e afiliado sem credencial vai à `/recuperar-senha`, que cria a senha
+(a API segue em 403 até lá); o `/afiliado` a devolveria ao `/app`, e seria um laço. A tela não fala com a `/api/v2`, que daria 402: `main.tsx` monta só a página, sem `Entrada`, `App`
+nem eventos.
+
 A área do próprio afiliado é `GET /api/affiliate/me` e `POST /api/affiliate/payout`
 (`frontend/routes/affiliates.py`), sem gate de plano: o `affiliate_id` sai sempre de
 `get_affiliate_by_user` com o usuário da sessão, e o corpo do saque só tem `pix_key`.

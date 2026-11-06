@@ -3701,7 +3701,7 @@ function _ensureGenericConfirmModal() {
     <div class="overlay" id="generic-confirm-overlay">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="generic-confirm-title">
         <h3 id="generic-confirm-title">Confirmar</h3>
-        <p class="msub" id="generic-confirm-body" style="white-space:pre-wrap"></p>
+        <p class="msub" id="generic-confirm-body" style="white-space:pre-wrap;word-break:break-word"></p>
         <div class="modal-acts" style="margin-top:18px">
           <button type="button" class="btn-cancel" id="generic-confirm-cancel">Cancelar</button>
           <button type="button" class="btn-save" id="generic-confirm-alt" style="display:none"></button>
@@ -11808,6 +11808,7 @@ function render(d) {
    PROGRAMA DE AFILIADOS — aba só aparece pra quem é afiliado
 ═══════════════════════════════════════════════════════════════════════ */
 let _affiliateCache = null;
+let _contaDaCarga = null; // o marcador de troca de conta (`webapp/src/dashboard/lib/sessao.ts`), lido no init
 const _affiliateChannel = makeFetchChannel(); // dedup + abort + geração
 
 async function _fetchAffiliate({ force = false } = {}) {
@@ -11822,6 +11823,7 @@ async function _fetchAffiliate({ force = false } = {}) {
 // Chamado no init: se o user é afiliado, mostra o item "Afiliados" no sidenav.
 async function initAffiliateNav() {
   try {
+    _contaDaCarga = getCookie("pb_conta");
     const res = await fetch(`${API}/api/affiliate/me`, { credentials: "same-origin" });
     if (!res.ok) return; // 404 = não é afiliado
     _affiliateCache = await res.json();
@@ -11883,10 +11885,10 @@ async function loadAffiliateView(forceFresh = false, { background = false } = {}
   } else {
     esqueleto = true;
     stats.innerHTML = `
-      <div class="stat-tile"><div class="stat-label">Indicados</div><div class="sk sk-h2"></div></div>
+      <div class="stat-tile"><div class="stat-label">Cadastros indicados</div><div class="sk sk-h2"></div></div>
       <div class="stat-tile"><div class="stat-label">Disponível</div><div class="sk sk-h2"></div></div>
       <div class="stat-tile"><div class="stat-label">Em carência</div><div class="sk sk-h2"></div></div>
-      <div class="stat-tile"><div class="stat-label">Já recebido</div><div class="sk sk-h2"></div></div>
+      <div class="stat-tile"><div class="stat-label">Já pago</div><div class="sk sk-h2"></div></div>
     `;
     body.innerHTML = "";
   }
@@ -11917,11 +11919,25 @@ function _renderAffiliateView(data) {
   if (!stats || !body) return;
 
   const s = data.stats || {};
+  const refunds = s.refunds || {};
+  const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+  // 0% é um valor (afiliado sem comissão): nunca `|| 10`. Comissão só existe na 1ª cobrança no cartão.
+  const regra = data.commission_percent === 0 ? "sem comissão neste programa" : `${Number(data.commission_percent).toLocaleString("pt-BR")}% da primeira cobrança do plano no cartão`;
   stats.innerHTML = `
     <div class="stat-tile" style="animation-delay:0ms">
-      <div class="stat-label">Indicados</div>
+      <div class="stat-label">Cadastros indicados</div>
       <div class="stat-value">${Number(s.referrals || 0)}</div>
-      <div class="stat-delta" style="color:var(--text-3)">cadastros pelo seu link</div>
+      <div class="stat-delta" style="color:var(--text-3)">pelo seu link</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:30ms">
+      <div class="stat-label">Clientes que pagaram</div>
+      <div class="stat-value">${Number(s.paying_clients || 0)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${s.refunded_clients ? plural(s.refunded_clients, "reembolsado", "reembolsados") : "pagamento confirmado"}</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:45ms">
+      <div class="stat-label">Comissões geradas</div>
+      <div class="stat-value">${fmt(s.generated || 0)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">sem as estornadas</div>
     </div>
     <div class="stat-tile" style="animation-delay:60ms">
       <div class="stat-label">Disponível pra saque</div>
@@ -11931,18 +11947,25 @@ function _renderAffiliateView(data) {
     <div class="stat-tile" style="animation-delay:120ms">
       <div class="stat-label">Em carência</div>
       <div class="stat-value">${fmt(s.held || 0)}</div>
-      <div class="stat-delta" style="color:var(--text-3)">libera 30 dias após a cobrança</div>
+      <div class="stat-delta" style="color:var(--text-3)">libera ${Number(data.hold_days)} dias após a cobrança</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:150ms">
+      <div class="stat-label">Em saque</div>
+      <div class="stat-value">${fmt(s.requested || 0)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">pedido em análise</div>
     </div>
     <div class="stat-tile" style="animation-delay:180ms">
-      <div class="stat-label">Já recebido</div>
+      <div class="stat-label">Já pago</div>
       <div class="stat-value">${fmt(s.paid || 0)}</div>
-      <div class="stat-delta" style="color:var(--text-3)">${s.requested ? fmt(s.requested) + " em saque pendente" : "comissão de " + Number(data.commission_percent || 10) + "% por cobrança"}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${regra}</div>
     </div>
   `;
 
   // Lista compacta: mostra as N mais recentes; o resto fica atrás de
-  // "Mostrar todas" (o backend já limita em 50 comissões / 20 saques).
+  // "Mostrar todas" (o backend já limita em 50 comissões / 20 saques: no limite há o que avisar).
   const AFF_LIST_VISIBLE = 8;
+  const AFF_LIMITE_COMISSOES = 50, AFF_LIMITE_SAQUES = 20;
+  const _notaDoLimite = (lista, limite, texto) => ((lista || []).length >= limite ? `<div style="margin-top:8px;font-size:.72rem;color:var(--text-3)">${texto}</div>` : "");
   const _collapsibleList = (rowsHtmlArr, keyId, visible = AFF_LIST_VISIBLE) => {
     if (rowsHtmlArr.length <= visible) return rowsHtmlArr.join("");
     const head = rowsHtmlArr.slice(0, visible).join("");
@@ -11956,13 +11979,14 @@ function _renderAffiliateView(data) {
 
   const commissionRowsArr = (data.commissions || []).map(c => {
     const st = _affiliateCommissionStatus(c);
+    const refund = { partial: "reembolso parcial", total: "pagamento reembolsado" }[c.payment_refund];
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--glass-border)">
         <div>
           <div style="font-weight:600">${fmt(c.amount)}</div>
           <div style="font-size:.72rem;color:var(--text-3)">fatura de ${fmt(c.invoice_amount)} · ${fmtDate(c.created_at)}</div>
         </div>
-        <span style="font-size:.75rem;color:${st.color}">${st.label}</span>
+        <span style="font-size:.75rem;color:${st.color};text-align:right">${st.label}${refund ? `<br><span style="color:var(--text-3)">${refund}</span>` : ""}</span>
       </div>`;
   });
   const commissionRows = _collapsibleList(commissionRowsArr, "aff-comm-extra");
@@ -11978,7 +12002,7 @@ function _renderAffiliateView(data) {
           </div>` : "";
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--glass-border)">
-        <div>
+        <div style="min-width:0;word-break:break-word">
           <div style="font-weight:600">${fmt(p.amount)}</div>
           <div style="font-size:.72rem;color:var(--text-3)">pedido em ${fmtDate(p.requested_at)}</div>${noteHtml}
         </div>
@@ -11987,40 +12011,42 @@ function _renderAffiliateView(data) {
   });
   const payoutRows = _collapsibleList(payoutRowsArr, "aff-payout-extra", 5);
 
-  const canRequest = Number(s.available || 0) >= Number(data.min_payout || 50) && !(data.payouts || []).some(p => p.status === "requested");
+  const canRequest = Number(s.available || 0) >= Number(data.min_payout || 50) && !Number(s.requested || 0) && !(data.payouts || []).some(p => p.status === "requested");
 
   body.innerHTML = `
     <div class="mock-card">
       <h3 style="margin:0 0 6px">Seu link de divulgação</h3>
       <p style="font-size:.78rem;color:var(--text-3);margin:0 0 12px">
-        Quem se cadastrar por ele e assinar o PigBank+ gera ${Number(data.commission_percent || 10)}% de comissão
-        pra você na primeira cobrança da assinatura.
+        ${data.commission_percent === 0 ? "Você participa sem comissão neste programa." : `Você ganha ${regra}. Pagamento por Pix não gera comissão.`}
       </p>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input id="affiliate-link-input" type="text" readonly value="${esc(data.link)}"
+      ${[["code", "Código", data.code], ["link", "Link", data.link]].map(([id, nome, valor]) => `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+        <input id="affiliate-${id}-input" type="text" readonly aria-label="${nome}" value="${esc(valor)}"
           style="flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text);font-size:.82rem">
-        <button class="mock-cta" type="button" onclick="copyAffiliateLink()">Copiar</button>
-      </div>
+        <button class="mock-cta" type="button" aria-label="Copiar ${nome.toLowerCase()}" onclick="copyAffiliateLink('affiliate-${id}-input', '${nome}')">Copiar</button>
+      </div>`).join("")}
       ${data.status !== "active" ? '<p style="font-size:.75rem;color:var(--red);margin:10px 0 0">Seu cadastro de afiliado está desativado. O link não gera novas comissões.</p>' : ""}
 
-      <h3 style="margin:18px 0 6px">Solicitar saque</h3>
+      ${data.commission_percent !== 0 || s.available > 0 || s.requested > 0 ? `<h3 style="margin:18px 0 6px">Solicitar saque</h3>
       <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">
         Saque mínimo de ${fmt(data.min_payout || 50)}. O pagamento é feito por Pix em até alguns dias úteis.
       </p>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input id="affiliate-pix-input" type="text" placeholder="Sua chave Pix (CPF, email, celular...)"
+        <input id="affiliate-pix-input" type="text" autocomplete="off" placeholder="Sua chave Pix (CPF, email, celular...)"
           style="flex:1;min-width:180px;padding:10px 12px;border-radius:10px;border:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text);font-size:.82rem">
         <button class="mock-cta" type="button" id="affiliate-payout-btn" onclick="requestAffiliatePayout()" ${canRequest ? "" : "disabled style='opacity:.5;cursor:not-allowed'"}>
           Sacar ${fmt(s.available || 0)}
         </button>
-      </div>
+      </div>` : ""}
     </div>
 
     <div class="mock-card">
-      <h3 style="margin:0 0 10px">Comissões</h3>
-      <div class="tx-list">${commissionRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhuma comissão ainda. Divulgue seu link! <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>'}</div>
+      <h3 style="margin:0 0 6px">Comissões</h3>
+      <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">Reembolsos: ${plural(Number(refunds.total || 0), "total", "totais")} · ${plural(Number(refunds.partial || 0), "parcial", "parciais")}</p>
+      <div class="tx-list">${commissionRows || `<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">${data.commission_percent === 0 ? "Nenhuma comissão." : 'Nenhuma comissão ainda. Divulgue seu link! <i class="ph ph-piggy-bank" aria-hidden="true"></i>'}</div>`}</div>
+      ${_notaDoLimite(data.commissions, AFF_LIMITE_COMISSOES, "Mostrando as mais recentes.")}
       <h3 style="margin:18px 0 10px">Saques</h3>
       <div class="tx-list">${payoutRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhum saque solicitado.</div>'}</div>
+      ${_notaDoLimite(data.payouts, AFF_LIMITE_SAQUES, "Mostrando os mais recentes.")}
     </div>
   `;
 }
@@ -12033,16 +12059,15 @@ function toggleAffiliateList(keyId, btn, hiddenCount) {
   if (btn) btn.textContent = showing ? `Mostrar todas (+${hiddenCount})` : "Mostrar menos";
 }
 
-async function copyAffiliateLink() {
-  const input = document.getElementById("affiliate-link-input");
+async function copyAffiliateLink(id, nome) {
+  const input = document.getElementById(id);
   if (!input) return;
   try {
     await navigator.clipboard.writeText(input.value);
-    showToast("✓ Link copiado");
+    showToast(`✓ ${nome} copiado`);
   } catch {
     input.select();
-    document.execCommand("copy");
-    showToast("✓ Link copiado");
+    showToast(document.execCommand("copy") ? `✓ ${nome} copiado` : "Não foi possível copiar");
   }
 }
 
@@ -12053,6 +12078,11 @@ async function requestAffiliatePayout() {
     await alertModal("Informe sua chave Pix pra receber o pagamento.", { title: "Saque" });
     return;
   }
+  const valor = fmt(_affiliateCache?.stats?.available || 0);
+  // O botão só desliga depois: o modal guarda o foco nele, e o Esc volta para lá.
+  if (!await confirmModal(`Saque de ${valor} para a chave Pix ${pixKey}. Confira a chave: é para ela que o pagamento vai.`, { title: "Confirmar saque", okText: "Confirmar saque" })) return;
+  // A conta trocou noutra aba: a chave digitada aqui não vira saque da conta nova.
+  if (getCookie("pb_conta") !== _contaDaCarga) { location.reload(); return; }
   const btn = document.getElementById("affiliate-payout-btn");
   if (btn) btn.disabled = true;
   try {

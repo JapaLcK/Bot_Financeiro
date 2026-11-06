@@ -51,8 +51,8 @@ export class ErroApi extends Error {
   }
 }
 
-// As rotas antigas ficam fora da /api/v2 (o `ai` é o chat com a IA).
-export const urlDe = (path: string) => (/^\/(auth|settings|open-finance|billing|agents|ai)\//.test(path) ? "" : "/api/v2") + path;
+// As rotas antigas ficam fora da /api/v2 (o `ai` é o chat com a IA; `api/affiliate`, o programa de afiliados).
+export const urlDe = (path: string) => (/^\/(auth|settings|open-finance|billing|agents|ai|api\/affiliate)\//.test(path) ? "" : "/api/v2") + path;
 
 /** O erro de uma resposta que não deu certo (ou 2xx sem corpo), o mesmo para `chamar` e para o stream (lib/sse.ts). */
 export function erroDe(r: Response, body: unknown) {
@@ -270,6 +270,8 @@ export const comparacaoQuery = (mes: string) => queryOptions({
 export const usePlan = () => useQuery(meQuery).data!.plan_tier;
 /** Freio de emergência dos agentes (`AGENTS_UI_ENABLED=0`): ausente (protótipo, resposta antiga) = ligado, como no /auth/me do dashboard antigo. */
 export const useAgentesLigados = () => useQuery(meQuery).data?.agents_ui_enabled !== false;
+/** Tem cadastro de afiliado, ativo ou desativado. Ligado SÓ com `afiliado: true`: ausente (protótipo, resposta antiga) = fora do menu, falha fechada. */
+export const useAfiliado = () => useQuery(meQuery).data?.afiliado === true;
 /** O freio do chat com a IA (`PAINEL_CHAT_IA_USER_IDS`): ligado SÓ com `chat_ia: true`; ausente (protótipo, resposta antiga) = desligado. Com ele a conversa do Piggy vai ao servidor (lib/conversaIa.ts); sem ele é a de exemplo. */
 export const useChatIa = () => useQuery(meQuery).data?.chat_ia === true;
 

@@ -107,7 +107,7 @@ async function loginCom(next) {
   const ctx = await browser.newContext();
   await ctx.route("**/auth/validate", json({ ok: true, user_id: 42 }));
   const pagina = (r) => r.fulfill({ contentType: "text/html", body: "<h1>destino</h1>" });
-  await ctx.route((u) => u.pathname === "/painel" || u.pathname === "/home", pagina);
+  await ctx.route((u) => ["/painel", "/afiliado", "/home"].includes(u.pathname), pagina);
   const page = await ctx.newPage();
   await page.goto(`${ORIGIN}/login.html?next=${encodeURIComponent(next)}`);
   // Compara o pathname: "**/painel" casaria a query ?next=/painel do próprio login.
@@ -119,6 +119,11 @@ async function loginCom(next) {
 
 test("/login com sessão viva e ?next=/painel vai ao /painel", async () => {
   assert.equal(await loginCom("/painel"), "/painel");
+});
+
+// mutação: tirar '/afiliado' da allowlist do login.html: quem entra pela porta sem plano cai no destino padrão
+test("/login com sessão viva e ?next=/afiliado vai ao /afiliado", async () => {
+  assert.equal(await loginCom("/afiliado"), "/afiliado");
 });
 
 test("controle: /login com ?next fora da allowlist vai ao destino padrão", async () => {
