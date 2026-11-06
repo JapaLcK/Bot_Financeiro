@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 
 from core.crypto import PiiAccessContext, decrypt_pii_optional
 from core.observability import log_system_event_sync, recent_event_exists
-from core.services import admin_notify
+from core.services import admin_notify, afiliado_pix
 from core.services.pix_extras import total_cents
 
 def janela_de_acesso(cobranca) -> tuple[datetime, datetime]:
@@ -323,4 +323,6 @@ def _email_do_titular(user_id: int) -> str | None:
 
 
 EXECUTORES = {"stripe_cancel": _stripe_cancel, "grant": _grant, "ebook": _ebook, "ga4": _ga4,
-               "capi": _capi, "email": _email, "revoke": _revoke}
+               "capi": _capi, "email": _email, "afiliado": afiliado_pix.registrar, "revoke": _revoke,
+               "afiliado_estorno": afiliado_pix.estornar,
+               "afiliado_estorno_parcial": lambda c, _: afiliado_pix.marcar(c, "partial")}

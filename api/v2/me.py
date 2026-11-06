@@ -1,10 +1,12 @@
 """`GET /api/v2/me`: o que o v2 precisa saber do usuário da sessão. Sem PII e sem id."""
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api.v2.sessao import usuario_atual
+from db.affiliates import get_affiliate_by_user
 from db.family_views import my_family
 from core.services.plan_service import agents_ui_enabled, get_plan_tier, painel_chat_ia
 
@@ -20,6 +22,7 @@ class Me(BaseModel):
     agents_ui_enabled: bool  # o freio AGENTS_UI_ENABLED=0 (só a allowlist); o mesmo gate de /auth/me e de /agents
     chat_ia: bool  # o freio do chat com a IA no /painel: PAINEL_CHAT_IA_USER_IDS lista quem o vê (desligado por padrão)
     familia: FamiliaMe | None = None  # Plano Família: só o papel. Acréscimo: o app instalado não atualiza com o deploy
+    afiliado: bool = False  # tem cadastro de afiliado, ativo ou desativado: mostra a área no /painel
 
 
 def _familia(uid: int) -> FamiliaMe | None:
@@ -27,7 +30,16 @@ def _familia(uid: int) -> FamiliaMe | None:
     return FamiliaMe(papel="titular" if v["role"] == "owner" else "membro") if v else None
 
 
+def _afiliado(uid: int) -> bool:
+    """Falha aqui não derruba o /me, a entrada do painel de todo mundo: só esconde o item do menu."""
+    try:
+        return get_affiliate_by_user(uid) is not None
+    except Exception as exc:
+        logging.getLogger(__name__).warning("afiliado do /me falhou causa=%s", type(exc).__name__, extra={"user_id": uid})
+        return False
+
+
 @router.get("/me", response_model=Me)
 def me(uid: int = Depends(usuario_atual)) -> Me:
     return Me(plan_tier=get_plan_tier(uid), agents_ui_enabled=agents_ui_enabled(uid),
-              chat_ia=painel_chat_ia(uid), familia=_familia(uid))
+              chat_ia=painel_chat_ia(uid), familia=_familia(uid), afiliado=_afiliado(uid))

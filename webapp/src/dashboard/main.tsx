@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { Entrada } from "./parts/Entrada";
 import { Cofre } from "./conta/Cofre";
+import { PaginaSemPlano } from "./afiliado/SemPlano";
 import { BALANCE_TODAY, MONTHS, netWorth, previousKey, summary } from "./lib/api";
 import { COMPARACAO_EXEMPLO } from "./lib/data.js";
 import { readProfile } from "./lib/profiles.js";
@@ -109,6 +110,9 @@ if (root) {
   if (!DEMO) escutarLogout(); // sair em outra aba derruba o painel (o dashboard.js antigo faz o mesmo)
   if (!DEMO) vigiar(); // a conta trocou (outra aba, logout + login): esconde e recarrega (lib/sessao.ts)
   createRoot(root).render(
-    <StrictMode><QueryClientProvider client={qc}><Entrada><App /></Entrada>{/* irmão do portão: o /me falhar não apaga os códigos de backup do MFA */}<Cofre /></QueryClientProvider></StrictMode>,
+    <StrictMode><QueryClientProvider client={qc}>
+      {/* O GET /afiliado (static_pages.py) serve este bundle a quem está sem plano: a /api/v2 daria 402, então só a página monta, sem o portão, o App e os eventos. */}
+      {location.pathname === "/afiliado" ? <PaginaSemPlano /> : <><Entrada><App /></Entrada>{/* irmão do portão: o /me falhar não apaga os códigos de backup do MFA */}<Cofre /></>}
+    </QueryClientProvider></StrictMode>,
   );
 }

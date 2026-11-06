@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { NATIVE, useDialogo } from "../parts/dialog";
 import { ErroApi } from "../lib/v2";
 import { deSaida } from "../lib/sessao";
+import { copiar as paraAreaDeTransferencia } from "../lib/copiar";
 
 // O cofre dos códigos de backup do MFA: o servidor os devolve UMA vez e (no regerar) já apagou os antigos, então eles
 // moram AQUI, na memória do módulo (padrão do router.ts), e não em estado de componente nem no cache do React Query.
@@ -30,7 +31,7 @@ function Modal({ g }: { g: Guardado }) {
   const concluir = () => { saindo.current = true; fecharDialog(); };
   const [aviso, setAviso] = useState(""); // para leitor de tela; o texto dos códigos nunca vai ao console
   const copiar = () => {
-    Promise.resolve().then(() => navigator.clipboard.writeText(g.codigos.join("\n"))).then(() => setAviso("Códigos copiados"), () => setAviso("Não foi possível copiar"));
+    paraAreaDeTransferencia(g.codigos.join("\n")).then(() => setAviso("Códigos copiados"), () => setAviso("Não foi possível copiar"));
   };
   return <>
     <dialog {...props} className={`lanc-form${NATIVE ? "" : " lanc-form-fb"}`} aria-labelledby="cofre-t">

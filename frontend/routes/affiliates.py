@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from core.pg_text import detalhe_seguro
 from db.affiliates import (
+    COMMISSION_HOLD_DAYS,
     MIN_PAYOUT_CENTS,
     REF_COOKIE_MAX_AGE_DAYS,
     get_affiliate_by_code,
@@ -80,12 +81,17 @@ async def affiliate_me(request: Request):
         "commission_percent": affiliate["commission_bps"] / 100.0,
         "has_pix_key": bool(affiliate["pix_key_enc"]),
         "min_payout": _cents(MIN_PAYOUT_CENTS),
+        "hold_days": COMMISSION_HOLD_DAYS,
         "stats": {
             "referrals": stats["referrals"],
             "held": _cents(stats["held_cents"]),
             "available": _cents(stats["available_cents"]),
             "requested": _cents(stats["requested_cents"]),
             "paid": _cents(stats["paid_cents"]),
+            "generated": _cents(stats["generated_cents"]),
+            "paying_clients": stats["paying_clients"],
+            "refunded_clients": stats["refunded_clients"],
+            "refunds": {"total": stats["refunds_total"], "partial": stats["refunds_partial"]},
         },
         "commissions": [
             {
@@ -94,6 +100,8 @@ async def affiliate_me(request: Request):
                 "amount": _cents(c["amount_cents"]),
                 "status": c["status"],
                 "available_at": c["available_at"].isoformat(),
+                "payout_id": c["payout_id"],
+                "payment_refund": c["payment_refund"],
                 "created_at": c["created_at"].isoformat(),
             }
             for c in commissions
