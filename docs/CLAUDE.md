@@ -14,7 +14,7 @@
 
 ## O que é o projeto
 
-Assistente financeiro pessoal usado por **WhatsApp** (canal principal), **Discord** e
+Assistente financeiro pessoal usado por **WhatsApp** (canal principal) e
 por um **dashboard web**. Registra despesa e receita em linguagem natural, categoriza
 com IA, e cobre cartão de crédito, parcelamentos, caixinhas, metas, orçamentos,
 boletos, recorrentes, investimentos com CDI, importação de extrato (OFX/CSV/PDF) e
@@ -31,8 +31,8 @@ tomadas". App iOS em Capacitor carregando o próprio site.
 ## Mapa do repositório
 
 ```
-launch.py                 — entrypoint do Railway: carrega o ambiente e vira o uvicorn ($PORT)
-bot.py                    — bot do Discord (fora do launch.py desde o PR 5a; não roda)
+launch.py                 — entrypoint do Procfile e local: carrega o ambiente e vira o uvicorn ($PORT); o Railway usa start command próprio
+bot.py                    — bot do Discord (não roda: serviço `Core` do Railway desligado em 2026-11-06)
 ai_router.py              — chamada à OpenAI (modelo em OPENAI_MODEL, default gpt-6-luna)
 parsers.py                — parse de linguagem natural ("gastei 50 mercado")
 statement_import.py       — importação de extrato (OFX/CSV/PDF)
@@ -1804,6 +1804,18 @@ Estorno que chega com a cobrança ainda `pending` não vira pagante, nem no boot
 `paid`.
 Limite: em `chargeback` o estorno não grava pagante; nenhum código grava esse status, só reparo manual, e o boot repara.
 
+`PAYMENT_RECEIVED_IN_CASH_UNDONE` (baixa manual desfeita, #1267; `core/services/pix_baixa_desfeita.py`):
+UNDONE com id diferente do `asaas_payment_id` de cobrança `paid`/`paid_orphan`/`refunded_partial` é de um pagamento secundário: só alerta, nada muda.
+sem `GET /v3/payments/{id}` já pago, revoga o grant (sem gravar o efeito `revoke`, que travaria o Pix
+real pela D3), grava o marcador `baixa_desfeita` (nunca apagado), reabre `paid`/`paid_orphan` como
+`pending` (`expired` se outra cobrança ativa ocupa o índice, ou se é órfã) apagando o efeito `grant`, e alerta o
+operador. Pagamento confirmado depois concede de novo (o upsert reativa o grant revogado por esse
+motivo) sem repetir Purchase/e-mail; `RECEIVED` com o marcador e o Asaas ainda não pago é retido. A revogação do UNDONE ignora a guarda de
+versão (`sem_guarda_de_versao`; a ordem vem do GET). Se o processo morreu entre revogar e reabrir e o Pix real chegou antes da
+retentativa, `reconciliar_grant` reconcede (só grant revogado POR ESTE motivo, GET pago) e alerta.
+`refunded_partial` vai a `refunded` com `revoke`; `refunded`/`chargeback` só alertam. Falha do Asaas
+deixa o evento aberto. O nome do evento vem só da documentação do Asaas, não do sandbox.
+
 **PR B: emitir com os cadernos (backend; invisível até o modal mandar `extras`).** O
 `POST /billing/pix/checkout` aceita `extras: list[str]` (ids de Price, até 3, sem
 repetir, senão 400). O cliente nunca manda preço: `pix_extras.escolher` relê a oferta
@@ -3247,7 +3259,7 @@ Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches
 | Serviço | Para quê | Onde |
 |---|---|---|
 | WhatsApp **Cloud API oficial** (`graph.facebook.com`) | canal principal | `adapters/whatsapp/` |
-| Discord | fora do `launch.py` desde o PR 5a do dashboard v2: o código segue e não roda | `adapters/discord/`, `bot.py` |
+| Discord | desligado: o serviço `Core` do Railway, que rodava `python bot.py`, parou em 2026-11-06. O código segue, e o pacote `discord` continua no caminho de import do WhatsApp (`core/reports/reports_daily.py`) | `adapters/discord/`, `bot.py` |
 | OpenAI | categorização, chat, agentes | `ai_router.py`, `core/services/ai_chat/` |
 | Stripe | assinaturas | billing no monólito |
 | Pluggy | Open Finance | `core/services/pluggy*.py` |

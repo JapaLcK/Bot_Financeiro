@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Assinatura, Assinaturas, MarcaIn } from "../lib/api-v2.gen";
 import { dayMonth, isoDay, money, money0, monthYear } from "../lib/format.js";
-import { ErroApi, apiPost, assinaturasQuery } from "../lib/v2";
+import { ErroApi, apiPost, assinaturasQuery, comPrazoLeitura } from "../lib/v2";
 import { conectarBanco } from "../router";
 import { Frame } from "../parts/Frame";
 import { Info } from "../parts/Info";
@@ -146,7 +146,7 @@ export function SubscriptionList() {
       }
       // A resposta pode ter se perdido com a marca já gravada: a recarga diz se ela pegou.
       // Recarga que falha deixa a lista de antes do POST, onde a ação não aparece aplicada.
-      await qc.invalidateQueries({ queryKey: assinaturasQuery.queryKey });
+      await comPrazoLeitura(qc.invalidateQueries({ queryKey: assinaturasQuery.queryKey })); // pendurada: estoura o prazo e destrava os botões
       const d = qc.getQueryData<Assinaturas>(assinaturasQuery.queryKey);
       const { chave, status } = a.corpo;
       const item = d && [...d.servicos, ...d.outras].find((x) => x.chave === chave);

@@ -287,3 +287,57 @@ def rezerar_rastreio_de_orfas() -> int:
             rezeradas = cur.rowcount
         conn.commit()
     return rezeradas
+
+
+def reabrir_baixa(charge_id: int, payment_id: str, status: str) -> bool:
+    """Baixa manual desfeita (#1267): `paid`/`paid_orphan` volta a `status`
+    (`pending`, ou `expired` se outra cobrança já ocupa o índice de ativa), sem
+    janela de acesso, e o efeito `grant` do pagamento sai da tabela para o
+    `RECEIVED` real conceder de novo. UMA transação. Devolve True se aplicou.
+
+    Sem `user_id` no `where`, como `transicionar` (tabela de exceções em
+    `db/pix_charges.py`): chaveada por `charge_id` que veio do evento assinado.
+    O `qr_payload_enc` foi apagado em `paid`; a cobrança reaberta não tem QR, por
+    isso `qr_expires_at = now()`. O marcador `baixa_desfeita` NUNCA é apagado.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update pix_charges set status = %s, paid_at = null,"
+                "       access_starts_at = null, access_expires_at = null,"
+                "       qr_expires_at = now()"
+                " where id = %s and status in ('paid', 'paid_orphan')"
+                " returning id",
+                (status, int(charge_id)),
+            )
+            aplicou = cur.fetchone() is not None
+            if aplicou:
+                cur.execute(
+                    "delete from pix_payment_effects"
+                    " where asaas_payment_id = %s and effect = 'grant'",
+                    (payment_id,),
+                )
+        conn.commit()
+    return aplicou
+
+
+def registrar_nao_casado(pagamento: dict, referencia: str) -> None:
+    """Insere em `pix_unmatched_payments` — fila de conciliação, não venda.
+
+    `on conflict do nothing`: o Asaas reentrega, e a mesma conciliação não pode
+    empilhar. Sem `user_id` porque não há dono — é esse o ponto da tabela.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into pix_unmatched_payments"
+                "  (asaas_payment_id, external_reference, value, net_value,"
+                "   status, date_created, customer, notified_at)"
+                " values (%s, %s, %s, %s, %s, %s, %s, now())"
+                " on conflict (asaas_payment_id) do nothing",
+                (str(pagamento.get("id") or ""), referencia,
+                 pagamento.get("value"), pagamento.get("netValue"),
+                 pagamento.get("status"), pagamento.get("dateCreated"),
+                 pagamento.get("customer")),
+            )
+        conn.commit()

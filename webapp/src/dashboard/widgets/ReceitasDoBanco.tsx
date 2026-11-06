@@ -10,7 +10,7 @@ import { flushSync } from "react-dom";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Previsao, ReceitaDoBanco, RespostaReceitaIn } from "../lib/api-v2.gen";
 import { moneyText } from "../lib/format.js";
-import { apiPost } from "../lib/v2";
+import { apiPost, comPrazoLeitura } from "../lib/v2";
 import { Frame } from "../parts/Frame";
 import type { AvisoDaPilha } from "../parts/PilhaAvisos";
 
@@ -62,13 +62,13 @@ export function useReceitas(modo: Modo) {
     mutationFn: ({ r, resposta }: { r: ReceitaDoBanco; resposta: Resposta }) => apiPost("/previsao/receita", { chave: r.chave, resposta }),
     onSuccess: async (_, { r, resposta }) => {
       setFalhou(false); falar(`${r.nome}: ${DITO[resposta]}`);
-      await qc.invalidateQueries({ queryKey: ["previsao"] });
+      await comPrazoLeitura(qc.invalidateQueries({ queryKey: ["previsao"] })); // pendurada: estoura o prazo e destrava os botões
       focar(tituloRef.current);
     },
     // A resposta pode ter se perdido com a marca já gravada: a releitura diz se pegou.
     // Releitura que também falha deixa a lista de antes do POST, onde a ação não aparece aplicada.
     onError: async (_, { r, resposta }) => {
-      await qc.invalidateQueries({ queryKey: ["previsao"] });
+      await comPrazoLeitura(qc.invalidateQueries({ queryKey: ["previsao"] })); // pendurada: estoura o prazo e destrava os botões
       // Chave fora da lista relida NÃO conta como gravada: pode ser banco fora do ar ou cadeia que deixou de ser detectada.
       const pegou = qc.getQueriesData<Previsao>({ queryKey: ["previsao"] })
         .some(([, d]) => d?.receitas_do_banco?.some((x) => x.chave === r.chave && x.status === STATUS[resposta]));

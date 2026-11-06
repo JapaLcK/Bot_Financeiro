@@ -1,8 +1,8 @@
 import { useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ErroApi } from "../lib/v2";
+import { ErroApi, comPrazoLeitura } from "../lib/v2";
 import { Confirma } from "./Confirma";
-import { DETALHES, comPrazoLeitura, encerrarOutras, encerrarSessao, falhaDe, horaRelativa, sessoesQuery, type Falha, type Sessao, type SessoesAtivas } from "./api";
+import { DETALHES, encerrarOutras, encerrarSessao, falhaDe, horaRelativa, sessoesQuery, type Falha, type Sessao, type SessoesAtivas } from "./api";
 
 const MOVEL = /iOS|iPadOS|Android|PigBank app/; // o rótulo do servidor (core/sessions.py: device_label); sem critério melhor, o resto é computador
 

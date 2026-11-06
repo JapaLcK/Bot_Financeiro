@@ -28,7 +28,7 @@ from .connection import get_conn
 EFEITOS = (
     "stripe_cancel", "grant", "ebook", "ga4", "capi", "email", "afiliado", "revoke",
     "afiliado_estorno", "afiliado_estorno_parcial", "orphan_notified", "valor_alertado", "valor_concedido_alertado",
-    "pagamento_duplicado_alertado",
+    "pagamento_duplicado_alertado", "baixa_desfeita",
 )
 
 
