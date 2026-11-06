@@ -1791,6 +1791,18 @@ as linhas Pix. Na junção de contas, caderno ainda não entregue cai com a orig
 dos status de estorno/contestação e a forma de `refunds` só se provam no sandbox do
 Asaas.
 
+`PAYMENT_RECEIVED_IN_CASH_UNDONE` (baixa manual desfeita, #1267; `core/services/pix_baixa_desfeita.py`):
+UNDONE com id diferente do `asaas_payment_id` de cobrança `paid`/`paid_orphan`/`refunded_partial` é de um pagamento secundário: só alerta, nada muda.
+sem `GET /v3/payments/{id}` já pago, revoga o grant (sem gravar o efeito `revoke`, que travaria o Pix
+real pela D3), grava o marcador `baixa_desfeita` (nunca apagado), reabre `paid`/`paid_orphan` como
+`pending` (`expired` se outra cobrança ativa ocupa o índice, ou se é órfã) apagando o efeito `grant`, e alerta o
+operador. Pagamento confirmado depois concede de novo (o upsert reativa o grant revogado por esse
+motivo) sem repetir Purchase/e-mail; `RECEIVED` com o marcador e o Asaas ainda não pago é retido. A revogação do UNDONE ignora a guarda de
+versão (`sem_guarda_de_versao`; a ordem vem do GET). Se o processo morreu entre revogar e reabrir e o Pix real chegou antes da
+retentativa, `reconciliar_grant` reconcede (só grant revogado POR ESTE motivo, GET pago) e alerta.
+`refunded_partial` vai a `refunded` com `revoke`; `refunded`/`chargeback` só alertam. Falha do Asaas
+deixa o evento aberto. O nome do evento vem só da documentação do Asaas, não do sandbox.
+
 **PR B: emitir com os cadernos (backend; invisível até o modal mandar `extras`).** O
 `POST /billing/pix/checkout` aceita `extras: list[str]` (ids de Price, até 3, sem
 repetir, senão 400). O cliente nunca manda preço: `pix_extras.escolher` relê a oferta

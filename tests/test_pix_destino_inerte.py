@@ -106,7 +106,12 @@ MARCAS_PERMITIDAS: dict[str, tuple[str, ...]] = {
     "db/pix_charges.py": ("pix_charges", "pix_payment_effects"),
     # `pix_webhook_events`: a prosa da `rezerar_rastreio_de_orfas`, que veio de
     # `db/pix_charges.py` para abrir espaço no teto de 350.
-    "db/pix_charges_saga.py": ("pix_charges", "pix_webhook_events"),
+    # `pix_payment_effects`/`pix_unmatched_payments`: o SQL de `reabrir_baixa` e da fila de
+    # conciliação, que moram aqui (#1267); só nome de tabela, sem host nem env.
+    "db/pix_charges_saga.py": ("pix_charges", "pix_webhook_events",
+                               "pix_payment_effects", "pix_unmatched_payments"),
+    # `from db.pix_charges import transicionar`: o nome do módulo, sem host nem env.
+    "core/services/pix_baixa_desfeita.py": ("pix_charges",),
     "db/webhook_outbox.py": ("pix_charges", "pix_webhook_events",
                              "pix_payment_effects"),
     "db/pix_effects.py": ("pix_webhook_events", "pix_payment_effects"),

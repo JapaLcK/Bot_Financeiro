@@ -306,7 +306,8 @@ def _revoke(cobranca, evt) -> None:
         return
     revoke_grant(cobranca["user_id"], "pix", str(cobranca["id"]),
                  f"asaas:{evt['event_type']}", int(evt["event_version"]),
-                 last_event_id=evt["event_id"])
+                 last_event_id=evt["event_id"],
+                 sem_guarda_de_versao=evt["event_type"] == "PAYMENT_RECEIVED_IN_CASH_UNDONE")
     recompute_entitlement(cobranca["user_id"], origem="pix_estorno")
 
 
