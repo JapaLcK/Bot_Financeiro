@@ -1796,7 +1796,9 @@ sem `GET /v3/payments/{id}` já pago, revoga o grant (sem gravar o efeito `revok
 real pela D3), grava o marcador `baixa_desfeita` (nunca apagado), reabre `paid`/`paid_orphan` como
 `pending` (`expired` se outra cobrança ativa ocupa o índice, ou se é órfã) apagando o efeito `grant`, e alerta o
 operador. Pagamento confirmado depois concede de novo (o upsert reativa o grant revogado por esse
-motivo) sem repetir Purchase/e-mail; `RECEIVED` com o marcador e o Asaas ainda não pago é retido.
+motivo) sem repetir Purchase/e-mail; `RECEIVED` com o marcador e o Asaas ainda não pago é retido. A revogação do UNDONE ignora a guarda de
+versão (`sem_guarda_de_versao`; a ordem vem do GET). Se o processo morreu entre revogar e reabrir e o Pix real chegou antes da
+retentativa, `reconciliar_grant` reconcede (só grant revogado POR ESTE motivo, GET pago) e alerta.
 `refunded_partial` vai a `refunded` com `revoke`; `refunded`/`chargeback` só alertam. Falha do Asaas
 deixa o evento aberto. O nome do evento vem só da documentação do Asaas, não do sandbox.
 

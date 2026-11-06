@@ -37,7 +37,7 @@ GRANT_SOURCES = ("stripe", "pix", "legacy", "admin", "family")
 #
 # O `>` estrito é metade da regra do §6.1 ("no empate, a revogação ganha"): a
 # CONCESSÃO que empata é descartada aqui. A outra metade — a revogação que
-# empata e APLICA — mora no `event_version <= %s` do `revoke_grant`, porque
+# empata e APLICA — mora no `event_version <= %s` do `revoke_grant` (salvo `sem_guarda_de_versao`, #1267), porque
 # revogar é UPDATE, não upsert: este INSERT nasce sempre `status='active'`, e
 # uma cláusula de desempate por `excluded.status='revoked'` seria inalcançável.
 # Ela chegou a existir aqui: removê-la não deixou um único teste vermelho, que é
@@ -282,6 +282,7 @@ def revoke_grant(
     reason: str,
     event_version: int,
     last_event_id: str | None = None,
+    sem_guarda_de_versao: bool = False,
 ) -> bool:
     """Revoga UM grant, identificado por `(user_id, source, external_ref)`.
 
@@ -316,6 +317,9 @@ def revoke_grant(
     (`update_user_plan` do ramo pago era o último a escrever), então não é
     regressão; fechá-lo exigiria gravar lápide de grant em todo cancelamento.
 
+    `sem_guarda_de_versao` (só a baixa Pix desfeita, #1267): a ordem vem do GET ao
+    Asaas, não da versão.
+
     Revogar grant `stripe` revoga também o `legacy` do mesmo usuário (§5.1) —
     senão o legado sustentaria acesso que o Stripe já disse que acabou.
     """
@@ -328,10 +332,11 @@ def revoke_grant(
                 "       updated_at = now()"
                 " where user_id = %s and source = %s and external_ref = %s"
                 "   and status <> 'revoked'"
-                "   and event_version <= %s"
+                "   and (event_version <= %s or %s)"
                 " returning id",
                 (reason, int(event_version), last_event_id,
-                 int(user_id), source, external_ref, int(event_version)),
+                 int(user_id), source, external_ref, int(event_version),
+                 sem_guarda_de_versao),
             )
             aplicou = cur.fetchone() is not None
             if aplicou and source == "stripe":

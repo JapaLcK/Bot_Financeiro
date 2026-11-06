@@ -323,3 +323,79 @@ def test_alerta_so_cita_stripe_se_o_cancelamento_foi_registrado(user_id, externo
     registrar_efeito(cob["asaas_payment_id"], "stripe_cancel", eid)
     entregar(UNDONE, cob)
     assert "segue agendado" in externo["alerta"][-1]
+
+
+def _undone_registrado_antes(cob):
+    """UNDONE com versão BAIXA, gravado na outbox e ainda não drenado."""
+    import uuid
+    from _dreno_pix_helpers import _versao
+    from db.webhook_outbox import registrar_evento
+
+    eid = f"evt_{uuid.uuid4().hex[:16]}"
+    registrar_evento(eid, UNDONE, {"id": eid, "event": UNDONE, "payment": {
+        "id": cob["asaas_payment_id"], "externalReference": cob["external_reference"],
+        "value": 499.0, "status": "RECEIVED_IN_CASH_UNDONE"}}, next(_versao))
+    return eid
+
+
+def test_undone_de_versao_menor_que_a_do_grant_ainda_revoga(user_id, externo):
+    """Codex A: RECEIVED reentregue (versão MAIOR) drenado antes do UNDONE."""
+    from core.services.pix_drain import drenar_evento
+
+    conta(user_id, "free", None)
+    cob = nova_cobranca(user_id)
+    eid = _undone_registrado_antes(cob)
+    entregar("PAYMENT_RECEIVED", cob)  # grant nasce com versão > a do UNDONE
+    externo["get_status"] = "PENDING"
+    drenar_evento(eid)
+    assert ler(cob["id"])["status"] == "pending" and _ativos(user_id) == []
+    assert _plano(user_id) == "free"
+    _pix_real(externo, cob)  # Pix real depois do UNDONE concede
+    assert len(_ativos(user_id)) == 1 and ler(cob["id"])["status"] == "paid"
+
+
+def _morre_antes_de_reabrir(externo, monkeypatch, user_id):
+    import core.services.pix_baixa_desfeita as m
+
+    cob = _paga(user_id)
+    real = m.reabrir_baixa
+    monkeypatch.setattr(m, "reabrir_baixa", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    eid = entregar(UNDONE, cob)
+    assert _ativos(user_id) == [] and ler(cob["id"])["status"] == "paid"
+    monkeypatch.setattr(m, "reabrir_baixa", real)
+    return cob, eid
+
+
+def test_pix_real_depois_da_morte_e_antes_da_retentativa_concede(user_id, externo, monkeypatch):
+    """Codex B, retentativa do UNDONE com o GET já pago."""
+    from core.services.pix_drain import drenar_evento
+
+    cob, eid = _morre_antes_de_reabrir(externo, monkeypatch, user_id)
+    externo["get_status"] = "RECEIVED"
+    externo["ga4"] = externo["email"] = 0
+    drenar_evento(eid)
+    assert len(_ativos(user_id)) == 1 and ler(cob["id"])["status"] == "paid"
+    assert _plano(user_id) != "free" and (externo["ga4"], externo["email"]) == (0, 0)
+
+
+def test_pix_real_depois_da_morte_concede_no_proprio_received(user_id, externo, monkeypatch):
+    """Codex B, RECEIVED antes da retentativa; a retentativa depois não desfaz."""
+    from core.services.pix_drain import drenar_evento
+
+    cob, eid = _morre_antes_de_reabrir(externo, monkeypatch, user_id)
+    _pix_real(externo, cob)
+    assert len(_ativos(user_id)) == 1
+    drenar_evento(eid)
+    assert len(_ativos(user_id)) == 1 and ler(cob["id"])["status"] == "paid"
+    assert (externo["ga4"], externo["email"]) == (1, 1)
+
+
+def test_undone_velho_sem_marcador_nao_reconcede(user_id, externo):
+    """Sem marcador, grant revogado pelo UNDONE-reason à mão: nada volta."""
+    from db.plan_grants import revoke_grant
+
+    cob = _paga(user_id)
+    revoke_grant(user_id, "pix", str(cob["id"]), "asaas:" + UNDONE, 2_000_000_000)
+    externo["get_status"] = "RECEIVED"
+    entregar(UNDONE, cob)
+    assert _ativos(user_id) == []

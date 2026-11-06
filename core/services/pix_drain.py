@@ -63,7 +63,7 @@ from core.services.pix_drain_effects import (
     alertar_stripe_desistido,
     janela_de_acesso,
 )
-from core.services.pix_baixa_desfeita import desfazer_baixa, pagamento_confirmado
+from core.services.pix_baixa_desfeita import desfazer_baixa, pagamento_confirmado, reconciliar_grant
 from core.services.pix_pago_sem_qr import avisar as avisar_pago_sem_qr
 from core.services.pix_valor import conferir_valor
 from db.pix_charges import (
@@ -190,6 +190,8 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
     if evt["event_type"] == "PAYMENT_RECEIVED_IN_CASH_UNDONE":
         return desfazer_baixa(cobranca, evt, payment_id)
 
+    if set(efeitos) & set(EFEITOS_DE_COMPRA):
+        reconciliar_grant(cobranca, evt, payment_id)  # #1267: Pix real após morte do UNDONE
     if (set(efeitos) & set(EFEITOS_DE_COMPRA) and cobranca["status"] in origens
             and efeito_registrado(payment_id, "baixa_desfeita")
             and not pagamento_confirmado(payment_id)):  # RECEIVED da baixa desfeita, reentregue

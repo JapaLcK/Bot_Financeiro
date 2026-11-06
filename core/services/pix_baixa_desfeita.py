@@ -14,10 +14,14 @@ Por que o desenho é este:
   * a revogação roda ANTES da reabertura, para a retentativa completar se o
     processo morrer entre as duas (`revoke_grant` é idempotente);
   * a volta a `pending` pode estourar `uniq_pix_charge_ativa` (outra cobrança
-    ativa do usuário): repete com `expired`.
+    ativa do usuário): repete com `expired`;
+  * `reconciliar_grant`: se o processo morreu entre a revogação e a reabertura e o Pix
+    real chegou antes da retentativa, o grant revogado por este motivo é reconcedido.
 """
 
 from __future__ import annotations
+
+import logging
 
 from psycopg import errors
 
@@ -28,6 +32,7 @@ from db.pix_charges import transicionar
 from db.pix_charges_saga import reabrir_baixa
 from db.pix_effects import efeito_registrado, lock_efeito, registrar_efeito
 
+log = logging.getLogger(__name__)
 TIPO = "PAYMENT_RECEIVED_IN_CASH_UNDONE"
 
 
@@ -42,6 +47,31 @@ def _alertar(cobranca, texto: str) -> None:
         f"valor R$ {total_cents(cobranca) / 100:.2f} · {texto}")
 
 
+def reconciliar_grant(cobranca, evt, payment_id: str) -> bool:
+    """Morreu depois do `revoke` e antes de `reabrir_baixa`, e o Pix real veio antes da
+    retentativa: cobrança `paid`, efeito `grant` registrado (o RECEIVED o pula) e grant
+    revogado POR ESTE MOTIVO. Reconcede sem Purchase/e-mail (já registrados). Exige
+    marcador; revogado por estorno/admin não volta. True se reconcedeu (já logou e alertou)."""
+    from db.plan_grants import list_grants
+
+    def _revogado():
+        return any(g["source"] == "pix" and g["external_ref"] == str(cobranca["id"])
+                   and g["status"] == "revoked" and g["revoked_reason"] == f"asaas:{TIPO}"
+                   for g in list_grants(cobranca["user_id"]))
+
+    if (cobranca["user_id"] is None or cobranca["status"] not in ("paid", "paid_orphan")
+            or not efeito_registrado(payment_id, "baixa_desfeita") or not _revogado()
+            or not pagamento_confirmado(payment_id)):
+        return False
+    with lock_efeito(payment_id, "grant"):
+        if not (efeito_registrado(payment_id, "grant") and _revogado()):
+            return False
+        EXECUTORES["grant"](cobranca, evt)
+    log.warning("pix: grant reconcedido (baixa desfeita, Pix real) cobranca=%s", cobranca["id"])
+    _alertar(cobranca, "acesso reconcedido: o Pix real chegou antes da retentativa do UNDONE.")
+    return True
+
+
 def desfazer_baixa(cobranca, evt, payment_id: str) -> None:
     antigo = cobranca["asaas_payment_id"]
     if (cobranca["status"] in ("paid", "paid_orphan", "refunded_partial")
@@ -51,6 +81,8 @@ def desfazer_baixa(cobranca, evt, payment_id: str) -> None:
         return _alertar(cobranca, f"ignorado: baixa desfeita do pagamento `{payment_id}`, "
                         f"mas a cobrança foi paga por `{antigo}`; nada alterado.")
     if pagamento_confirmado(payment_id):  # UNDONE velho, reentregue depois do Pix real
+        if reconciliar_grant(cobranca, evt, payment_id):
+            return
         return _alertar(cobranca, "ignorado: o Asaas já mostra o pagamento como pago.")
     if cobranca["status"] in ("refunded", "chargeback"):
         return _alertar(cobranca, "cobrança já estornada/contestada, nada reaberto.")
