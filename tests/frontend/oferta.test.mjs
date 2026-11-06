@@ -27,7 +27,7 @@ after(async () => { await browser?.close(); server?.kill(); });
 
 /** Contexto novo por caso. `erros` junta pageerror e resposta >= 400. */
 async function abrir({ js = true, calmo = false, mobile = false, relogio = false, largura, logado = false, disponivel = {}, planosDepois = 0,
-                       assinatura = { active: false, trial_disponivel: true }, query = "" } = {}) {
+                       assinatura = { active: false, trial_disponivel: true }, query = "", caminho = "/index.html" } = {}) {
   const ctx = await browser.newContext({
     viewport: largura ? { width: largura, height: 800 } : mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 },
     javaScriptEnabled: js, reducedMotion: calmo ? "reduce" : "no-preference",
@@ -52,7 +52,7 @@ async function abrir({ js = true, calmo = false, mobile = false, relogio = false
   page.on("pageerror", e => erros.push("pageerror: " + e.message));
   page.on("response", r => { if (r.status() >= 400 && !r.url().endsWith("/auth/validate")) erros.push(`${r.status()} ${r.url()}`); });
   if (relogio) await page.clock.install({ time: new Date("2026-01-01T08:00:00") });
-  await page.goto(`${ORIGIN}/index.html${query}`, { waitUntil: "load" });
+  await page.goto(`${ORIGIN}${caminho}${query}`, { waitUntil: "load" });
   if (relogio) await page.clock.pauseAt(new Date("2026-01-01T09:00:00")); // daqui o tempo só anda no runFor
   return { page, ctx, erros, subs };
 }
@@ -383,6 +383,17 @@ for (const [nome, assinatura] of [["403 (sem credencial)", 403], ["degraded", { 
     assert.equal((await cartoes(page)).filter(h => h.startsWith("/assinar?")).length, 6);
     await ctx.close();
     assert.deepEqual(erros.filter(e => !e.includes("/billing/subscription")), []);
+  });
+}
+
+for (const largura of [1280, 390]) {
+  test(`fbclid na entrada de / a ${largura}px: os 4 CTAs levam ao Plus mensal com utm_source e fbclid`, async () => {
+    const { page, ctx, erros, subs } = await abrir({ caminho: "/", largura, query: "?utm_source=x&fbclid=abc" });
+    await assentou(page, subs, 0);
+    assert.deepEqual(await page.$$eval(CTAS_UTM, as => as.map(a => a.getAttribute("href"))),
+                     Array(4).fill(PLUS_MENSAL + "&utm_source=x&fbclid=abc"));
+    await ctx.close();
+    assert.deepEqual(erros, []);
   });
 }
 
