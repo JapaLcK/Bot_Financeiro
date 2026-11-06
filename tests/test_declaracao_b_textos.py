@@ -1,5 +1,6 @@
-"""PR-B (ADR 0006): os textos T1 a T17 (sem T13), aprovados pelo dono em 2026-10-26 (DP-1), 2026-10-27 (T9, T10, T11, variante
-do T1) e 2026-10-28 (T12, T14, T15, issue #1310; T16, T17 e o T12 reescrito pela E3), exatos, e nenhum deixa vazar o
+"""PR-B (ADR 0006): os textos T1 a T19 (sem T13), aprovados pelo dono em 2026-10-26 (DP-1), 2026-10-27 (T9, T10, T11, variante
+do T1), 2026-10-28 (T12, T14, T15, issue #1310; T16, T17 e o T12 reescrito pela E3) e 2026-11-02 (T18, T19, chat IA),
+exatos, e nenhum deixa vazar o
 código `DECLARACAO_*` do escritor. Pino de texto (como `test_declaracao_a2c_texto.py`): sem controle de mutação.
 T1/T2/T3/T4/T6/T7/T8/T9 saem pela conversa; T5 (defesa, raro) pela tradução do erro do escritor.
 """
@@ -95,8 +96,33 @@ def test_t8_so_com_a_flag_ligada_o_texto_de_hoje_fica(ana):
     assert r.startswith("🐷 Não registrei: com banco conectado, Pix, cartão e débito chegam sozinhos pelo Open Finance."), r
 
 
-def test_t9_sem_como_garantir(ana, liga):
-    assert manda_wamid(ana, "gastei 50 no mercado no pix", "sem-wamid") == [T9]
+T18 = ("🐷 Não registrei: por aqui eu não consigo garantir que o mesmo pagamento pelo banco não entre duas vezes. "
+       "Manda pelo WhatsApp. Se foi em dinheiro vivo, diga *em dinheiro*.")
+T19 = "🐷 Não registrei: esse pedido já tinha sido cancelado ou ficou sem resposta. Se quiser registrar, me manda de novo."
+
+
+def test_t9_sem_como_garantir(ana, liga, monkeypatch):
+    def cai(_uid):
+        raise RuntimeError("DB caiu")
+    monkeypatch.setattr(db, "has_open_finance_connections", cai)
+    assert manda_wamid(ana, "gastei 50 no mercado no pix") == [T9]
+
+
+def test_t18_sem_id_de_mensagem(ana, liga):
+    """PR-B (b), D6=A: sem id utilizável o roteador também responde T18 (antes T9)."""
+    assert manda_wamid(ana, "gastei 50 no mercado no pix", "sem-wamid") == [T18]
+
+
+SIM_JA_RECEBIDO = "🐷 Essa resposta eu já tinha recebido. Confere no extrato antes de mandar de novo."
+NAO_JA_RECEBIDO = "🐷 Essa resposta eu já tinha recebido."
+
+
+def test_t18_e_t19_exatos():
+    """T18 e T19 do chat IA, aprovados em 2026-11-02, e os textos do "sim" (D-a, 2026-11-04) e do "não" (rodada 10) já recebidos; a conversa
+    que os produz está em `test_declaracao_b_chat_ia_*`. Nenhum tem asterisco: não passam pelo molde do negrito."""
+    assert (decl.tx.SEM_ID, decl.tx.ACAO_ENCERRADA, decl.tx.SIM_JA_RECEBIDO, decl.tx.NAO_JA_RECEBIDO) == (
+        T18, T19, SIM_JA_RECEBIDO, NAO_JA_RECEBIDO)
+    assert "*" not in decl.tx.ACAO_ENCERRADA + decl.tx.SIM_JA_RECEBIDO + decl.tx.NAO_JA_RECEBIDO
 
 
 def test_nenhuma_resposta_expoe_o_codigo_do_escritor(ana, liga):

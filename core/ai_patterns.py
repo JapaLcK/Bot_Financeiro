@@ -7,7 +7,8 @@ usam o mesmo cache, mas NÃO passam pelo LLM (D12 do PL-06): saem dos detectores
 `db/insights.py` e `core/services/insights_detectores.py`, com o texto deles.
 
 Cache TTL por kind:
-- `insights`: até 6h ou até a meia-noite de Brasília (estado financeiro muda rápido — orçamento, salário, vencimento)
+- `insights`: até 6h ou até a meia-noite de Brasília (estado financeiro muda rápido — orçamento, salário, vencimento),
+  e só se a geração começou depois da última escrita financeira do usuário (`invalidar_insights`, D13 do PL-06)
 - `patterns`: 24h (padrões comportamentais são estáveis)
 
 Fallback: se LLM falha (sem API key, erro de rede, JSON inválido), os padrões
@@ -46,6 +47,9 @@ PATTERNS_CACHE_TTL_SECONDS = 24 * 3600    # 24h
 # (`core/services/insights_contrato.py`). Cache antigo vira miss (kind diferente).
 _PROMPT_VERSION_PATTERNS = 8
 _PROMPT_VERSION_INSIGHTS = 15
+# Marcador "dados mudaram" (D13): linha do usuário em `ai_proactive_cache` com o instante da última escrita
+# financeira, gravada pelo ouvinte do `pb_escrita`. `ai_proactive_cache` NUNCA entra em `TABELAS_QUE_AVISAM` (laço).
+_MARCADOR_INSIGHTS = "insights_mudou"
 
 
 def _ttl_insights() -> int:
@@ -67,8 +71,8 @@ def _cache_kind(base: str) -> str:
 # Cache
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_cached(user_id: int, kind: str, ttl_seconds: int) -> list[dict] | None:
-    """Retorna payload cacheado se ainda válido, senão None."""
+def _get_cached(user_id: int, kind: str, ttl_seconds: int, marcador: str | None = None) -> list[dict] | None:
+    """Retorna payload cacheado se ainda válido, senão None. Com `marcador`, só vale o cache gerado depois dele."""
     from db.connection import get_conn
     try:
         with get_conn() as conn:
@@ -79,8 +83,10 @@ def _get_cached(user_id: int, kind: str, ttl_seconds: int) -> list[dict] | None:
                     from ai_proactive_cache
                     where user_id = %s and kind = %s
                       and generated_at + (%s || ' seconds')::interval > now()
+                      and generated_at > coalesce((select m.generated_at from ai_proactive_cache m
+                                                   where m.user_id = %s and m.kind = %s), '-infinity')
                     """,
-                    (user_id, kind, str(ttl_seconds)),
+                    (user_id, kind, str(ttl_seconds), user_id, marcador),
                 )
                 row = cur.fetchone()
                 if not row:
@@ -99,8 +105,8 @@ def _get_cached(user_id: int, kind: str, ttl_seconds: int) -> list[dict] | None:
         return None
 
 
-def _save_cache(user_id: int, kind: str, items: list[dict]) -> None:
-    """Persiste lista de narrativas no cache (upsert)."""
+def _save_cache(user_id: int, kind: str, items: list[dict], gerado_em=None) -> None:
+    """Persiste lista de narrativas no cache (upsert). `gerado_em` (do banco) no lugar do `now()`."""
     from db.connection import get_conn
     try:
         payload = json.dumps({"items": items}, ensure_ascii=False)
@@ -109,12 +115,12 @@ def _save_cache(user_id: int, kind: str, items: list[dict]) -> None:
                 cur.execute(
                     """
                     insert into ai_proactive_cache (user_id, kind, payload, generated_at)
-                    values (%s, %s, %s::jsonb, now())
+                    values (%s, %s, %s::jsonb, coalesce(%s, now()))
                     on conflict (user_id, kind) do update
                       set payload = excluded.payload,
                           generated_at = excluded.generated_at
                     """,
-                    (user_id, kind, payload),
+                    (user_id, kind, payload, gerado_em),
                 )
             conn.commit()
     except Exception as e:
@@ -521,16 +527,17 @@ def generate_ai_patterns(user_id: int, *, force: bool = False) -> list[dict]:
 def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
     """Insights do PigBank (contrato v1, `core/services/insights_contrato.py`). Cache: `_ttl_insights`.
 
-    Gate de plano -> cache -> (miss) fatos dos detectores, com o texto deles -> cache completo -> projeção
-    por plano. Sem LLM (D12 do PL-06); o nome ficou pelos chamadores (rota, agendador, card, testes).
-    Detector em falha: os itens dos outros saem, mas o cache NÃO é gravado (uma lista incompleta não pode
-    valer 6 h como "nada a apontar"); o próximo pedido recalcula.
+    Gate de plano -> cache (até o TTL ou até a próxima escrita financeira do usuário, `invalidar_insights`) -> (miss)
+    fatos dos detectores, com o texto deles -> cache completo -> projeção por plano. Sem LLM (D12 do PL-06); o nome
+    ficou pelos chamadores (rota, agendador, card, testes).
+    Detector em falha: os itens dos outros saem, mas o cache NÃO é gravado e o anterior é apagado (uma lista
+    incompleta não pode valer 6 h como "nada a apontar"); o próximo pedido recalcula.
     """
     from core.services.plan_service import plan_gate_ok
     if not plan_gate_ok(user_id, "insights"):
         return []
     kind = _cache_kind("insights")
-    itens = None if force else _get_cached(user_id, kind, _ttl_insights())
+    itens = None if force else _cache_insights(user_id)
     if itens is None:
         # Uma geração por usuário em voo: o cache só é gravado DEPOIS das consultas dos detectores, então pedidos
         # concorrentes (2 abas, StrictMode) repetiriam todas. Quem espera relê o cache que o primeiro gravou (com
@@ -538,7 +545,7 @@ def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
         # ponytail: trava por processo; com mais de uma réplica cada uma pode gerar 1x. Advisory lock do Postgres
         # prenderia 1 conexão do pool por espera.
         with _INSIGHTS_LOCKS.setdefault(user_id, threading.Lock()):
-            itens = None if force else _get_cached(user_id, kind, _ttl_insights())
+            itens = None if force else _cache_insights(user_id)
             if itens is None:
                 itens = _gerar_insights(user_id, kind)
     return _projetar(user_id, itens)
@@ -547,26 +554,77 @@ def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
 _INSIGHTS_LOCKS: dict[int, threading.Lock] = {}
 
 
+def _cache_insights(user_id: int) -> list[dict] | None:
+    return _get_cached(user_id, _cache_kind("insights"), _ttl_insights(), _MARCADOR_INSIGHTS)
+
+
+async def invalidar_insights(conn, user_ids: list[int]) -> tuple[set[int], set[int]]:
+    """Marca que os dados de cada um de `user_ids` mudaram (uma linha por usuário, com o `user_id` dele): o cache de
+    insights gerado antes disto deixa de valer. Chamada pelo ouvinte do `pb_escrita` (`api/v2/eventos._Marcador`),
+    DEPOIS do commit das escritas, na conexão async própria dele (autocommit, prazos curtos); o erro do banco sobe para
+    ele. `user_ids` sem repetição (o `on conflict` não toca a mesma linha 2x no mesmo comando).
+
+    Devolve `(gravados, travados)`. Travado = a conta existe, mas outra transação prende a linha dela em `users`
+    (exclusão ou merge em curso) ou o marcador dela (reset de conta): `skip locked` pula sem esperar e os demais gravam.
+    Quem não está em nenhum dos dois não tem mais conta. O `greatest` impede que um ouvinte atrasado (2 réplicas) volte
+    a marca. Não pula: INSERT não comitado da mesma chave, que espera o `lock_timeout` da conexão."""
+    cur = await conn.execute(
+        """
+        with pode as materialized (
+          select id from users where id = any(%(uids)s::bigint[]) for key share skip locked
+        ), livre as materialized (
+          select m.user_id from ai_proactive_cache m
+          where m.kind = %(kind)s and m.user_id in (select id from pode) for update skip locked
+        ), gravou as (
+          insert into ai_proactive_cache (user_id, kind, payload, generated_at)
+          select p.id, %(kind)s, '{}'::jsonb, now() from pode p
+          where p.id in (select user_id from livre)
+             or not exists (select 1 from ai_proactive_cache m where m.user_id = p.id and m.kind = %(kind)s)
+          on conflict (user_id, kind) do update
+            set generated_at = greatest(ai_proactive_cache.generated_at, excluded.generated_at)
+          returning user_id
+        )
+        select u.id, u.id in (select user_id from gravou) from users u where u.id = any(%(uids)s::bigint[])
+        """,
+        {"uids": user_ids, "kind": _MARCADOR_INSIGHTS},
+    )
+    linhas = await cur.fetchall()
+    return {uid for uid, gravou in linhas if gravou}, {uid for uid, gravou in linhas if not gravou}
+
+
 def _gerar_insights(user_id: int, kind: str) -> list[dict]:
-    """Os fatos dos detectores, carimbados; o cache só é gravado se nenhum detector falhou."""
+    """Os fatos dos detectores, carimbados; o cache só é gravado se nenhum detector falhou (senão, é apagado)."""
     from db import compute_active_insights
     from db.insight_estado import registrar
+    from db.connection import get_conn
+    # O instante do banco ANTES dos detectores vira o `generated_at`: escrita que comitar durante a geração marca
+    # depois dele, e este cache (que pode não a ter visto) já nasce inválido.
+    with get_conn() as conn:
+        inicio = conn.execute("select now() as t").fetchone()["t"]
     itens, falhas = compute_active_insights(user_id)
     agora = now_tz().isoformat(timespec="seconds")
     for it in itens:
         it["explicacao"]["calculado_em"] = agora
     registrar(user_id, itens)  # antes do cache: item em cache sem registro daria 404 no dispensar; fail-open
     if not falhas:
-        _save_cache(user_id, kind, itens)
+        _save_cache(user_id, kind, itens, inicio)
+    else:  # o cache anterior não pode responder pela lista incompleta (o `motivo_vazio` do card leria "dispensados")
+        try:
+            with get_conn() as conn:
+                conn.execute("delete from ai_proactive_cache where user_id = %s and kind = %s", (user_id, kind))
+                conn.commit()
+        except Exception as e:
+            logger.warning("ai_patterns: cache delete falhou: %s", type(e).__name__, extra={"user_id": user_id})
     return itens
 
 
 def motivo_vazio(user_id: int) -> str | None:
     """Por que a lista PROJETADA saiu vazia (só se chama assim): `dispensados` se o cache tem itens que o plano mostra
-    (todos dispensados), senão `sem_dados`/`sem_destaques`. Sem cache (um detector falhou) = None: não é "nada a
-    apontar"."""
+    (todos dispensados), senão `sem_dados`/`sem_destaques`. Sem cache válido = None: um detector falhou (não é "nada
+    a apontar"), ou uma escrita marcou o cache depois do início da geração que acabou de rodar (ponytail: aí o vazio
+    sai sem motivo, raro e só até o próximo pedido; corrigir pede o motivo calculado da própria geração)."""
     from core.services.insights_contrato import projetar
-    itens = _get_cached(user_id, _cache_kind("insights"), _ttl_insights())
+    itens = _cache_insights(user_id)
     if itens is None:
         return None
     if projetar(itens, acoes_ok=True, recursos_ok=_recursos_ok(user_id, itens)):  # o mesmo corte por recurso da leitura
@@ -576,9 +634,9 @@ def motivo_vazio(user_id: int) -> str | None:
 
 
 def ler_insights(user_id: int) -> list[dict] | None:
-    """O cache (até 6 h ou até a meia-noite de Brasília) com a mesma projeção da rota, sem gerar (o card `piggy` do
-    chat). None = sem cache. Quem chama já passou no gate `insights`."""
-    itens = _get_cached(user_id, _cache_kind("insights"), _ttl_insights())
+    """O cache válido (`_cache_insights`) com a mesma projeção da rota, sem gerar. None = sem cache. Quem chama já
+    passou no gate `insights`."""
+    itens = _cache_insights(user_id)
     return None if itens is None else _projetar(user_id, itens)
 
 
@@ -700,6 +758,7 @@ __all__ = [
     "generate_ai_patterns",
     "generate_ai_insights",
     "ler_insights",
+    "invalidar_insights",
     "PATTERNS_CACHE_TTL_SECONDS",
     "INSIGHTS_CACHE_TTL_SECONDS",
 ]

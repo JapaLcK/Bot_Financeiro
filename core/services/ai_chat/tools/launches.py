@@ -16,6 +16,8 @@ Write (auto-executado, SEM confirmação):
     (a mesma fn que o bot tradicional usa) e devolve a resposta padrão. No
     WhatsApp com WA_IA_PRIMEIRO, pede "sim" antes quando os args não batem
     com o texto do usuário (`confirmar_se`, `core/services/wa_ia_primeiro.py`).
+    Com `DECLARACAO_BANCO`, "banco" vira declaração e sempre pede "sim"
+    (`declaracao_ia.py`, ADR 0006 PR-B (b)).
 
 Write (PEDE confirmação — destrutivo):
   - delete_launch: apaga um lançamento da carteira pelo `pode` do Extrato (`extrato_ia.py`);
@@ -47,6 +49,7 @@ from .. import streaming
 from .._context import CATEGORIAS_NAO_ACHADAS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, FALHAS_DE_CARD_DO_TURNO, JANELAS_DO_TURNO
 from ..cards import MAX_CATEGORIA, MAX_MESES_PERIODO, card_ainda_resolve, mostrar_da_tool
 from ..cards_resumos import resumo_comparacao, resumo_maiores
+from . import declaracao_ia
 from ._base import Tool
 from .extrato_ia import ERRO_APAGAR as _ERRO_APAGAR
 from .extrato_ia import ao_confirmar as _ao_confirmar_alvo
@@ -623,7 +626,10 @@ def _parse_iso_datetime_for_launch(s: str | None) -> datetime | None:
 def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
     """IA já extraiu os args; aqui só valida e delega pra fonte única de
     verdade (`add_from_entities` no handler). Toda lógica de categorização,
-    learn, budget alert e formato de resposta vive lá."""
+    learn, budget alert e formato de resposta vive lá. Pendência de declaração
+    pelo banco (`_declaracao`, só o servidor a escreve): grava só o payload."""
+    if isinstance(args.get("_declaracao"), dict):
+        return declaracao_ia.executar(user_id, args)
     tipo = (args.get("tipo") or "").strip().lower()
     if tipo not in _TIPOS_VALIDOS:
         return "🐷 Tipo inválido — precisa ser despesa ou receita."
@@ -643,6 +649,9 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
     forma = forma_declarada(args)
     decisao = fp.decidir(user_id, forma)
     if decisao == fp.BANCO:
+        from core.handlers.declaracao_banco import declara
+        if declara(user_id, decisao):  # sem confirmação não grava: T8, T18, T4, T3, T19 ou T9
+            return declaracao_ia.sem_payload(user_id, tipo, valor)
         return fp.msg_banco(user_id, tipo, valor)
     ents = dict(
         tipo=tipo,
@@ -713,10 +722,26 @@ def _congela_pendencia(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     return {**args, "categoria": categoria, "_category_reason": motivo}
 
 
+def _confirma_lancamento(user_id: int, args: dict[str, Any]) -> bool:
+    """`confirmar_se`: a declaração pelo banco (flag) sempre pede "sim"; o resto, a regra do WA_IA_PRIMEIRO."""
+    if declaracao_ia.aplica(user_id, args):
+        return declaracao_ia.confirmar(user_id, args)
+    return precisa_confirmar_lancamento(user_id, args)
+
+
+def _congela_lancamento(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """`ao_confirmar`: o congelamento de sempre e, na declaração, o payload que o "sim" grava."""
+    args = _congela_pendencia(user_id, args)
+    return declaracao_ia.congela(user_id, args) if declaracao_ia.aplica(user_id, args) else args
+
+
 def _add_launch_summary(args: dict[str, Any]) -> str:
     """Tudo o que a gravação vai usar e o usuário precisa ver para recusar:
     tipo, valor, alvo, nota, categoria, o DIA efetivo (o do mesmo parser da
-    gravação; ausente/ilegível = hoje) e a forma, se veio."""
+    gravação; ausente/ilegível = hoje) e a forma, se veio. Declaração: só o
+    payload congelado (`declaracao_ia.resumo`), a mesma fonte da gravação."""
+    if isinstance(args.get("_declaracao"), dict):
+        return declaracao_ia.resumo(args["_declaracao"])
     from core.handlers import forma_pagamento as fp
     from core.handlers.launches import _fmt_date_label
     try:
@@ -1196,8 +1221,8 @@ TOOLS: list[Tool] = [
         execute=_add_launch_execute,
         valor_do_usuario="valor",
         summary=_add_launch_summary,
-        confirmar_se=precisa_confirmar_lancamento,
-        ao_confirmar=_congela_pendencia,
+        confirmar_se=_confirma_lancamento,
+        ao_confirmar=_congela_lancamento,
         # Só a Q40 (WhatsApp com a flag); fora disso o add_launch não conta.
         arma_pendencia_no_execute=armaria_q40,
     ),

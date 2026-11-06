@@ -660,6 +660,7 @@ _RESET_TABLES = (
     # preservar, então não há leitura anterior a respeitar.
     "ai_messages",
     "ai_pending_actions",
+    "ia_declaracao_livro",
     "ai_fallback_log",
     "ai_proactive_cache",
     "insight_estado",
@@ -994,6 +995,7 @@ def delete_user_data(
         # `accrue_all_*` e de `_RESET_TABLES`; lote primeiro fecha ciclo com eles).
         "ai_messages",
         "ai_pending_actions",
+        "ia_declaracao_livro",
         "recurring_charges",
         "recurring_incomes",
         "recurring_expenses",

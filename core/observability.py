@@ -72,7 +72,9 @@ class _DashboardHandler(logging.Handler):
             return
         level = record.levelname.lower()      # "warning" | "error" | "critical"
         source = record.name                   # nome do módulo (ex: adapters.discord.discord_bot)
-        message = self.format(record)
+        # #1331: a pilha mora só em `details.traceback` (o admin a mostra; a exportação a omite,
+        # A9). `self.format` anexava `exc_text` aqui. Não mexer no record: o stderr depende dele.
+        message = record.getMessage()
 
         # inclui traceback no campo details se disponível
         details: dict[str, Any] = {"logger": record.name}
@@ -112,9 +114,9 @@ def _log_falha(op: str, user_id: int, e: Exception, *,
 
     O traceback (`exc_info`) só vai ao log quando o CALL SITE pede
     `com_traceback=True`. Quem decide é a PORTA, não o nível, e o critério é
-    privacidade: o `_DashboardHandler` (acima) persiste em `system_event_logs`
-    tanto o `self.format(record)` — que anexa o traceback à `message` — quanto
-    `details["traceback"]`; e o traceback de um erro do psycopg carrega
+    privacidade: o `_DashboardHandler` (acima) persiste o traceback em
+    `system_event_logs.details["traceback"]` (desde a #1331, não mais na
+    `message`); e o traceback de um erro do psycopg carrega
     `DETAIL: Key (…)=(…)`, com valor e descrição da linha do cliente.
 
     O critério NÃO é "é rota HTTP", é medido por rota: o

@@ -103,6 +103,7 @@ _DESTINO_VENCE = (
     ("daily_report_prefs", ()),
     ("recurring_suggestion_dismissed", ("merchant_key", "amount")),
     ("ai_pending_actions", ()),
+    ("ia_declaracao_livro", ("chave",)),  # o livro da IA (ADR 0006): sem ele, um "sim" da origem pareceria novo
     ("budget_alert_sent", ("categoria", "ym", "threshold")),
     ("subscription_marks", ("merchant_key",)),
 )

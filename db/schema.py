@@ -1947,6 +1947,28 @@ def init_db():
         )
         """,
 
+        # Livro das declarações "pelo banco" que a IA arma e confirma (ADR 0006, PR-B (b), D7=B; `db/declaracao_livro.py`).
+        # Só hashes de id de mensagem e estados; sem FK para `launches`: o histórico sobrevive ao apagar a declaração.
+        # Nada é podado (D9=B): sai só no reset e na exclusão da conta.
+        """
+        create table if not exists ia_declaracao_livro (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          papel text not null check (papel in ('acao', 'sim', 'nao')),
+          chave text not null,
+          estado text check (estado in ('armada', 'consumida', 'confirmada', 'descartada')),
+          acao text,
+          launch_id bigint,
+          user_seq integer,
+          payload_hash text,
+          criado_em timestamptz not null default now(),
+          mudou_em timestamptz not null default now(),
+          check ((papel = 'acao') = (estado is not null)),
+          check (papel = 'sim' or acao is null)
+        )
+        """,
+        "create unique index if not exists uq_ia_declaracao_livro_chave on ia_declaracao_livro (user_id, chave)",
+
         # Telemetria de perguntas que a IA reconheceu como dentro de finanças
         # mas sem tool adequada. Alimenta decisão de quais tools criar.
         """

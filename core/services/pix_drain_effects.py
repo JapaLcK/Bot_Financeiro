@@ -323,5 +323,5 @@ def _email_do_titular(user_id: int) -> str | None:
 
 EXECUTORES = {"stripe_cancel": _stripe_cancel, "grant": _grant, "ebook": _ebook, "ga4": _ga4,
                "capi": _capi, "email": _email, "afiliado": afiliado_pix.registrar, "revoke": _revoke,
-               "afiliado_estorno": lambda c, _: afiliado_pix.marcar(c, "total"),
+               "afiliado_estorno": afiliado_pix.estornar,
                "afiliado_estorno_parcial": lambda c, _: afiliado_pix.marcar(c, "partial")}
