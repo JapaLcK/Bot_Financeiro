@@ -37,8 +37,9 @@ def test_recusas_de_valor_nao_aprendem(ana, liga, texto, marca):
     assert regras(ana) == [] and declaracoes(ana) == []
 
 
-def test_t9_sem_wamid_nao_aprende(ana, liga):
-    assert "Não consegui confirmar seu banco" in manda_wamid(ana, "gastei 50 #lazer no ifood pelo banco", "sem-wamid")[0]
+def test_t18_sem_wamid_nao_aprende(ana, liga):
+    """Sem wamid: T18 desde o PR-B (b) (D6=A; antes T9). Nada grava, nada aprende."""
+    assert "não consigo garantir" in manda_wamid(ana, "gastei 50 #lazer no ifood pelo banco", "sem-wamid")[0]
     assert regras(ana) == [] and n_lancamentos(ana) == 0
 
 

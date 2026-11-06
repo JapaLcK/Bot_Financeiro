@@ -8,13 +8,17 @@ iguais com wamids diferentes são dois gastos.
 - Flag: `DECLARACAO_BANCO` (liga) e `DECLARACAO_BANCO_USER_IDS` (restringe), lidas a cada chamada, fail-closed. Nasce
   DESLIGADA; ligar é ato do dono, fora do PR. `fp.decidir` não muda (a conta a pagar paga "pelo banco" depende dele).
 - Chave: `wa:<hash_pii(wamid)>:<n>` em `launches.external_id` (índice único que já existe), n = ordem da declaração
-  no turno. O wamid cru nunca vai para a coluna nem para o log. Sem wamid utilizável não se declara (T9).
+  no turno. O wamid cru nunca vai para a coluna nem para o log. Sem wamid utilizável não se declara (T18).
+- Chat IA (PR-B (b)): o turno também se abre no Discord (`dc`, o snowflake) e na web (`web`, o `client_message_id`);
+  a chave da mensagem (`chave_da_mensagem`) identifica a ação e o "sim" no livro (`db/declaracao_livro.py`). O roteador
+  só declara pelo WhatsApp (`proxima_chave`).
 """
 from __future__ import annotations
 
 import functools
 import logging
 import os
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 
 import db
@@ -25,8 +29,10 @@ from core.handlers import forma_pagamento as fp
 logger = logging.getLogger(__name__)
 _LIGADA = {"1", "true", "yes", "on"}
 
-# [wamid, n] do turno em curso; None fora de um `handle_incoming` do WhatsApp com wamid. Aberto e fechado em
-# `handle_incoming` (mesmo molde de `pergunta_no_turno`). O `handle_incoming` roda inteiro na thread do worker.
+# [prefixo, id da mensagem, n, novo, autorizada] do turno em curso; None sem id utilizável. `novo`: o "sim" desta
+# mensagem chegou agora pela 1ª vez (memória do turno; None = ainda não registrado). `autorizada`: (user_id, ação) que o
+# "sim" DESTE turno consumiu no CAS (`autoriza`); só ela pode ser gravada, e só neste turno. Aberto e fechado em `handle_incoming` (mesmo molde de
+# `pergunta_no_turno`, roda inteiro na thread do worker) e, na web, por `turno` em volta do chat.
 ACAO_DO_TURNO: ContextVar[list | None] = ContextVar("declaracao_acao_do_turno", default=None)
 
 
@@ -63,23 +69,77 @@ def msg_misto(user_id: int) -> str:
 
 
 def abre_turno(msg) -> Token:
-    wamid = msg.message_id if msg.platform == "whatsapp" and str(msg.message_id or "").startswith("wamid.") else None
-    return ACAO_DO_TURNO.set([wamid, 0] if wamid else None)
+    mid = str(msg.message_id or "")
+    prefixo = ("wa" if msg.platform == "whatsapp" and mid.startswith("wamid.")
+               else "dc" if msg.platform == "discord" and mid.isdigit() else None)
+    return ACAO_DO_TURNO.set([prefixo, mid, 0, None, None] if prefixo else None)
 
 
 def fecha_turno(token: Token) -> None:
     ACAO_DO_TURNO.reset(token)
 
 
-def proxima_chave() -> str | None:
-    """A chave da próxima declaração do turno (None = sem wamid utilizável; nunca timestamp nem hash do corpo)."""
-    turno = ACAO_DO_TURNO.get()
-    if not turno:
+@contextmanager
+def turno(prefixo: str, ident: str | None):
+    """O turno de um canal sem `handle_incoming` (a web): `ident` é o id que o cliente deu à mensagem."""
+    token = ACAO_DO_TURNO.set([prefixo, ident, 0, None, None] if ident else None)
+    try:
+        yield
+    finally:
+        ACAO_DO_TURNO.reset(token)
+
+
+def chave_da_mensagem() -> str | None:
+    """`<canal>:<hmac do id da mensagem>` (None = sem id utilizável; nunca timestamp nem hash do corpo)."""
+    t = ACAO_DO_TURNO.get()
+    if not t:
         return None
     from core.crypto import hash_pii
-    chave = f"wa:{hash_pii(turno[0], kind='external_id')}:{turno[1]}"
-    turno[1] += 1
+    return f"{t[0]}:{hash_pii(t[1], kind='external_id')}"
+
+
+def proxima_chave() -> str | None:
+    """A chave da próxima declaração do ROTEADOR no turno: só no WhatsApp (o Discord segue sem, T18)."""
+    t = ACAO_DO_TURNO.get()
+    if not t or t[0] != "wa":
+        return None
+    chave = f"{chave_da_mensagem()}:{t[2]}"
+    t[2] += 1
     return chave
+
+
+def registrar_mensagem(user_id: int, texto: str) -> bool | None:
+    """Anota no livro a mensagem com forma de "sim" ou de "não" (os predicados com que o runner consome a pendência) e
+    diz se ela chegou agora pela 1ª vez. Uma vez por turno: a 2ª chamada devolve a memória (a 2ª ida ao banco diria "já
+    vista"). None = flag desligada, sem id ou não é resposta."""
+    t = ACAO_DO_TURNO.get()
+    if not t or not ligada(user_id):
+        return None
+    if t[3] is None:
+        from core.services.ai_chat.confirmations import is_cancel, is_confirm
+        if not (is_confirm(texto or "") or is_cancel(texto or "")):
+            return None
+        from db.declaracao_livro import registra_sim
+        t[3] = registra_sim(user_id, chave_da_mensagem(), "sim" if is_confirm(texto or "") else "nao")
+    return t[3]
+
+
+def mensagem_nova() -> bool:
+    t = ACAO_DO_TURNO.get()
+    return bool(t and t[3])
+
+
+def autoriza(user_id: int, acao: str) -> None:
+    """A marca do turno (M8): o "sim" deste turno consumiu a ação. Some com o turno (o token do `ContextVar` volta no
+    `fecha_turno`/`turno`, inclusive com exceção), então nunca passa para outro turno."""
+    t = ACAO_DO_TURNO.get()
+    if t:
+        t[4] = (user_id, acao)
+
+
+def autorizada(user_id: int, acao: str) -> bool:
+    t = ACAO_DO_TURNO.get()
+    return bool(t and t[4] == (user_id, acao))
 
 
 class NaoGravou(str):
@@ -87,13 +147,13 @@ class NaoGravou(str):
     valores devolve o item: sem isto uma reentrega da resposta gastaria o item seguinte."""
 
 
-def preparar(user_id: int) -> str:
-    """A chave de ação da próxima declaração, ou o texto de "sem como garantir a ação" (`NaoGravou`: nada foi
-    gravado e dá para tentar de novo). Sem wamid utilizável não se declara; a consulta do banco é a de verdade,
-    porque `regra_ativa` devolve True quando cai, e sem banco a declaração nunca casaria."""
-    chave = proxima_chave()
+def preparar(user_id: int, chave: str | None = None) -> str:
+    """A chave de ação da declaração (`chave`, a da IA, ou a próxima do roteador), ou o texto de "sem como garantir a
+    ação" (`NaoGravou`: nada foi gravado e dá para tentar de novo). Sem id utilizável não se declara (T18); a consulta
+    do banco é a de verdade, porque `regra_ativa` devolve True quando cai, e sem banco a declaração nunca casaria (T9)."""
+    chave = chave or proxima_chave()
     if chave is None:
-        return NaoGravou(tx.SEM_GARANTIA)
+        return NaoGravou(tx.SEM_ID)
     try:
         if db.has_open_finance_connections(user_id):
             # Reentrega: a chave já gravou. Dizer T3 aqui (antes do teto do plano); o escritor segue sendo a autoridade.
@@ -117,7 +177,9 @@ def recusa(exc: Exception, user_id: int, valor: float) -> str | None:
     codigo = str(exc).split(":")[0] if isinstance(exc, ValueError) else ""
     return {"DECLARACAO_VALOR_CASAS": lambda: tx.valor_casas(valor),
             "DECLARACAO_VALOR_INVALIDO": lambda: tx.VALOR_INVALIDO,
-            "DECLARACAO_INTERNA": lambda: tx.INTERNA}.get(codigo, lambda: None)()
+            "DECLARACAO_INTERNA": lambda: tx.INTERNA,
+            "DECLARACAO_NAO_CONFIRMADA": lambda: NaoGravou(tx.ACAO_ENCERRADA),  # o livro da IA (`confirma_no_cursor`)
+            }.get(codigo, lambda: None)()
 
 
 def recusa_valor(texto: str, valor: float | None = None) -> str | None:

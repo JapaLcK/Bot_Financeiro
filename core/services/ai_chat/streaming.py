@@ -124,19 +124,22 @@ def completar(client, **kw):
 
 
 def executar(user_id: int, texto: str, *, monthly_limit: int, emissor: Callable[[dict], None],
-             cancela: threading.Event, cards: tuple[str, ...] = ()):
+             cancela: threading.Event, cards: tuple[str, ...] = (), id_mensagem: str | None = None):
     """Roda UM turno do chat com emissor e cancelamento. Síncrona: o endpoint a
     chama em `to_thread` com `contextvars.copy_context()`. Devolve o `Resultado`
     do runner; o `fim` (usage, chips) é montado pelo endpoint. `cards` = os que o app sabe
     mostrar (`CARDS_DO_APP`). O app não mostra o 🐷 do começo da resposta: o `fim.reply` sai sem ele
-    (o histórico gravado, compartilhado com o WhatsApp, fica como estava)."""
+    (o histórico gravado, compartilhado com o WhatsApp, fica como estava). `id_mensagem`: o `client_message_id`, a
+    identidade da mensagem para a declaração pelo banco (`declaracao_banco.turno`)."""
+    from core.handlers.declaracao_banco import turno
     from . import chips
     from ._context import CARDS_DO_APP
     from .runner import chat_detalhado
 
     t1, t2, t3 = EMISSOR.set(emissor), CANCELA.set(cancela), CARDS_DO_APP.set(tuple(cards))
     try:
-        r = chat_detalhado(user_id, texto, monthly_limit=monthly_limit, platform="dashboard")
+        with turno("web", id_mensagem):
+            r = chat_detalhado(user_id, texto, monthly_limit=monthly_limit, platform="dashboard")
     finally:
         CARDS_DO_APP.reset(t3)
         CANCELA.reset(t2)
