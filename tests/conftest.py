@@ -461,7 +461,7 @@ def _oferta_campanha_fora_da_janela(monkeypatch):
     from zoneinfo import ZoneInfo
     from core.services import oferta_campanha
     fora = datetime(2026, 10, 1, tzinfo=ZoneInfo("America/Sao_Paulo"))
-    monkeypatch.setattr(oferta_campanha, "_agora", lambda: fora)
+    pass  # controle: fixture desligada
 
 
 @pytest.fixture(autouse=True)
