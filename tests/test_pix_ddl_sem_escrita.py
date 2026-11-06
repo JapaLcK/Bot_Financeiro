@@ -43,6 +43,8 @@ import re
 
 import pytest
 
+from db.schema import BACKFILL_AFILIADO_PAGAMENTOS_SQL
+
 # Lista IMPORTADA, não recopiada (§0.7): ver o comentário na fonte. Precedente
 # do repositório para teste importar teste: `test_pix_transicao_efeitos.py`
 # lendo `_JANELA` de `test_pix_charges.py`.
@@ -71,7 +73,14 @@ def escreve_nas_tabelas_novas(sql: str) -> bool:
     reparos; só o nome daria falso positivo no `create table … on delete set
     null` (o `delete` casa no meio) e no DDL de `plan_grants`, que cita
     `pix_charges.id` num comentário. Os dois falsos positivos foram medidos.
+
+    A exceção é o TEXTO exato do backfill do afiliado, que lê `pix_charges` e grava em
+    outra tabela. Igualdade, de propósito: procurar o alvo da escrita deixou passar
+    `do` dinâmico, `only (tabela)`, `public . tabela` e `U&"tabela"`. O que o texto
+    faz está preso em `test_backfill_so_escreve_na_propria_tabela`.
     """
+    if sql == BACKFILL_AFILIADO_PAGAMENTOS_SQL:
+        return False
     limpo = sem_comentarios(sql)
     return bool(VERBOS_DE_ESCRITA.match(limpo)) and any(t in limpo for t in TABELAS_NOVAS)
 
@@ -219,6 +228,32 @@ SABOTAGENS = [
     ("update", "update pix_charges set status = 'paid'"),
     ("delete", "delete from pix_webhook_events"),
     ("indentado e em CAIXA ALTA", "\n    INSERT INTO pix_charges VALUES (1)"),
+    ("com aspas", 'update "pix_charges" set status = \'paid\''),
+    ("com schema", "delete from public.pix_webhook_events"),
+    ("com schema e aspas", 'insert into "public"."pix_charges" values (1)'),
+    ("update only", "update only pix_charges set status = 'paid'"),
+    ("CTE que apaga", "with d as (delete from pix_charges returning id) select * from d"),
+    ("lê de outra e grava no Pix", "insert into pix_charges select * from plan_grants"),
+    # As 13 que a versão por alvo de escrita deixou passar (todas escrevem de verdade no Postgres).
+    ("do + execute concatenado", "do $$ declare t text := 'pix_charges'; begin execute 'delete from ' || t; end $$"),
+    ("do + format %I", "do $$ begin execute format('delete from %I', 'pix_charges'); end $$"),
+    ("do + literal partido", "do $$ begin execute 'delete from ' || 'pix_charges'; end $$"),
+    ("do + laço em tabelas", "do $$ declare r text; begin foreach r in array array['pix_charges'] loop "
+                             "execute 'update ' || r || ' set status = 1'; end loop; end $$"),
+    ("update only (tabela)", "update only (pix_charges) set status = 'x'"),
+    ("delete only (tabela)", "delete from only (pix_charges)"),
+    ("CTE com only (tabela)", "with d as (delete from only (pix_charges) returning id) select * from d"),
+    ("merge only (tabela)", "merge into only (pix_charges) t using (select 1 as id) s on t.id = s.id "
+                            "when matched then delete"),
+    ("espaço no ponto", "update public . pix_charges set status = 'x'"),
+    ("espaço no ponto com aspas", 'delete from "public" . "pix_charges"'),
+    ("três partes", "update banco.public.pix_charges set status = 'x'"),
+    ("U& identificador", 'update U&"pix_charges" set status = 1'),
+    ("update em CTE com only", "with x as (update only (pix_charges) set status='x' returning id) select 1"),
+    # A exceção é o texto exato: qualquer coisa a mais volta a ser escrita.
+    ("backfill + delete", BACKFILL_AFILIADO_PAGAMENTOS_SQL + "; delete from pix_charges"),
+    ("backfill com CTE que apaga", "with d as (delete from pix_charges) " + BACKFILL_AFILIADO_PAGAMENTOS_SQL),
+    ("backfill + espaço", BACKFILL_AFILIADO_PAGAMENTOS_SQL + " "),
 ]
 
 
@@ -239,6 +274,7 @@ INOCENTES = [
     ("escrita em OUTRA tabela", "update plan_trials set user_id = null"),
     ("índice parcial", "create unique index uniq_pix_charge_ativa on pix_charges (user_id)"),
     ("insert do resync do 1a", "insert into plan_grants (user_id) select 1"),
+    ("backfill do afiliado", BACKFILL_AFILIADO_PAGAMENTOS_SQL),
 ]
 
 
@@ -249,6 +285,17 @@ def test_o_detector_nao_grita_a_toa(rotulo, sql):
     `delete` no meio; `pix_charges.id` citado num comentário do DDL de
     `plan_grants`). Portão que grita sem motivo é portão que alguém desliga."""
     assert not escreve_nas_tabelas_novas(sql), f"falso positivo em {rotulo!r}: {sql!r}"
+
+
+def test_backfill_so_escreve_na_propria_tabela():
+    """O que sustenta a exceção por texto: mudar a constante para escrever no Pix cairia nela.
+
+    Lê o texto CRU: `sem_comentarios` corta depois de `--` mesmo dentro de string SQL, e
+    `returning '--'; update ...` esconderia a escrita."""
+    texto = BACKFILL_AFILIADO_PAGAMENTOS_SQL.lower()
+    assert texto.strip().startswith("insert into affiliate_referral_payments")
+    assert ";" not in texto and "$$" not in texto and texto.count("insert") == 1
+    assert not re.search(r"\b(update|delete|merge|copy|truncate|execute)\b", texto)
 
 
 def _contagens() -> dict[str, int]:

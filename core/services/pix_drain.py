@@ -57,12 +57,8 @@ from psycopg import errors
 from core.crypto import PiiAccessContext, decrypt_pii_optional
 from core.observability import log_system_event_sync
 from core.services import admin_notify
-from core.services.pix_drain_effects import (
-    EXECUTORES,
-    alertar,
-    alertar_stripe_desistido,
-    janela_de_acesso,
-)
+from core.services.afiliado_pix import efeitos_do_laco, rotular_reembolso
+from core.services.pix_drain_effects import EXECUTORES, alertar, alertar_stripe_desistido, janela_de_acesso
 from core.services.pix_pago_sem_qr import avisar as avisar_pago_sem_qr
 from core.services.pix_valor import conferir_valor
 from db.pix_charges import (
@@ -78,9 +74,9 @@ from db.webhook_outbox import marcar_processado, registrar_falha, reservar_event
 # conta do NEGÓCIO também recebe (§11, correção 5).
 REFERENCIA_NOSSA = re.compile(r"^pix:[0-9]+$")
 
-# `ebook` logo depois do `grant`: grava a pendência dos cadernos da foto
-# (`pix_drain_effects._ebook`); sem cadernos é no-op registrado.
-EFEITOS_DE_COMPRA = ("stripe_cancel", "grant", "ebook", "ga4", "capi", "email")
+# `ebook` logo depois do `grant`: pendência dos cadernos da foto, no-op sem cadernos.
+# `afiliado` por último: a falha dele vira retentativa sem segurar grant nem e-mail.
+EFEITOS_DE_COMPRA = ("stripe_cancel", "grant", "ebook", "ga4", "capi", "email", "afiliado")
 # `draft`/`creating` entram: o QR pode ter falhado e o cliente pagou assim mesmo (#819).
 _ORIGENS_DE_PAGAMENTO = ("draft", "creating", "pending", "canceling", "canceled", "expired")
 _APAGAM_O_QR = ("paid", "paid_orphan", "canceled", "expired")
@@ -101,11 +97,11 @@ ROTEAMENTO: dict[str, tuple[tuple[str, ...], str | None, tuple[str, ...]]] = {
     "PAYMENT_OVERDUE": (("pending", "canceling"), "expired", ()),
     "PAYMENT_DELETED": (("pending", "canceling"), "canceled", ()),
     "PAYMENT_REFUNDED": (("paid", "paid_orphan", "refunded_partial"),
-                        "refunded", ("revoke",)),
-    # Só de `paid`/`paid_orphan`, e sem efeito nenhum: o parcial nunca revoga e
-    # nunca concede (decisão do dono, pendências 1 e 4).
+                        "refunded", ("revoke", "afiliado_estorno")),
+    # Só de `paid`/`paid_orphan`: o parcial nunca revoga e nunca concede (pendências 1 e 4).
+    # O efeito só rotula o afiliado, e `efeitos_do_laco` o pula fora de `refunded_partial`.
     "PAYMENT_PARTIALLY_REFUNDED": (("paid", "paid_orphan"),
-                                   "refunded_partial", ()),
+                                   "refunded_partial", ("afiliado_estorno_parcial",)),
     # Estorno agendado e estorno negado: revogar no primeiro cortaria acesso por
     # algo que ainda pode ser negado, e o segundo não tem o que reverter.
     "PAYMENT_REFUND_IN_PROGRESS": ((), None, ()),
@@ -181,7 +177,7 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
         return None
     origens, destino, efeitos = rota
     payment_id = (payment_id if isinstance(payment_id, str) else "") or cobranca["asaas_payment_id"]
-    if efeitos and not payment_id:  # sem id o efeito não se registra e o evento repete sem fim
+    if set(efeitos) - {"afiliado_estorno_parcial"} and not payment_id:  # sem id o efeito não se registra e repete sem fim
         return ("PagamentoSemId", None)
 
     # B) GUARDA DE ÓRFÃO, antes do laço: titular excluído (§13.4). Nenhum efeito
@@ -222,7 +218,7 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
     if evt["event_type"] in _ALERTAM:
         alertar(evt["event_type"], cobranca, payment_id)
 
-    for efeito in efeitos:
+    for efeito in efeitos_do_laco(efeitos, cobranca, payment_id):
         with lock_efeito(payment_id, efeito):
             if efeito_registrado(payment_id, efeito):
                 continue
@@ -318,6 +314,7 @@ def _orfao(event_id, cobranca, destino, origens, payment_id):
         transicionar(cobranca["id"], de=origens, para=alvo,
                      asaas_payment_id=payment_id,
                      apagar_qr=alvo in _APAGAM_O_QR)
+    rotular_reembolso(cobranca, destino)
     with lock_efeito(payment_id, "orphan_notified"):
         if destino == "paid" and not efeito_registrado(payment_id, "orphan_notified"):
             registrar_efeito(payment_id, "orphan_notified", event_id)

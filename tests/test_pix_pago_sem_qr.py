@@ -129,7 +129,7 @@ def test_pago_em_creating_concede_pelo_webhook_real(user_id, vendavel, asaas_fal
     assert _sql("select plan from auth_accounts where user_id = %s", (user_id,))[0]["plan"] == "pro_max"
     assert (externo["email"], externo["ga4"], externo["capi"]) == (1, 1, 1)
     assert {e["ebook_price"] for e in _entregas(user_id)} == {"price_cad_a", "price_cad_b"}
-    assert efeitos(pid) == {"stripe_cancel", "grant", "ebook", "ga4", "capi", "email"}
+    assert efeitos(pid) == {"stripe_cancel", "grant", "ebook", "ga4", "capi", "email", "afiliado"}
     # D2: o operador é avisado de que o QR não saiu (e só ali, uma vez).
     assert len([a for a in externo["alerta"] if "sem QR" in a]) == 1
     assert len(_avisos_de_qr(user_id)) == 1
@@ -155,7 +155,7 @@ def test_aviso_que_falha_nao_atrasa_o_grant(user_id, vendavel, asaas_falso, exte
     assert ev["processed_at"] is not None and ev["attempts"] == 0, ev["last_error"]
     assert ler(linha["id"])["status"] == "paid" and len(_grants(user_id)) == 1
     assert externo["email"] == 1
-    assert efeitos(pid) == {"stripe_cancel", "grant", "ebook", "ga4", "capi", "email"}
+    assert efeitos(pid) == {"stripe_cancel", "grant", "ebook", "ga4", "capi", "email", "afiliado"}
     assert "pix_pago_sem_qr: aviso falhou (RuntimeError)" in caplog.text
 
 

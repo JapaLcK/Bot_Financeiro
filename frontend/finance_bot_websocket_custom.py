@@ -7007,6 +7007,22 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 await _fire_email(user_id, send_pro_charged_email,
                                   plan_value, amount_brl, expires_dt)
 
+                # Pagamento do indicado, antes e fora da comissão: "cliente que pagou"
+                # não depende dela. Idempotente por fatura; falha não derruba o webhook.
+                try:
+                    from db.affiliate_payments import registrar_pagamento
+                    await asyncio.to_thread(
+                        registrar_pagamento, user_id, "stripe", _g(invoice, "id"),
+                        int(amount_cents),
+                        datetime.fromtimestamp(event["created"], timezone.utc),
+                    )
+                except Exception as exc:
+                    await log_system_event(
+                        "error", "affiliate_payment_record_failed",
+                        "Pagamento de indicado nao registrado.", source="affiliates",
+                        user_id=user_id, details={"erro": type(exc).__name__},
+                    )
+
                 # Comissão de afiliado: se o pagante foi indicado por um afiliado
                 # ativo, credita a % da fatura. Idempotente por invoice id (retry
                 # de webhook não duplica). Nunca pode derrubar o webhook.

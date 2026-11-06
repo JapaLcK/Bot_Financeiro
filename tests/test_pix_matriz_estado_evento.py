@@ -47,9 +47,10 @@ EVENTOS = ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED", "PAYMENT_CREATED",
            "PAYMENT_CHARGEBACK_DISPUTE", "PAYMENT_AWAITING_CHARGEBACK_REVERSAL",
            "PAYMENT_UPDATED")                  # o último é desconhecido de propósito
 
-COMPRA = frozenset({"stripe_cancel", "grant", "ebook", "ga4", "capi", "email"})
+COMPRA = frozenset({"stripe_cancel", "grant", "ebook", "ga4", "capi", "email", "afiliado"})
 NADA = frozenset()
-REVOKE = frozenset({"revoke"})
+REVOKE = frozenset({"revoke", "afiliado_estorno"})
+PARCIAL = frozenset({"afiliado_estorno_parcial"})  # rótulo do afiliado: nunca revoga nem concede
 REC = ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED")
 
 
@@ -87,7 +88,7 @@ TABELA = {
     # `paid` vem de um RECEIVED de verdade: os 6 efeitos já estão registrados.
     "paid": _linha("paid", 1,
                    PAYMENT_REFUNDED=("refunded", REVOKE, 0),
-                   PAYMENT_PARTIALLY_REFUNDED=("refunded_partial", NADA, 1)),
+                   PAYMENT_PARTIALLY_REFUNDED=("refunded_partial", PARCIAL, 1)),
     # titular excluído: a transição acontece, o efeito de compra e o `revoke` NÃO.
     "paid_orphan": _linha("paid_orphan", 0,
                           PAYMENT_REFUNDED=("refunded", NADA, 0),
@@ -203,7 +204,7 @@ def test_estorno_antes_do_pagamento_em_creating_nao_concede(user_id, externo):
     ev = evento(entregar("PAYMENT_RECEIVED", cob))
     assert ev["processed_at"] is not None and ev["attempts"] == 0
     assert ler(cob["id"])["status"] == "creating", "a linha não pode virar paid sobre dinheiro devolvido"
-    assert _grants(user_id) == 0 and efeitos(cob["asaas_payment_id"]) == {"revoke"}
+    assert _grants(user_id) == 0 and efeitos(cob["asaas_payment_id"]) == REVOKE
     assert any("depois do estorno" in a for a in externo["alerta"])
 
 

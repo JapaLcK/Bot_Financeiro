@@ -26,8 +26,8 @@ from .connection import get_conn
 # `'grantt'` gravado seria um efeito que NUNCA é encontrado pela consulta e que
 # portanto reexecuta para sempre.
 EFEITOS = (
-    "stripe_cancel", "grant", "ebook", "ga4", "capi", "email", "revoke",
-    "orphan_notified", "valor_alertado", "valor_concedido_alertado",
+    "stripe_cancel", "grant", "ebook", "ga4", "capi", "email", "afiliado", "revoke",
+    "afiliado_estorno", "afiliado_estorno_parcial", "orphan_notified", "valor_alertado", "valor_concedido_alertado",
     "pagamento_duplicado_alertado",
 )
 

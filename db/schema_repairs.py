@@ -63,6 +63,9 @@ _USER_FK_SET_NULL_TABLES: frozenset[str] = frozenset({
     "family_goals",
     # Quem usou o convite: o convite morre com o grupo, não com quem o aceitou.
     "family_invites",
+    # A conversão do afiliado não encolhe quando o indicado exclui a conta: o cadastro e
+    # os pagamentos ficam, sem a pessoa (`referred_user_id` nulo).
+    "affiliate_referrals",
 })
 
 

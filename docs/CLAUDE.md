@@ -159,7 +159,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   a vê. Erro no meio de um stream SSE chega num `ExceptionGroup` e é desembrulhado
   antes de classificar. Ficam **fora** do envelope o 403 do CSRF e o 422 do
   `query_venenosa_middleware`, que nascem nos middlewares do pai e saem `{"detail": ...}`.
-- `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro", "agents_ui_enabled": bool, "chat_ia": bool, "familia": {"papel": "titular"|"membro"} | null}`, sem PII. `familia` (Plano Família, `db/family_views.my_family`) é só acréscimo: o app instalado não atualiza com o deploy, então o campo nunca muda de forma. `agents_ui_enabled` é o freio `AGENTS_UI_ENABLED=0` (o mesmo gate do `/auth/me` e do `/agents`): com ele `false` o /painel esconde a tela de Agentes. `chat_ia` é o freio do chat com a IA no /painel: env `PAINEL_CHAT_IA_TODOS=1` (abre para todos; sem teto global de custo, vale a cota mensal por plano) ou `PAINEL_CHAT_IA_USER_IDS` (user_id separados por vírgula, lida a cada pedido; ausente, vazia ou sem id válido = ninguém; `painel_chat_ia` em `core/services/plan_service.py`). Ligado, a conversa do Piggy vai ao `/ai/chat/stream` e o passo `piggy.pergunta` do guia vira `dado: "real"`.
+- `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro", "agents_ui_enabled": bool, "chat_ia": bool, "familia": {"papel": "titular"|"membro"} | null, "afiliado": bool}`, sem PII. `familia` (Plano Família, `db/family_views.my_family`) é só acréscimo: o app instalado não atualiza com o deploy, então o campo nunca muda de forma. `afiliado` também é acréscimo: verdadeiro para quem tem linha em `affiliates`, ativa ou desativada (`get_affiliate_by_user`). `agents_ui_enabled` é o freio `AGENTS_UI_ENABLED=0` (o mesmo gate do `/auth/me` e do `/agents`): com ele `false` o /painel esconde a tela de Agentes. `chat_ia` é o freio do chat com a IA no /painel: env `PAINEL_CHAT_IA_TODOS=1` (abre para todos; sem teto global de custo, vale a cota mensal por plano) ou `PAINEL_CHAT_IA_USER_IDS` (user_id separados por vírgula, lida a cada pedido; ausente, vazia ou sem id válido = ninguém; `painel_chat_ia` em `core/services/plan_service.py`). Ligado, a conversa do Piggy vai ao `/ai/chat/stream` e o passo `piggy.pergunta` do guia vira `dado: "real"`.
 - **API do Plano Família** (`api/v2/familia.py`, montada em `/api/v2` e `/api/app`, fora do OpenAPI até o PR do app): `GET|POST /familia`, `POST|DELETE /familia/convites`, `POST /familia/convites/aceitar`, `DELETE /familia/membros/{ref}`, `POST /familia/sair`, `GET|POST /familia/dissolucao`. Nenhuma rota recebe user_id/group_id; `ref` = `family_members.id`, resolvido sempre com o filtro do titular (`db/family_views.member_user_id`). O titular vê de cada membro só `ref`, primeiro nome, status e `permissoes` (metadado do que o membro liberou, nenhum dado dele). Só o aceite, `POST /familia/sair` e `DELETE /familia/permissoes/{escopo}` (PR 4 abaixo) usam `usuario_logado` (`api/v2/sessao.py`): sessão sem exigir assinatura (quem entra é grátis até aceitar; quem perdeu o plano ainda sai e reduz o que liberou; `SEM_ASSINATURA` em `tests/test_api_v2_rotas.py` reprova outra). `GET /familia` usa `usuario_atual`: sem plano é 402 `plan_selection_required`/`subscription_required` (o envelope padrão, não `family_coverage_required`). Vale o plano da PESSOA: membro com plano individual em grupo suspenso segue como antes (`tests/test_api_v2_familia_sem_plano.py` fixa isso). Limites: aceite 10/h e emissão 20/dia por usuário (`_check_persistent_rate_limit`). Escrita sem corpo precisa de `Content-Type: application/json` (isenção de CSRF sem cookie). O aviso de saída/dissolução vem de `GET /familia` (404 `not_found` = fora de família), mas só chega a quem tem plano: sem plano é 402, e o membro que ficou free não recebe o aviso por aqui; o `familia` do `/me` só leva o papel enquanto o usuário tem acesso, porque `/me` usa `usuario_atual` e dá 402 para o membro que ficou free.
 - **Consentimento e leitura do titular (Plano Família, PR 4)** (`api/v2/familia_dados.py`, `core/services/family_reads.py`, `db/family_consents.py`): o membro usa `POST /familia/permissoes {escopo}` e `GET /familia/historico?antes&limite` (quem leu, `escopo`, `mes`; vale também depois de sair ou da dissolução, para quem tem plano; ambas `usuario_atual`, 402 sem plano) e `DELETE /familia/permissoes/{escopo}` (`agregados` derruba `lancamentos` junto; `usuario_logado`, funciona sem plano: revogar só reduz o que se libera e o histórico perdido de quem ficou free é consequência aceita); `permissoes` vem em `GET /familia` (de cada membro para o titular; as próprias para o membro). O titular (`usuario_atual`) lê `GET /familia/membros/{ref}/agregados|lancamentos?mes=` SÓ por `ler_do_membro`: ref fora do grupo, o próprio titular, ex-membro ou malformado = 404 `not_found`; membro ativo sem a permissão = 403 `consent_required`; mês futuro ou anterior ao mês em que o membro entrou = 422. Confere o consentimento, consulta com o user_id do membro, e `log_read` reconfere sob o lock e grava ANTES de o dado sair (revogado no meio = 403, dado descartado, sem log). Respostas por lista branca e `Cache-Control: no-store`. `recurso` do log = `agregados:AAAA-MM` ou `lancamentos:AAAA-MM`, do mesmo escopo lido (`log_read` recusa o resto com `bad_recurso` antes de gravar; contrato do histórico; cada página de lançamentos é uma linha). Limite herdado: `family_access_log.viewer_user_id` é `on delete cascade`: se o titular apagar a conta, o membro perde o histórico dessas leituras. Par no outro lado: app no PR 8. Para o PR 8: no `/api/app` as rotas fechadas por plano (`usuario_do_app`) também exigem o onboarding do Open Finance (403 `open_finance_onboarding_required`), e o app trata 402 indo ao portão (`p.falhou` em `app/src/features/painel/provider.tsx`).
 - **A casa (Plano Família, PR 5)** (`api/v2/familia_casa.py`, `db/family_house.py`, nos dois prefixos, fora do OpenAPI): metas e orçamentos que pertencem ao GRUPO; qualquer membro ativo, titular incluso, lê (`GET /familia/casa`) e escreve (ambos `usuario_atual`, 402 sem plano): `POST /familia/casa/metas`, `PUT|DELETE .../metas/{ref}`, `POST .../metas/{ref}/movimentos`, e o par `.../orcamentos`. Escrita devolve a `Casa` inteira (DELETE, 204); `PUT` troca o item e exige a `versao` lida (409 `edit_conflict`); movimento (`somar`/`subtrair`) soma sempre e subtrair além do saldo é 409 `insufficient`; categoria única por grupo sem diferenciar caixa (409 `category_taken`); sem teto de itens. O gasto do orçamento é um contador do mês lançado na própria casa (`gasto_mes`; mês novo parte de 0), nunca lido de `launches`. `ref` = prefixo do tipo (`m` meta, `o` orçamento) + id da linha; sem prefixo, prefixo errado ou malformado = o mesmo 404; sempre com `group_id` do chamador: ref de outro grupo, inexistente, malformado, ex-membro e sem família são o mesmo 404. `autor` = primeiro nome se quem criou ainda é membro ativo do grupo, senão `null`. Só `db/family_house.py` toca `family_goals`/`family_budgets` (`tests/test_casa_so_na_porta.py`); escrita abre o lock do grupo (`_lock_member_group(..., com_titular=True)`). A prévia de dissolução conta `metas`/`orcamentos` e eles entram no nonce. Fora da exportação LGPD (item é do grupo). Par no outro lado: telas no PR 6, app no PR 8.
@@ -1788,6 +1788,14 @@ as linhas Pix. Na junção de contas, caderno ainda não entregue cai com a orig
 dos status de estorno/contestação e a forma de `refunds` só se provam no sandbox do
 Asaas.
 
+**Afiliado no dreno do Pix.** `afiliado` é o último efeito de compra (a falha dele vira
+retentativa sem segurar `grant` nem e-mail) e grava o pagamento do indicado pelo
+`amount_cents`, nunca os cadernos. `afiliado_estorno` roda no `PAYMENT_REFUNDED`, e
+`afiliado_estorno_parcial`, no parcial, só com a cobrança em `refunded_partial` e com id: são
+dois nomes porque o dreno deduplica por `(pagamento, efeito)`, e com um só o total depois do
+parcial seria pulado. O parcial sem id fecha sem retentativa, como antes. Titular excluído
+(`_orfao`) não roda efeito: `rotular_reembolso` marca o reembolso direto, por ser idempotente.
+
 **PR B: emitir com os cadernos (backend; invisível até o modal mandar `extras`).** O
 `POST /billing/pix/checkout` aceita `extras: list[str]` (ids de Price, até 3, sem
 repetir, senão 400). O cliente nunca manda preço: `pix_extras.escolher` relê a oferta
@@ -2543,6 +2551,46 @@ separada (`ADMIN_DASHBOARD_*`), visão de usuários, overview, auditoria de aces
 e gestão do programa de afiliados (comissões, payouts, PIX). As páginas
 `admin-login.html` e `admin-dashboard.html` **não carregam app-mode nem o shim de área
 segura**, de propósito.
+
+A área do próprio afiliado é `GET /api/affiliate/me` e `POST /api/affiliate/payout`
+(`frontend/routes/affiliates.py`), sem gate de plano: o `affiliate_id` sai sempre de
+`get_affiliate_by_user` com o usuário da sessão, e o corpo do saque só tem `pix_key`.
+Conta desativada lê e saca o que já acumulou; só deixa de acumular. O `/me` devolve
+`stats.generated` (soma dos quadros, sem estornadas), `hold_days` (`COMMISSION_HOLD_DAYS`)
+e `commissions[].payout_id`, e nunca dado do indicado. `stats.requested` e `stats.paid` vêm
+de `affiliate_payouts` (`status` `requested` e `paid`), não das comissões: excluir a conta do
+indicado apaga a comissão em cascata, e o saque aberto ou o Pix feito não some do total. Só a
+parte em carência ou disponível cai com a exclusão. `admin_list_affiliates`
+ainda soma as comissões, então o "pago" do admin pode ficar menor nesse caso.
+`request_payout` trava a linha de `affiliates` (`for no key update`) antes de checar o
+saque aberto: dois pedidos simultâneos dão um saque, e a FK do webhook que grava comissão
+não espera essa trava.
+
+"Cadastros indicados" é `stats.referrals`; "Clientes que pagaram" é `stats.paying_clients`,
+que vem de `affiliate_referral_payments` (`db/affiliate_payments.py`) e nunca da comissão, do
+percentual ou do status do afiliado: 0%, desativado e Pix contam. Uma linha por pagamento
+confirmado, sem `user_id`, única por `(source, payment_ref)`; cliente é a referral, então
+dois pagamentos contam uma vez. Quem grava: `invoice.paid`/`invoice.payment_succeeded` com
+valor de plano maior que 0 (trial, fatura zerada e fatura só de caderno ficam fora), em `try`
+próprio, com log `affiliate_payment_record_failed`; e o efeito `afiliado` do dreno do Pix.
+Limite: a falha nesse `try` responde 200, então a Stripe não reentrega. Só o evento irmão da
+mesma fatura grava; sem ele, o pagamento fica fora até `scripts/backfill_afiliado_pagamentos.py`,
+e o backfill do boot só o recupera se a fatura tiver comissão.
+Estorno de comissão não toca esta tabela. Reembolso só rotula (`refund_status`, nunca rebaixa
+`total`): `stats.refunds.total` e `.partial` contam pagamentos, `stats.refunded_clients` conta
+clientes com todos os pagamentos devolvidos por inteiro, que seguem em `paying_clients`, e
+`commissions[].payment_refund` é o rótulo por linha.
+
+Conta excluída mantém cadastro e pagamentos: `affiliate_referrals` está em
+`_USER_FK_SET_NULL_TABLES`, com `referred_user_id` nulo. A comissão ainda cai em cascata.
+Limites aceitos: (1) quem exclui a conta e se recadastra com o mesmo e-mail conta 2 vezes em
+cadastros e pagantes, porque reconhecer a pessoa exigiria guardar dado pessoal; (2) se o efeito
+`afiliado` falha e o indicado exclui a conta antes da retentativa, o pagante se perde: o dreno
+cai em `_orfao`, que não registra compra, e sem titular o backfill não acha a referral.
+`BACKFILL_AFILIADO_PAGAMENTOS_SQL` roda em todo `init_db`, em passo próprio e com
+`lock_timeout` de 1s: qualquer falha vira `logger.error` só com o tipo e o sqlstate, não impede a
+subida, e o próximo boot repete. Fatura Stripe sem comissão não tem histórico para ele.
+`commission_bps` aceita 0. Só a rota `/admin/api/affiliates` recusa decimal, com 400; `create_affiliate` confere apenas a faixa de 0 a 10000.
 
 O drill-down de uma conta troca o plano à mão (`POST /admin/api/users/{id}/plan`
 → `set_account_plan`, a mesma escrita do `/admin/grant-pro`): grava

@@ -43,7 +43,7 @@ from core.services.pix_valor import centavos_do_valor, valor_pago_cobre_devido
 from db.connection import get_conn
 from db.plan_grants import list_grants
 
-COMPRA = {"stripe_cancel", "grant", "ebook", "ga4", "capi", "email"}
+COMPRA = {"stripe_cancel", "grant", "ebook", "ga4", "capi", "email", "afiliado"}
 EXTRAS = [
     {"price": "price_cad_a", "url": "https://drive.test/a", "nome": "Caderno A", "valor_cents": 1990},
     {"price": "price_cad_b", "url": "https://drive.test/b", "nome": "Caderno B", "valor_cents": 2990},
