@@ -31,6 +31,17 @@ def marcar(cobranca, tipo: str) -> None:
                      cobranca["refunded_at"] or datetime.now(timezone.utc))
 
 
+def estornar(cobranca, evt) -> None:
+    """Efeito `afiliado_estorno`. `refunded` prova que houve `paid`; com o `afiliado` pendente, é
+    aqui que o pagante nasce, porque depois do `revoke` a guarda D3 fecha a compra. Fora de
+    `refunded` só rotula: `chargeback` não transiciona e pode ter linha, e o estorno fora de
+    ordem (`pending`) segue sem linha."""
+    if cobranca["status"] == "refunded":
+        registrar(cobranca, evt)
+    else:
+        marcar(cobranca, "total")
+
+
 def rotular_reembolso(cobranca, status: str | None) -> None:
     """Rótulo pelo estado da cobrança, sem registro de efeito (é idempotente): serve à
     conta excluída, que não passa pelo laço, e à retentativa de `registrar`."""

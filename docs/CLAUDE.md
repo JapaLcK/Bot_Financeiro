@@ -1790,11 +1790,17 @@ Asaas.
 
 **Afiliado no dreno do Pix.** `afiliado` é o último efeito de compra (a falha dele vira
 retentativa sem segurar `grant` nem e-mail) e grava o pagamento do indicado pelo
-`amount_cents`, nunca os cadernos. `afiliado_estorno` roda no `PAYMENT_REFUNDED`, e
-`afiliado_estorno_parcial`, no parcial, só com a cobrança em `refunded_partial` e com id: são
+`amount_cents`, nunca os cadernos. `afiliado_estorno` roda no `PAYMENT_REFUNDED` e, com a
+cobrança em `refunded`, grava o pagamento antes de rotular: se o `afiliado` ficou pendente, a
+guarda D3 fecha a retentativa da compra e ele não roda mais. Em outro status ele só rotula a
+linha que já existe (`chargeback` não transiciona). `afiliado_estorno_parcial` roda no parcial,
+só com a cobrança em `refunded_partial` e com id: são
 dois nomes porque o dreno deduplica por `(pagamento, efeito)`, e com um só o total depois do
 parcial seria pulado. O parcial sem id fecha sem retentativa, como antes. Titular excluído
 (`_orfao`) não roda efeito: `rotular_reembolso` marca o reembolso direto, por ser idempotente.
+Estorno que chega com a cobrança ainda `pending` não vira pagante, nem no boot: ela nunca foi
+`paid`.
+Limite: em `chargeback` o estorno não grava pagante; nenhum código grava esse status, só reparo manual, e o boot repara.
 
 **PR B: emitir com os cadernos (backend; invisível até o modal mandar `extras`).** O
 `POST /billing/pix/checkout` aceita `extras: list[str]` (ids de Price, até 3, sem
