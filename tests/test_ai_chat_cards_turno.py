@@ -1,7 +1,6 @@
 """PR B1: `show_card`, gates, entrada, teto por turno e eventos do stream.
 Apoio e paridade: `_cards_apoio.py`, `test_ai_chat_cards.py`."""
 import json
-import time
 
 import pytest
 
@@ -239,18 +238,19 @@ def test_o_maximo_do_prompt_e_da_tool_vem_da_constante():
     assert frase in ADENDO_CARDS and frase in SCHEMA["function"]["description"]
 
 
-def test_piggy_sem_cache_nao_gera_dentro_do_turno(monkeypatch, pro_user_id):
+def test_piggy_sem_cache_gera_na_hora_sem_ia(monkeypatch, pro_user_id):
+    """Sem cache, o card gera dentro do turno (D13, Q2 b), sem LLM: só as completions do roteiro do turno."""
     completo(pro_user_id)
-    """Sem o cache de 6 h, gerar seria uma chamada ao LLM (sem timeout) com a trava do turno na mão."""
     chamadas = []
-    monkeypatch.setattr("core.ai_patterns._call_llm", lambda *a, **k: chamadas.append(1) or time.sleep(3) or [])
-    openai_falso(monkeypatch, rodada(None, ("show_card", {"card": "piggy"})), rodada("As dicas ainda não estão prontas."))
-    t = time.monotonic()
+    monkeypatch.setattr("core.ai_patterns._call_llm", lambda *a, **k: chamadas.append(1) or [])
+    from core.ai_patterns import ler_insights
+    assert ler_insights(pro_user_id) is None
+    ia = openai_falso(monkeypatch, rodada(None, ("show_card", {"card": "piggy"})), rodada("Olha o que eu notei."))
     r, ev, _ = executar(pro_user_id, "o que você notou?")
-    assert time.monotonic() - t < 2 and not chamadas
-    assert r.reply == "As dicas ainda não estão prontas." and not [e for e in ev if e["tipo"] in ("passo", "bloco")]
-    (tool,) = [json.loads(l["content"]) for l in linhas(pro_user_id) if l["role"] == "tool"]
-    assert tool["error"] == "indisponivel"
+    assert r.reply == "Olha o que eu notei." and not chamadas and len(ia.creates) == 2
+    (bloco,) = [e["bloco"] for e in ev if e["tipo"] == "bloco"]
+    assert bloco["abas"][0]["recursos"]["insights"]["insights"] == []  # gerou (sem dado: lista vazia, não None)
+    assert ler_insights(pro_user_id) == []  # e gravou o cache
     openai_falso(monkeypatch, rodada("Oi de novo."))
     r2, _, _ = executar(pro_user_id, "e agora?")  # o 2º turno não espera a trava
     assert r2.reply == "Oi de novo."

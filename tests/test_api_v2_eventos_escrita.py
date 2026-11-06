@@ -50,6 +50,8 @@ NAO_AVISAM = {
     "ai_proactive_cache", "insight_estado", "audit_events", "system_event_logs",
     # Plano Família: vínculo pessoa × grupo, sem dado financeiro (PR 6 revê se a tela precisar de aviso).
     "family_members",
+    # Livro da IA (ADR 0006, PR-B (b)): ids e estados das confirmações; a declaração em si avisa por `launches`.
+    "ia_declaracao_livro",
 }
 
 
