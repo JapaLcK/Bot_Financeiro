@@ -2,7 +2,8 @@
 pelo dono em 2026-10-26; T10, o T9 reescrito e o T1 SEM_CONTA em 2026-10-27; T11 (VALOR_AMBIGUO) teve a SUBSTÂNCIA
 aprovada em 2026-10-27 e a redação final, com asteriscos, é do Coder; `.time-dev/pr-b/decisoes-dono-b.md`; T12, T14 e
 T15 do leitor estrito, issue #1310, aprovados pelo dono em 2026-10-28; T16 e T17 (decisões E1 e E2) e o T12 reescrito
-pela E3, aprovados pelo dono no mesmo dia; não há T13).
+pela E3, aprovados pelo dono no mesmo dia; não há T13; T18 e T19, do chat IA (PR-B (b)), aprovados em 2026-11-02,
+`.time-dev/prb-chat/decisoes-dono.md`).
 Um teste pina cada um (tests/test_declaracao_b_textos.py).
 
 T1 e T2 são só a LINHA do meio de uma resposta de lançamento (o cabeçalho "registrada pelo banco" e o ID saem de
@@ -54,6 +55,13 @@ FILA_CARTAO_OF = ("🐷 Não registrei e mantive este item na fila: compra no ca
 FILA_CARTAO_NEUTRO = ("🐷 Não registrei e mantive este item na fila: não sei se foi pelo banco ou no cartão. Se foi Pix, "
                       "débito ou transferência, me manda só o valor (ex.: *1500*); para desistir, responda *deixa* (isso "
                       "descarta todos os itens que faltam).")
+SEM_ID = ("🐷 Não registrei: por aqui eu não consigo garantir que o mesmo pagamento pelo banco não entre duas vezes. "
+          "Manda pelo WhatsApp. Se foi em dinheiro vivo, diga *em dinheiro*.")  # T18: canal sem id de mensagem
+ACAO_ENCERRADA = ("🐷 Não registrei: esse pedido já tinha sido cancelado ou ficou sem resposta. "
+                  "Se quiser registrar, me manda de novo.")  # T19: reentrega de um pedido descartado ou abandonado
+# O "sim" já recebido que volta sem ter gravado nada, quando o sistema não sabe o desfecho (D-a, rodada 8, 2026-11-04)
+SIM_JA_RECEBIDO = "🐷 Essa resposta eu já tinha recebido. Confere no extrato antes de mandar de novo."
+NAO_JA_RECEBIDO = "🐷 Essa resposta eu já tinha recebido."  # o "não" visto sem declaração viva: não há o que conferir
 SEM_CONTA = ("🕓 Anotei como pago pelo banco. Ainda não apareceu no seu extrato e, sem uma conta corrente "
              "conectada, eu não consigo conferir sozinho: confira em Patrimônio total → Movimentações "
              "não confirmadas.")  # T1, variante de quem não tem conta corrente ativa
@@ -64,9 +72,10 @@ def com_par(par: dict) -> str:  # T2
             f"{fmt_brl(float(par['valor']))}. Sua Carteira não mudou.")
 
 
-def valor_casas(valor: float) -> str:
-    """O valor como o usuário o escreve (vírgula, sem notação científica), nunca o `repr` do float."""
-    return VALOR_CASAS.format(valor=format(Decimal(str(valor)), "f").replace(".", ","))
+def valor_casas(valor: float, molde: str = VALOR_CASAS) -> str:
+    """O valor como o usuário o escreve (vírgula, sem notação científica), nunca o `repr` do float. `molde`: o T4 com o
+    negrito do canal (`declaracao_ia._molde`)."""
+    return molde.format(valor=format(Decimal(str(valor)), "f").replace(".", ","))
 
 
 def valor_abreviado(trecho: str) -> str:  # T10

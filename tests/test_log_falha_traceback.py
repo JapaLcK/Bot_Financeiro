@@ -1,8 +1,8 @@
 """Quem leva traceback pro `system_event_logs` — e quem não pode levar.
 
-O `_DashboardHandler` (`core/observability.py`) PERSISTE duas coisas de cada
-`warning()`/`error()`: `self.format(record)`, que anexa o traceback à
-`message`, e `details["traceback"]`. Um erro do psycopg carrega
+O `_DashboardHandler` (`core/observability.py`) PERSISTE o traceback de cada
+`warning()`/`error()` em `details["traceback"]` (desde a #1331, não mais na
+`message`). Um erro do psycopg carrega
 `DETAIL: Key (…)=(…)` com valor e descrição da linha — então mandar `exc_info`
 numa porta de conversa grava dado financeiro do usuário no log, mesmo com a
 mensagem formatada omitindo `str(e)`.

@@ -91,15 +91,16 @@ def _com_id(uid, texto, message_id, platform="whatsapp"):
     ("wamid.abc", "discord"),
 ])
 def test_sem_wamid_utilizavel_nao_declara(ana, liga, message_id, platform):
-    """R11: nunca timestamp nem hash do corpo como chave (duas mensagens no mesmo segundo se suprimiriam)."""
-    assert _com_id(ana, FRASE, message_id, platform) == tx.SEM_GARANTIA
+    """R11: nunca timestamp nem hash do corpo como chave (duas mensagens no mesmo segundo se suprimiriam). T18 desde o
+    PR-B (b) (D6=A): antes era o T9."""
+    assert _com_id(ana, FRASE, message_id, platform) == tx.SEM_ID
     assert declaracoes(ana) == [] and n_lancamentos(ana) == 0
 
 
 def test_sem_wamid_na_fila_o_item_volta(ana, liga, monkeypatch):
     fala(monkeypatch, ana, "paguei o aluguel e paguei a academia no pix")
     r = _com_id(ana, "1500", "1761500000")
-    assert tx.SEM_GARANTIA in r and "aluguel" in r, r
+    assert tx.SEM_ID in r and "aluguel" in r, r
     assert declaracoes(ana) == []
     fila = db.get_pending_action(ana)["payload"]["queue"]
     assert [i["desc"].split()[0] for i in fila] == ["aluguel", "academia"]

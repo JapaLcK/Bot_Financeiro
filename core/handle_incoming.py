@@ -301,7 +301,7 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
     cartao = declarando and (resposta_cartao or tem_cartao(parts))
     if declarando and (recusa := recusa_valor(reunir([p for p in parts if not is_comparative_question(p)]))):
         # "2 reais e 50" partido em dois: não grava nenhum pedaço (T10/T11). Com cartão (B1) só o T10/T11/T15 recusa, antes
-        # da fatura ler "1,5k" como R$ 1,50 (rodadas 9 e 10); o T16 de dois gastos não, esses vão para T8 ou fatura.
+        # da fatura gravar sem confirmar: "1,5 mi" o parser lê 1,5 (#1404); o T16 de dois gastos não, esses vão para T8 ou fatura.
         # Prefixo antes do "{": T10/T11 levam o trecho; o T15 não tem campo, o prefixo é o texto inteiro.
         if not cartao or str(recusa).startswith(tuple(t.split("{")[0] for t in (tx.VALOR_ABREVIADO, tx.VALOR_AMBIGUO,
                                                                                     tx.LONGA))):
@@ -431,6 +431,15 @@ def _resposta_da_ia(uid: int, text: str, platform: str, rotulo: str,
 _IA_TENTOU = object()
 
 
+def _reentrega_da_declaracao(uid: int, texto: str | None, platform: str) -> str | None:
+    """`declaracao_ia.na_chegada` (None com a flag desligada). Respondeu: a pergunta aberta da IA fica como estava."""
+    from core.services.ai_chat.tools.declaracao_ia import na_chegada
+    reentregue = na_chegada(uid, (texto or "").strip(), platform)
+    if reentregue is not None:
+        pergunta_no_turno.set(MANTEM)
+    return reentregue
+
+
 def _ia_primeiro(uid: int, text: str):
     """5a do `handle_incoming` (`core/services/wa_ia_primeiro.py`). A resposta
     da IA (str); `_IA_TENTOU` se ela foi chamada e devolveu None ou levantou;
@@ -539,6 +548,9 @@ def _handle_audio(msg: IncomingMessage, platform: str,
 
     prefix = "_" if platform == "discord" else ""
     preview = f'🎙️ {prefix}Entendi: "{transcription}"{prefix}\n\n'
+    reentregue = _reentrega_da_declaracao(uid, transcription, platform)  # o "sim" falado (`handle_incoming` viu só o anexo)
+    if reentregue is not None:
+        return [OutgoingMessage(text=preview + format_for_platform(reentregue, platform))]
 
     # Mesma regra do texto (5b do `handle_incoming`): pergunta da IA em aberto
     # e nenhuma pendência → a transcrição inteira responde à IA. Se a consulta
@@ -1086,6 +1098,12 @@ def handle_incoming(msg: IncomingMessage, *,
         gated = _paywall_gate(msg, platform)
         if gated is not None:
             return gated
+
+        # Declaração pelo banco pelo chat IA (flag): o "sim" anotado e a reentrega respondida pelo id da mensagem,
+        # antes de anexos, da guarda anti-sequestro e da IA (`declaracao_ia.na_chegada`).
+        reentregue = _reentrega_da_declaracao(_normalize_user_id(msg), msg.text, platform)
+        if reentregue is not None:
+            return [OutgoingMessage(text=format_for_platform(reentregue, platform))]
 
         # ------------------------------------------------------------------
         # 1. Anexo OFX — tratamento especial (não passa pelo classificador)

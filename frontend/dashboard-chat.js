@@ -84,6 +84,9 @@
     status = '';
     draft = '';
     const createdAt = new Date().toISOString();
+    // Um id por mensagem: o servidor não grava duas vezes a mesma declaração pelo banco (ADR 0006).
+    // getRandomValues: o randomUUID não existe no Safari 14.
+    const clientMessageId = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
     messages.push({ id: `piggy-${++sequence}`, role: 'user', content: text, createdAt });
     const reply = { id: `piggy-${++sequence}`, role: 'assistant', content: 'Preparando a resposta…', state: 'pending', markdown: true };
     messages.push(reply);
@@ -92,7 +95,7 @@
       const response = await fetch('/ai/chat', {
         method: 'POST', credentials: 'same-origin',
         headers: csrfHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, client_message_id: clientMessageId }),
       });
       if (response.status === 403) {
         Object.assign(reply, { state: 'error', content: 'Conversar com a IA é um recurso do PigBank+. [Faça upgrade](/precos) pra liberar.' });

@@ -90,6 +90,8 @@ def add_launch_and_update_balance(
     cur=None,
     declaracao_banco: bool = False,
     chave_acao: str | None = None,
+    confirmacao: str | None = None,
+    payload_hash: str | None = None,
 ):
     """
     Lança em launches e atualiza saldo em accounts na mesma transação.
@@ -117,7 +119,12 @@ def add_launch_and_update_balance(
     ainda concilia com o extrato. Erros `ValueError` `DECLARACAO_*` antes de abrir a conexão; não aceita `cur` externo.
     `chave_acao` (só com `declaracao_banco`; identifica a AÇÃO, nunca o conteúdo) vai em `launches.external_id`: se o
     usuário já tem um lançamento com a chave, sob o mesmo mutex, levanta `DeclaracaoRepetida` e nada é gravado.
+    `confirmacao` (só com `chave_acao`; a chave do "sim" da IA) e `payload_hash` (o HMAC do payload que vai ser gravado):
+    no mesmo commit, o livro da IA confirma a ação (`db/declaracao_livro.confirma_no_cursor`, que pode recusar e desfazer
+    tudo).
     """
+    if confirmacao is not None and chave_acao is None:
+        raise ValueError("DECLARACAO_ARGS_INCOMPATIVEIS")
     if chave_acao is not None and not declaracao_banco:
         raise ValueError("DECLARACAO_ARGS_INCOMPATIVEIS")
     if declaracao_banco:
@@ -190,6 +197,9 @@ def add_launch_and_update_balance(
             from .bank_movements import record_bank_movement
             record_bank_movement(cur, user_id, row["id"], extra_efeitos["funding_source"],
                                  -v if tipo == "despesa" else v)
+        if confirmacao is not None:
+            from .declaracao_livro import confirma_no_cursor
+            confirma_no_cursor(cur, user_id, chave_acao, confirmacao, row["id"], row["user_seq"], payload_hash)
         return row["id"], row["user_seq"], new_bal
 
     if cur is not None:

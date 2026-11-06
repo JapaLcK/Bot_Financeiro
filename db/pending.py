@@ -37,10 +37,11 @@ def advance_pending_action(user_id: int, action_type: str,
 
     Compare-and-swap. Duas respostas do mesmo usuário podem ser processadas em
     paralelo: `adapters/discord/discord_bot.py:122` é um `on_message` async sem
-    lock, e o `launch.py` sobe o Discord num processo separado do uvicorn — um
-    usuário com as duas plataformas ligadas é alcançado pelos dois ao mesmo
-    tempo. (O webhook do WhatsApp, sozinho, NÃO corre: `wa_app.py` enfileira em
-    `_queue` e um `_worker_loop` único consome um payload por vez.)
+    lock, e o bot roda num processo separado do uvicorn — um usuário com as duas
+    plataformas ligadas é alcançado pelos dois ao mesmo tempo, quando o bot está
+    no ar (hoje não está: `docs/armadilhas.md`). (O webhook do WhatsApp, sozinho,
+    NÃO corre: `wa_app.py` enfileira em `_queue` e um `_worker_loop` único consome
+    um payload por vez.)
     Sem isso as duas leem a mesma fila, registram o MESMO item e o segundo valor
     some. Aqui a segunda escrita não pega: o Postgres serializa o UPDATE na
     linha, a condição `payload = <o que eu li>` já não vale, `rowcount` volta 0 e
