@@ -18,9 +18,9 @@ const json = (r, corpo, status = 200) => r.fulfill({ status, contentType: "appli
 const RET = {
   email: "l•••@dominio.com", desconto_pct: 20, trial: true,
   precos: {
-    essencial: { monthly: 792, annual: 7920, pix: 7920 },
-    plus: { monthly: 1592, annual: 15920, pix: 15920 },
-    pro: { monthly: 3992, annual: 39920, pix: 39920 },
+    essencial: { pct: 20, monthly: 792, annual: 7920, pix: 7920 },
+    plus: { pct: 20, monthly: 1592, annual: 15920, pix: 15920 },
+    pro: { pct: 20, monthly: 3992, annual: 39920, pix: 39920 },
   },
 };
 
@@ -47,12 +47,12 @@ for (const [nome, viewport] of [["desktop", { width: 1280, height: 900 }], ["mob
     assert.equal(await mensal.locator(".rm-selo").innerText(), "20% OFF");
     assert.equal(await mensal.locator("s.rm-cheio").evaluate((e) => getComputedStyle(e).textDecorationLine), "line-through");
     assert.ok(await mensal.isVisible(), "o preço estático tem de estar visível (NumberFlow fora)");
-    assert.equal(n(await card.locator(".price-cycle-copy").innerText()), "7 dias grátis no cartão, depois R$ 7,92 (20% OFF na 1ª cobrança)");
+    assert.equal(n(await card.locator(".price-cycle-copy").innerText()), "7 dias grátis no cartão, 20% OFF na 1ª cobrança, depois R$ 9,90");
     await page.click("#cycle-annual");
     const anual = card.locator("[data-price-annual]").first();
     assert.equal(n(await anual.locator("s.rm-cheio").innerText()), "R$ 99");
     assert.match(await anual.innerText(), /R\$\s*79,20/);
-    assert.equal(n(await card.locator(".price-cycle-copy").innerText()), "7 dias grátis no cartão, depois R$ 79,20 (20% OFF na 1ª cobrança)");
+    assert.equal(n(await card.locator(".price-cycle-copy").innerText()), "7 dias grátis no cartão, 20% OFF na 1ª cobrança, depois R$ 99");
     assert.equal(await card.locator(".price-eq").isVisible(), false);   // "equivale a" seria o preço cheio
     assert.equal(await page.locator("#plans-v2 .price-flow-host:visible").count(), 0);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "overflow horizontal");
@@ -60,6 +60,16 @@ for (const [nome, viewport] of [["desktop", { width: 1280, height: 900 }], ["mob
     await page.close();
   });
 }
+
+test("tabela, anual: o 'Equivale a' sai do preço com desconto (Essencial R$ 6,60)", async () => {
+  const page = await abrir(RET, { width: 1280, height: 900 });
+  await page.click("#cycle-annual");
+  const col = (t) => page.locator(`#cmp-v2 [data-plano="${t}"]`).first().innerText().then(n);
+  const [e, p] = [await col("essencial"), await col("plus")];
+  assert.match(e, /R\$ 79,20/); assert.match(e, /Equivale a R\$ 6,60\/mês/); assert.doesNotMatch(e, /8,25/);
+  assert.match(p, /Equivale a R\$ 13,26\/mês/); assert.doesNotMatch(p, /16,58/);
+  await page.close();
+});
 
 test("sem trial: o texto diz que o desconto é só na 1ª cobrança", async () => {
   const page = await abrir({ ...RET, trial: false }, { width: 1280, height: 900 });
@@ -71,7 +81,7 @@ test("sem trial: o texto diz que o desconto é só na 1ª cobrança", async () =
 test("sem retomada: nenhum risco, nenhum selo, preço de hoje", async () => {
   const page = await abrir(null, { width: 1280, height: 900 });
   assert.equal(await page.locator(".rm-cheio, .rm-selo").count(), 0);
-  assert.equal(await page.locator("#plans-v2.rm-on").count(), 0);
+  assert.equal(await page.locator(".rm-on").count(), 0);
   assert.match((await page.locator("#plans-v2 [data-price-monthly]").first().textContent()).replace(/\s+/g, " "), /R\$\s*9,90/);
   await page.close();
 });

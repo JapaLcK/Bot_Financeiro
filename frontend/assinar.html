@@ -53,6 +53,7 @@
 <form id="form-s1">
 <h1 id="s1-titulo">Seus 7 dias grátis do Plus começam aqui</h1>
 <p class="assinar-sub">Hoje você não paga nada. O cartão entra no próximo passo e a primeira cobrança só vem depois dos 7 dias. Cancele antes pelo painel e não paga nada.</p>
+<p class="assinar-sub" id="s1-oferta" hidden></p>
 <p class="hint">Teste grátis disponível uma vez por número de telefone · <a class="lp-auth-text-button" href="/?site=1#planos">Trocar de plano</a></p>
 <div class="auth-error" id="s1-erro" role="alert"></div>
 <div class="auth-error show" id="s1-pendente" role="alert" hidden>Já existe um cadastro em andamento com este e-mail. Termine pelo código que enviamos para ele, ou use outro e-mail. <a href="/cadastro">Ir para o cadastro</a></div>
@@ -108,6 +109,7 @@ Entrar com Google
 <section id="s4" hidden>
 <h1 id="s4-titulo" hidden>Esta assinatura não tem período grátis</h1>
 <p class="assinar-sub" id="s4-trial"></p>
+<p class="assinar-sub" id="s4-oferta" hidden></p>
 <div id="stripe-checkout"></div>
 <!-- Página própria (pagamento-pagina.js): celular = resumo, caixas, pagamento, botão; ≥880 px, duas colunas. -->
 <div class="pp" id="pagina" hidden>

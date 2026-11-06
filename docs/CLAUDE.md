@@ -1612,6 +1612,7 @@ número que não é de outra conta; `send_template(url_button_param=token)` pree
 `core/services/retomada.py`; a etapa só do cookie). Cartão: cupom `rm_e{etapa}_{pct}_{product}` (`retomada_cupom.py`,
 `repeating`/1 mês, divergente = 503) em `discounts`, sem `allow_promotion_codes`; `rm_desc` entra na reutilização da
 sessão. Pix anual: `criar_checkout(desconto_pct=)`. `ja_comprou` relido sob o lock (409). Detalhe: `docs/plano-remarketing.md`.
+Campanha com janela fixa (Black Friday): `core/services/oferta_campanha.py`, constantes no código, sem env; a fixture autouse de `tests/conftest.py` (`_oferta_campanha_fora_da_janela`) congela o relógio fora da janela.
 
 **Retomada do checkout abandonado (PR 4 de `docs/plano-remarketing.md`; inerte até o PR 6
 emitir um token).** `GET /retomar?t=…` (`frontend/routes/retomada.py`, só 303) troca o token

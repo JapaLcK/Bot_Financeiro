@@ -13,13 +13,17 @@ cookie (path `/auth/refresh`) não viaja aqui e não conta (resíduo declarado, 
 """
 import asyncio
 import logging
+from datetime import timedelta
 from typing import NamedTuple
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from core.reports.formatting import _fmt_brl
+from core.services import oferta_campanha as camp
 from core.services import retomada as tokens
+from core.services.comparacao_periodos import MESES
 from frontend.routes import shared
 from frontend.routes.shared import FRONTEND_DIR
 
@@ -103,21 +107,33 @@ async def desconto_pix(etapa, user_id: int):
     return desconto
 
 
+def _precos_tela(pct_link: int | None) -> dict:
+    """Por tier público COM desconto: `{pct, monthly, annual, pix}` em centavos. O % é o efetivo
+    (link e campanha: o maior); tier sem desconto fica de fora, e a tela não mexe nele."""
+    from core.services.pix_pricing import PRECOS_ANUAIS_CENTS  # noqa: PLC0415
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
+
+    precos = {}
+    for tier, mensal in tokens.PRECOS_MENSAIS_CENTS.items():
+        stored = TIER_TO_STORED_PLAN[tier]
+        pct = camp.pct_da_oferta(stored, pct_link)
+        if pct:
+            anual = tokens.com_desconto(PRECOS_ANUAIS_CENTS[stored], pct)
+            precos[tier] = {"pct": pct, "monthly": tokens.com_desconto(mensal, pct), "annual": anual, "pix": anual}
+    return precos
+
+
 def desconto_config(request: Request) -> dict:
     """Para o `plans-config`, SÓ com cookie válido: `desconto_pct`, os preços JÁ com desconto
     (centavos, mensal / anual cartão / anual Pix, por tier público) e se o trial vale. O front
     não faz conta de dinheiro. A etapa sai do cookie, nunca do pedido."""
-    from core.services.pix_pricing import PRECOS_ANUAIS_CENTS  # noqa: PLC0415
-    from core.services.plan_service import TIER_TO_STORED_PLAN, plans_v2_enabled  # noqa: PLC0415
+    from core.services.plan_service import plans_v2_enabled  # noqa: PLC0415
 
     lido = None if traz_sessao(request) else _cookie_lido(request)
     pct = tokens.desconto_da_etapa(lido[1]) if lido else None
     if not pct:
         return {}
-    precos = {}
-    for tier, mensal in tokens.PRECOS_MENSAIS_CENTS.items():
-        anual = tokens.com_desconto(PRECOS_ANUAIS_CENTS[TIER_TO_STORED_PLAN[tier]], pct)
-        precos[tier] = {"monthly": tokens.com_desconto(mensal, pct), "annual": anual, "pix": anual}
+    precos = _precos_tela(pct)
     trial = False
     if plans_v2_enabled():   # a mesma pergunta do checkout; falhou = sem promessa de trial
         from db.plans import is_trial_eligible_for_user  # noqa: PLC0415
@@ -126,6 +142,40 @@ def desconto_config(request: Request) -> dict:
         except Exception as exc:
             logging.getLogger(__name__).warning("retomada_trial_falhou: %s", type(exc).__name__)
     return {"desconto_pct": pct, "precos": precos, "trial": trial}
+
+
+def _brl(cents: int) -> str:
+    return _fmt_brl(cents / 100).replace(",00", "")
+
+
+def campanha_config() -> dict | None:
+    """Para o `plans-config`: None fora da janela; dentro, a oferta de campanha (Plus e Pro) com
+    TODO texto já formatado. Não depende de cookie; a tela decide quem vê (assinante não)."""
+    if not camp.campanha_pct():
+        return None
+    from core.services.pix_pricing import PRECOS_ANUAIS_CENTS  # noqa: PLC0415
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
+
+    pct = camp.CAMPANHA_PCT
+    fim = camp.CAMPANHA_FIM - timedelta(days=1)
+    ate = f"só até {fim.day} de {MESES[fim.month - 1]}"
+    precos = _precos_tela(None)
+    textos = {}
+    for tier, p in precos.items():
+        nome, cheio_a = tier.capitalize(), PRECOS_ANUAIS_CENTS[TIER_TO_STORED_PLAN[tier]]
+        cheio_m = tokens.PRECOS_MENSAIS_CENTS[tier]
+        textos[tier] = {
+            "mensal": _brl(p["monthly"]), "anual": _brl(p["annual"]), "anual_mes": _brl(p["annual"] // 12),
+            "linha_mensal": f"1º mês por {_brl(p['monthly'])}, depois {_brl(cheio_m)} por mês",
+            "linha_anual": f"{_brl(p['annual'])} no 1º ano, depois {_brl(cheio_a)} por ano",
+            "frase_anual": f"12 meses de {nome} pelo preço de 6, {_brl(p['annual'])} no plano anual, {ate}.",
+            "frase_mensal": f"1º mês do {nome} por {_brl(p['monthly'])}, depois {_brl(cheio_m)} por mês. "
+                            f"Só até {fim.day} de {MESES[fim.month - 1]}."}
+    return {
+        "desconto_pct": pct, "trial": False, "precos": precos, "textos": textos,
+        "frase": f"Black Friday: {pct}% OFF nos planos Plus e Pro, anual a partir de "
+                 f"{_brl(precos['plus']['annual'])}, {ate}.",
+        "frase_assinante": f"Black Friday: o anual no Pix sai com {pct}% OFF nos planos Plus e Pro, {ate}."}
 
 
 def _precos(request: Request) -> str:
