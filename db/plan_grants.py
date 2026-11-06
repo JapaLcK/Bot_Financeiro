@@ -128,14 +128,16 @@ def upsert_grant(
     exatamente o que faz o 5xx da Stripe ser retryable em vez de virar evento
     obsoleto.
 
-    O grant `source='pix'` (`do nothing`) passa a devolver o `id` do grant ATIVO
+    O grant `source='pix'` (`do nothing`, exceto a reativação descrita adiante) passa a devolver o `id` do grant ATIVO
     existente sempre que nenhum evento mais novo o superou. Não há chamador
     hoje; **o consumidor é o PR 1b**, e é para ele que este parágrafo existe.
 
     `source='pix'` é **criação única** (§6): depois de criado, um grant Pix só
     muda por operação explícita — `revoke_grant` (estorno/chargeback) ou a
-    antecipação do §4.4. A janela é decidida uma vez, no pagamento; não existe
-    caso legítimo de "evento posterior recalcula a janela do mesmo pagamento".
+    antecipação do §4.4. A janela é decidida uma vez, no pagamento. Única exceção
+    (#1267): grant revogado por `asaas:PAYMENT_RECEIVED_IN_CASH_UNDONE` é reativado
+    pelo upsert quando o Asaas confirma o pagamento depois; revogado por admin,
+    estorno ou chargeback não revive. Fora isso não existe caso legítimo de "evento posterior recalcula a janela do mesmo pagamento".
 
     Supersessão do `legacy` (§5.1): todo upsert APLICADO de grant `stripe`
     revoga, na MESMA transação, o `legacy` do mesmo usuário. Evento velho
@@ -158,7 +160,15 @@ def upsert_grant_cur(cur, user_id, source, external_ref, plan_stored, starts_at,
     if source not in GRANT_SOURCES:
         raise ValueError(f"source inválido: {source!r}")
     conflito = (
-        "on conflict (source, external_ref) do nothing"
+        # Pix: criação única, salvo grant revogado pela baixa manual desfeita (#1267), que volta se o
+        # Asaas confirmar o pagamento depois. Revogado por admin/estorno/chargeback não revive.
+        "on conflict (source, external_ref) do update"
+        "   set status = 'active', starts_at = excluded.starts_at, ends_at = excluded.ends_at,"
+        "       event_version = excluded.event_version, last_event_id = excluded.last_event_id,"
+        "       revoked_reason = null, revoked_at = null, updated_at = now()"
+        " where plan_grants.status = 'revoked'"
+        "   and plan_grants.revoked_reason = 'asaas:PAYMENT_RECEIVED_IN_CASH_UNDONE'"
+        "   and plan_grants.user_id = excluded.user_id"
         if source == "pix"
         else (
             "on conflict (source, external_ref) do update"

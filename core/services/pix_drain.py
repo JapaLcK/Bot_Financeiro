@@ -63,6 +63,7 @@ from core.services.pix_drain_effects import (
     alertar_stripe_desistido,
     janela_de_acesso,
 )
+from core.services.pix_baixa_desfeita import desfazer_baixa, pagamento_confirmado
 from core.services.pix_pago_sem_qr import avisar as avisar_pago_sem_qr
 from core.services.pix_valor import conferir_valor
 from db.pix_charges import (
@@ -70,6 +71,7 @@ from db.pix_charges import (
     buscar_por_external_reference,
     transicionar,
 )
+from db.pix_charges_saga import registrar_nao_casado
 from db.pix_effects import efeito_registrado, lock_efeito, registrar_efeito
 from db.webhook_outbox import marcar_processado, registrar_falha, reservar_evento
 
@@ -115,6 +117,8 @@ ROTEAMENTO: dict[str, tuple[tuple[str, ...], str | None, tuple[str, ...]]] = {
     "PAYMENT_CHARGEBACK_REQUESTED": ((), None, ()),
     "PAYMENT_CHARGEBACK_DISPUTE": ((), None, ()),
     "PAYMENT_AWAITING_CHARGEBACK_REVERSAL": ((), None, ()),
+    # #1267: tratado em `pix_baixa_desfeita`; o `revoke` aqui só aciona a guarda PagamentoSemId.
+    "PAYMENT_RECEIVED_IN_CASH_UNDONE": ((), None, ("revoke",)),
 }
 
 _ALERTAM = ("PAYMENT_PARTIALLY_REFUNDED", "PAYMENT_CHARGEBACK_REQUESTED",
@@ -183,6 +187,20 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
     payment_id = (payment_id if isinstance(payment_id, str) else "") or cobranca["asaas_payment_id"]
     if efeitos and not payment_id:  # sem id o efeito não se registra e o evento repete sem fim
         return ("PagamentoSemId", None)
+    if evt["event_type"] == "PAYMENT_RECEIVED_IN_CASH_UNDONE":
+        return desfazer_baixa(cobranca, evt, payment_id)
+
+    if (set(efeitos) & set(EFEITOS_DE_COMPRA) and cobranca["status"] in origens
+            and efeito_registrado(payment_id, "baixa_desfeita")
+            and not pagamento_confirmado(payment_id)):  # RECEIVED da baixa desfeita, reentregue
+        log_system_event_sync(
+            "warning", "pix_received_apos_baixa_desfeita",
+            "Pagamento recebido depois de baixa desfeita e o Asaas nao o mostra pago — nada concedido.",
+            source="pix", user_id=cobranca["user_id"], details={"charge_id": cobranca["id"]})
+        admin_notify.notify_pix_alerta(
+            f"⚠️ **Pix: RECEIVED depois da baixa desfeita** cobrança `{cobranca['id']}` — "
+            "acesso NÃO concedido, confira no painel do Asaas.")
+        return None
 
     # B) GUARDA DE ÓRFÃO, antes do laço: titular excluído (§13.4). Nenhum efeito
     # de compra — não há a quem conceder —, e o `CHECK` da janela não se aplica.
@@ -275,35 +293,11 @@ def _sem_cobranca(referencia, pagamento: dict) -> None:
             source="pix", details={"tem_referencia": bool(referencia)},
         )
         return
-    _registrar_nao_casado(pagamento, referencia)
+    registrar_nao_casado(pagamento, referencia)
     admin_notify.notify_pix_alerta(
         f"🚨 **Pix nosso sem cobrança** `{referencia}` — pagamento com "
         "referência do PigBank e nenhuma linha em `pix_charges`."
     )
-
-
-def _registrar_nao_casado(pagamento: dict, referencia: str) -> None:
-    """Insere em `pix_unmatched_payments` — fila de conciliação, não venda.
-
-    `on conflict do nothing`: o Asaas reentrega, e a mesma conciliação não pode
-    empilhar. Sem `user_id` porque não há dono — é esse o ponto da tabela.
-    """
-    from db.connection import get_conn
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "insert into pix_unmatched_payments"
-                "  (asaas_payment_id, external_reference, value, net_value,"
-                "   status, date_created, customer, notified_at)"
-                " values (%s, %s, %s, %s, %s, %s, %s, now())"
-                " on conflict (asaas_payment_id) do nothing",
-                (str(pagamento.get("id") or ""), referencia,
-                 pagamento.get("value"), pagamento.get("netValue"),
-                 pagamento.get("status"), pagamento.get("dateCreated"),
-                 pagamento.get("customer")),
-            )
-        conn.commit()
 
 
 def _orfao(event_id, cobranca, destino, origens, payment_id):

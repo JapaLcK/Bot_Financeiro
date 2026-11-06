@@ -120,6 +120,7 @@ CHAMADORES_PERMITIDOS: frozenset[str] = frozenset({
     "core/services/pix_extras.py",
     # A conferência do valor pago (#1228): marca `valor_alertado` em `pix_payment_effects`.
     "core/services/pix_valor.py",
+    "core/services/pix_baixa_desfeita.py",
     # A guarda da cobrança dupla Pix × cartão: só LÊ se uma cobrança paga do dono
     # cobre hoje (`paga_cobrindo_agora`), para o webhook e o create-checkout do
     # cartão recusarem. Não emite cobrança nem concede acesso.

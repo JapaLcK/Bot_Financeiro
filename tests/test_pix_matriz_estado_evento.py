@@ -45,11 +45,12 @@ EVENTOS = ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED", "PAYMENT_CREATED",
            "PAYMENT_PARTIALLY_REFUNDED", "PAYMENT_REFUND_IN_PROGRESS",
            "PAYMENT_REFUND_DENIED", "PAYMENT_CHARGEBACK_REQUESTED",
            "PAYMENT_CHARGEBACK_DISPUTE", "PAYMENT_AWAITING_CHARGEBACK_REVERSAL",
-           "PAYMENT_UPDATED")                  # o último é desconhecido de propósito
+           "PAYMENT_RECEIVED_IN_CASH_UNDONE", "PAYMENT_UPDATED")  # o último é desconhecido de propósito
 
 COMPRA = frozenset({"stripe_cancel", "grant", "ebook", "ga4", "capi", "email"})
 NADA = frozenset()
 REVOKE = frozenset({"revoke"})
+MARCA = frozenset({"baixa_desfeita"})  # UNDONE (#1267): marcador durável, nunca apagado
 REC = ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED")
 
 
@@ -69,30 +70,30 @@ def _paga_tudo(grants_final=1):
 # (status final, efeitos NOVOS, grants pix ativos). Escrita à mão, linha a linha.
 TABELA = {
     # sem id remoto: RECEIVED paga mesmo assim (o dinheiro entrou, §8.2); o QR nunca saiu.
-    "draft": _linha("draft", 0, **_paga_tudo(), PAYMENT_REFUNDED=("draft", REVOKE, 0)),
-    "creating": _linha("creating", 0, **_paga_tudo(),
+    "draft": _linha("draft", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("draft", MARCA, 0), PAYMENT_REFUNDED=("draft", REVOKE, 0)),
+    "creating": _linha("creating", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("creating", MARCA, 0),
                        PAYMENT_REFUNDED=("creating", REVOKE, 0)),
-    "pending": _linha("pending", 0, **_paga_tudo(),
+    "pending": _linha("pending", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("pending", MARCA, 0),
                       PAYMENT_OVERDUE=("expired", NADA, 0),
                       PAYMENT_DELETED=("canceled", NADA, 0),
                       PAYMENT_REFUNDED=("pending", REVOKE, 0)),
-    "canceling": _linha("canceling", 0, **_paga_tudo(),
+    "canceling": _linha("canceling", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("canceling", MARCA, 0),
                         PAYMENT_OVERDUE=("expired", NADA, 0),
                         PAYMENT_DELETED=("canceled", NADA, 0),
                         PAYMENT_REFUNDED=("canceling", REVOKE, 0)),
-    "canceled": _linha("canceled", 0, **_paga_tudo(),
+    "canceled": _linha("canceled", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("canceled", MARCA, 0),
                        PAYMENT_REFUNDED=("canceled", REVOKE, 0)),
-    "expired": _linha("expired", 0, **_paga_tudo(),
+    "expired": _linha("expired", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("expired", MARCA, 0),
                       PAYMENT_REFUNDED=("expired", REVOKE, 0)),
     # `paid` vem de um RECEIVED de verdade: os 6 efeitos já estão registrados.
-    "paid": _linha("paid", 1,
+    "paid": _linha("paid", 1, PAYMENT_RECEIVED_IN_CASH_UNDONE=("pending", MARCA, 0),
                    PAYMENT_REFUNDED=("refunded", REVOKE, 0),
                    PAYMENT_PARTIALLY_REFUNDED=("refunded_partial", NADA, 1)),
     # titular excluído: a transição acontece, o efeito de compra e o `revoke` NÃO.
-    "paid_orphan": _linha("paid_orphan", 0,
+    "paid_orphan": _linha("paid_orphan", 0, PAYMENT_RECEIVED_IN_CASH_UNDONE=("expired", MARCA, 0),
                           PAYMENT_REFUNDED=("refunded", NADA, 0),
                           PAYMENT_PARTIALLY_REFUNDED=("refunded_partial", NADA, 0)),
-    "refunded_partial": _linha("refunded_partial", 1,
+    "refunded_partial": _linha("refunded_partial", 1, PAYMENT_RECEIVED_IN_CASH_UNDONE=("refunded", MARCA | REVOKE, 0),
                                PAYMENT_REFUNDED=("refunded", REVOKE, 0)),
     # `revoke` já registrado: o RECEIVED atrasado NÃO reconcede (a célula positiva).
     "refunded": _linha("refunded", 0),
@@ -150,7 +151,7 @@ def externo(monkeypatch):
     return mundo_externo(monkeypatch)
 
 
-def test_a_tabela_tem_as_143_celulas():
+def test_a_tabela_tem_as_154_celulas():
     assert set(TABELA) == set(ESTADOS)
     assert all(set(t) == set(EVENTOS) for t in TABELA.values())
 
