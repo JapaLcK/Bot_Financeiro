@@ -19,7 +19,7 @@ from test_retomada_backend import _checkout, _cliente, _conta, _pix
 
 BRT = ZoneInfo("America/Sao_Paulo")
 DENTRO = datetime(2026, 11, 25, 12, tzinfo=BRT)
-ANTES = datetime(2026, 11, 22, 23, 59, 59, tzinfo=BRT)
+ANTES = datetime(2026, 10, 31, 23, 59, 59, tzinfo=BRT)
 DEPOIS = datetime(2026, 12, 1, tzinfo=BRT)
 
 
@@ -42,8 +42,8 @@ def _cartao(monkeypatch):
 
 def test_janela_em_brasilia_fim_exclusivo():
     z = lambda *a: datetime(*a, tzinfo=timezone.utc)   # noqa: E731
-    assert camp.campanha_pct(z(2026, 11, 23, 2, 59, 59)) is None
-    assert camp.campanha_pct(z(2026, 11, 23, 3, 0, 0)) == 40
+    assert camp.campanha_pct(z(2026, 11, 1, 2, 59, 59)) is None
+    assert camp.campanha_pct(z(2026, 11, 1, 3, 0, 0)) == 40
     assert camp.campanha_pct(datetime(2026, 11, 30, 23, 59, 59, tzinfo=BRT)) == 40
     assert camp.campanha_pct(datetime(2026, 12, 1, 0, 0, 0, tzinfo=BRT)) is None
 

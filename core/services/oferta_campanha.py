@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 _BRT = ZoneInfo("America/Sao_Paulo")
 CAMPANHA_PCT = 40
-CAMPANHA_INICIO = datetime(2026, 11, 23, tzinfo=_BRT)
+CAMPANHA_INICIO = datetime(2026, 11, 1, tzinfo=_BRT)
 CAMPANHA_FIM = datetime(2026, 12, 1, tzinfo=_BRT)   # exclusivo: 30/11 23:59:59 ainda vale
 CAMPANHA_PLANOS = frozenset({"pro", "pro_max"})
 

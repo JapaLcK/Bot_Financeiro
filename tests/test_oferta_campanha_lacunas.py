@@ -56,7 +56,7 @@ def test_agora_real_devolve_horario_com_fuso_e_decide_a_janela_em_brasilia(monke
     assert abs(real._agora() - datetime.now(timezone.utc)) < timedelta(seconds=5)
 
     class Relogio(datetime):   # o `datetime.now(tz)` do módulo, num instante escolhido (em UTC)
-        instante = datetime(2026, 11, 23, 2, 59, 59, tzinfo=timezone.utc)
+        instante = datetime(2026, 11, 1, 2, 59, 59, tzinfo=timezone.utc)
 
         @classmethod
         def now(cls, tz=None):
@@ -64,7 +64,7 @@ def test_agora_real_devolve_horario_com_fuso_e_decide_a_janela_em_brasilia(monke
 
     monkeypatch.setattr(real, "datetime", Relogio)
     assert real._agora().utcoffset() == timedelta(hours=-3) and real.campanha_pct() is None
-    Relogio.instante = datetime(2026, 11, 23, 3, 0, 0, tzinfo=timezone.utc)   # 00:00 em Brasília
+    Relogio.instante = datetime(2026, 11, 1, 3, 0, 0, tzinfo=timezone.utc)   # 00:00 em Brasília
     assert real.campanha_pct() == 40
     Relogio.instante = datetime(2026, 12, 1, 2, 59, 59, tzinfo=timezone.utc)   # 30/11 23:59:59
     assert real.campanha_pct() == 40
