@@ -58,3 +58,35 @@ def test_get_falha_no_received_nao_perde(user_id, externo, monkeypatch):
     externo["get_erro"], externo["get_status"] = None, "RECEIVED"
     drenar_evento(eid)
     assert len(_ativos(user_id)) == 1
+
+
+def test_undone_durante_stripe_cancel_do_received_nao_concede(user_id, externo, monkeypatch):
+    """Corrida: RECEIVED pausa em `stripe_cancel`, UNDONE revoga/reabre/apaga o grant.
+    Guarda: reler a cobrança sob o lock do grant. Sem ela: pending com acesso ativo."""
+    import core.services.pix_drain_effects as eff
+    from db.pix_charges import buscar_por_asaas_payment_id as ler_cob
+    from test_pix_baixa_desfeita import UNDONE, nova_cobranca, conta
+    conta(user_id, "free", None)
+    cob = nova_cobranca(user_id)
+    real = eff.EXECUTORES["stripe_cancel"]
+
+    def pausa(c, e):
+        monkeypatch.setitem(eff.EXECUTORES, "stripe_cancel", real)
+        entregar(UNDONE, cob)  # GET do Asaas: PENDING (default do mundo falso)
+        return real(c, e)
+
+    monkeypatch.setitem(eff.EXECUTORES, "stripe_cancel", pausa)
+    eid = entregar("PAYMENT_RECEIVED", cob)
+    from _dreno_pix_helpers import evento
+    assert ler_cob(cob["asaas_payment_id"])["status"] == "pending"
+    assert _ativos(user_id) == []
+    assert evento(eid)["processed_at"] is not None and evento(eid)["attempts"] == 0
+
+
+def test_pix_real_entre_o_get_e_o_revoke_do_undone_nao_revoga(user_id, externo, monkeypatch):
+    """Corrida: GET do UNDONE diz PENDING, o Pix real paga, o GET sob o lock diz pago."""
+    cob = _paga(user_id)
+    respostas = iter(["PENDING", "RECEIVED"])
+    monkeypatch.setattr(asaas, "buscar_pagamento", lambda p: {"status": next(respostas)})
+    entregar("PAYMENT_RECEIVED_IN_CASH_UNDONE", cob)
+    assert len(_ativos(user_id)) == 1

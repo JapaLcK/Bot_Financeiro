@@ -63,7 +63,7 @@ from core.services.pix_drain_effects import (
     alertar_stripe_desistido,
     janela_de_acesso,
 )
-from core.services.pix_baixa_desfeita import desfazer_baixa, pagamento_confirmado, reconciliar_grant
+from core.services.pix_baixa_desfeita import desfazer_baixa, pagamento_confirmado, reconciliar_grant, veto_grant
 from core.services.pix_pago_sem_qr import avisar as avisar_pago_sem_qr
 from core.services.pix_valor import conferir_valor
 from db.pix_charges import (
@@ -243,9 +243,11 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
         alertar(evt["event_type"], cobranca, payment_id)
 
     for efeito in efeitos:
-        with lock_efeito(payment_id, efeito):
+        with lock_efeito(payment_id, "grant" if efeito == "revoke" else efeito):  # estorno espera o grant em voo
             if efeito_registrado(payment_id, efeito):
                 continue
+            if efeito == "grant" and (veto := veto_grant(payment_id))[0]:
+                return veto[1]  # #1267: UNDONE/estorno ganhou a corrida (relido sob o lock)
             try:
                 EXECUTORES[efeito](cobranca, evt)
             except Exception as exc:  # noqa: BLE001 — vira attempts, não 500 mudo
