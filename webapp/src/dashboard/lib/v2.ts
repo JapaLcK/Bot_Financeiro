@@ -140,6 +140,13 @@ export const contaQuery = {
   retry: meQuery.retry,
   enabled: !DEMO,
 };
+// Espera uma releitura contra o prazo de 30 s (as consultas não recebem signal): a que sobra termina no cache, sem efeito.
+// Estouro ou rejeição = null, e quem espera (o modal do MFA, o diálogo das sessões, os botões dos widgets de Receitas e Assinaturas, o fechar dos forms de meta e gasto fixo) não fica preso numa leitura que nunca responde.
+export const comPrazoLeitura = <T,>(p: Promise<T>) => {
+  let prazo: ReturnType<typeof setTimeout>;
+  return Promise.race([p.catch(() => null), new Promise<null>((ok) => { prazo = setTimeout(() => ok(null), 30000); })])
+    .finally(() => clearTimeout(prazo));
+};
 // A conta numa leitura que SAIU agora ou depois. Uma leitura já em voo pode ter saído com a sessão anterior (a conta mudou noutra
 // aba): espera por ela e lê de novo. Cancelar não serve, quem a esperava receberia o cancelamento. Toda conferência de conta do
 // chat passa por aqui: montagem, foco, pergunta ao Piggy e menção (Codex no #1157).

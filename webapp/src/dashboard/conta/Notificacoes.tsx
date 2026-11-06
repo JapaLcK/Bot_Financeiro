@@ -1,8 +1,8 @@
 import { useId, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ErroApi, contaQuery } from "../lib/v2";
+import { ErroApi, comPrazoLeitura, contaQuery } from "../lib/v2";
 import { href } from "../router";
-import { HORAS, comPrazoLeitura, falhaDe, notificacoesQuery, salvarNotificacoes, telefoneBR, uidValido, type CorpoNotificacoes, type Falha, type Notificacoes } from "./api";
+import { HORAS, falhaDe, notificacoesQuery, salvarNotificacoes, telefoneBR, uidValido, type CorpoNotificacoes, type Falha, type Notificacoes } from "./api";
 
 type Campo = Exclude<keyof CorpoNotificacoes, "daily_report_hour" | "daily_report_minute">;
 const hhmm = (h: number, m: number) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
