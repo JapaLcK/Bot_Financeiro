@@ -45,6 +45,7 @@ export function OrcamentoCategoriaForm({ orcamento, orcamentos, limite, fechar }
   const m = useMutation({
     mutationKey: CHAVE_ESCRITA, retry: false, networkMode: "always",
     mutationFn: (a: Escrita) => a.apagar ? apiPost("/orcamentos-categoria/apagar", { categoria: a.categoria }) : apiPost("/orcamentos-categoria", { categoria: a.categoria, valor: a.valor }),
+    onMutate: () => qc.cancelQueries({ queryKey: orcamentosCategoriaQuery.queryKey }), // o onError solta a trava sem esperar a releitura: a que sobrar em voo não pode cobrir o setQueryData do retry
     onSuccess: (r: OrcamentosCategoria) => qc.setQueryData(orcamentosCategoriaQuery.queryKey, r),
     onError: () => { void qc.invalidateQueries({ queryKey: ["orcamentos-categoria"] }); }, // resposta perdida: relê o que o servidor tem; sem devolver a promessa (o TanStack a espera e uma releitura pendurada prenderia a escrita)
   });

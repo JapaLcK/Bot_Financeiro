@@ -36,6 +36,7 @@ export function useEscrita(mes: string) {
   const m = useMutation({
     mutationKey: CHAVE_ESCRITA, retry: false, networkMode: "always",
     mutationFn: (a: Escrita) => "potes" in a ? apiPost("/orcamento-domestico/potes", a.potes) : apiPost("/orcamento-domestico/renda", a.renda),
+    onMutate: () => qc.cancelQueries({ queryKey: ["orcamento-domestico"] }), // o onError solta a trava sem esperar a releitura: a que sobrar em voo não pode cobrir o setQueryData do retry
     onSuccess: (r) => qc.setQueryData(orcamentoQuery(mes).queryKey, r),
     onError: () => { void qc.invalidateQueries({ queryKey: ["orcamento-domestico"] }); }, // resposta perdida: relê o que o servidor tem; sem devolver a promessa (o TanStack a espera e uma releitura pendurada prenderia a escrita)
   });
