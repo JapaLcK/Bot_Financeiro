@@ -57,7 +57,7 @@ test("desktop: menu com Simulador e Ferramentas, sem Piggy; o botão rosa abre F
   await page.locator(".tools li").first().waitFor();
   const cards = await page.locator(".tools li").evaluateAll((lis) => lis.map((li) => [li.querySelector("b").textContent, li.querySelector("a")?.getAttribute("href") ?? (li.querySelector("button") ? "botão" : li.querySelector("[aria-disabled]")?.textContent.includes("Em breve"))]));
   await ctx.close();
-  assert.deepEqual(menu, ["Resumo", "Previsão", "Para onde vai", "Assinaturas", "Simulador", "Metas", "Patrimônio", "Lançamentos", "Ferramentas", "Ajuda"]);
+  assert.deepEqual(menu, ["Resumo", "Previsão", "Para onde vai", "Assinaturas", "Simulador", "Metas", "Patrimônio", "Lançamentos", "Casa", "Ferramentas", "Ajuda"]);
   assert.equal(botao.trim(), "Ferramentas");
   assert.deepEqual(cards[0], ["Simulador", "#/simulador"]);
   assert.deepEqual(cards[1], ["Painel antigo", "/app"]); // sai do v2 para o dashboard de sempre
@@ -111,11 +111,12 @@ test("a aba do Piggy mostra quando é a página atual, como as outras", async ()
   assert.equal(dentro, "none|1");
 });
 
-// O Menu da barra de baixo (parts/MenuTelas.tsx): uma folha com as 9 telas do menu lateral, a Ajuda e o grupo Conta (Perfil, Cobrança, Configurações, Bancos conectados, Família, Sair).
+// O Menu da barra de baixo (parts/MenuTelas.tsx): uma folha com as 10 telas do menu lateral (9 no protótipo, que não tem a Casa), a Ajuda e o grupo Conta (Perfil, Cobrança, Configurações, Bancos conectados, Família, Sair).
 // Nativo e com o fallback do Safari 14 (sem showModal/close): o mesmo roteiro.
 const ROTULOS = ["Resumo", "Previsão", "Para onde vai", "Assinaturas", "Simulador", "Metas", "Patrimônio", "Lançamentos", "Ferramentas"];
+const ROTULOS_LOGADO = [...ROTULOS.slice(0, 8), "Casa", "Ferramentas"]; // a Casa (PR 6c) não existe no protótipo (ATIVAS)
 for (const semDialog of [false, true]) {
-  test(`celular 375 (${semDialog ? "fallback sem <dialog>" : "<dialog> nativo"}): o Menu abre a folha com as 9 telas e o grupo Conta; foco, Esc, toque fora, navegar e reabrir`, async () => {
+  test(`celular 375 (${semDialog ? "fallback sem <dialog>" : "<dialog> nativo"}): o Menu abre a folha com as 10 telas e o grupo Conta; foco, Esc, toque fora, navegar e reabrir`, async () => {
     const { ctx, page } = await abrir(375, "#/", { height: 812, semDialog });
     const botao = page.locator(".tabbar").getByRole("button", { name: "Menu" });
     const folha = page.locator(".menu-telas");
@@ -129,10 +130,10 @@ for (const semDialog of [false, true]) {
     r.atual = await textos(page, '.menu-telas a[aria-current="page"]');
     r.foco = await foco();
     r.guias = await page.locator(".menu-telas [data-guia]").count();
-    // 17 Tabs (fecha + 9 telas + 4 da Conta + Sair + Guia do painel = 16, então dá a volta): o foco nunca para num
+    // 18 Tabs (fecha + 10 telas + 4 da Conta + Sair + Guia do painel = 17, então dá a volta): o foco nunca para num
     // elemento de fora da folha. No nativo, a volta passa um Tab pelo navegador (document.body).
     r.tabs = [];
-    for (let i = 0; i < 17; i++) { await page.keyboard.press("Tab"); r.tabs.push(await page.evaluate(() => { const a = document.activeElement; return a === document.body || a?.closest(".menu-telas") != null; })); }
+    for (let i = 0; i < 18; i++) { await page.keyboard.press("Tab"); r.tabs.push(await page.evaluate(() => { const a = document.activeElement; return a === document.body || a?.closest(".menu-telas") != null; })); }
     // Com a folha aberta o ⌘K não abre um segundo modal.
     await page.keyboard.press("Meta+k");
     r.cmdk = await page.locator(".cmdk[open]").count();
@@ -161,8 +162,8 @@ for (const semDialog of [false, true]) {
     r.ajuda = [await visivel(), await page.evaluate(() => window.__guia)];
     await ctx.close();
     assert.deepEqual(r, {
-      fechada: false, aberta: true, rotulos: [...ROTULOS, "Perfil", "Cobrança", "Configurações", "Bancos conectados", "Família"], atual: ["Resumo"], foco: [true, "Resumo"], guias: 0,
-      tabs: Array(17).fill(true), cmdk: 0, escFechou: true, escFoco: true, foraFechou: true, mesmaTela: true,
+      fechada: false, aberta: true, rotulos: [...ROTULOS_LOGADO, "Perfil", "Cobrança", "Configurações", "Bancos conectados", "Família"], atual: ["Resumo"], foco: [true, "Resumo"], guias: 0,
+      tabs: Array(18).fill(true), cmdk: 0, escFechou: true, escFoco: true, foraFechou: true, mesmaTela: true,
       navegou: [false, ["#/previsao", "page-title"]], atualDepois: ["Previsão"], ajuda: [false, 1],
     });
   });

@@ -11,6 +11,9 @@ import { RAIZ, RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs"
 export { RESPOSTAS };
 /** Uma fixture de tests/fixtures (o dump do Pydantic que o pytest confere): `ai_chat_recurso_detalhes.json` (o `detalhes` de resumo/categorias/calendario), `ai_chat_bloco_periodo.json`. */
 export const fixture = (nome) => JSON.parse(readFileSync(join(RAIZ, "tests", "fixtures", nome), "utf8"));
+/** O formato que o servidor aceita para o `client_message_id` (`AIChatBody`, frontend/routes/ai_chat.py), lido da fonte (§0.7). */
+export const ID_DA_MENSAGEM = new RegExp(`^${readFileSync(join(RAIZ, "frontend", "routes", "ai_chat.py"), "utf8")
+  .match(/^ID_DA_MENSAGEM = r"([^"]+)"/m)[1]}$`);
 
 let browser;
 export const iniciar = async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); };
@@ -51,7 +54,11 @@ export async function abrir({ width = 1440, chatIa = true, uid = 1, usage = { us
     return r.fulfill({ json: { messages: [], usage: cota } });
   });
   await ctx.route("**/auth/refresh", (r) => { log.push("POST /auth/refresh"); return r.fulfill({ json: { ok: true, user_id: 1, confirmada: true } }); });
-  await page.exposeFunction("__reg", (s, corpo, csrf) => { log.push(s); if (corpo) posts.push({ corpo, csrf }); });
+  // `id` = o `client_message_id` (aleatório por mensagem), separado do `corpo` para os testes compararem o resto exato.
+  await page.exposeFunction("__reg", (s, corpo, csrf) => {
+    log.push(s);
+    if (corpo) { const { client_message_id: id, ...resto } = corpo; posts.push({ corpo: resto, csrf, id }); }
+  });
   await ctx.addInitScript(() => {
     const real = window.fetch.bind(window);
     const S = window.__sse = { reqs: [], proximas: [], ignoraAbort: false };

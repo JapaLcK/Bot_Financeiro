@@ -18,9 +18,9 @@ export type Agregados = { mes: string; entrou: string; saiu: string; categorias:
 export type LancamentoMembro = { data: string; tipo: "entrada" | "saida"; valor: string; moeda: string; descricao: string | null; categoria: string | null };
 export type Pagina = { itens: LancamentoMembro[]; proximo: string | null };
 
-const dinheiro = (v: unknown): v is string => typeof v === "string" && moneyText(v) !== null;
-const opcional = (v: unknown): v is string | null => v === null || typeof v === "string";
-const lista = (v: unknown): unknown[] => { if (!Array.isArray(v)) throw contrato(); return v; };
+export const dinheiro = (v: unknown): v is string => typeof v === "string" && moneyText(v) !== null;
+export const opcional = (v: unknown): v is string | null => v === null || typeof v === "string";
+export const lista = (v: unknown): unknown[] => { if (!Array.isArray(v)) throw contrato(); return v; };
 
 function permissoesEscritas(v: unknown): Escopo[] {
   if (!objeto(v) || !Array.isArray(v.permissoes)) throw contrato();

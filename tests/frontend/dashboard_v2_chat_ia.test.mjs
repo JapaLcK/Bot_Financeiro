@@ -6,7 +6,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { PAROU, PREPARANDO, SEM_CARD, SEM_COTA, GENERICO, abrir, botao, enviar, encerrar, evento, fim, iniciar, respostas, texto, trocarConta, ultima } from "./_chat_ia.mjs";
+import { ID_DA_MENSAGEM, PAROU, PREPARANDO, SEM_CARD, SEM_COTA, GENERICO, abrir, botao, enviar, encerrar, evento, fim, iniciar, respostas, texto, trocarConta, ultima } from "./_chat_ia.mjs";
 
 before(iniciar);
 after(encerrar);
@@ -70,6 +70,9 @@ test("D3: com o freio ligado até a pergunta de metas e de investido vai à IA",
   await enviar(page, "quanto tenho investido?");
   await flux.espera(2);
   assert.deepEqual(posts.map((p) => p.corpo.message), ["como estão minhas metas?", "quanto tenho investido?"]);
+  // ADR 0006 (PR-B (b)): cada mensagem leva o seu id, no formato que o servidor aceita; duas mensagens, dois ids.
+  assert.ok(posts.every((p) => ID_DA_MENSAGEM.test(p.id)), JSON.stringify(posts.map((p) => p.id)));
+  assert.notEqual(posts[0].id, posts[1].id);
   await page.context().close();
 });
 

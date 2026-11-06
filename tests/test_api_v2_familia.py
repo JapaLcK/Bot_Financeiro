@@ -149,7 +149,7 @@ def test_i2_titular_ve_so_os_seus_com_chaves_exatas(w):
 
 
 def test_fora_de_familia_e_404_e_o_titular_de_b_nao_ve_a(w):
-    erro(w.chamar(w.u, "GET", "/familia"), 404, "not_found")  # free sem família: sem gate de plano, só não há o que ver
+    erro(w.chamar(w.u, "GET", "/familia"), 402, "plan_selection_required")  # free: o gate de plano vem antes do 404
     erro(w.chamar(w.u, "POST", "/familia"), 402, "plan_selection_required")  # o resto segue no gate normal
     erro(w.chamar(_usuario("essencial"), "GET", "/familia"), 404, "not_found")
     j = w.chamar(w.tb, "GET", "/familia").json()
@@ -442,10 +442,9 @@ def _free_membro_de_grupo_suspenso(w):
     erro(w.chamar(w.u, "GET", "/resumo-do-mes"), 402, "plan_selection_required")  # o gate de plano segue valendo no resto
 
 
-def test_membro_sem_plano_ve_a_familia_sai_e_entra_em_outra(w):
+def test_membro_sem_plano_nao_ve_a_familia_mas_sai_e_entra_em_outra(w):
     _free_membro_de_grupo_suspenso(w)
-    r = w.chamar(w.u, "GET", "/familia")
-    assert r.status_code == 200 and r.json() == {"papel": "membro", "permissoes": []}
+    erro(w.chamar(w.u, "GET", "/familia"), 402, "plan_selection_required")
     assert w.chamar(w.u, "POST", "/familia/sair").status_code == 204
     assert aceitar(w, w.u, fam.create_invite(w.ta)).status_code == 200
     assert _ativo(w.u)
@@ -467,7 +466,11 @@ def test_aceite_exige_credencial_e_com_senha_aceita(w):
     db_support.invalidate_auth_user_cache(w.u)
     assert db.conta_sem_credencial(w.u)
     erro(aceitar(w, w.u, t), 403, "password_required")
-    erro(w.chamar(w.u, "GET", "/familia"), 403, "password_required")
+    erro(w.chamar(w.u, "GET", "/familia"), 402, "plan_selection_required")  # free: o 402 de plano vem antes do 403 de senha
+    sem_senha = _usuario("essencial")  # com plano e sem credencial: o 403 de senha é o que sobra
+    sql("update auth_accounts set password_hash = null where user_id = %s", sem_senha)
+    db_support.invalidate_auth_user_cache(sem_senha)
+    erro(w.chamar(sem_senha, "GET", "/familia"), 403, "password_required")
     assert not _ativo(w.u)
     sql("update auth_accounts set password_hash = 'x' where user_id = %s", w.u)
     db_support.invalidate_auth_user_cache(w.u)
@@ -560,10 +563,10 @@ def test_status_do_membro_vem_do_acesso_efetivo_e_nao_do_marcador(w):
     assert _status_membros(w, w.ta) == ["suspenso", "suspenso"]
 
 
-def test_dissolucao_membro_sem_plano_le_404_no_familia_e_402_no_me(w):
+def test_dissolucao_membro_sem_plano_le_402_no_familia_e_no_me(w):
     u = _usuario("free")
     assert aceitar(w, u, fam.create_invite(w.tb)).status_code == 200
     j = w.chamar(w.tb, "GET", "/familia/dissolucao").json()
     assert w.chamar(w.tb, "POST", "/familia/dissolucao", json={"confirmacao": j["confirmacao"]}).status_code == 204
-    erro(w.chamar(u, "GET", "/familia"), 404, "not_found")  # o canal do aviso: sem gate de plano
+    erro(w.chamar(u, "GET", "/familia"), 402, "plan_selection_required")  # GET /familia deixou de ser canal de aviso sem plano
     erro(w.chamar(u, "GET", "/me"), 402, "plan_selection_required")  # /me segue com o gate de plano

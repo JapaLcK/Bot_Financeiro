@@ -184,6 +184,7 @@ const DO_ACEITE = [
   ["500: NÃO limpa", ERRO(500, "internal"), "Não foi possível entrar", true],
   ["rede fora: NÃO limpa", (r) => r.abort(), "Não foi possível entrar", true],
   ["404 com outro código: NÃO limpa", ERRO(404, "not_found"), "Não foi possível entrar", true],
+  ["403 password_required: NÃO limpa", ERRO(403, "password_required"), "Defina uma senha para continuar.", true],
 ];
 for (const [nome, aceitar, h1, fica] of DO_ACEITE) {
   test(`aceite ${nome}`, async () => {
@@ -195,6 +196,28 @@ for (const [nome, aceitar, h1, fica] of DO_ACEITE) {
     });
   });
 }
+
+// Quem não tem plano (o convidado típico: cadastro novo) recebe 402 no GET /familia; o plano vem com o aceite.
+for (const code of ["plan_selection_required", "subscription_required"]) {
+  test(`GET /familia 402 ${code}: oferece o aceite, e o clique faz o POST`, async () => {
+    await com({ s: { get: ERRO(402, code) } }, async (t) => {
+      await aceita(t).waitFor();
+      assert.equal(await t.h1(), "Entrar na família");
+      assert.equal(t.reqs.filter((q) => q.metodo === "POST" && q.url.includes("aceitar")).length, 0); // o clique é do usuário
+      await aceita(t).click();
+      await t.esperaH1("Você entrou na família.");
+      assert.equal(t.reqs.filter((q) => q.metodo === "POST" && q.url.endsWith("/convites/aceitar")).length, 1);
+    });
+  });
+}
+
+test("GET /familia 402 + aceite 409 already_in_family: 'Você já está numa família.' e limpa o token", async () => {
+  await com({ s: { get: ERRO(402, "plan_selection_required"), aceitar: ERRO(409, "already_in_family") } }, async (t) => {
+    await aceita(t).click();
+    await t.esperaH1("Você já está numa família.");
+    assert.equal(await t.guardado(), null);
+  });
+});
 
 test("aceite: clique duplo = 1 POST; o clique é do usuário (sem POST antes dele)", async () => {
   await com({ s: { aceitar: async (r) => { await new Promise((ok) => setTimeout(ok, 300)); return r.fulfill({ json: { papel: "membro" } }); } } }, async (t) => {

@@ -16,6 +16,8 @@ export const ROUTES = [
   { path: "/metas", label: "Metas", short: "Metas", icon: "ph-target", title: "Metas" },
   { path: "/patrimonio", label: "Patrimônio", short: "Patrimônio", icon: "ph-wallet", title: "Patrimônio" },
   { path: "/lancamentos", label: "Lançamentos", short: "Extrato", icon: "ph-receipt", title: "Lançamentos" },
+  // A casa do grupo (familia/Casa.tsx): metas e orçamentos que a família divide. Item próprio do menu (fora da Conta); sem família a tela mostra o caminho para criar uma. O protótipo (DEMO) não tem conta nem família: ver ATIVAS.
+  { path: "/casa", label: "Casa", short: "Casa", icon: "ph-heart", title: "Casa" },
   // Fora do RAIL (menu lateral e Menu do celular): abre pelo card de Ferramentas e pelo ⌘K.
   { path: "/orcamento", label: "Orçamento doméstico", short: "Orçamento", icon: "ph-house", title: "Orçamento doméstico" },
   // Idem: fora do RAIL, abre pelo card de Ferramentas e pelo ⌘K.
@@ -40,15 +42,15 @@ export type Path = (typeof ROUTES)[number]["path"];
 export const TABBAR: Path[] = ["/", "/gastos", "/piggy", "/lancamentos"];
 // O Piggy não entra no menu lateral: no desktop o acesso é a barra de conversa. O Orçamento doméstico, os Orçamentos por categoria e o Progresso ao milhão também não (só Ferramentas e ⌘K).
 export const CONTA: Path[] = ["/conta/perfil", "/conta/cobranca", "/conta/configuracoes", "/conta/bancos", "/conta/familia"];
-export const RAIL: Path[] = ROUTES.map((r) => r.path).filter((p) => p !== "/piggy" && p !== "/simulador/compra" && p !== "/orcamento" && p !== "/orcamentos-categoria" && p !== "/milhao" && p !== "/agentes" && !CONTA.includes(p));
-// O protótipo (DEMO) não tem conta: as rotas da Conta não existem nele (nem hash, nem ⌘K).
-export const ATIVAS = ROUTES.filter((r) => !(DEMO && (CONTA.includes(r.path) || r.path === "/simulador/compra")));
+// O protótipo (DEMO) não tem conta nem família: as rotas da Conta e a Casa não existem nele (nem hash, nem menu, nem ⌘K).
+export const ATIVAS = ROUTES.filter((r) => !(DEMO && (CONTA.includes(r.path) || r.path === "/simulador/compra" || r.path === "/casa")));
+export const RAIL: Path[] = ATIVAS.map((r) => r.path).filter((p) => p !== "/piggy" && p !== "/simulador/compra" && p !== "/orcamento" && p !== "/orcamentos-categoria" && p !== "/milhao" && p !== "/agentes" && !CONTA.includes(p));
 // Telas que o card de Ferramentas abre (pages.tsx, TOOLS): abrir uma delas é o passo "Ferramentas" do guia.
 // `as const`: o `to` de cada ferramenta em TOOLS é desse tipo, então ferramenta fora da lista não compila.
 export const FERRAMENTAS = ["/simulador", "/orcamento", "/orcamentos-categoria", "/simulador/compra", "/milhao", "/agentes"] as const satisfies readonly Path[];
 // Páginas que mostram só o presente (ignoram o mês escolhido): o topbar esconde o seletor.
 // A previsão real é de hoje em diante; a do protótipo segue o mês escolhido.
-export const NO_MONTH: Path[] = ["/assinaturas", "/simulador", "/simulador/compra", "/metas", "/patrimonio", "/orcamentos-categoria", "/milhao", "/agentes", "/ferramentas", "/piggy", ...CONTA, ...(DEMO ? [] : ["/previsao" as const])];
+export const NO_MONTH: Path[] = ["/assinaturas", "/simulador", "/simulador/compra", "/metas", "/patrimonio", "/casa", "/orcamentos-categoria", "/milhao", "/agentes", "/ferramentas", "/piggy", ...CONTA, ...(DEMO ? [] : ["/previsao" as const])];
 
 // Hash desconhecido (#/xyz) abre o Resumo e troca o endereço para "#/" sem criar entrada
 // no histórico; hash vazio continua valendo como Resumo.

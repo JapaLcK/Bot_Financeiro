@@ -1101,8 +1101,14 @@ def add_from_entities(
     suppress_pending: bool = False,
     conditional_pending: bool = False,
     forma_pagamento: str,
+    chave_acao: str | None = None,
+    confirmacao: str | None = None,
+    payload_hash: str | None = None,
 ) -> str:
     """Registra um lançamento a partir de args já estruturados (sem regex).
+
+    `chave_acao`, `confirmacao` e `payload_hash` (só a declaração confirmada pela IA, `declaracao_ia.executar`): a ação
+    que o "sim" confirma, a chave do "sim" e o HMAC do payload, em vez da próxima chave do turno do roteador.
 
     `forma_pagamento` é a forma DECLARADA (`core/handlers/forma_pagamento.py`),
     obrigatória: com banco conectado só "dinheiro" grava — Pix, cartão e débito
@@ -1137,10 +1143,12 @@ def add_from_entities(
     decisao = fp.decidir(user_id, forma_pagamento)
     if decisao != fp.CARTEIRA and not decl.declara(user_id, decisao):  # banco + flag: declaração (ADR 0006)
         raise ValueError("FORMA_PAGAMENTO_NAO_GRAVA")
+    if confirmacao is not None and decisao != fp.BANCO:  # D-e: o "sim" a uma declaração nunca vira Carteira (o banco
+        return decl.NaoGravou(decl.tx.SEM_GARANTIA)       # saiu entre o `executar` e aqui): T9, nada gravado
 
     chave = None
     if decisao == fp.BANCO:  # só chega aqui com `declara`. ANTES do teto: a reentrega (T3) não ganha aviso de upgrade
-        chave = decl.preparar(user_id)
+        chave = decl.preparar(user_id, chave_acao)
         if isinstance(chave, decl.NaoGravou):
             return chave
 
@@ -1182,7 +1190,9 @@ def add_from_entities(
         else is_internal_category(categoria_final)
     )
 
-    declaracao = {"declaracao_banco": True, "chave_acao": chave} if decisao == fp.BANCO else {}  # sem saldo a mostrar
+    declaracao = ({"declaracao_banco": True, "chave_acao": chave, "confirmacao": confirmacao,
+                   "payload_hash": payload_hash}
+                  if decisao == fp.BANCO else {})  # sem saldo a mostrar
     try:
         launch_id, user_seq, new_balance = db.add_launch_and_update_balance(
             user_id=user_id,
@@ -1827,7 +1837,7 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
         return decl.msg_misto(user_id)
     declara = decl.declara(user_id, decisao)
     cartao = declara and decl.tem_cartao(split_financial_transactions(text))  # cartão nunca declara (despesa ou receita): T8
-    if declara and not cartao and (recusa := decl.recusa_valor(text)):  # "2,2k" o parser lê como 2,2: não grava o palpite
+    if declara and not cartao and (recusa := decl.recusa_valor(text)):  # grava sem confirmar: leitor estrito (#1404)
         return recusa
     if declarada == fp.DINHEIRO or declara:  # a forma dita não entra no alvo
         text = fp.limpar(text, banco=declara)

@@ -67,6 +67,7 @@ def _semeia_origem(o):
     append_message(o, "assistant", "R$ 50,00")
     set_pending_action(o, "add_launch", {"v": 1}, "da origem")
     _sql("insert into ai_fallback_log(user_id, question) values (%s, 'x')", (o,))
+    _sql("insert into ia_declaracao_livro(user_id, papel, chave) values (%s, 'sim', 'wa:da-origem')", (o,))
     _sql("insert into ai_proactive_cache(user_id, kind, payload) values (%s, 'k', '{}')", (o,))
     _sql("insert into insight_estado(user_id, chave, tipo, severidade, dispensado_em, dispensado_severidade)"
          " values (%s, 'budget_warning:mercado:2026-09', 'budget_warning', 'warning', now(), 'warning')", (o,))
