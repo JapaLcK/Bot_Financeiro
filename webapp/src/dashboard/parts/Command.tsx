@@ -3,11 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { CATEGORIES, HORIZONS, MONTHS, summary } from "../lib/api";
 import { dayMonth, money, monthTitle } from "../lib/format.js";
 import { dayKey, escolherMes, get, set, setFilter, setSim } from "../lib/store.js";
-import { DEMO, MESES, guiaQuery, useAgentesLigados } from "../lib/v2";
+import { DEMO, MESES, guiaQuery, useAfiliado, useAgentesLigados } from "../lib/v2";
 import { abrirDica, dicaDe } from "./Dica";
 import { abrirGuia } from "./Guia";
 import { PRESETS } from "../widgets/Simulator";
-import { ATIVAS, NO_MONTH, go, useRoute, type Path } from "../router";
+import { ATIVAS, NO_MONTH, go, noMenu, useRoute, type Path } from "../router";
 import { NATIVE, hide, isOpen, show, untrap } from "./dialog";
 
 interface Cmd { id: string; group: string; label: string; hint?: string; icon: string; run: () => void }
@@ -15,10 +15,10 @@ interface Cmd { id: string; group: string; label: string; hint?: string; icon: s
 
 const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
-function commands(q: string, here: Path, dica: boolean, agentes: boolean): Cmd[] {
+function commands(q: string, here: Path, dica: boolean, agentes: boolean, afiliado: boolean): Cmd[] {
   const s = get();
   const list: Cmd[] = [
-    ...ATIVAS.filter((r) => agentes || r.path !== "/agentes").map((r) => ({ id: `nav-${r.path}`, group: "Ir para", label: r.label, icon: r.icon, run: () => go(r.path) })),
+    ...ATIVAS.filter((r) => (agentes || r.path !== "/agentes") && noMenu(r.path, afiliado)).map((r) => ({ id: `nav-${r.path}`, group: "Ir para", label: r.label, icon: r.icon, run: () => go(r.path) })),
     ...(DEMO ? [] : [{ id: "guia", group: "Ações", label: "Mostrar o guia do painel", icon: "ph-question", run: abrirGuia }]),
     ...(dica ? [{ id: "dica", group: "Ações", label: "Como funciona esta tela", icon: "ph-info", run: abrirDica }] : []),
     { id: "edit", group: "Ações", label: s.editing ? "Terminar de organizar o painel" : "Organizar o painel", icon: "ph-pencil-simple", run: () => set({ editing: !s.editing }) },
@@ -51,7 +51,8 @@ export function Command() {
   const here = useRoute();
   const dica = !!dicaDe(useQuery(guiaQuery).data, here);
   const agentes = useAgentesLigados();
-  const items = useMemo(() => commands(q, here, dica, agentes), [q, opened, here, dica, agentes]);
+  const afiliado = useAfiliado();
+  const items = useMemo(() => commands(q, here, dica, agentes, afiliado), [q, opened, here, dica, agentes, afiliado]);
 
   useEffect(() => {
     // Com o véu do guia (parts/Guia.tsx), só o balão e o alvo do passo respondem.

@@ -185,6 +185,7 @@ from frontend.routes.shared import (
     make_jwt as _make_jwt,
     marcar_conta,
     months_pt as _months_pt,
+    destino_sem_plano,
     painel_como_destino,
     parse_date_param as _parse_date_param,
     raise_if_account_scheduled_for_deletion as _raise_if_account_scheduled_for_deletion,
@@ -3089,17 +3090,17 @@ def _post_login_url(user_id: int | None = None, request: Request | None = None) 
     Cadastro novo (ou quem ainda não escolheu plano) vai DIRETO pra /precos —
     só entra no dashboard depois de escolher um plano — que hoje é sempre pago,
     o Grátis saiu da /precos — e concluir o pagamento. Sem assinatura ativa
-    (paywall ligado), idem. Fora disso: /painel no navegador com a chave do v2
-    (`painel_como_destino`), senão /home."""
+    (paywall ligado), idem; o afiliado vai à área dele (`destino_sem_plano`). Fora disso:
+    /painel no navegador com a chave do v2 (`painel_como_destino`), senão /home."""
     if user_id is not None:
         from core.services.plan_service import has_app_access, needs_plan_selection
         if needs_plan_selection(int(user_id)):
-            return f"{DASHBOARD_URL}/precos?escolha=1"
+            return f"{DASHBOARD_URL}{destino_sem_plano(int(user_id))}"
         if not has_app_access(int(user_id)):
             # Mesmo destino da perna de cima: depois do corte do Grátis as duas
             # pernas pedem a MESMA coisa (assinar), e `escolha=1` é o marcador
             # que o `nav-auth.js` reconhece para calar os CTAs de marketing.
-            return f"{DASHBOARD_URL}/precos?escolha=1"
+            return f"{DASHBOARD_URL}{destino_sem_plano(int(user_id))}"
         if request is not None and painel_como_destino(request, int(user_id)):
             return _dashboard_url("/painel")
     return _dashboard_url("/home")
@@ -7751,7 +7752,7 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
         return HTMLResponse(content=_stamp_asset_versions(expired_html), status_code=401)
 
     # next: rotas internas permitidas pra evitar open-redirect. Tem prioridade sobre view.
-    _ALLOWED_NEXT_PREFIXES = ("/precos", "/conta", "/app", "/home", "/settings")
+    _ALLOWED_NEXT_PREFIXES = ("/precos", "/conta", "/app", "/afiliado", "/home", "/settings")
     if next and next.startswith("/") and any(next.startswith(p) for p in _ALLOWED_NEXT_PREFIXES):
         redirect_url = next
     else:
