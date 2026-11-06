@@ -1,7 +1,7 @@
 import { obj } from "../../lib/ia-cards";
 import { lista } from "./legado";
 
-// O card `piggy` ("Piggy notou", `{ insights: { ok, insights[] } }`): o que o Piggy destacou, do cache de 6 horas. Título e frase são texto do modelo (sempre como texto, nunca como HTML).
+// O card `piggy` ("Piggy notou", `{ insights: { ok, insights[] } }`): o que o Piggy destacou, calculado na hora pelo servidor. Título e frase são texto do modelo (sempre como texto, nunca como HTML).
 // Só leitura: o `action_view` do destaque não leva a lugar nenhum no chat (o app também o ignora). A chave do React é o índice, porque a `key` do modelo pode repetir.
 type Destaque = { title: string; message: string };
 const destaqueOk = (i: unknown) => obj(i) && typeof i.title === "string" && typeof i.message === "string";

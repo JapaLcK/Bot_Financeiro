@@ -173,7 +173,7 @@ def registro() -> dict[str, Card]:
     from api.v2.contas import contas
     from api.v2.previsao import _assinante as gate_previsao, previsao
     from api.v2.resumo_mes import mes_pedido, resumo
-    from core.ai_patterns import ler_insights, motivo_vazio
+    from core.ai_patterns import generate_ai_insights, motivo_vazio
     from core.services.ai_chat.tools.launches import _tendencia
     from core.services import metas_conversa
     from core.services.metas_status import status_metas
@@ -231,13 +231,8 @@ def registro() -> dict[str, Card]:
     def gate_renda(uid, a):
         require_plan_feature(uid, "financial_comparison")
 
-    piggy_pendente = ("as dicas do Piggy ainda não estão prontas. "
-                      "Diga que ainda não estão prontas e siga sem o card.")
-
     def gate_piggy(uid, a):
         require_plan_feature(uid, "insights")
-        if ler_insights(uid) is None:
-            raise CardIndisponivel(piggy_pendente)
 
     def gate_metas(uid, a):  # P1-b: as metas novas só para quem tem a chave do /painel; os demais, caixinhas
         if not metas_do_turno(uid):
@@ -254,11 +249,9 @@ def registro() -> dict[str, Card]:
         return [(None, {"renda": {"ok": True, "evolution": compute_evolution(uid, n), "months": n}})]
 
     def piggy(uid, a):
-        # ponytail: SÓ o cache de até 6 h (ou até a meia-noite; gerar aqui fica para decisão do dono: seriam as consultas dos
-        # detectores com a trava do turno na mão). O /insights do painel segue gerando.
-        itens = ler_insights(uid)  # a mesma projeção por plano e o mesmo envelope da rota
-        if itens is None:
-            raise CardIndisponivel(piggy_pendente)
+        # Gera na hora (sem LLM, D12; D13 Q2 b): o gasto lançado na mesma resposta já entra. A mesma projeção por plano
+        # e o mesmo envelope da rota.
+        itens = generate_ai_insights(uid, force=True)
         return [(None, {"insights": {"ok": True, "insights": itens,
                                      "motivo": None if itens else motivo_vazio(uid)}})]
 

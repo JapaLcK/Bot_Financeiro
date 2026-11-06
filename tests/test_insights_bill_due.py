@@ -271,7 +271,7 @@ def test_11b_quem_perde_o_recurso_com_o_cache_quente_nao_ve_e_o_teto_e_preenchid
     monkeypatch.setattr("db.compute_active_insights", lambda *a: recalculos.append(a) or ([], []))
     promote_to_pro(uid, "free")
     assert feed() == ["budget_warning"] * 6
-    assert [i["type"] for i in ai_patterns.ler_insights(uid)] == ["budget_warning"] * 6  # o card `piggy`
+    assert [i["type"] for i in ai_patterns.ler_insights(uid)] == ["budget_warning"] * 6  # a leitura do cache
     assert recalculos == []  # veio do cache
 
 
