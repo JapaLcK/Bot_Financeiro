@@ -287,7 +287,8 @@ def test_t15_historico_so_do_proprio_membro(w):
     h2 = w.chamar(w.ma1, "GET", "/familia/historico", params={"limite": 2, "antes": h1["proximo"]}).json()
     assert len(h2["itens"]) == 1 and h2["proximo"] is None
     assert len(w.chamar(w.ma2, "GET", "/familia/historico").json()["itens"]) == 1
-    assert w.chamar(w.u, "GET", "/familia/historico").json() == {"itens": [], "proximo": None}
+    erro(w.chamar(w.u, "GET", "/familia/historico"), 402, "plan_selection_required")  # free: o histórico pede plano
+    assert w.chamar(w.u2, "GET", "/familia/historico").json() == {"itens": [], "proximo": None}  # com plano e sem leitura: vazio
     assert w.chamar(w.ma1, "GET", "/familia/historico", params={"antes": "1; drop"}).status_code == 422
     assert w.chamar(w.ma1, "GET", "/familia/historico", params={"limite": 0}).status_code == 422
 

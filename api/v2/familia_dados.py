@@ -3,7 +3,8 @@
 O usuário vem sempre da sessão; `ref` é family_members.id. Toda leitura do titular passa por
 `core.services.family_reads.ler_do_membro` (o único ponto que autoriza e grava o log) e sai por LISTA BRANCA de
 campos, nunca `**dados`: sem descrição nos agregados, sem `mensagem`/conta/cartão/instituição/origem/id nos lançamentos.
-Respostas do titular com `no-store`. Fora do schema OpenAPI, como `familia.py`.
+Respostas do titular com `no-store`.
+Sem plano: só revogar (`DELETE /permissoes/{escopo}`) usa `usuario_logado`; conceder, histórico e leituras do titular dão 402. Fora do schema OpenAPI, como `familia.py`.
 A página de lançamentos descarta os itens internos depois da consulta: pode vir menor que `limite`, até vazia com `proximo`.
 `gastos.ler_mes` e `get_budgets_status_for_month` semeiam/garantem o usuário do MEMBRO (idempotente, como no /painel dele).
 """
@@ -120,7 +121,7 @@ def _permissoes(uid: int) -> Permissoes:
 
 
 @router.post("/familia/permissoes", response_model=Permissoes)
-def conceder(corpo: EscopoIn, uid: int = Depends(usuario_logado)) -> Permissoes:
+def conceder(corpo: EscopoIn, uid: int = Depends(usuario_atual)) -> Permissoes:
     try:
         fc.grant_consent(uid, fc.ESCOPO_BANCO[corpo.escopo])
     except fam.FamilyError as exc:
@@ -139,7 +140,7 @@ def revogar(escopo: Escopo, uid: int = Depends(usuario_logado)) -> Permissoes:
 
 @router.get("/familia/historico", response_model=Historico)
 def historico(antes: str | None = Query(None, max_length=40), limite: int = Query(50, ge=1),
-              uid: int = Depends(usuario_logado)) -> Historico:
+              uid: int = Depends(usuario_atual)) -> Historico:
     if antes is not None and not views._REF.fullmatch(antes):
         raise _recusa("antes", "Cursor inválido.")
     limite = min(limite, _TETO)

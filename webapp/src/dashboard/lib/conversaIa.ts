@@ -144,7 +144,10 @@ export async function enviarIa(texto: string, patch: (p: Partial<Msg>) => void) 
       muda(sem(uso));
       if (uso.used >= uso.limit) { liberar(); return patch({ estado: "cota", text: SEM_COTA }); } // sem POST: o servidor recusaria
     }
-    await fluxo("/ai/chat/stream", { message: texto, cards: [] }, ctrl.signal, (bruto) => {
+    // Um id por mensagem (o servidor não grava duas vezes a mesma declaração pelo banco, ADR 0006). getRandomValues: o randomUUID não
+    // existe no Safari 14.
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+    await fluxo("/ai/chat/stream", { message: texto, cards: [], client_message_id: id }, ctrl.signal, (bruto) => {
       if (!vivo()) return; // troca de conta, parada ou prazo: nada mais entra
       const e = lerEvento(bruto);
       if (!e) return;

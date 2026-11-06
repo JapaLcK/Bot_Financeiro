@@ -116,7 +116,10 @@ def test_cadastro_novo_aceita_o_convite_e_entra_no_painel_sem_ir_aos_precos(monk
     assert antes.status_code == 302 and antes.headers["location"] == "/precos?escolha=1"  # controle: sem o aceite, fecha
     csrf = c.cookies.get("csrf_token")  # emitido no GET acima; o navegador o devolve no X-CSRF-Token (pbCsrfHeaders)
     assert csrf
+    previa = c.get("/api/v2/familia")  # o que a página /familia/entrar lê antes de oferecer o aceite: sem plano é 402 e ela segue
+    assert previa.status_code == 402 and previa.json()["error"]["code"] == "plan_selection_required", previa.text
     r = c.post("/api/v2/familia/convites/aceitar", json={"token": token}, headers={"X-CSRF-Token": csrf})
     assert r.status_code == 200 and r.json() == {"papel": "membro", "permissoes": []}
+    assert c.get("/api/v2/familia").json() == {"papel": "membro", "permissoes": []}  # com o plano da família, o GET abre
     depois = c.get("/painel", follow_redirects=False)
     assert depois.status_code == 200, (depois.status_code, depois.headers.get("location"))

@@ -254,6 +254,11 @@ def chat_detalhado(
             if ia_primeiro:
                 raise TurnoOcupado()
             return Resultado(_OCUPADO)
+        # A declaração pelo banco (flag): o "sim" anotado e a reentrega respondida pelo id da mensagem, sob a trava
+        # (a 2ª linha do `handle_incoming`; a única da web). Sem IA, sem cota, sem tocar a pendência.
+        from .tools.declaracao_ia import na_chegada
+        if (reentregue := na_chegada(int(user_id), user_text, platform)) is not None:
+            return Resultado(reentregue)
         if visto is not None and not _ainda_e_a_mesma(int(user_id), visto):
             return Resultado(_CAS_PERDIDO)
         if confirma and visto is None and db.ai_get_pending_action(int(user_id)) is not None:
@@ -322,6 +327,8 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
                 # duplica dado. O cancel vence a maioria das corridas (17 de 20,
                 # medido).
                 return _CAS_PERDIDO
+            from .tools.declaracao_ia import consumida
+            consumida(user_id, pending)  # a declaração pelo banco só grava a ação que ESTE "sim" consumiu
             result = _execute_pending(user_id, pending)
             db.ai_append_message(user_id, "user", user_text)
             _grava_assistant(user_id, result)
@@ -336,6 +343,8 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
             # perdedor, e por isso a mesma frase.
             if db.ai_consume_pending_action(user_id, pending):
                 msg = "👍 Beleza, não fiz nada."
+                from .tools.declaracao_ia import descartada
+                descartada(user_id, pending)  # a reentrega do pedido passa a dar T19
             else:
                 msg = _CAS_PERDIDO
             db.ai_append_message(user_id, "user", user_text)
@@ -831,6 +840,14 @@ def _maybe_override_trend(tool_calls_dicts: list[dict[str, Any]], user_id: int) 
                 fn["arguments"] = json.dumps({"months": months})
 
 
+def _texto_da_confirmacao(args: dict[str, Any], summary: str) -> str:
+    """`_CONFIRMA`; a da declaração pelo banco (payload do servidor) leva o negrito do canal (D 1A)."""
+    if isinstance(args, dict) and isinstance(args.get("_declaracao"), dict):
+        from .tools.declaracao_ia import confirmacao
+        return confirmacao(summary)
+    return _CONFIRMA.format(resumo=summary)
+
+
 def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, str | None]:
     """
     Despacha a tool e retorna (history_content, terminal_msg).
@@ -946,7 +963,7 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         return (
             json.dumps({"status": "pending_user_confirmation", "summary": summary,
                         "args": args}, ensure_ascii=False),
-            _CONFIRMA.format(resumo=summary),
+            _texto_da_confirmacao(args, summary),
         )
 
     if tool.is_write:
