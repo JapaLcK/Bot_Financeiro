@@ -26,6 +26,7 @@ import logging
 from psycopg import errors
 
 from core.services import admin_notify, asaas
+from core.services.billing_access import recompute_entitlement
 from core.services.pix_drain_effects import EXECUTORES
 from core.services.pix_extras import _PAGO, total_cents
 from db.pix_charges import buscar_por_asaas_payment_id, transicionar
@@ -54,19 +55,29 @@ def reconciliar_grant(cobranca, evt, payment_id: str) -> bool:
     marcador; revogado por estorno/admin não volta. True se reconcedeu (já logou e alertou)."""
     from db.plan_grants import list_grants
 
-    def _revogado():
-        return any(g["source"] == "pix" and g["external_ref"] == str(cobranca["id"])
-                   and g["status"] == "revoked" and g["revoked_reason"] == f"asaas:{TIPO}"
-                   for g in list_grants(cobranca["user_id"]))
+    def _estado():  # "revoked" por este motivo, "active", ou None
+        for g in list_grants(cobranca["user_id"]):
+            if g["source"] == "pix" and g["external_ref"] == str(cobranca["id"]):
+                if g["status"] == "revoked":
+                    return "revoked" if g["revoked_reason"] == f"asaas:{TIPO}" else None
+                return g["status"]
 
     if (cobranca["user_id"] is None or cobranca["status"] not in ("paid", "paid_orphan")
-            or not efeito_registrado(payment_id, "baixa_desfeita") or not _revogado()
+            or not efeito_registrado(payment_id, "baixa_desfeita") or _estado() not in ("revoked", "active")
             or not pagamento_confirmado(payment_id)):
         return False
     with lock_efeito(payment_id, "grant"):
         atual = buscar_por_asaas_payment_id(payment_id) or cobranca  # estorno pode ter vindo antes do lock
         if not (atual["status"] in ("paid", "paid_orphan")
-                and efeito_registrado(payment_id, "grant") and _revogado()):
+                and efeito_registrado(payment_id, "grant")):
+            return False
+        estado = _estado()
+        if estado == "active":
+            # `_grant` commita o grant ANTES do `recompute`: se este levantou, a retentativa
+            # acha o grant ativo e só reprojeta (idempotente; nunca reconcede nem toca o grant).
+            recompute_entitlement(cobranca["user_id"], origem="pix")
+            return False
+        if estado != "revoked":
             return False
         EXECUTORES["grant"](cobranca, evt)
     log.warning("pix: grant reconcedido (baixa desfeita, Pix real) cobranca=%s", cobranca["id"])

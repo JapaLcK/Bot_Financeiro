@@ -90,3 +90,21 @@ def test_pix_real_entre_o_get_e_o_revoke_do_undone_nao_revoga(user_id, externo, 
     monkeypatch.setattr(asaas, "buscar_pagamento", lambda p: {"status": next(respostas)})
     entregar("PAYMENT_RECEIVED_IN_CASH_UNDONE", cob)
     assert len(_ativos(user_id)) == 1
+
+
+def test_recompute_falha_na_reconciliacao_a_retentativa_projeta_o_plano(user_id, externo, monkeypatch):
+    """Codex #1444: `_grant` commita o grant antes do recompute; se este levanta, a retentativa
+    do UNDONE achava o grant ativo, recusava e o plano ficava sem projeção."""
+    import core.services.billing_access as ba
+    from core.services.pix_drain import drenar_evento
+    from db import get_auth_user
+
+    cob, eid = _morre_antes_de_reabrir(externo, monkeypatch, user_id)
+    externo["get_status"] = "RECEIVED"
+    real = ba.recompute_entitlement
+    monkeypatch.setattr(ba, "recompute_entitlement", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db")))
+    drenar_evento(eid)  # grant commitado, recompute levantou -> attempts
+    assert len(_ativos(user_id)) == 1
+    monkeypatch.setattr(ba, "recompute_entitlement", real)
+    drenar_evento(eid)
+    assert get_auth_user(user_id)["plan"] != "free"
