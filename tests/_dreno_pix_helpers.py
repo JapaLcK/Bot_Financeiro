@@ -131,7 +131,9 @@ def mundo_externo(monkeypatch) -> dict:
               # O e-mail do fundador sai do mesmo efeito `email`; conta-se o
               # remetente de baixo, para as travas do `send_founder_email_once`
               # rodarem de verdade. `fundador_erro` liga uma exceção nele.
-              "fundador": 0, "fundador_erro": None}
+              "fundador": 0, "fundador_erro": None,
+              # `GET /v3/payments/{id}` (#1267): status que o Asaas devolve; `get_erro` o faz levantar.
+              "get_status": "PENDING", "get_erro": None}
 
     import core.services.admin_notify as an
     import core.services.email_service as es
@@ -161,6 +163,14 @@ def mundo_externo(monkeypatch) -> dict:
         return True
 
     monkeypatch.setattr(es, "send_founder_email", _fundador)
+    import core.services.asaas as asaas
+
+    def _get(payment_id):
+        if contas["get_erro"]:
+            raise contas["get_erro"]
+        return {"id": payment_id, "status": contas["get_status"]}
+
+    monkeypatch.setattr(asaas, "buscar_pagamento", _get)
     monkeypatch.setattr(an, "notify_pix_alerta",
                         lambda msg: contas["alerta"].append(msg) or True)
     return contas

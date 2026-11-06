@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CustoMensal, EdicaoMeta, Fonte, Meta, MetaId, NovaMeta } from "../lib/api-v2.gen";
-import { ErroApi, apiPost } from "../lib/v2";
+import { ErroApi, apiPost, comPrazoLeitura } from "../lib/v2";
 import { moneyText, normalizaValor, valorInvalido } from "../lib/format.js";
 import { CAMPOS_META, ERRO_CAMPO, MESES_PADRAO, falhaDaEscrita, fraseCusto, hojeNoFuso, type CampoMeta, type Falha } from "../lib/metas-textos";
 import { CRIAR_SENHA } from "./Entrada";
@@ -39,7 +39,7 @@ export function MetaForm({ meta, custo, temReserva, comecar, fechar }: {
   const m = useMutation({
     mutationKey: CHAVE, retry: false, networkMode: "always",
     mutationFn: (a: Acao) => a.acao === "criar" ? apiPost("/metas", a.corpo) : a.acao === "editar" ? apiPost("/metas/editar", a.corpo) : apiPost("/metas/apagar", a.corpo),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["metas"] }),
+    onSettled: () => comPrazoLeitura(qc.invalidateQueries({ queryKey: ["metas"] })), // o fechar espera a lista nova, mas só até o prazo
   });
   const pendente = useIsMutating({ mutationKey: CHAVE }) > 0;
   const reserva = c.tipo === "reserva" && !converte;

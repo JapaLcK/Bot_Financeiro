@@ -181,6 +181,51 @@ test("resposta perdida (abort): texto de \"pode ter sido salvo\" e um GET novo",
   assert.ok(depois > gets, `${gets} -> ${depois}`);
 });
 
+test("resposta perdida e releitura pendurada (relógio falso): o alerta aparece e o Salvar destrava, sem esperar a leitura", async () => {
+  const { ctx, page, pedidos } = await aberto({ relogio: "instalado" });
+  let pendurar = false;
+  await ctx.route(URL_, (r) => r.request().method() === "POST" ? r.abort() : pendurar ? new Promise(() => {}) : r.fallback());
+  await abrirNovo(page);
+  await page.locator('input[name="valor"]').fill("10");
+  pendurar = true;
+  await page.getByRole("button", { name: "Salvar", exact: true }).click();
+  await page.getByRole("alert").filter({ hasText: "O orçamento pode ter sido salvo" }).waitFor();
+  await page.clock.runFor(31000);
+  const salvar = page.getByRole("button", { name: "Salvar", exact: true });
+  const livre = await salvar.isEnabled();
+  const gets = pedidos.filter((p) => p.m === "GET").length;
+  await ctx.close();
+  assert.ok(livre, "o Salvar seguiu travado com a releitura no ar");
+  assert.ok(gets >= 2, `a releitura do onError saiu? ${gets}`);
+});
+
+test("POST perdido, releitura presa, retry que dá certo e só então a releitura velha chega: a tela mostra o valor do retry", async () => {
+  const { ctx, page } = await aberto();
+  const novo = structuredClone(RESPOSTAS.orcamentos_categoria.padrao);
+  novo.orcamentos[0].teto = "900.00";
+  let posts = 0, soltar, presa = false;
+  const velha = new Promise((f) => { soltar = f; });
+  await ctx.route(URL_, async (r) => {
+    if (r.request().method() === "POST") return ++posts === 1 ? r.abort() : r.fulfill({ json: novo });
+    if (presa) { await velha; return r.fulfill({ json: RESPOSTAS.orcamentos_categoria.padrao }); } // a leitura que o onError disparou, com o valor de antes
+    return r.fallback();
+  });
+  await page.locator(".orc-linha").filter({ hasText: "alimentação" }).click();
+  await page.locator('input[name="valor"]').fill("900");
+  presa = true;
+  await page.getByRole("button", { name: "Salvar", exact: true }).click();
+  await page.getByRole("alert").filter({ hasText: "O orçamento pode ter sido salvo" }).waitFor();
+  await page.getByRole("button", { name: "Salvar", exact: true }).click(); // retry
+  await page.locator("dialog.orc-form").waitFor({ state: "detached" });
+  soltar();
+  await page.waitForTimeout(500);
+  const linha = await page.locator(".orc-linha").filter({ hasText: "alimentação" }).innerText();
+  await ctx.close();
+  assert.equal(posts, 2);
+  assert.match(linha, /900,00/);
+  assert.doesNotMatch(linha, /800,00/);
+});
+
 test("editar: categoria fixa e valor preenchido; apagar confirma e manda a categoria exata; 404 fecha", async () => {
   const { ctx, page, pedidos } = await aberto();
   await page.locator(".orc-linha").filter({ hasText: "alimentação" }).click();
