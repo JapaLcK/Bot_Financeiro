@@ -304,11 +304,35 @@ def list_affiliate_commissions(affiliate_id: int, limit: int = 50) -> list[dict]
             return cur.fetchall()
 
 
-def reverse_commission(commission_id: int) -> bool:
-    """Estorna uma comissão (refund/chargeback da fatura). Só enquanto pending
-    e fora de um saque em andamento."""
+def comissao_da_fatura(stripe_invoice_id: str) -> dict | None:
+    """A comissão da fatura e o rótulo de reembolso do pagamento dela. Leitura de instante:
+    quem decide o estorno é o `update` de `reverse_commission`."""
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                """
+                select c.id, c.status, c.payout_id, c.amount_cents, p.refund_status
+                  from affiliate_commissions c
+                  left join affiliate_referral_payments p
+                    on p.source = 'stripe' and p.payment_ref = c.stripe_invoice_id
+                 where c.stripe_invoice_id = %s
+                """,
+                (stripe_invoice_id,),
+            )
+            return cur.fetchone()
+
+
+def reverse_commission(commission_id: int) -> bool:
+    """Estorna uma comissão (refund/chargeback da fatura). Só enquanto pending
+    e fora de um saque em andamento.
+
+    A trava vem antes, pelo `id`: o `update` sozinho filtra `payout_id is null` no snapshot, e
+    com a comissão ainda no saque ele nem espera o `reject_payout` em voo, que a devolve logo
+    depois. Esperando, o `update` lê a linha já solta."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id from affiliate_commissions where id = %s for update",
+                        (int(commission_id),))
             cur.execute(
                 """
                 update affiliate_commissions
@@ -426,7 +450,15 @@ def mark_payout_paid(payout_id: int, note: str | None = None) -> bool:
 
 
 def reject_payout(payout_id: int, note: str | None = None) -> bool:
-    """Rejeita o saque e devolve as comissões pro saldo disponível."""
+    """Rejeita o saque e devolve as comissões pro saldo disponível, menos a de fatura
+    reembolsada por inteiro: essa sai estornada, senão voltaria a ser sacável.
+
+    A trava vem antes da leitura do rótulo: é nela que `reverse_commission` espera. Sem ela, o
+    webhook roda entre a leitura e a devolução, não acha a comissão solta, e nenhum dos dois
+    a estorna. Um `update` só, e não um por efeito: dois na mesma linha fazem deadlock com a
+    exclusão de conta."""
+    from core.observability import log_system_event_sync  # tardio: importa `db`
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -441,11 +473,35 @@ def reject_payout(payout_id: int, note: str | None = None) -> bool:
                 conn.rollback()
                 return False
             cur.execute(
-                "update affiliate_commissions set payout_id = null where payout_id = %s",
+                "select id from affiliate_commissions where payout_id = %s for update",
                 (int(payout_id),),
             )
+            cur.execute(
+                """
+                update affiliate_commissions c
+                   set payout_id = null,
+                       status = case when c.status = 'pending' and exists (
+                         select 1
+                           from affiliate_referral_payments p
+                           join affiliate_referrals r on r.id = p.referral_id
+                          where r.affiliate_id = c.affiliate_id
+                            and p.source = 'stripe' and p.payment_ref = c.stripe_invoice_id
+                            and p.refund_status = 'total'
+                       ) then 'reversed' else c.status end
+                 where c.payout_id = %s
+                returning c.id, c.status
+                """,
+                (int(payout_id),),
+            )
+            estornadas = [c["id"] for c in cur.fetchall() if c["status"] == "reversed"]
             conn.commit()
-            return True
+    for comissao_id in estornadas:
+        log_system_event_sync(
+            "info", "affiliate_commission_reversed_by_refund",
+            "Comissao estornada ao rejeitar o saque: fatura reembolsada.", source="affiliates",
+            details={"commission_id": comissao_id, "payout_id": int(payout_id)},
+        )
+    return True
 
 
 # ─── Admin ────────────────────────────────────────────────────────────────────

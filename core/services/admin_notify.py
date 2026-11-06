@@ -146,6 +146,11 @@ def notify_security_alert(message: str) -> bool:
     return _send(message)
 
 
+def notify_afiliado_alerta(message: str) -> bool:
+    """Reembolso de indicado que a comissão não acompanhou sozinha. Mensagem já formatada,
+    sem dado do indicado. Reentrega pode repeti-lo, como em `notify_pix_alerta`."""
+    return _send(message)
+
 def notify_pix_alerta(message: str) -> bool:
     """Alerta do fluxo Pix (§8.2/§12): estorno parcial, chargeback aberto,
     pagamento órfão, evento travado. Mensagem já formatada pelo chamador.

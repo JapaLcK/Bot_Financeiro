@@ -6343,22 +6343,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         value = (float(unit) / 100.0) if unit is not None else 0.0
         return (value, str(cur).upper())
 
-    def _extras_liquido_cents(linhas, precos: set[str]) -> int:
-        """Centavos LÍQUIDOS das `linhas` da fatura (`linhas_da_fatura`) dos
-        produtos extras. Os extras são os preços da foto da metadata da assinatura
-        (`da_metadata`), não os da env do momento. Medido: `amount` da linha é
-        BRUTO; o cupom vem só em `discount_amounts`. `price` vem string ou
-        expandido (`.id`)."""
-        if not precos:
-            return 0
-        total = 0
-        for line in linhas:
-            price = _g(_g(_g(line, "pricing", {}), "price_details", {}), "price")
-            if (price if isinstance(price, str) else _g(price, "id")) not in precos:
-                continue
-            desconto = sum(_g(d, "amount", 0) for d in _g(line, "discount_amounts", []) or [])
-            total += (_g(line, "amount", 0) or 0) - desconto
-        return total
+    from core.services.extras_assinar import extras_liquido_cents as _extras_liquido_cents
 
     def _ga_plano_publico(*objetos) -> str | None:
         """Nome PÚBLICO do plano ('essencial'/'plus'/'pro') pro item do GA4.
@@ -6399,34 +6384,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 return fbp, fbc
         return None, None
 
-    def _invoice_subscription_id(objeto) -> str | None:
-        """Id da assinatura, seja `subscription` string ou objeto EXPANDIDO.
-
-        Serve `invoice.paid` E `checkout.session.completed`: o ramo do checkout
-        lia `_g(session, "subscription")` cru, então um payload com o objeto
-        expandido virava uma `external_ref` diferente da que o `invoice.paid`
-        grava, e o mesmo assinante ficava com DOIS grants da mesma assinatura.
-        Depois que a revogação passou a mirar `external_ref` exato, os dois
-        lados precisam produzir a mesma chave (§0.1: reusar, não repetir).
-        O fallback de `parent.subscription_details` simplesmente não casa num
-        objeto de sessão, então serve os dois sem ramificar por tipo.
-        """
-        sub_id = _g(objeto, "subscription")
-        if sub_id:
-            return sub_id if isinstance(sub_id, str) else _g(sub_id, "id")
-        # API >= 2025-09 movido pra invoice.parent.subscription_details.subscription.
-        # `objeto`, NÃO `invoice`: quando esta função passou a servir também o
-        # `checkout.session.completed`, esta linha ficou lendo uma variável
-        # LIVRE, só ligada no ramo `invoice.paid`. Sessão sem `subscription`
-        # (checkout de pagamento avulso) chegava aqui e estourava
-        # UnboundLocalError → 500 → a Stripe reentregando por 3 dias, e o ramo
-        # "Checkout do Stripe concluido (sem subscription)" inalcançável.
-        parent = _g(objeto, "parent", {})
-        details = _g(parent, "subscription_details", {})
-        ref = _g(details, "subscription")
-        if ref is None:
-            return None
-        return ref if isinstance(ref, str) else _g(ref, "id")
+    from core.services.extras_assinar import assinatura_da_fatura as _invoice_subscription_id
 
     async def _user_email(uid: int) -> str:
         try:
@@ -7487,6 +7445,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 )
             except Exception as exc:
                 print(f"[billing] admin notify canceled falhou user={user_id}: {exc}")
+
+    elif event["type"] in ("charge.refunded", "charge.dispute.closed"):
+        # Reembolso de indicado de afiliado. Sem try: nada aqui segura grant nem comissão de
+        # outro evento, tudo é idempotente, e a falha vira 5xx e reentrega, como o `retrieve`.
+        from core.services.afiliado_reembolso import tratar_evento
+        await asyncio.to_thread(tratar_evento, event)
 
     return {"received": True}
 

@@ -2625,6 +2625,42 @@ Estorno de comissão não toca esta tabela. Reembolso só rotula (`refund_status
 clientes com todos os pagamentos devolvidos por inteiro, que seguem em `paying_clients`, e
 `commissions[].payment_refund` é o rótulo por linha.
 
+Reembolso da Stripe: `charge.refunded` e `charge.dispute.closed` (só `status = lost`) vão a
+`core/services/afiliado_reembolso.py`. **Ação do dono: habilitar os dois eventos no endpoint do
+Stripe; sem isso nenhum chega, com todos os testes verdes.** A fatura sai de `charge.invoice`
+ou, sem ele, de `InvoicePayment.list(payment=...)`: o formato do evento segue a versão de API do
+endpoint, e o caminho inverso não foi conferido contra a Stripe real. `total` se o devolvido (ou
+a disputa) cobre a cobrança, senão `partial`. Comissão da fatura: total estorna com
+`reverse_commission` se ela está fora de saque; em saque ou paga não muda e avisa o admin
+(`notify_afiliado_alerta` + `affiliate_refund_commission_kept`); parcial só avisa. Comissão só
+existe na 1ª fatura, então reembolso de renovação só rotula. Falha da API vira 5xx e reentrega,
+porque tudo é idempotente. A comissão vem antes do rótulo: morrer entre os dois repete o alerta
+em vez de perdê-lo. Comissão em saque reembolsada por inteiro não volta a ser sacável:
+`reject_payout` a estorna na mesma transação, com a trava nas comissões antes de ler o rótulo;
+`reverse_commission` trava a linha pelo `id` antes do `update`, e o webhook o repete depois do
+rótulo. As três partes juntas fecham a corrida: qualquer uma a menos deixa a comissão solta.
+
+Limites do reembolso: (1) o que chega antes do `invoice.paid` é no-op e se perde; quem repara é
+o script. (2) Reembolso só do caderno rotula `partial`, sem distinguir. (3) Plano inteiro devolvido
+com o caderno mantido também vira `partial`: a comissão fica e só o alerta sai. (4) Sem linha no
+registro não há rótulo, e o saque rejeitado devolve a comissão; o alerta sai no reembolso. (5) Sem
+`ADMIN_NOTIFY_WEBHOOK_URL` o alerta se perde, e sobra o log `affiliate_refund_commission_kept`.
+(6) Disputa parcial seguida de reembolso do restante fica `partial`, sem novo alerta: o
+`charge.refunded` só olha o devolvido. Hipótese não verificada por trás disso e do cálculo da
+disputa: `charge.amount_refunded` não inclui disputa. Conferir com disputa real no modo de teste
+da Stripe.
+
+`scripts/backfill_afiliado_pagamentos.py` completa o registro com o que o boot não alcança
+(fatura de plano sem comissão, webhook perdido, reembolso antigo). Sem `--aplicar` é simulação.
+Rodar com `DATABASE_URL` e `STRIPE_SECRET_KEY` de produção:
+`.venv/bin/python scripts/backfill_afiliado_pagamentos.py [--aplicar]`. É idempotente, só
+imprime contagens, não estorna comissão, não marca contestação (a cobrança não diz se foi
+perdida) e não recupera conta excluída. Rótulo `total` do script não estorna: a comissão antiga
+segue sacável, e a rejeição do saque a estorna sem aviso ao admin. Pula o cartão recusado com Pix
+cobrindo pela `MARCA` na assinatura; assinatura já morta quando a recusa rodou não grava a
+`MARCA`, e o script conta a fatura. Fatura com `payment.type = payment_record` faz `cobrancas_da_fatura` levantar: o
+cliente inteiro sai em `clientes_com_falha`.
+
 Conta excluída mantém cadastro e pagamentos: `affiliate_referrals` está em
 `_USER_FK_SET_NULL_TABLES`, com `referred_user_id` nulo. A comissão ainda cai em cascata.
 Limites aceitos: (1) quem exclui a conta e se recadastra com o mesmo e-mail conta 2 vezes em

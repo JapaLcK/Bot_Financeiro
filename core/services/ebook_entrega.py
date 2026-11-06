@@ -30,15 +30,21 @@ from db.google_auth import conta_sem_credencial
 def _compra_estornada(sid: str, key: str) -> bool:
     """Estorno (parcial ou total, D2) ou contestação (D3) na cobrança da compra.
     Sem fatura ou sem pagamento (cupom 100%) → False. Erro do Stripe propaga:
-    quem chama não envia nem fecha, e o claim expira. Forma inesperada num
-    pagamento pago também levanta (falha FECHADO): por isso o acesso direto por
-    `[...]`, e não o `_ler`, que leria "sem estorno"."""
+    quem chama não envia nem fecha, e o claim expira."""
     import stripe  # noqa: PLC0415
 
     inv = _ler(stripe.checkout.Session.retrieve(sid, api_key=key), "invoice")
     inv = _ler(inv, "id") or inv          # id ou objeto expandido
     if not inv:
         return False
+    return any(ch["amount_refunded"] > 0 or ch["disputed"] for ch in cobrancas_da_fatura(inv, key))
+
+def cobrancas_da_fatura(inv: str, key: str):
+    """As cobranças dos pagamentos pagos da fatura. Forma inesperada num pagamento pago
+    levanta (falha FECHADO): por isso o acesso direto por `[...]`, e não o `_ler`, que
+    leria "sem estorno"."""
+    import stripe  # noqa: PLC0415
+
     # `limit=100`: tentativas antes da paga somam linhas; o padrão 10 deixaria
     # o pagamento pago fora da página e o estorno passaria batido.
     for pag in stripe.InvoicePayment.list(invoice=inv, api_key=key, limit=100)["data"]:
@@ -51,9 +57,7 @@ def _compra_estornada(sid: str, key: str) -> bool:
             pagamento["payment_intent"], expand=["latest_charge"], api_key=key)["latest_charge"]
         if isinstance(ch, str) or ch is None:
             raise RuntimeError("latest_charge não veio expandida")
-        if ch["amount_refunded"] > 0 or ch["disputed"]:
-            return True
-    return False
+        yield ch
 
 
 def _conferir_stripe(sid: str, preco: str, key: str) -> tuple[str, str | None]:

@@ -2599,7 +2599,7 @@ async function toggleAffiliateStatus(id, status) {
 }
 
 async function payoutAction(id, action) {
-  const label = action === 'paid' ? 'Confirmar que o Pix deste saque JÁ FOI PAGO?' : 'Rejeitar este saque? As comissões voltam pro saldo do afiliado.';
+  const label = action === 'paid' ? 'Confirmar que o Pix deste saque JÁ FOI PAGO?' : 'Rejeitar este saque? As comissões voltam pro saldo do afiliado, menos as de fatura reembolsada.';
   if (!confirm(label)) return;
   const note = prompt('Observação (opcional):') || '';
   const res = await fetch(`/admin/api/affiliates/payouts/${id}/${action}`, {
