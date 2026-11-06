@@ -18,7 +18,7 @@ const FALHA = "Não foi possível carregar a casa.";
 /** a releitura do foco falha com 500 (depois dos 3 retries o corpo da tela vira o erro de carga) */
 const releituraFalha = async (t) => { t.s.casaLer = ERRO(500, "x"); await foco(t); await t.secao.getByText(FALHA).waitFor(); };
 
-// mutação: `diag` voltar a depender de `casa` (Casa.tsx, `!q.data` -> `!casa`): o erro de carga desmonta o diálogo e o rascunho se perde
+// mutação: `diag` voltar a depender de `casa` (CasaPagina.tsx, `!q.data` -> `!casa`): o erro de carga desmonta o diálogo e o rascunho se perde
 test("releitura 5xx com o diálogo aberto: o rascunho fica; recuperada a carga, o mesmo diálogo segue", async () => {
   await comCasa({}, async (t) => {
     await t.bt("Nova meta").click();
@@ -33,7 +33,7 @@ test("releitura 5xx com o diálogo aberto: o rascunho fica; recuperada a carga, 
   });
 });
 
-// mutação: as duas defesas de Casa.tsx juntas (`diag` por `casa` E sem o useEffect que zera `aberto`): o diálogo volta em branco depois de criada (a duplicata). Cada uma sozinha segura este caso; o 1 e o 3 pegam cada uma
+// mutação: as duas defesas de CasaPagina.tsx juntas (`diag` por `casa` E sem o useEffect que zera `aberto`): o diálogo volta em branco depois de criada (a duplicata). Cada uma sozinha segura este caso; o 1 e o 3 pegam cada uma
 test("criar meta em voo + releitura 5xx: a escrita conclui, o diálogo FECHA e não reaparece em branco; 1 POST", async () => {
   const [seguro, solta] = porta();
   await comCasa({ antes: (_c, s) => { s.casaCriar = () => seguro; } }, async (t) => {
@@ -53,7 +53,7 @@ test("criar meta em voo + releitura 5xx: a escrita conclui, o diálogo FECHA e n
   });
 });
 
-// mutação: tirar o `useEffect` que zera `aberto` sem q.data (Casa.tsx): a família volta e o diálogo reabre com a foto velha
+// mutação: tirar o `useEffect` que zera `aberto` sem q.data (CasaPagina.tsx): a família volta e o diálogo reabre com a foto velha
 test("404 (família some) com o diálogo aberto: o diálogo sai; a família voltando NÃO o reabre", async () => {
   await comCasa({}, async (t) => {
     await linha(t, "Viagem").getByRole("button", { name: "Editar" }).click();
@@ -111,7 +111,7 @@ test("leitura que saiu antes da escrita e chega depois dela não apaga o item no
   });
 });
 
-// mutação: voltar o `await reler()` no `agir` do Apagar (Casa.tsx): a confirmação fica presa em "Apagando…" ~3,4 s com a releitura em 5xx (e para sempre com ela pendurada)
+// mutação: voltar o `await reler()` no `agir` do Apagar (CasaPagina.tsx): a confirmação fica presa em "Apagando…" ~3,4 s com a releitura em 5xx (e para sempre com ela pendurada)
 for (const [nome, ler] of [["500", () => ERRO(500, "x")], ["pendurada", () => () => new Promise(() => {})]]) {
   test(`Apagar OK + releitura ${nome}: a confirmação fecha em menos de 1 s (o DELETE já deu certo), 1 DELETE`, async () => {
     await comCasa({}, async (t) => {

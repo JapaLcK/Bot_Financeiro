@@ -5,7 +5,7 @@ import { href } from "../router";
 import { ErroApi } from "../lib/v2";
 import { casaQuery, deveReler, falhaCasa, type Casa, type FalhaCasa, type Tipo } from "./casa";
 
-/** O aviso da PÁGINA (Casa.tsx o liga ao `FalhaFamilia`): o item que sumiu por baixo do diálogo fecha o diálogo e avisa aqui, o mesmo lugar do erro do Apagar. */
+/** O aviso da PÁGINA (CasaPagina.tsx o liga ao `FalhaFamilia`): o item que sumiu por baixo do diálogo fecha o diálogo e avisa aqui, o mesmo lugar do erro do Apagar. */
 export const AvisoCasa = createContext<(f: FalhaCasa) => void>(() => {});
 
 // O diálogo das escritas da casa (meta, orçamento, movimento): o molde de parts/OrcamentoCategoriaForm.tsx. Em qualquer erro o rascunho fica; a escrita em voo trava o fechar.

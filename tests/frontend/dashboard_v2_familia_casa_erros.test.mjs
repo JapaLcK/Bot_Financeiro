@@ -151,7 +151,7 @@ test("resposta perdida (5xx): 'Confira antes de tentar de novo.', o rascunho fic
   });
 });
 
-// mutação: `q.isError ? undefined : q.data` trocado por `q.data` (Casa.tsx): o erro de uma releitura mostra a casa velha
+// mutação: `q.isError ? undefined : q.data` trocado por `q.data` (CasaPagina.tsx): o erro de uma releitura mostra a casa velha
 test("erro de carga nunca mostra o dado velho; 'Tentar de novo' recupera; 401 pede para recarregar", async () => {
   await com({}, async (t) => {
     t.s.casaLer = ERRO(403, "forbidden");
