@@ -561,3 +561,36 @@ test("teste-piggy.js atrasado e o Plus 'Indisponível' antes dele: os cartões r
     ["/assinar?plano=pro&ciclo=annual&utm_source=fb&fbclid=abc", "/assinar?plano=pro&ciclo=monthly&utm_source=fb&fbclid=abc"]);
   assert.deepEqual(erros, []);
 });
+
+// ── "Comparar os planos": botão secundário entre a grade de cartões e o bloco de garantia ────
+const COMPARAR = 'section#planos a[href="/precos#comparar"]';
+const posicao = page => page.evaluate(sel => {
+  const a = document.querySelector(sel), grade = document.querySelector("#planos [data-plano]").parentElement;
+  const garantia = [...document.querySelectorAll("#planos > div > div")].find(d => d.textContent.includes("7 dias grátis."));
+  const depois = (x, y) => !!(x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING);
+  return { a: !!a, aposGrade: a && depois(grade, a), antesGarantia: a && garantia && depois(a, garantia),
+           alturas: a && a.getBoundingClientRect().height, href: a && a.getAttribute("href"),
+           overflow: document.documentElement.scrollWidth - innerWidth };
+}, COMPARAR);
+
+test("Comparar os planos: depois da grade, antes da garantia, href exato (UTM e assinante), nos dois ciclos, >= 44px, sem overflow", async () => {
+  for (const [nome, opts] of [["anônimo", {}], ["com UTM", { query: "?utm_source=ig&fbclid=x" }],
+                              ["assinante ativo", { logado: true, assinatura: { active: true, plan: "plus" } }]]) {
+    for (const largura of [1280, 320]) {
+      const { page, ctx, erros, subs } = await abrir({ largura, ...opts });
+      if (opts.logado) await assentou(page, subs);
+      for (const ciclo of ["mensal", "anual"]) {
+        await page.click(`#planos button[data-set="${ciclo}"]`);
+        const p = await posicao(page);
+        const ou = `${nome} ${largura} ${ciclo}`;
+        assert.equal(p.a, true, ou);
+        assert.equal(p.aposGrade, true, ou); assert.equal(p.antesGarantia, true, ou);
+        assert.equal(p.href, "/precos#comparar", ou);
+        assert.ok(p.alturas >= 44, `${ou}: altura ${p.alturas}`);
+        assert.ok(p.overflow <= 0, `${ou}: overflow ${p.overflow}`);
+      }
+      await ctx.close();
+      assert.deepEqual(erros.filter(e => !e.includes("/billing/subscription")), []);
+    }
+  }
+});
