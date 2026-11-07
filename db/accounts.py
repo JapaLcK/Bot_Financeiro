@@ -20,7 +20,7 @@ from .connection import (
     TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
 )
 from .open_finance_cash import PAR_ATIVO_SQL, VINCULADO_SQL
-from .users import ensure_user
+from .users import ensure_user, ensure_user_tx
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,10 @@ def add_launch_and_update_balance(
     # Para todo lançamento (a declaração acima já validou o seu, mais estrito): Só finitude: aceita 0 (lançamento zerado) e deixa o teto técnico para as portas de entrada.
     if not isfinite(float(valor)):
         raise ValueError("VALOR_INVALIDO")
-    ensure_user(user_id)
+    if cur is None:
+        ensure_user(user_id)
+    else:  # transação do chamador: nada de 2ª conexão com ela aberta (esgota o pool)
+        ensure_user_tx(cur, user_id)
 
     v = Decimal(str(valor))
     if tipo == "despesa":
@@ -1800,7 +1803,8 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                               exigir_pode: bool = False) -> str | None:
     """
     Deleta um lançamento e reverte seus efeitos no banco atomicamente.
-    Usa o campo efeitos (jsonb) para saber o que reverter.
+    Usa o campo efeitos (jsonb) para saber o que reverter. A conta a pagar ligada
+    a este lançamento (`bill_instances.launch_id`) volta a pendente (#793).
 
     Recusa o que não sabe reverter por inteiro, sem deixar saldo mexido — o
     pré-voo roda antes de qualquer escrita, e as recusas por `rowcount` (que
@@ -2375,6 +2379,10 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
                                                "mudou_durante") from exc
 
+            # Conta (bill_instances) paga por este lançamento volta a pendente: o FK é
+            # `on delete set null` e deixaria a conta "paga" sem pagamento. Antes do delete.
+            cur.execute("update bill_instances set status='pending', paid_at=null, paid_amount=null, "
+                        "launch_id=null where launch_id=%s and user_id=%s", (launch_id, user_id))
             # apaga o lançamento
             cur.execute("delete from launches where id=%s and user_id=%s", (launch_id, user_id))
 
@@ -2460,7 +2468,7 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
 
     Reusa `delete_launch_and_rollback` linha a linha (em vez de um `delete`
     em massa) porque cada lançamento guarda seus efeitos colaterais no jsonb
-    `efeitos` — saldo da conta e reabertura de fatura. Apagar em massa sem
+    `efeitos` — saldo da conta, reabertura de fatura e reabertura de conta a pagar. Apagar em massa sem
     reverter deixaria esses saldos inconsistentes.
 
     Ordena por `id desc` (mais novo primeiro) por segurança em reversões
