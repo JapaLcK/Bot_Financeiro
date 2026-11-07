@@ -27,6 +27,8 @@ export const ROUTES = [
   // Fora do RAIL, como o Milhão: abre pelo card de Ferramentas e pelo ⌘K.
   { path: "/agentes", label: "Agentes", short: "Agentes", icon: "ph-robot", title: "Agentes" },
   { path: "/ferramentas", label: "Ferramentas", short: "Ferramentas", icon: "ph-wrench", title: "Ferramentas" },
+  // A Ajuda (parts/AjudaTela.tsx): fora do RAIL (o item Ajuda do trilho mora em App.tsx) e do protótipo, que não tem conta.
+  { path: "/ajuda", label: "Ajuda", short: "Ajuda", icon: "ph-question", title: "Ajuda" },
   { path: "/piggy", label: "Piggy", short: "Piggy", icon: "ph-chat-circle", title: "Converse com o Piggy" },
   // A seção "Conta" da barra lateral (fora do RAIL): o Perfil e a Cobrança (conta/Cobranca.tsx, lê /billing/subscription) já são páginas de verdade; as Configurações mostram a Segurança (conta/Seguranca.tsx), os dispositivos conectados (conta/Sessoes.tsx), as Notificações (conta/Notificacoes.tsx) e o link para a /settings; os Bancos conectados são página de verdade (conta/Bancos.tsx).
   { path: "/conta/perfil", label: "Perfil", short: "Perfil", icon: "ph-user", title: "Perfil" },
@@ -43,14 +45,14 @@ export const TABBAR: Path[] = ["/", "/gastos", "/piggy", "/lancamentos"];
 // O Piggy não entra no menu lateral: no desktop o acesso é a barra de conversa. O Orçamento doméstico, os Orçamentos por categoria e o Progresso ao milhão também não (só Ferramentas e ⌘K).
 export const CONTA: Path[] = ["/conta/perfil", "/conta/cobranca", "/conta/configuracoes", "/conta/bancos", "/conta/familia"];
 // O protótipo (DEMO) não tem conta nem família: as rotas da Conta e a Casa não existem nele (nem hash, nem menu, nem ⌘K).
-export const ATIVAS = ROUTES.filter((r) => !(DEMO && (CONTA.includes(r.path) || r.path === "/simulador/compra" || r.path === "/casa")));
-export const RAIL: Path[] = ATIVAS.map((r) => r.path).filter((p) => p !== "/piggy" && p !== "/simulador/compra" && p !== "/orcamento" && p !== "/orcamentos-categoria" && p !== "/milhao" && p !== "/agentes" && !CONTA.includes(p));
+export const ATIVAS = ROUTES.filter((r) => !(DEMO && (CONTA.includes(r.path) || r.path === "/simulador/compra" || r.path === "/casa" || r.path === "/ajuda")));
+export const RAIL: Path[] = ATIVAS.map((r) => r.path).filter((p) => p !== "/piggy" && p !== "/ajuda" && p !== "/simulador/compra" && p !== "/orcamento" && p !== "/orcamentos-categoria" && p !== "/milhao" && p !== "/agentes" && !CONTA.includes(p));
 // Telas que o card de Ferramentas abre (pages.tsx, TOOLS): abrir uma delas é o passo "Ferramentas" do guia.
 // `as const`: o `to` de cada ferramenta em TOOLS é desse tipo, então ferramenta fora da lista não compila.
 export const FERRAMENTAS = ["/simulador", "/orcamento", "/orcamentos-categoria", "/simulador/compra", "/milhao", "/agentes"] as const satisfies readonly Path[];
 // Páginas que mostram só o presente (ignoram o mês escolhido): o topbar esconde o seletor.
 // A previsão real é de hoje em diante; a do protótipo segue o mês escolhido.
-export const NO_MONTH: Path[] = ["/assinaturas", "/simulador", "/simulador/compra", "/metas", "/patrimonio", "/casa", "/orcamentos-categoria", "/milhao", "/agentes", "/ferramentas", "/piggy", ...CONTA, ...(DEMO ? [] : ["/previsao" as const])];
+export const NO_MONTH: Path[] = ["/assinaturas", "/simulador", "/simulador/compra", "/metas", "/patrimonio", "/casa", "/orcamentos-categoria", "/milhao", "/agentes", "/ferramentas", "/piggy", "/ajuda", ...CONTA, ...(DEMO ? [] : ["/previsao" as const])];
 
 // Hash desconhecido (#/xyz) abre o Resumo e troca o endereço para "#/" sem criar entrada
 // no histórico; hash vazio continua valendo como Resumo.
@@ -62,12 +64,15 @@ const current = (): Path => {
 };
 
 let path = current();
+// A tela de onde se chegou à atual (a Ajuda a usa para o "Como funciona esta tela"). Vazia no primeiro carregamento.
+let origem: Path | null = null;
+export const origemDaTela = () => origem;
 const subs = new Set<() => void>();
 window.addEventListener("hashchange", () => {
   const next = current();
   if (next === path) return;
   try { conferir(); } catch { return; } // a tela nova não abre com o cache da conta anterior
-  const swap = () => { path = next; subs.forEach((f) => f()); };
+  const swap = () => { origem = path; path = next; subs.forEach((f) => f()); };
   // Troca de página com View Transition quando o navegador tem; sem ela, troca direto.
   const vt = (document as Document & { startViewTransition?: (cb: () => void) => unknown }).startViewTransition;
   if (vt && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) vt.call(document, () => flushSync(swap));

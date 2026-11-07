@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAINEL, RESPOSTAS } from "./_painel.mjs";
-import { FAZER, PASSOS_TODOS, ROTA, abrir, acoes, anelNoAlvo, bora, entendi, esperaTitulo, navegador, tocarAba } from "./_guia.mjs";
+import { FAZER, PASSOS_TODOS, ROTA, abrir, acoes, ajudaDoMenu, ajudaDoTrilho, anelNoAlvo, bora, guiaPorCmdK, entendi, esperaTitulo, navegador, tocarAba } from "./_guia.mjs";
 
 navegador();
 
@@ -20,7 +20,7 @@ const feitos = (ids, estado = "em_andamento") => (_ctx, s) => {
   s.g.passos.forEach((p) => { p.feito = ids.includes(p.id); });
   s.g.estado = estado;
 };
-const ajuda = (page) => page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+const ajuda = (page) => ajudaDoTrilho(page);
 const titulo = (t) => new RegExp(`^${t}$`);
 
 test("fonte única: os passos novos têm âncora na tela deles, na aba e uma ação tratada aqui", async () => {
@@ -58,7 +58,7 @@ test("Organizar: ligar o Organizar avança, o guia some enquanto organiza e volt
 test("Organizar: o Organizar já ligado antes de o passo começar não conta; Pronto sozinho também não", async () => {
   const { ctx, page, s } = await abrir({ guia: "em_andamento", roteiro: "todos", antes: feitos(["resumo.saiu"]) });
   await page.locator('[data-guia="painel.organizar"]').click(); // organiza ANTES do guia
-  await ajuda(page); // a Ajuda abre o guia enquanto organiza: o guia espera
+  await guiaPorCmdK(page); // o Cmd-K abre o guia enquanto organiza (a tela Ajuda tiraria o Organizar): o guia espera
   await page.waitForTimeout(500);
   await page.locator('[data-guia="painel.organizar"]').click(); // Pronto
   await esperaTitulo(page, "Do seu jeito");
@@ -115,8 +115,7 @@ const naRotaDaCompra = (page) => page.waitForFunction(() => location.hash === "#
 test("Ferramentas (celular): a aba é o Menu; o guia espera a folha aberta, o Esc fecha só a folha", async () => {
   const fim = TODOS.filter((i) => i !== "ferramentas.abrir");
   const { ctx, page, s } = await abrir({ width: 390, height: 844, guia: "em_andamento", roteiro: "todos", antes: feitos(fim) });
-  await page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
-  await page.locator(".menu-telas").getByRole("button", { name: "Guia do painel" }).click();
+  await ajudaDoMenu(page);
   const leva = page.locator("#guia-titulo", { hasText: "Agora toca" });
   await leva.waitFor();
   assert.equal(await leva.innerText(), "Agora toca em Menu e depois em Ferramentas.");

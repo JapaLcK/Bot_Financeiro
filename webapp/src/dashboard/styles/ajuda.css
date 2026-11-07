@@ -1,0 +1,63 @@
+/* Tela Ajuda (parts/AjudaTela.tsx): contato e "aprenda a usar" em listas de linhas com filete, feedback ao lado. */
+.ajuda-grade { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); grid-template-rows: auto 1fr; grid-template-areas: "contato feedback" "aprender feedback"; gap: 20px; align-items: start; }
+.ajuda-contato { grid-area: contato; }
+.ajuda-aprender { grid-area: aprender; }
+.ajuda-feedback { grid-area: feedback; }
+@media (max-width: 1100px) {
+  .ajuda-grade { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "contato" "feedback" "aprender"; }
+}
+
+.ajuda-card { min-width: 0; border-radius: var(--r-panel); background: var(--plane-1); box-shadow: inset 0 0 0 1px rgb(var(--tw-border)); overflow: hidden; }
+.ajuda-card h2 { margin: 0; font-size: 20px; line-height: 26px; font-weight: 600; letter-spacing: -0.02em; outline: none; }
+.ajuda-card p { margin: 0; }
+.ajuda-contato > h2, .ajuda-aprender > h2 { padding: 20px 20px 12px; }
+.ajuda-card ul { margin: 0; padding: 0; list-style: none; }
+
+.ajuda-linha {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 8px 20px; box-sizing: border-box;
+  border: 0; border-top: 1px solid var(--rule); border-radius: 0; background: none;
+  font: inherit; text-align: start; color: var(--ink); cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease-out);
+}
+.ajuda-contato .ajuda-linha { min-height: 64px; }
+.ajuda-linha:focus-visible { outline-offset: -2px; }
+@media (hover: hover) and (pointer: fine) { .ajuda-linha:hover { background: rgba(255, 255, 255, 0.03); } }
+.ajuda-ico { flex: none; display: flex; justify-content: center; width: 28px; color: var(--ink-2); font-size: 22px; line-height: 1; }
+.ajuda-aprender .ajuda-ico { font-size: 20px; }
+.ajuda-ico img { border-radius: 999px; object-fit: cover; }
+.ajuda-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 14px; line-height: 21px; font-weight: 500; overflow-wrap: anywhere; }
+.ajuda-txt small { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-3); }
+.ajuda-linha > .ph { flex: none; font-size: 16px; color: var(--ink-3); }
+
+.ajuda-feedback { padding: 20px; }
+.ajuda-feedback form { display: flex; flex-direction: column; gap: 16px; }
+.ajuda-feedback p { font-size: 14px; line-height: 21px; color: var(--ink-2); }
+.ajuda-tipos { display: flex; flex-wrap: wrap; gap: 8px; }
+.ajuda-tipos label { position: relative; }
+.ajuda-tipos input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.ajuda-tipos span { display: flex; align-items: center; height: 44px; padding: 0 18px; border-radius: 999px; background: var(--plane-2); color: var(--ink-2); font-size: 13px; font-weight: 500; transition: background-color var(--t-fast) ease, color var(--t-fast) ease; }
+.ajuda-tipos input:checked + span { background: var(--pink-wash); color: var(--pink-ink); }
+.ajuda-tipos input:focus-visible + span { outline: 2px solid var(--pink); outline-offset: 2px; }
+.ajuda-msg { display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--ink-2); }
+.ajuda-msg textarea {
+  width: 100%; box-sizing: border-box; padding: 12px; border: 0; border-radius: var(--r-ctrl); resize: vertical;
+  background: var(--plane-2); box-shadow: inset 0 0 0 1px rgb(var(--tw-border)); color: var(--ink);
+  font: inherit; font-size: 14px; line-height: 21px; caret-color: var(--pink);
+}
+.ajuda-msg textarea::placeholder { color: var(--ink-3); }
+.ajuda-msg textarea:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--pink); }
+.ajuda-feedback .ajuda-nota { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-3); }
+.ajuda-feedback .ajuda-erro { font-size: 13px; line-height: 18px; font-weight: 500; color: var(--alert); }
+.ajuda-btn { align-self: flex-start; height: 44px; padding: 0 20px; border-radius: 999px; }
+.ajuda-btn:disabled { opacity: 0.5; cursor: default; }
+.ajuda-ok { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 12px 0; }
+.ajuda-ok > i { font-size: 32px; line-height: 1; color: var(--gain); }
+.ajuda-ok div { display: flex; flex-direction: column; gap: 4px; }
+@media (max-width: 760px) {
+  .ajuda-contato > h2, .ajuda-aprender > h2 { padding: 16px 16px 12px; }
+  .ajuda-linha { padding-inline: 16px; }
+  .ajuda-msg textarea { font-size: 16px; } /* 16px evita o zoom do iOS ao focar */
+}
+@media (prefers-reduced-motion: reduce) {
+  .ajuda-linha, .ajuda-tipos span { transition: none; }
+}

@@ -616,8 +616,13 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`{dica_id: carimbo}`, coluna por `alter … if not exists`) e devolve o `Guia`; id fora do
   catálogo = 422; não toca `oferecido_em` nem `feitos` (o guia segue em `oferecer`). Dica que
   o plano não dá grava e é inofensiva: o GET não a devolve. O cliente (`parts/Dica.tsx`) mostra
-  a dica uma vez, sem mover o foco e nunca com o guia aberto; a Ajuda vira menu só na tela com
-  dica (`parts/Ajuda.tsx`), e o Cmd-K ganha "Como funciona esta tela" lá.
+  a dica uma vez, sem mover o foco e nunca com o guia aberto; a tela Ajuda (`#/ajuda`, `parts/AjudaTela.tsx`)
+  tem a linha "Como funciona <tela>" quando quem a abriu veio de uma tela com dica (a origem é o `origemDaTela()` do `router.ts`; sem
+  origem a linha some), e o Cmd-K ganha "Como funciona esta tela" lá.
+- `POST /api/v2/feedback {tipo: ideia|problema|elogio, mensagem}` (`api/v2/feedback.py`; também `/api/app`): o feedback da tela Ajuda, por
+  e-mail ao time (`DESTINO`, constante do módulo, nunca na tela nem no bundle), sem gravar no banco. `usuario_atual` (o /painel não serve
+  a pessoa sem assinatura vigente); usuário e e-mail da conta (Reply-To) vêm do servidor. Mensagem de 1 a 4000 caracteres depois do trim,
+  campo extra = 422; 5 por hora por conta (429, contado antes do envio); `send_email` falso = 502 `feedback_nao_enviado`.
 
 - `POST /api/v2/simulador` (`api/v2/simulador.py`; também `/api/app/simulador`): simulador de compra do
   Pro, o mesmo `simular` da rota legada sobre `previsao_v2.ler_snapshot(uid, 90)` (a mesma leitura da

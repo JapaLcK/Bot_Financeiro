@@ -24,7 +24,7 @@
 .brand img { border-radius: 8px; }
 
 .rail-list, .rail-conta ul { display: grid; gap: 2px; }
-.rail-list a, .rail-list button, .rail-conta a, .rail-conta button {
+.rail-list a, .rail-conta a, .rail-conta button {
   display: flex; align-items: center; gap: 11px;
   width: 100%;
   height: 36px; padding: 0 12px;
@@ -33,36 +33,16 @@
   font-weight: 500;
   transition: color var(--t-fast) ease, background-color var(--t-fast) ease;
 }
-/* "Ajuda" (abre o guia, parts/Guia.tsx) e "Menu" da barra de baixo: botão com a cara dos links. */
-.rail-list button, .rail-conta button, .tabbar button { border: 0; background: none; font: inherit; cursor: pointer; }
+/* "Sair" e "Menu" da barra de baixo: botão com a cara dos links. */
+.rail-conta button, .tabbar button { border: 0; background: none; font: inherit; cursor: pointer; }
 .rail-list i, .rail-conta i { font-size: 17px; }
 .rail-list a[aria-current="page"], .rail-conta a[aria-current="page"] { color: var(--ink); background: var(--pink-wash); }
 .rail-list a[aria-current="page"] i, .rail-conta a[aria-current="page"] i { color: var(--pink); }
 @media (hover: hover) and (pointer: fine) {
-  .rail-list a:hover, .rail-list button:hover, .rail-conta a:hover, .rail-conta button:hover { color: var(--ink); background: var(--plane-1); }
+  .rail-list a:hover, .rail-conta a:hover, .rail-conta button:hover { color: var(--ink); background: var(--plane-1); }
 }
-/* A Ajuda que vira menu (parts/Ajuda.tsx, nas telas com dica). O botão ocupa a célula inteira. O trilho sobe acima do conteúdo da página, que
-   tem `position: relative` com z-index: senão o menu, que abre para a direita, fica embaixo. */
+/* O trilho sobe acima do conteúdo da página, que tem `position: relative` com z-index. */
 .rail { z-index: 21; }
-.ajuda { position: relative; display: grid; }
-.ajuda-menu {
-  position: absolute; z-index: 1;
-  display: grid; gap: 2px;
-  width: max-content; padding: 6px;
-  border-radius: var(--r-ctrl);
-  background: var(--plane-2);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), inset 0 0 0 1px var(--rule);
-}
-.rail .ajuda-menu { left: calc(100% + 8px); bottom: 0; }
-.rail-list .ajuda-menu button {
-  display: flex; justify-content: flex-start; align-items: center;
-  width: 100%; height: 40px; padding: 0 12px;
-  border-radius: 8px;
-  font-size: 14px; font-weight: 500; color: var(--ink);
-}
-@media (hover: hover) and (pointer: fine) {
-  .rail-list .ajuda-menu button:hover { background: var(--plane-3); }
-}
 
 /* Conta (parts/RailConta.tsx): presa embaixo do trilho (o margin-top:auto era do .rail-foot, que agora fecha a coluna). */
 .rail-conta { margin-top: auto; display: grid; gap: 2px; }
@@ -77,19 +57,17 @@
    então o compacto vai até 801px e o de 30px até 669px. Fechado (o padrão), o trilho cabe sem rolar a partir de 600px. */
 @media (max-height: 801px) {
   .rail { gap: 14px; padding: 14px 14px 12px; }
-  .rail-list a, .rail-list button, .rail-conta a, .rail-conta button { height: 32px; }
+  .rail-list a, .rail-conta a, .rail-conta button { height: 32px; }
   .rail-list { gap: 0; }
   .rail-conta ul { gap: 0; }
 }
 /* Fechado, os itens a 32px cabem até 560px (o grupo aberto, ver acima, pede 670px); abaixo de 669px baixam a 30px. */
 @media (max-height: 669px) {
-  .rail-list a, .rail-list button, .rail-conta a, .rail-conta button { height: 30px; }
+  .rail-list a, .rail-conta a, .rail-conta button { height: 30px; }
 }
-/* Janela baixa demais até para isso (zoom, janela pequena): o trilho rola e o Sair se alcança com Tab. O overflow cortaria o menu da Ajuda,
-   que abre para a direita: nessa altura ele fica `fixed`, ao lado do trilho e rente ao pé da janela. 650px = o trilho cheio (~625px a 1440 de largura) + folga. */
+/* Janela baixa demais até para isso (zoom, janela pequena): o trilho rola e o Sair se alcança com Tab. 650px = o trilho cheio (~625px a 1440 de largura) + folga. */
 @media (max-height: 650px) {
-  .rail { overflow-y: auto; z-index: 41; } /* 41 > .askbar (40, chat.css): o menu fixo não fica sob a barra do Piggy; o guia (45+) e os diálogos (80+) seguem acima */
-  .rail .ajuda-menu { position: fixed; left: calc(var(--rail-w) + 8px); bottom: 12px; }
+  .rail { overflow-y: auto; z-index: 41; } /* 41 > .askbar (40, chat.css): o trilho não fica sob a barra do Piggy; o guia (45+) e os diálogos (80+) seguem acima */
 }
 .rail-foot { padding: 0 12px; display: grid; gap: 4px; font-size: 12px; }
 .rail-sync { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
@@ -165,7 +143,7 @@
 @media (max-width: 1180px) {
   :root { --rail-w: 72px; --gutter: 28px; }
   .brand span, .rail-label { display: none; }
-  .rail-list a, .rail-list button, .rail-conta a, .rail-conta button { justify-content: center; padding: 0; }
+  .rail-list a, .rail-conta a, .rail-conta button { justify-content: center; padding: 0; }
   .rail-conta .rail-conta-t { justify-content: center; margin: 0 -2px; width: calc(100% + 4px); } /* a coluna de ícones tem 43px: o alvo do subtítulo chega a 44 */
   .rail-list i, .rail-conta i { font-size: 19px; }
   .brand { justify-content: center; padding: 4px 0; }

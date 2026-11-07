@@ -1,10 +1,10 @@
-// A dica de primeiro uso de Assinaturas, Previsão, Metas, Patrimônio e Simulador (#728, parts/Dica.tsx) e a Ajuda que vira menu nas telas
-// com dica (parts/Ajuda.tsx). O servidor de mentira e as opções `dica`/`dicaLenta` estão em
+// A dica de primeiro uso de Assinaturas, Previsão, Metas, Patrimônio e Simulador (#728, parts/Dica.tsx) e a linha "Como funciona <tela>"
+// da tela Ajuda (parts/AjudaTela.tsx), que reabre a dica na tela de origem. O servidor de mentira e as opções `dica`/`dicaLenta` estão em
 // _guia.mjs; o carimbo e o portão de plano de verdade, em tests/test_api_v2_guia_dica.py.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RESPOSTAS } from "./_painel.mjs";
-import { FAZER, PASSOS, abrir, acoes, esperaTitulo, naRota, navegador } from "./_guia.mjs";
+import { FAZER, PASSOS, abrir, acoes, ajudaDoTrilho, esperaTitulo, naRota, navegador } from "./_guia.mjs";
 
 navegador();
 
@@ -12,7 +12,12 @@ const CARD = ".dica-tela";
 const TITULO = "Como eu acho suas assinaturas";
 const ir = (page, rota) => page.evaluate((h) => { location.hash = h; }, `#${rota}`);
 const focoNoTitulo = (page) => page.waitForFunction(() => document.activeElement?.id === "dica-titulo", null, { timeout: 5000 });
-const menu = (page, onde) => page.locator(`${onde} .ajuda > button`);
+const irParaAjuda = (page) => page.locator(".rail").getByRole("link", { name: "Ajuda" }).click();
+const irParaAjudaCel = async (page) => {
+  await page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
+  await page.locator(".menu-telas").getByRole("link", { name: "Ajuda" }).click();
+};
+const comoFunciona = (page, tela) => page.locator("main").getByRole("button", { name: `Como funciona ${tela}` });
 
 test("1280, dica nova: o card entra entre o título da página e os blocos, sem mexer no foco; um POST só, mesmo com o POST lento, o foco na aba e sair e voltar", async () => {
   const { ctx, page, s, erros } = await abrir({ guia: "concluido", dica: "nova", dicaLenta: 300, rota: "/assinaturas" });
@@ -48,8 +53,7 @@ test("POST da dica lento: a resposta não volta o guia ao estado de antes (o \"F
   const volta = page.waitForResponse("**/api/v2/guia/dica", { timeout: 15000 });
   let voltou = false;
   volta.then(() => { voltou = true; });
-  await menu(page, ".rail").click();
-  await page.getByRole("button", { name: "Guia do painel" }).click();
+  await ajudaDoTrilho(page);
   await esperaTitulo(page, PASSOS[0].fala.titulo);
   await FAZER["mes.trocado"](page);
   await page.locator("#guia-titulo", { hasText: "Fechou!" }).waitFor({ timeout: 5000 });
@@ -76,113 +80,89 @@ test("dica já vista: recarrega sem card e sem POST", async () => {
   assert.deepEqual(s.dicas, []);
 });
 
-test("trilho 1280: Ajuda é menu (guia ou dica); a dica reabre com o foco no título; Tab e Enter; Esc fecha e devolve o foco; o guia esconde o card", async () => {
+test("1280, vindo de Assinaturas: a Ajuda tem a linha \"Como funciona Assinaturas\"; ao tocar volta à tela e reabre o card com o foco no título; o guia esconde o card", async () => {
   const { ctx, page, s } = await abrir({ guia: "concluido", rota: "/assinaturas" });
-  const ajuda = menu(page, ".rail");
-  await ajuda.waitFor();
-  const fechado = await ajuda.getAttribute("aria-expanded");
-  await ajuda.click();
-  const itens = await page.locator(".rail .ajuda-menu button").allTextContents();
-  // O menu fica por cima da página (o trilho sobe acima do conteúdo).
-  const porCima = await page.evaluate(() => {
-    const b = document.querySelector(".rail .ajuda-menu button").getBoundingClientRect();
-    return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest(".ajuda-menu") != null;
-  });
-  await page.getByRole("button", { name: "Como funciona esta tela" }).click();
+  await irParaAjuda(page);
+  const linha = comoFunciona(page, "Assinaturas");
+  await linha.waitFor();
+  const naAjuda = [await page.evaluate(() => location.hash), await page.locator(CARD).count()];
+  await linha.click();
+  await naRota(page, "#/assinaturas");
   await focoNoTitulo(page);
-  const aberto = [await ajuda.getAttribute("aria-expanded"), await page.locator(".ajuda-menu").count()];
+  const reaberta = await page.locator(`${CARD} h2`).textContent();
   await page.locator(CARD).getByRole("button", { name: "Entendi" }).click();
   const depois = [await page.locator(CARD).count(), await page.evaluate(() => document.activeElement?.id)];
-  // Teclado: Enter abre, Tab vai aos itens, Enter no 2º reabre a dica.
-  await ajuda.focus();
-  await page.keyboard.press("Enter");
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
+  // Teclado: Enter na linha faz o mesmo.
+  await irParaAjuda(page);
+  await comoFunciona(page, "Assinaturas").focus();
   await page.keyboard.press("Enter");
   await focoNoTitulo(page);
-  // Esc: fecha o menu e o foco volta à Ajuda.
-  await ajuda.click();
-  await page.keyboard.press("Escape");
-  const esc = [await page.locator(".ajuda-menu").count(), await page.evaluate(() => document.activeElement?.closest(".ajuda") != null)];
-  // Toque fora fecha.
-  await ajuda.click();
-  await page.mouse.click(900, 300);
-  const fora = await page.locator(".ajuda-menu").count();
   // "Guia do painel": reabre o guia; com o balão aberto, o card some.
-  await ajuda.click();
-  await page.getByRole("button", { name: "Guia do painel" }).click();
+  await ajudaDoTrilho(page);
   await page.locator(".guia-balao").waitFor();
   const comGuia = await page.locator(CARD).count();
   await ctx.close();
-  assert.equal(fechado, "false");
-  assert.deepEqual(itens, ["Guia do painel", "Como funciona esta tela"]);
-  assert.ok(porCima);
-  assert.deepEqual(aberto, ["false", 0]);
+  assert.deepEqual(naAjuda, ["#/ajuda", 0]);
+  assert.equal(reaberta, TITULO);
   assert.deepEqual(depois, [0, "page-title"]);
-  assert.deepEqual(esc, [0, true]);
-  assert.equal(fora, 0);
   assert.equal(comGuia, 0);
   assert.deepEqual(acoes(s), ["reabrir"]);
   assert.deepEqual(s.dicas, []); // reabrir a dica não grava nada
 });
 
-test("telas sem dica (/ e /gastos): a Ajuda é o botão de sempre e abre o guia direto; no Menu do celular, só o guia", async () => {
+test("telas sem dica (/ e /gastos): a Ajuda não tem a linha \"Como funciona\" e abre o guia; no celular a Ajuda também não tem", async () => {
   for (const rota of ["/", "/gastos"]) {
     const { ctx, page, s } = await abrir({ guia: "concluido", rota });
-    const ajuda = menu(page, ".rail");
-    const exp = await ajuda.getAttribute("aria-expanded");
-    await ajuda.click();
+    await irParaAjuda(page);
+    await page.locator("main").getByRole("button", { name: "Guia do painel" }).waitFor();
+    const linhas = await page.locator("main").getByRole("button", { name: /^Como funciona/ }).count();
+    await page.locator("main").getByRole("button", { name: "Guia do painel" }).click();
     await page.locator(".guia-balao").waitFor();
     await ctx.close();
-    assert.equal(exp, null, rota);
+    assert.equal(linhas, 0, rota);
     assert.deepEqual(acoes(s), ["reabrir"], rota);
     const cel = await abrir({ width: 375, height: 812, guia: "concluido", rota });
-    await cel.page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
-    const itens = await ajudaDaFolha(cel.page);
+    await irParaAjudaCel(cel.page);
+    await cel.page.locator("main").getByRole("button", { name: "Guia do painel" }).waitFor();
+    const celLinhas = await cel.page.locator("main").getByRole("button", { name: /^Como funciona/ }).count();
     await cel.ctx.close();
-    assert.deepEqual(itens, ["Guia do painel"], rota);
+    assert.equal(celLinhas, 0, rota);
   }
 });
 
-// A Ajuda do celular mora no Menu da barra de baixo (parts/MenuTelas.tsx): as mesmas ações do menu do trilho.
-// Só o grupo Ajuda: o grupo Conta (Sair) é outro botão da mesma folha.
-const ajudaDaFolha = (page) => page.locator('.menu-telas [aria-labelledby="menu-ajuda"] li button').allTextContents();
-test("390: o Menu mostra a Ajuda com a dica da tela, dentro da tela; o item fecha a folha e reabre o card; nada estoura", async () => {
+test("390: vindo de Assinaturas pelo Menu, a Ajuda tem a linha; tocada, o card reabre dentro da tela; nada estoura", async () => {
   const { ctx, page } = await abrir({ width: 390, height: 844, guia: "concluido", rota: "/assinaturas" });
-  await page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
-  const itens = await ajudaDaFolha(page);
-  const r = await page.evaluate(() => {
-    const m = document.querySelector(".menu-telas").getBoundingClientRect();
-    return { dentro: m.left >= 0 && m.right <= innerWidth && m.bottom <= innerHeight, cabe: document.documentElement.scrollWidth <= innerWidth };
-  });
-  await page.locator(".menu-telas").getByRole("button", { name: "Como funciona esta tela" }).click();
+  await irParaAjudaCel(page);
+  const linha = comoFunciona(page, "Assinaturas");
+  await linha.waitFor();
   const aberta = await page.locator(".menu-telas[open]").count();
+  await linha.click();
   await focoNoTitulo(page);
   const card = await page.evaluate((sel) => {
     const b = document.querySelector(sel).getBoundingClientRect();
     return b.left >= 0 && b.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth;
   }, CARD);
   await ctx.close();
-  assert.deepEqual(itens, ["Guia do painel", "Como funciona esta tela"]);
-  assert.deepEqual(r, { dentro: true, cabe: true });
   assert.equal(aberta, 0);
   assert.ok(card);
 });
 
 // Antes (decisão de 2026-10-04) abaixo de 360 a Ajuda saía da barra e a dica não reabria por ela;
 // agora a Ajuda mora no Menu, que cabe em 320.
-test("320: a dica nova aparece inteira na tela e a Ajuda do Menu a reabre", async () => {
+test("320: a dica nova aparece inteira na tela e a Ajuda, pelo Menu, a reabre", async () => {
   const { ctx, page } = await abrir({ width: 320, height: 640, guia: "concluido", dica: "nova", rota: "/assinaturas" });
   await page.locator(CARD).waitFor();
   const r = await page.evaluate((sel) => {
     const b = document.querySelector(sel).getBoundingClientRect();
     return { card: b.left >= 0 && b.right <= innerWidth, cabe: document.documentElement.scrollWidth <= innerWidth };
   }, CARD);
-  await page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
-  const itens = await ajudaDaFolha(page);
+  await irParaAjudaCel(page);
+  await comoFunciona(page, "Assinaturas").click();
+  await focoNoTitulo(page);
+  const volta = await page.evaluate(() => [location.hash, document.documentElement.scrollWidth <= innerWidth]);
   await ctx.close();
   assert.deepEqual(r, { card: true, cabe: true });
-  assert.deepEqual(itens, ["Guia do painel", "Como funciona esta tela"]);
+  assert.deepEqual(volta, ["#/assinaturas", true]);
 });
 
 test("guia aberto: o convite segue na tela de Assinaturas e a dica espera; \"Agora não\" e ela entra, com um POST", async () => {
@@ -200,23 +180,28 @@ test("guia aberto: o convite segue na tela de Assinaturas e a dica espera; \"Ago
   assert.deepEqual(s.dicas, ["assinaturas.marcas"]);
 });
 
-test("Essencial (sem a dica): nem card nem menu; a Ajuda abre o guia", async () => {
+test("Essencial (sem a dica): nem card nem a linha \"Como funciona\" na Ajuda", async () => {
   const { ctx, page } = await abrir({ guia: "concluido", plano: "essencial", dica: "sem", rota: "/assinaturas" });
   await page.waitForTimeout(400);
-  const r = [await page.locator(CARD).count(), await menu(page, ".rail").getAttribute("aria-expanded")];
+  await irParaAjuda(page);
+  await page.locator("main").getByRole("button", { name: "Guia do painel" }).waitFor();
+  const r = [await page.locator(CARD).count(), await page.locator("main").getByRole("button", { name: /^Como funciona/ }).count()];
   await ctx.close();
-  assert.deepEqual(r, [0, null]);
+  assert.deepEqual(r, [0, 0]);
 });
 
 // Rollback: o navegador guarda o dashboard-app.js novo (nome fixo) e o servidor volta a responder
 // o guia sem `dicas`. A tela abre como antes do #728, sem quebrar o render.
-test("guia sem a chave dicas (servidor antigo): Assinaturas abre, a Ajuda é o botão de sempre, sem card nem POST", async () => {
+test("guia sem a chave dicas (servidor antigo): Assinaturas abre, a Ajuda não tem a linha \"Como funciona\", sem card nem POST", async () => {
   const { ctx, page, s, erros } = await abrir({ guia: "concluido", dica: "ausente", rota: "/assinaturas" });
   await page.locator(".panel").first().waitFor();
   await page.waitForTimeout(400);
-  const r = [await page.locator("#page-title").isVisible(), await menu(page, ".rail").getAttribute("aria-expanded"), await page.locator(CARD).count()];
+  const titulo = await page.locator("#page-title").isVisible(), card = await page.locator(CARD).count();
+  await irParaAjuda(page);
+  await page.locator("main").getByRole("button", { name: "Guia do painel" }).waitFor();
+  const r = [titulo, await page.locator("main").getByRole("button", { name: /^Como funciona/ }).count(), card];
   await ctx.close();
-  assert.deepEqual(r, [true, null, 0]);
+  assert.deepEqual(r, [true, 0, 0]);
   assert.deepEqual(s.dicas, []);
   assert.deepEqual(erros, []);
 });
@@ -239,9 +224,7 @@ test("Cmd-K: \"Como funciona esta tela\" só na tela com dica; escolhido, mostra
   assert.deepEqual([naHome, naTela], [false, true]);
 });
 
-// O duplo toque no "Menu": a folha abre embaixo do dedo e o 2º toque cairia no item que ficou ali
-// (Guia do painel, que faz POST `reabrir`; "Como funciona esta tela"). O "Fechar" da folha ocupa essa
-// faixa (parts/MenuTelas.tsx): o duplo toque vira abrir+fechar, sem efeito colateral.
+// O duplo toque no "Menu": a folha abre embaixo do dedo e o 2º toque cairia num item da folha que ficou ali. O "Fechar" da folha ocupa essa faixa (parts/MenuTelas.tsx): o duplo toque vira abrir+fechar, sem efeito colateral.
 for (const [semDialog, rota, w, h] of [[false, "/", 375, 812], [true, "/", 375, 812], [false, "/assinaturas", 375, 812], [true, "/assinaturas", 320, 568]]) {
   test(`${w}×${h} ${rota} (${semDialog ? "fallback sem <dialog>" : "<dialog> nativo"}): duplo toque no Menu abre e fecha a folha, sem abrir guia nem dica nem POST`, async () => {
     const { ctx, page, s } = await abrir({ width: w, height: h, guia: "concluido", rota, semDialog });
@@ -258,9 +241,10 @@ for (const [semDialog, rota, w, h] of [[false, "/", 375, 812], [true, "/", 375, 
 
 // As outras quatro telas com dica. Os textos vêm da fixture, que tests/test_api_v2_contrato.py prende
 // ao catálogo `DICAS` do servidor: tirar a dica de lá (ou da TELA em parts/Dica.tsx) deixa isto vermelho.
+const ROTULO = { "/previsao": "Previsão", "/metas": "Metas", "/patrimonio": "Patrimônio", "/simulador": "Simulador" };
 const OUTRAS = [["/previsao", "previsao.saldo"], ["/metas", "metas.ritmo"], ["/patrimonio", "patrimonio.soma"], ["/simulador", "simulador.corte"]];
 for (const [rota, id] of OUTRAS) {
-  test(`${rota}: a dica aparece na 1ª visita com um POST, não volta ao sair e voltar, reabre pela Ajuda (1280 e 390) e some com o guia aberto`, async () => {
+  test(`${rota}: a dica aparece na 1ª visita com um POST, não volta ao sair e voltar, reabre pela tela Ajuda (1280 e 390) e some com o guia aberto`, async () => {
     const titulo = RESPOSTAS.guia.concluido.dicas.find((d) => d.id === id).titulo;
     const { ctx, page, s, erros } = await abrir({ guia: "concluido", dica: "nova", rota });
     await page.locator(CARD).waitFor();
@@ -275,34 +259,29 @@ for (const [rota, id] of OUTRAS) {
     await naRota(page, `#${rota}`);
     await page.waitForTimeout(500);
     const volta = await page.locator(CARD).count(); // a mesma carga de página: o card montou de novo? não
-    // Pela Ajuda do trilho: o menu tem as duas ações e a dica reabre com o foco no título.
-    const ajuda = menu(page, ".rail");
-    await ajuda.click();
-    const itens = await page.locator(".rail .ajuda-menu button").allTextContents();
-    await page.getByRole("button", { name: "Como funciona esta tela" }).click();
+    // Pela Ajuda do trilho: a linha da tela reabre a dica com o foco no título.
+    await irParaAjuda(page);
+    await comoFunciona(page, ROTULO[rota]).click();
+    await naRota(page, `#${rota}`);
     await focoNoTitulo(page);
     const reaberta = await page.locator(`${CARD} h2`).textContent();
     // Com o guia aberto (Ajuda > Guia do painel) o card some.
-    await ajuda.click();
-    await page.getByRole("button", { name: "Guia do painel" }).click();
+    await ajudaDoTrilho(page);
     await page.locator(".guia-balao").waitFor();
     const comGuia = await page.locator(CARD).count();
     await ctx.close();
-    // Celular: o Menu da barra de baixo reabre a mesma dica.
+    // Celular: o Menu leva à Ajuda, que tem a mesma linha.
     const cel = await abrir({ width: 390, height: 844, guia: "concluido", rota });
-    await cel.page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
-    const itensCel = await ajudaDaFolha(cel.page);
-    await cel.page.locator(".menu-telas").getByRole("button", { name: "Como funciona esta tela" }).click();
+    await irParaAjudaCel(cel.page);
+    await comoFunciona(cel.page, ROTULO[rota]).click();
     await cel.page.locator(CARD).waitFor();
     const noCel = await cel.page.evaluate((sel) => { const b = document.querySelector(sel).getBoundingClientRect(); return b.left >= 0 && b.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth; }, CARD);
     await cel.ctx.close();
     assert.deepEqual(r, { titulo, dentro: true });
     assert.deepEqual(s.dicas, [id]); // um POST só, mesmo saindo e voltando
     assert.equal(volta, 0);
-    assert.deepEqual(itens, ["Guia do painel", "Como funciona esta tela"]);
     assert.equal(reaberta, titulo);
     assert.equal(comGuia, 0);
-    assert.deepEqual(itensCel, ["Guia do painel", "Como funciona esta tela"]);
     assert.ok(noCel);
     assert.deepEqual(erros, []);
   });

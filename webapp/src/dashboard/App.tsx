@@ -7,7 +7,6 @@ import { useDash } from "./useDash";
 import { AskBar } from "./parts/AskBar";
 import { Command } from "./parts/Command";
 import { MenuTelas } from "./parts/MenuTelas";
-import { Ajuda } from "./parts/Ajuda";
 import { RailConta } from "./parts/RailConta";
 import { Guia, navGuia } from "./parts/Guia";
 import { Tip } from "./parts/Tip";
@@ -100,7 +99,7 @@ export function App() {
                 </a>
               </li>
             ))}
-            {!DEMO && <li className="ajuda"><Ajuda path={path} title="Ajuda"><i className="ph ph-question" aria-hidden="true" /><span className="rail-label">Ajuda</span></Ajuda></li>}
+            {!DEMO && <li><a href={href("/ajuda")} aria-current={path === "/ajuda" ? "page" : undefined} title="Ajuda"><i className="ph ph-question" aria-hidden="true" /><span className="rail-label">Ajuda</span></a></li>}
           </ul>
           {/* Conta: fora da .rail-list e do .rail-foot (que some entre 761 e 1180px). Sem DEMO: o protótipo não tem conta. */}
           {!DEMO && <RailConta path={path} />}
