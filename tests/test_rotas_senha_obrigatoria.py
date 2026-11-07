@@ -156,6 +156,7 @@ TABELA = {
     ("POST", "/api/v2/orcamentos-categoria"): (B, "usuario_atual"),
     ("POST", "/api/v2/orcamentos-categoria/apagar"): (B, "usuario_atual"),
     ("POST", "/api/v2/gastos-fixos"): (B, "usuario_atual"),
+    ("POST", "/api/v2/feedback"): (B, "usuario_atual"),
     # ── /api/app: mesma guarda de credencial, antes do marco bancário ──
     ("GET", "/api/app/me"): (B, "usuario_do_app"),
     ("GET", "/api/app/assinaturas"): (B, "usuario_do_app"),
@@ -198,6 +199,7 @@ TABELA = {
     ("POST", "/api/app/orcamentos-categoria"): (B, "usuario_do_app"),
     ("POST", "/api/app/orcamentos-categoria/apagar"): (B, "usuario_do_app"),
     ("POST", "/api/app/gastos-fixos"): (B, "usuario_do_app"),
+    ("POST", "/api/app/feedback"): (B, "usuario_do_app"),
     # ── Plano Família (api/v2/familia.py, nos dois prefixos) ──
     **{(m, f"{pre}{p}"): (B, gate) for pre, gate in (("/api/v2", "usuario_atual"), ("/api/app", "usuario_do_app"))
        for m, p in (("GET", "/familia"), ("POST", "/familia"), ("POST", "/familia/convites"),

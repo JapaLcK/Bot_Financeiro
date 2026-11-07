@@ -1,21 +1,15 @@
 import { useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { DEMO, guiaQuery, sair } from "../lib/v2";
+import { DEMO, sair } from "../lib/v2";
 import { CONTA, RAIL, href, route, useRoute } from "../router";
-import { abrirDica, dicaDe } from "./Dica";
-import { abrirGuia } from "./Guia";
 import { NATIVE, hide, isOpen, show } from "./dialog";
 
 // O "Menu" da barra de baixo (celular): uma folha com todas as telas e a Ajuda. Abre pelo evento
-// `dash:menu` (App.tsx). Na Ajuda, as mesmas ações da Ajuda do trilho (parts/Ajuda.tsx), sem o
-// popover: dentro de um <dialog> modal o menu dela ficaria preso na camada de cima.
+// `dash:menu` (App.tsx). A Ajuda é um link para a tela dela (parts/AjudaTela.tsx), como o item do trilho.
 export function MenuTelas() {
   const dlg = useRef<HTMLDialogElement>(null);
   const path = useRoute();
-  const dica = !!dicaDe(useQuery(guiaQuery).data, path);
   // Só fecha o que está aberto: o `hide` do fallback mexe na trava de foco, que é uma só (dialog.ts).
   const fechar = () => { if (isOpen(dlg.current)) hide(dlg.current); };
-  const ajuda = (abrir: () => void) => () => { fechar(); abrir(); };
 
   useEffect(() => {
     const abrir = () => {
@@ -35,13 +29,13 @@ export function MenuTelas() {
     <dialog className={NATIVE ? "menu-telas" : "menu-telas menu-telas-fb"} ref={dlg} role={NATIVE ? undefined : "dialog"} aria-modal={NATIVE ? undefined : true} aria-label="Menu" onClick={(e) => { if (e.target === dlg.current) fechar(); }}>
       <div className="menu-telas-body">
         <h2>Menu</h2>
-        {!DEMO && <div role="group" aria-labelledby="menu-ajuda">
-          <p id="menu-ajuda" className="menu-telas-sec">Ajuda</p>
-          <ul>
-            <li><button type="button" onClick={ajuda(abrirGuia)}><i className="ph ph-question" aria-hidden="true" /><span>Guia do painel</span></button></li>
-            {dica && <li><button type="button" onClick={ajuda(abrirDica)}><i className="ph ph-info" aria-hidden="true" /><span>Como funciona esta tela</span></button></li>}
-          </ul>
-        </div>}
+        {!DEMO && <ul>
+          <li>
+            <a href={href("/ajuda")} aria-current={path === "/ajuda" ? "page" : undefined} onClick={fechar}>
+              <i className="ph ph-question" aria-hidden="true" /><span>Ajuda</span>
+            </a>
+          </li>
+        </ul>}
         <ul>
           {RAIL.map(route).map((r) => (
             <li key={r.path}>

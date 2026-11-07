@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAINEL, RESPOSTAS } from "./_painel.mjs";
-import { ALVO, FAZER, PASSOS, ROTA, abrir, antigo, acoes, ajudaDoMenu, bora, esperaTitulo, irAoAlvo, naRota, navegador, piggyEm } from "./_guia.mjs";
+import { ALVO, FAZER, PASSOS, ROTA, abrir, antigo, acoes, ajudaDoMenu, ajudaDoTrilho, bora, esperaTitulo, irAoAlvo, naRota, navegador, piggyEm, tocarAba } from "./_guia.mjs";
 
 navegador();
 
@@ -109,7 +109,7 @@ test("conversa já começada (sem chips): o alvo do passo do Piggy é o campo da
   await page.locator("#askbar-input").fill("oi");
   await page.locator("#askbar-input").press("Enter");
   await naRota(page, "#/piggy");
-  await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+  await ajudaDoTrilho(page);
   await esperaTitulo(page, PASSOS[2].fala.titulo);
   await irAoAlvo(page, '[data-guia="piggy.pergunta"]');
   const r = [await page.locator('[data-guia="piggy.chip"]').count(), await piggyEm(page, '[data-guia="piggy.pergunta"]')];
@@ -124,11 +124,11 @@ test("conversa já começada (sem chips): o alvo do passo do Piggy é o campo da
 
 test("voltou pelo navegador: \"Agora toca em “Para onde vai”.\" com o Piggy na aba, sem ser puxado de novo; a aba leva de volta", async () => {
   const { ctx, page, s } = await abrir({ guia: "dispensado" }); // o 1 feito: abre no passo 2
-  await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+  await ajudaDoTrilho(page);
   await esperaTitulo(page, PASSOS[1].fala.titulo);
   await naRota(page, "#/gastos");
   await page.locator('[data-guia="categorias.item"]').waitFor();
-  await page.goBack();
+  await page.goBack(); // volta à Ajuda, de onde o guia abriu
   await page.locator(".guia-balao").getByText("Agora toca em “Para onde vai”.").waitFor({ timeout: 5000 });
   await page.waitForTimeout(1200);
   const r = [await page.evaluate(() => location.hash), await piggyEm(page, '.rail [data-guia="nav.gastos"]')];
@@ -137,7 +137,7 @@ test("voltou pelo navegador: \"Agora toca em “Para onde vai”.\" com o Piggy 
   await FAZER["categoria.aberta"](page);
   await esperaTitulo(page, PASSOS[2].fala.titulo);
   await ctx.close();
-  assert.equal(r[0], "#/");
+  assert.equal(r[0], "#/ajuda");
   assert.ok(r[1][0] && r[1].includes(8), JSON.stringify(r[1]));
   assert.deepEqual(acoes(s), ["reabrir", "feito:gastos.categoria"]);
 });
@@ -178,7 +178,8 @@ test("sem dados, pela Ajuda: orientação com o link do Open Finance e segue par
   const { ctx, page, s } = await abrir({ guia: "indisponivel" });
   await page.waitForTimeout(800);
   const convite = await page.locator(".guia-balao").count();
-  await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+  await ajudaDoTrilho(page);
+  await tocarAba(page); // a Ajuda não é a tela do passo 1: o guia pede a aba Resumo antes do motivo
   await page.locator('.guia-balao a[href="#/conta/bancos"]').waitFor({ timeout: 5000 });
   await page.getByRole("button", { name: "Seguir" }).click();
   await esperaTitulo(page, PASSOS[1].fala.titulo);
@@ -190,7 +191,8 @@ test("sem dados, pela Ajuda: orientação com o link do Open Finance e segue par
 test("sem dados, pela Ajuda: o link do balão leva à página Bancos conectados sem recarregar o painel", async () => {
   const { ctx, page } = await abrir({ guia: "indisponivel" });
   await page.waitForTimeout(800);
-  await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+  await ajudaDoTrilho(page);
+  await tocarAba(page);
   await page.evaluate(() => { window.__mesmaPagina = true; });
   await page.locator('.guia-balao a[href="#/conta/bancos"]').click();
   await page.waitForFunction(() => location.hash === "#/conta/bancos");
@@ -203,7 +205,8 @@ test("sem dados, pela Ajuda: o link do balão leva à página Bancos conectados 
 
 test("passo 1 pulado, 2 e 3 feitos: sem \"Fechou!\" nem \"Guia concluído.\" (o servidor segue em_andamento); Fechar não dispensa", async () => {
   const { ctx, page, s } = await abrir({ guia: "indisponivel" });
-  await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+  await ajudaDoTrilho(page);
+  await tocarAba(page);
   await page.getByRole("button", { name: "Seguir" }).click();
   await esperaTitulo(page, PASSOS[1].fala.titulo);
   await FAZER["categoria.aberta"](page);
@@ -234,7 +237,7 @@ const ultimoPulavel = (estado, feitos) => {
 test("1 e 2 feitos, Seguir no 3: \"Por agora é isso\" (sem \"Fechou!\"); Fechar não dispensa", async () => {
   const { ctx, page, s } = await abrir({ guia: "em_andamento" });
   s.g = ultimoPulavel("em_andamento", [true, true, false]);
-  await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+  await ajudaDoTrilho(page);
   await esperaTitulo(page, PASSOS[2].fala.titulo);
   await page.getByRole("button", { name: "Seguir" }).click();
   await esperaTitulo(page, "Por agora é isso");
@@ -253,7 +256,7 @@ test("1 e 2 feitos, Seguir no 3: \"Por agora é isso\" (sem \"Fechou!\"); Fechar
 test("revisão com o servidor concluído, Seguir até o fim: \"Fechou!\", não \"Por agora é isso\"", async () => {
   const { ctx, page, s } = await abrir({ guia: "concluido" });
   s.g = ultimoPulavel("concluido", [true, true, true]);
-  await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+  await ajudaDoTrilho(page);
   for (const p of PASSOS) {
     await esperaTitulo(page, p.fala.titulo);
     await page.getByRole("button", { name: "Seguir" }).click();
@@ -273,7 +276,7 @@ test("Esc e Pular dispensam; Ajuda (trilho, ou Menu da barra de baixo) e Cmd-K r
   const r1 = [await esc.page.locator(".guia-balao").count(), acoes(esc.s)];
   await esc.page.reload(); await esc.page.locator("#page-title").waitFor(); await esc.page.waitForTimeout(800);
   const r2 = [await esc.page.locator(".guia-balao").count(), acoes(esc.s)];
-  await esc.page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+  await ajudaDoTrilho(esc.page);
   await esperaTitulo(esc.page, PASSOS[0].fala.titulo);
   await esc.page.getByRole("button", { name: "Pular guia" }).click();
   await esc.page.keyboard.press("Meta+k");
@@ -312,7 +315,7 @@ test("Cmd-K não abre com o véu do convite nem do passo (nativo e Safari 14); E
     await page.keyboard.press("Meta+k");
     await page.locator(".cmdk[open]").waitFor({ timeout: 5000 }); // sem o véu, o ⌘K volta
     await page.keyboard.press("Escape");
-    await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+    await ajudaDoTrilho(page);
     await esperaTitulo(page, PASSOS[0].fala.titulo);
     await page.getByRole("button", { name: "Pular guia" }).click();
     const pular = await page.locator(".guia-veu").count();

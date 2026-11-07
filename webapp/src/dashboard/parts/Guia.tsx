@@ -28,7 +28,7 @@ export const navGuia = (p: Path) => {
   const tela = (Object.keys(ROTA) as Passo["tela"][]).find((t) => ROTA[t] === p);
   return tela && `nav.${tela}`;
 };
-// O item "Ajuda" e o Cmd-K abrem o guia por aqui.
+// A tela Ajuda (parts/AjudaTela.tsx) e o Cmd-K abrem o guia por aqui.
 export const abrirGuia = () => window.dispatchEvent(new Event("dash:guia"));
 
 // Uma ação é a passagem de um retrato da tela para o seguinte; o retrato de quando o passo

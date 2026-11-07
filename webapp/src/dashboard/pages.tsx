@@ -5,6 +5,7 @@ import { mesDe, simActive } from "./lib/store.js";
 import type { DashState } from "./lib/types";
 import { Frame } from "./parts/Frame";
 import { Board } from "./parts/Board";
+import { AjudaTela } from "./parts/AjudaTela";
 import { DicaDaTela } from "./parts/Dica";
 import { Lancamentos } from "./parts/Lancamentos";
 import { Ledger } from "./parts/Ledger";
@@ -211,7 +212,7 @@ function Launches({ s }: { s: DashState }) {
 
 // Ferramentas: só o Simulador já existe no protótipo; as outras vêm do dashboard atual
 // (ou são novas) e entram uma de cada vez. O Painel antigo sai do v2 para o /app. O guia mora
-// aqui também (e no Cmd-K e na Ajuda do Menu do celular).
+// aqui também (e no Cmd-K e na tela Ajuda).
 const TOOLS: { label: string; line: string; icon: string; to?: (typeof FERRAMENTAS)[number]; url?: string; run?: () => void; guia?: string }[] = [
   { label: "Simulador", line: DEMO ? "E se você cortasse o delivery pela metade? Veja o saldo e as metas mudarem na hora." : "Corte um gasto do dia a dia e veja quanto sobra por mês.", icon: "ph-lightning", to: "/simulador", guia: "ferramentas.simulador" },
   { label: "Painel antigo", line: "O dashboard de sempre, com os seus dados de verdade.", icon: "ph-chart-bar", url: "/app" },
@@ -279,10 +280,14 @@ function CategoryBudgets() {
   );
 }
 
+function AjudaPage() {
+  return <Page path="/ajuda" estado="Fale com a gente ou conte o que achou do PigBank."><AjudaTela /></Page>;
+}
+
 export const PAGES: Record<Path, (p: { s: DashState }) => ReactNode> = {
   "/": Home, "/previsao": Forecast, "/gastos": Spending, "/assinaturas": SubscriptionsPage, "/simulador": Simulate, "/simulador/compra": ComprarPage,
   "/metas": GoalsPage, "/milhao": Milhao, "/agentes": Agentes, "/patrimonio": Wealthy, "/lancamentos": Launches,
   "/orcamento": Budget, "/orcamentos-categoria": CategoryBudgets, "/ferramentas": Tools, "/piggy": PiggyChat,
   "/conta/perfil": ContaPerfil, "/conta/cobranca": ContaCobranca, "/conta/configuracoes": ContaConfiguracoes, "/conta/bancos": ContaBancos,
-  "/conta/familia": ContaFamilia, "/casa": PaginaCasa,
+  "/conta/familia": ContaFamilia, "/casa": PaginaCasa, "/ajuda": AjudaPage,
 };
