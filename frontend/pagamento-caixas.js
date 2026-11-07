@@ -28,6 +28,27 @@
     return e;
   }
 
+  const primeiraCobranca = function (d) {
+    const r = d && d.recurring;
+    return !!d && !d.promotionCode && d.percentOff > 0 && !!r && r.type === "repeating" && r.durationInMonths === 1;
+  };
+  /**
+   * A linha "depois" do resumo: `{depois}` (o `dueNext.total` do Stripe) ou, com cupom AUTOMÁTICO de 1ª cobrança
+   * (sem código, `percentOff`, repeating de 1 mês) e trial curto, `{primeira, depois}`: a 1ª cobrança e o preço
+   * cheio da renovação. Exceção à regra "o front não faz conta": medido com test clock em 2026-11-06, com o e-book
+   * (one_time) no carrinho o `dueNext` chega SEM o desconto (total 19900, discount 0), e a fatura real cobra 11940.
+   * Código digitado fica de fora (pode durar meses): mantém o `dueNext.total`.
+   */
+  function proxima(s, td, hoje) {
+    const n = s.recurring && s.recurring.dueNext, tot = n && centavos(n.total), sub = n && centavos(n.subtotal);
+    if (tot === null || tot === undefined) return null;
+    const auto = (Array.isArray(s.discountAmounts) ? s.discountAmounts : []).find(primeiraCobranca);
+    if (!(td > 0 && td < 28 && auto && sub !== null)) return { depois: tot };
+    // Stripe mandou o desconto: o número dele ganha. Senão, só com cobrança hoje (o e-book): a conta do Stripe, que arredonda o DESCONTO.
+    const primeira = centavos(n.discount) > 0 || !(hoje > 0) ? tot : sub - Math.round(sub * auto.percentOff / 100);
+    return primeira < sub ? { primeira: primeira, depois: sub } : { depois: tot };
+  }
+
   /** O resumo e o texto do botão, a partir da sessão do `change`. Devolve o total de hoje (null = sem total). */
   function resumo(s, td, por) {
     const r = $("pp-resumo"), itens = Array.isArray(s.lineItems) ? s.lineItems : [];
@@ -52,9 +73,11 @@
     if (cod || desc > 0) linha(cod ? "Cupom " + cod + " aplicado" : "Desconto", desc > 0 ? "−" + fmt(desc) : "", "pp-r-desc");
     const hoje = centavos(s.total && s.total.total);
     linha("Total hoje", fmt(hoje), "pp-r-hoje");
-    const prox = s.recurring && s.recurring.dueNext && centavos(s.recurring.dueNext.total);
-    if (prox !== null && prox !== undefined) {
-      r.appendChild(el("div", "pp-r-depois", (td > 0 ? "Depois do teste: " : "Depois: ") + fmt(prox) + por));
+    const p = proxima(s, td, hoje);
+    if (p) {
+      r.appendChild(el("div", "pp-r-depois", p.primeira === undefined
+        ? (td > 0 ? "Depois do teste: " : "Depois: ") + fmt(p.depois) + por
+        : fmt(p.primeira) + " na 1ª cobrança, depois " + fmt(p.depois) + por));
     }
     // Com trial, o que se paga hoje são os cadernos: as linhas com valor só escolhem o singular/plural.
     rotulo(td, hoje, itens.filter(function (li) { return centavos(li.total) > 0; }).length, fmt);
