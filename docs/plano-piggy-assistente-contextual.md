@@ -263,12 +263,11 @@ paralelo.
   hipóteses, sem imagem ou texto financeiro bruto em logs.
 - **Consistência:** na primeira entrega, carimbar a hora do cálculo e reler os dados a cada
   pergunta. Controle de snapshot ou detecção de mudança concorrente fica para quando houver
-  incidente medido. Janela conhecida e aceita: pagar conta e pagar fatura fazem dois commits
-  (`mark_bill_paid` reserva a conta antes de debitar, de propósito, e `db/cards.py` debita antes de
+  incidente medido. Janela conhecida e aceita: pagar fatura faz dois commits (`db/cards.py` debita antes de
   atualizar a fatura), então uma simulação que leia entre eles vê um estado intermediário. A janela
   dura o intervalo entre dois commits da mesma requisição, e exige o mesmo usuário pagando e
-  perguntando ao mesmo tempo. Se virar incidente, o primeiro gate é a assinatura que o próprio
-  `mark_bill_paid` já usa para a reserva (conta `paid` sem `launch_id`).
+  perguntando ao mesmo tempo. Pagar conta não tem essa janela: a carteira é uma transação só e o
+  método banco é um único `update`.
 - **Regressão (inventário, não escopo de um PR só):** gastos variáveis ausentes e duplicados,
   compra no fechamento do cartão, salário antes/depois da parcela, fatura vencida, parcelas além
   de 90 dias, reserva já violada, banco indisponível, oferta sem CET, OCR errado, legenda ignorada,

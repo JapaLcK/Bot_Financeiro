@@ -411,15 +411,14 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   ou em par pendente com o banco (P3), só descrição e apagar se ligada ao dinheiro em espécie
   (Q41), só categoria e data se paga conta ou fatura, e só categoria se além disso fundida
   (sem apagar no v2: apagar o pagamento de
-  conta devolve o dinheiro e a conta segue paga; o de fatura do cartão manual cai no mesmo ramo,
+  conta devolve o dinheiro; apagar por outra porta (`/app`, WhatsApp) também reabre a conta (`pending`); o de fatura do cartão manual cai no mesmo ramo,
   `bill_id`, e sai junto; o `/app` e o WhatsApp seguem apagando; a IA segue este `pode` e NÃO apaga compra manual
   no cartão, guardado nem pagamento de conta, nem recategoriza o ligado a dinheiro em espécie). `launches.origem` (NULL =
   antigo, sem backfill) vale `'carteira'` (`db.accounts.ORIGEM_CARTEIRA`) e quem grava é o
   escritor da carteira, por padrão, em todo canal (`/app`, WhatsApp, quick_entry, IA, saldo
   inicial e ajuste, pagamento de fatura pela carteira, a v2) e o saque/depósito automático da
   Q41 (`open_finance_cash._credita`); o pagamento de conta pela carteira (`mark_bill_paid`)
-  nasce sem a marca e a ganha no mesmo statement que o liga à conta (antes disso o v2 o
-  apagaria como carteira pura); antecipar parcela e o estorno de fatura do
+  grava `origem=ORIGEM_CARTEIRA` já no insert, na mesma transação que o liga à conta; antecipar parcela e o estorno de fatura do
   cartão manual gravam `origem=None` (o `efeitos` não guarda o que desfazer), e OFX, sombra do
   Open Finance, caixinha e aporte não passam pelo escritor. `conta`/`cartao` de
   outro usuário dão a lista vazia, igual a id inexistente; `raw`, `provider_*_id`,
