@@ -9,7 +9,6 @@ Idempotência de instância: UNIQUE(recurring_id, due_date).
 """
 from __future__ import annotations
 
-import logging
 from datetime import date
 from decimal import Decimal
 from math import isfinite
@@ -18,8 +17,6 @@ from typing import Any
 from utils_text import TETO_ENTRADA, valor_valido
 
 from .connection import get_conn
-
-logger = logging.getLogger(__name__)
 
 
 def _row(r: Any) -> dict[str, Any]:
@@ -180,8 +177,10 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None, *,
     lançamento de despesa (debita + categoriza); 'banco' só marca como paga — o
     débito chega pelo Open Finance, e `paid_amount` é o valor informado ou NULL
     (a estimativa não é o valor pago). `amount` sobrescreve o valor (boleto
-    variável). Retorna a conta atualizada, ou None se não achar / já paga."""
+    variável). Retorna a conta atualizada, ou None se não achar / já paga. Apagar o
+    lançamento depois reabre a conta (`delete_launch_and_rollback`)."""
     from db.accounts import ORIGEM_CARTEIRA, add_launch_and_update_balance
+    from db.bank_movements import _lock_user
     from db.open_finance import propose_manual_reconciliation
     if metodo not in ("carteira", "banco"):
         raise ValueError("METODO_INVALIDO")
@@ -203,22 +202,15 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None, *,
     name = bill["name"] or "Conta"
     categoria = bill["category"] or "outros"
 
-    # RESERVA a conta ANTES de debitar. A ordem inversa (debitar e depois
-    # atualizar o status) tem dois modos de falha caros: duas requisições
-    # concorrentes criam DOIS lançamentos porque as duas leem `pending`; e uma
-    # falha entre os dois commits deixa o débito feito com a conta ainda
-    # pendente, então a próxima tentativa debita de novo.
-    #
-    # Com a reserva primeiro, o `where status='pending'` serializa (inclusive
-    # 'banco' × 'carteira'): só uma requisição transita, as outras recebem None.
-    # A janela entre os dois passos NÃO é erro conservador — foi o que se
-    # pensou, e está errado. Medido: conta 'paid' sem lançamento, saldo não
-    # debitado, gasto fora do extrato, e a retentativa devolve None ("essa
-    # conta não está mais pendente") porque não há caminho no bot para reabrir
-    # a conta. É perda permanente, pior que o débito duplo, que ao menos é
-    # visível. Por isso o débito abaixo DESFAZ a reserva se estourar.
+    # Uma transação só: reserva, débito e ligação (launch_id + origem) commitam juntos ou
+    # nada fica. Falha no meio desfaz tudo (conta continua pending, saldo intacto) e o
+    # `where status='pending'` serializa duas requisições (inclusive 'banco' × 'carteira').
+    # Carteira trava o usuário primeiro (ordem de locks com reset/merge). O lançamento só
+    # fica visível no commit, já ligado à conta: apagar espera o mutex do usuário e, commitado, reabre a conta.
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if metodo == "carteira":
+                _lock_user(cur, user_id)
             cur.execute(
                 """
                 update bill_instances
@@ -227,45 +219,17 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None, *,
                 """,
                 (None if valor is None else Decimal(str(valor)), int(bill_id), int(user_id)),
             )
-            reservou = cur.rowcount == 1
+            if cur.rowcount != 1:
+                return None
+            if metodo == "carteira":
+                launch_id, _seq, _bal = add_launch_and_update_balance(
+                    user_id, "despesa", valor, alvo=f"conta:{name}", nota=f"Pagamento · {name}",
+                    categoria=categoria, is_internal_movement=False, origem=ORIGEM_CARTEIRA, cur=cur)
+                cur.execute("update bill_instances set launch_id=%s where id=%s and user_id=%s",
+                            (launch_id, int(bill_id), int(user_id)))
         conn.commit()
-    if not reservou or metodo == "banco":
-        return get_bill(user_id, bill_id) if reservou else None
-
-    try:
-        launch_id, _seq, _bal = add_launch_and_update_balance(
-            user_id, "despesa", valor, alvo=f"conta:{name}", nota=f"Pagamento · {name}",
-            categoria=categoria, is_internal_movement=False, origem=None)
-    except Exception:
-        # Devolve a conta para 'pending' para a retentativa funcionar.
-        # Condicionado à assinatura exata que a reserva deixou (paid + sem
-        # launch_id): se algo já tiver ligado um lançamento nesta conta, não
-        # reabre. O erro da devolução não pode mascarar o erro original.
-        try:
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        update bill_instances
-                           set status='pending', paid_at=null, paid_amount=null
-                         where id=%s and user_id=%s and status='paid'
-                           and launch_id is null
-                        """,
-                        (int(bill_id), int(user_id)),
-                    )
-                conn.commit()
-        except Exception as exc:
-            logger.error("falha ao devolver a conta %s do usuario %s para pending — ela ficou paga sem"
-                         " lançamento causa=%s sqlstate=%s", bill_id, user_id, type(exc).__name__,
-                         getattr(exc, "sqlstate", None), extra={"user_id": user_id})
-        raise
-    # Sem marca (a /api/v2 a apagaria na janela) até a ligação gravar; o pool commita.
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("with b as (update bill_instances set launch_id=%(l)s where id=%(b)s"
-                    " and user_id=%(u)s returning 1) update launches set origem=%(o)s"
-                    " where id=%(l)s and user_id=%(u)s and exists (select 1 from b)",
-                    {"o": ORIGEM_CARTEIRA, "l": launch_id, "u": int(user_id), "b": int(bill_id)})
-    propose_manual_reconciliation(user_id, launch_id)  # débito já importado vira pendência; não sobe
+    if metodo == "carteira":
+        propose_manual_reconciliation(user_id, launch_id)  # débito já importado vira pendência; não sobe
     return get_bill(user_id, bill_id)
 
 

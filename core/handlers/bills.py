@@ -285,9 +285,9 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
 
     # REIVINDICA antes de pagar. Duas respostas concorrentes (Discord, ou duas
     # plataformas ligadas) leem a mesma pendência e as duas chegam no
-    # `mark_bill_paid`, que cria o lançamento que debita o saldo ANTES da
-    # atualização condicional de status: só uma conta muda de status, mas os
-    # DOIS lançamentos existem. Quem perde o compare-and-swap sai sem fazer
+    # `mark_bill_paid`. Hoje a carteira reserva a conta (`where status='pending'`)
+    # e debita numa transação só, então o 2º pagamento falha sem debitar; o claim
+    # evita o trabalho duplicado. Quem perde o compare-and-swap sai sem fazer
     # nada — o vencedor responde. Mesmo desenho do PR #128 na fila de
     # multi-lançamento.
     if not consume_pending_action(user_id, pending):
