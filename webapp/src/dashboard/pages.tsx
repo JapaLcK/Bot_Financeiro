@@ -16,7 +16,7 @@ import { ContaCobranca } from "./conta/Cobranca";
 import { ContaConfiguracoes } from "./conta/Configuracoes";
 import { ContaPerfil } from "./conta/Perfil";
 import { ContaFamilia } from "./familia/Familia";
-import { PaginaCasa } from "./familia/Casa";
+import { PaginaCasa } from "./familia/CasaPagina";
 import { DEMO, useAgentesLigados } from "./lib/v2";
 import { useMedia } from "./useMedia";
 import { FERRAMENTAS, go, href, route, type Path } from "./router";
