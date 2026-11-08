@@ -19,6 +19,13 @@ from utils_date import today_tz
 HOJE = today_tz()
 
 
+@pytest.fixture(autouse=True)
+def _hoje_da_execucao():
+    """Relê o dia a cada teste: a suíte leva ~10 min e pode cruzar a meia-noite depois do import."""
+    global HOJE
+    HOJE = today_tz()
+
+
 def dia(n):
     return HOJE - timedelta(days=n)
 

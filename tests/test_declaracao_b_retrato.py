@@ -22,6 +22,15 @@ from tests.test_declaracao_fluxo_reconcilia import sincroniza
 from utils_date import today_tz
 
 HOJE = (today_tz() - BASE).days  # o dia da declaração, em relação a BASE
+
+
+@pytest.fixture(autouse=True)
+def _hoje_da_execucao():
+    """Relê o dia a cada teste: a suíte leva ~10 min e pode cruzar a meia-noite depois do import."""
+    global HOJE
+    HOJE = (today_tz() - BASE).days
+
+
 LOJA = "SUPERMERCADO XYZ"
 
 

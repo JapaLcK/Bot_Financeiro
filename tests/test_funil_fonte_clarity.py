@@ -52,6 +52,13 @@ VALORES = (SEG_URL, "TOKEN-NA-URL-777", "pigbankai.com", "fbclid", "utm_source",
 HOJE = datetime.now(timezone.utc).date()
 
 
+@pytest.fixture(autouse=True)
+def _hoje_da_execucao():
+    """Relê o dia a cada teste: a suíte leva ~10 min e pode cruzar a meia-noite depois do import."""
+    global HOJE
+    HOJE = datetime.now(timezone.utc).date()
+
+
 def sem_segredo(*textos):
     for t in textos:
         for s in SEGREDOS:
