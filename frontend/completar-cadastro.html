@@ -93,7 +93,7 @@ history.replaceState(null,'',location.pathname+(q.toString()?'?'+q:'')+location.
 </label>
 <button class="btn btn-primary btn-block btn-lg" disabled="" id="submit-btn" type="submit">Criar minha conta</button>
 </form>
-<a class="back" href="/" onclick="try{sessionStorage.removeItem('pb_signup_token')}catch(e){}">Cancelar</a>
+<a class="back" id="cancelar" href="/">Cancelar</a>
 </div>
 </div>
 </main>
@@ -120,6 +120,8 @@ function hideError() { msgError.textContent = ""; msgError.classList.remove("sho
 // truthy, e na tela vira "[object Object]". Só string passa; o resto cai no
 // fallback de cada chamada. Mesma regra do `_errDetail` (dashboard.js).
 function strDetail(d) { return d && typeof d.detail === "string" ? d.detail : ""; }
+
+document.getElementById("cancelar").addEventListener("click", () => { try { sessionStorage.removeItem("pb_signup_token"); } catch (e) {} });
 
 async function loadPending() {
   if (!signupToken) { showError("Link inválido. Inicie o login com Google novamente."); submitBtn.disabled = true; emailDisplay.textContent = "—"; return; }
