@@ -2,6 +2,18 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8"/>
+<script>
+// #1459: o token do cadastro sai da URL AQUI, no topo do <head>: o servidor injeta GA4/Meta
+// Pixel no fim do <head> e eles leem `location.href`. Fica no sessionStorage para o F5.
+var PB_Q=new URLSearchParams(location.search),PB_SIGNUP_TOKEN=PB_Q.get('token')||'';
+try{
+  if(PB_SIGNUP_TOKEN)sessionStorage.setItem('pb_signup_token',PB_SIGNUP_TOKEN);
+  else if(PB_Q.has('token'))sessionStorage.removeItem('pb_signup_token'); // ?token= vazio: não cai no storage
+  else PB_SIGNUP_TOKEN=sessionStorage.getItem('pb_signup_token')||'';
+}catch(e){}
+(function(){var q=new URLSearchParams(location.search);if(!q.has('token'))return;q.delete('token');
+history.replaceState(null,'',location.pathname+(q.toString()?'?'+q:'')+location.hash);})();
+</script>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>Finalize seu cadastro · PigBank</title>
 <meta content="noindex" name="robots"/>
@@ -81,7 +93,7 @@
 </label>
 <button class="btn btn-primary btn-block btn-lg" disabled="" id="submit-btn" type="submit">Criar minha conta</button>
 </form>
-<a class="back" href="/">Cancelar</a>
+<a class="back" href="/" onclick="try{sessionStorage.removeItem('pb_signup_token')}catch(e){}">Cancelar</a>
 </div>
 </div>
 </main>
@@ -94,8 +106,7 @@
 </nav>
 </footer>
 <script>
-const params = new URLSearchParams(window.location.search);
-const signupToken = params.get("token") || "";
+const signupToken = PB_SIGNUP_TOKEN;
 const msgError = document.getElementById("msg-error");
 const submitBtn = document.getElementById("submit-btn");
 const emailDisplay = document.getElementById("email-display");
@@ -115,6 +126,8 @@ async function loadPending() {
   try {
     const res = await fetch("/auth/google/pending/" + encodeURIComponent(signupToken), { credentials: "same-origin" });
     if (!res.ok) {
+      // 429/5xx são transitórios: o token já saiu da URL, limpar aqui faria o F5 perdê-lo.
+      if ([404, 410].includes(res.status)) { try { sessionStorage.removeItem("pb_signup_token"); } catch (e) {} }
       const data = await res.json().catch(function(){ return {}; });
       showError(strDetail(data) || "Cadastro expirado. Faça login com Google novamente.");
       submitBtn.disabled = true; emailDisplay.textContent = "—"; return;
@@ -145,6 +158,8 @@ document.getElementById("signup-form").addEventListener("submit", async function
       body: JSON.stringify({ token: signupToken, name: name, phone: phone, accepted_terms: true })
     });
     const data = await res.json().catch(function(){ return {}; });
+    // 400 mistura token inválido e nome/telefone ruins: não limpa (o pending, no próximo acesso, limpa).
+    if (!res.ok && [401, 404, 410].includes(res.status)) { try { sessionStorage.removeItem("pb_signup_token"); } catch (e) {} }
     if (!res.ok) { showError(strDetail(data) || "Não foi possível criar sua conta."); submitBtn.disabled = false; submitBtn.textContent = window.PBPurchaseIntent && window.PBPurchaseIntent.pending() ? "Criar minha conta e continuar" : "Criar minha conta"; return; }
     // Meta Ads: conta criada via Google. eventID casa com o CompleteRegistration
     // server-side (CAPI) pro Meta deduplicar.
@@ -152,6 +167,7 @@ document.getElementById("signup-form").addEventListener("submit", async function
     // GA4: mesma conversão, nome recomendado. `method` separa e-mail de Google.
     // `pbTrack` porque o replace abaixo destrói a página (ver o snippet em
     // frontend/routes/shared.py): sem esperar, o evento morre no dataLayer.
+    try { sessionStorage.removeItem("pb_signup_token"); } catch (e) {}
     const irPraDash = () => {
       const depois = window.PBPurchaseIntent
         ? window.PBPurchaseIntent.afterAuth(data.dashboard_url || "/home")
