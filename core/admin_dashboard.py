@@ -4,6 +4,8 @@ import asyncio
 import logging
 import os
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -49,8 +51,13 @@ ADMIN_DASHBOARD_PASSWORD = os.getenv("ADMIN_DASHBOARD_PASSWORD", "")
 ADMIN_DASHBOARD_PASSWORD_HASH = os.getenv("ADMIN_DASHBOARD_PASSWORD_HASH", "")
 ADMIN_DASHBOARD_SESSION_HOURS = float(os.getenv("ADMIN_DASHBOARD_SESSION_HOURS", "12"))
 # Prazo total da conferência na Stripe antes de pagar um saque de afiliado: estouro é 503, e o admin tenta
-# de novo. O SDK sozinho espera até 80 s por chamada.
+# de novo. O SDK sozinho espera até 80 s por chamada, e a thread que estourou segue presa até lá: por isso
+# a conferência tem executor próprio, com VAGAS_CONFERENCIA threads, e nunca o padrão do asyncio, que todas
+# as rotas usam via `to_thread`. Vagas cheias = 503 na hora, sem consultar.
 PRAZO_CONFERENCIA_S = 20
+VAGAS_CONFERENCIA = 4
+_VAGAS_CONFERENCIA = threading.BoundedSemaphore(VAGAS_CONFERENCIA)
+_EXECUTOR_CONFERENCIA = ThreadPoolExecutor(VAGAS_CONFERENCIA, thread_name_prefix="conferir-saque")
 _STRIPE_FORA = "Não foi possível conferir reembolsos na Stripe agora. Tente de novo em instantes."
 _SE_O_PIX_SAIU = " Se o Pix já saiu, use Pagamento já realizado."
 _DISPUTA_ABERTA = ("Uma comissão deste saque tem disputa aberta na Stripe. Rejeite o saque para liberar as outras; "
@@ -2319,12 +2326,21 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
 
     async def _conferir_saque_na_stripe(payout_id: int) -> dict | None:
         """Consulta cada fatura do saque antes de o dinheiro sair, fora de transação e com prazo. None = Stripe
-        fora, sem chave ou prazo estourado: a thread que estourou termina sozinha, e o que ela gravar é idempotente."""
+        fora, sem chave, prazo estourado ou vagas cheias: a thread que estourou termina sozinha, segurando a
+        vaga até lá, e o que ela gravar é idempotente."""
         from core.services import afiliado_reembolso
 
+        if not _VAGAS_CONFERENCIA.acquire(blocking=False):
+            return None
         try:
-            return await asyncio.wait_for(
-                asyncio.to_thread(afiliado_reembolso.conferir_saque, payout_id), PRAZO_CONFERENCIA_S)
+            futuro = _EXECUTOR_CONFERENCIA.submit(afiliado_reembolso.conferir_saque, payout_id)
+        except BaseException:
+            _VAGAS_CONFERENCIA.release()
+            raise
+        # Solta a vaga quando a thread acaba, ou quando o pedido é cancelado antes de começar.
+        futuro.add_done_callback(lambda _: _VAGAS_CONFERENCIA.release())
+        try:
+            return await asyncio.wait_for(asyncio.wrap_future(futuro), PRAZO_CONFERENCIA_S)
         except (asyncio.TimeoutError, afiliado_reembolso.StripeIndisponivel):
             return None
 
@@ -2341,28 +2357,31 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         from core.services.pix_brcode import build_pix_brcode, qr_svg_data_url
         from db.affiliates import get_payout
 
-        row = await asyncio.to_thread(get_payout, payout_id)
-        if not row:
-            raise HTTPException(status_code=404, detail="Saque não encontrado.")
-        if row["status"] != "requested":  # pago, rejeitado ou registrado: um QR aqui pagaria de novo
-            raise HTTPException(status_code=409, detail="Este saque não está aberto.")
-        if row["blocked"]:
-            raise HTTPException(status_code=409, detail="Este saque tem reembolso de cliente em análise.")
+        def aberto(row: dict | None, bloqueado: str) -> dict:
+            if not row:
+                raise HTTPException(status_code=404, detail="Saque não encontrado.")
+            if row["status"] != "requested":  # pago, rejeitado ou registrado: um QR aqui pagaria de novo
+                raise HTTPException(status_code=409, detail="Este saque não está aberto.")
+            if row["blocked"]:
+                raise HTTPException(status_code=409, detail=bloqueado)
+            if not row.get("pix_key_enc"):  # órfão (D9) ou saque sem chave
+                raise HTTPException(status_code=422, detail="Este saque não tem chave Pix registrada.")
+            return row
 
-        payout = _decrypt_affiliate_row(row, username)  # registra o acesso à PII
-        pix_key = (payout.get("pix_key") or "").strip()
-        if not pix_key:
-            raise HTTPException(
-                status_code=422, detail="Este saque não tem chave Pix registrada."
-            )
+        aberto(await asyncio.to_thread(get_payout, payout_id), "Este saque tem reembolso de cliente em análise.")
         # A última chance antes de o dinheiro sair: o `charge.refunded` pode ter se perdido.
         conferencia = await _conferir_saque_na_stripe(payout_id)
         if conferencia is None:
             raise HTTPException(status_code=503, detail=_STRIPE_FORA)
         if conferencia["disputa"]:
             raise HTTPException(status_code=409, detail=_DISPUTA_ABERTA)
-        if (await asyncio.to_thread(get_payout, payout_id))["blocked"]:
-            raise HTTPException(status_code=409, detail="Reembolso de cliente achado na Stripe: o saque ficou bloqueado para revisão.")
+        # Relê o saque inteiro: outro admin pode ter rejeitado, pago ou revisado durante a consulta.
+        row = aberto(await asyncio.to_thread(get_payout, payout_id),
+                     "Reembolso de cliente achado na Stripe: o saque ficou bloqueado para revisão.")
+        payout = _decrypt_affiliate_row(row, username)  # registra o acesso à PII
+        pix_key = (payout.get("pix_key") or "").strip()
+        if not pix_key:
+            raise HTTPException(status_code=422, detail="Este saque não tem chave Pix registrada.")
         try:
             brcode = build_pix_brcode(pix_key, amount_cents=int(payout["amount_cents"]))
         except ValueError as exc:

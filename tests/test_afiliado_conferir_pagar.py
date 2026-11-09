@@ -5,7 +5,10 @@ decide, `registrar_reembolso` grava, e a regra de bloqueio que já existe recusa
 Rota real, Postgres real; a Stripe é falsa só na rede (`tests/_afiliado_stripe.py`, via `mundo`).
 """
 import gc
+from types import SimpleNamespace
 import threading
+import time
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
@@ -13,8 +16,10 @@ import pytest
 import stripe
 
 import core.admin_dashboard as admin_dashboard
+import core.services.afiliado_reembolso as servico
 from core.services.afiliado_reembolso import conferir_pendentes, tratar_evento
-from db.affiliates import request_payout
+from db.affiliate_reviews import registrar_reembolso, resolver_parcial
+from db.affiliates import reject_payout, request_payout
 from db.connection import get_conn
 from test_afiliado_area import _afiliado, _esperando_lock, _painel_aberto  # noqa: F401
 from test_afiliado_exclusao import _excluir, _saque_com_pix
@@ -34,6 +39,8 @@ from test_afiliado_reembolso import _evento, _logs, _segura, mundo  # noqa: F401
 
 PIX = "/admin/api/affiliates/payouts/{}/pix"
 FORA = "Não foi possível conferir reembolsos na Stripe agora. Tente de novo em instantes."
+DISPUTA = ("Uma comissão deste saque tem disputa aberta na Stripe. Rejeite o saque para liberar as outras; "
+           "ela volta quando a disputa fechar.")
 
 
 def _pix(adm, saque):
@@ -108,13 +115,64 @@ def test_sem_chave_recusa(adm, mundo, monkeypatch, rota):
 
 def test_prazo_estourado(adm, mundo, monkeypatch):
     """O prazo real é 20 s; aqui ele cai para 0,5 s e a Stripe demora 2 s, sem reembolso: sem o prazo seria 200.
-    O tempo de resposta não se mede aqui: o `TestClient` fecha o laço a cada requisição e espera a thread."""
+    O executor é próprio, então o `TestClient` não espera a thread ao fechar o laço e o tempo se mede."""
     monkeypatch.setattr(admin_dashboard, "PRAZO_CONFERENCIA_S", 0.5)
+    conta = _conta(monkeypatch)
     c = _afiliado()
     _, _, saque = _dois(c)
     mundo.stripe.atraso = 2
+    t0 = time.monotonic()
     r = _pix(adm, saque)
+    dur = time.monotonic() - t0
+    conta.espera()
     assert r.status_code == 503 and r.json()["detail"] == FORA
+    assert dur < 1.5, dur
+
+
+def _conta(monkeypatch):
+    """Conta as conferências que começaram e as que terminaram. A thread que estourou o prazo segue
+    ocupando a vaga até acabar, e o teste seguinte do mesmo worker precisa dela livre: `espera()`."""
+    real = servico.conferir_saque
+    c = SimpleNamespace(chamadas=[], fins=[])
+
+    def contada(payout_id):
+        c.chamadas.append(payout_id)
+        try:
+            return real(payout_id)
+        finally:
+            c.fins.append(payout_id)
+
+    def espera(prazo=15):
+        fim = time.monotonic() + prazo
+        while len(c.fins) < len(c.chamadas) and time.monotonic() < fim:
+            time.sleep(0.05)
+        assert len(c.fins) == len(c.chamadas)
+    c.espera = espera
+    monkeypatch.setattr(servico, "conferir_saque", contada)
+    return c
+
+
+def test_rajada_lenta_recusa_na_hora_sem_consultar(adm, mundo, monkeypatch):
+    """Stripe lenta (o SDK espera até 80 s por chamada): a conferência roda num executor próprio de
+    `VAGAS_CONFERENCIA` threads, nunca no executor padrão que as outras rotas usam via `to_thread`. Cheio,
+    o QR recusa com 503 na hora, sem consultar."""
+    monkeypatch.setattr(admin_dashboard, "PRAZO_CONFERENCIA_S", 0.3)
+    vagas = getattr(admin_dashboard, "VAGAS_CONFERENCIA", 4)
+    conta = _conta(monkeypatch)
+    c = _afiliado()
+    _, _, saque = _dois(c)
+    mundo.stripe.atraso = 3
+    with ThreadPoolExecutor(vagas) as pool:
+        primeiras = list(pool.map(lambda _: _pix(adm, saque).status_code, range(vagas)))
+    # Prazo folgado na seguinte: sem a recusa na hora, ela esperaria na fila do executor e consultaria.
+    monkeypatch.setattr(admin_dashboard, "PRAZO_CONFERENCIA_S", 5)
+    t0 = time.monotonic()
+    r = _pix(adm, saque)
+    dur = time.monotonic() - t0
+    conta.espera()
+    assert primeiras == [503] * vagas and (r.status_code, r.json()["detail"]) == (503, FORA)
+    assert len(conta.chamadas) == vagas, "com as vagas cheias, a seguinte consultou a Stripe"
+    assert dur < 1, dur
 
 
 # ── "Pagamento já realizado" nunca recusa ───────────────────────────────────
@@ -173,12 +231,58 @@ def test_disputa_aberta(adm, mundo):
     assert r.json()["detail"] == ("Uma comissão deste saque tem disputa aberta na Stripe. Rejeite o saque para liberar "
                                   "as outras; ela volta quando a disputa fechar.")
     assert _marcada(a) and not _marcada(b)
+    r = _pagar(adm, saque)  # "Marcar pago" também recusa: sem pendência, só a consulta vê a disputa
+    assert (r.status_code, r.json()["detail"]) == (409, DISPUTA) and _saque(saque)["status"] == "requested"
     assert _rejeitar(adm, saque).status_code == 200
     assert request_payout(c.aff["id"])["amount_cents"] == 7_000
     assert _quadros(c)["held"] == 100
 
 
 # ── Corrida e conexão ────────────────────────────────────────────────────────
+
+def _rejeita_durante(saque):
+    trava = threading.Lock()
+
+    def rejeita():
+        with trava:
+            if _saque(saque)["status"] == "requested":
+                reject_payout(saque, None, "adm2")
+    return rejeita
+
+
+def test_qr_status_muda_durante_a_conferencia(adm, mundo):
+    """Outro admin rejeita o saque enquanto a Stripe responde: o QR relê o saque inteiro e não sai."""
+    c = _afiliado()
+    _, _, saque = _dois(c)
+    mundo.stripe.durante = _rejeita_durante(saque)
+    r = _pix(adm, saque)
+    assert (r.status_code, r.json()["detail"]) == (409, "Este saque não está aberto."), r.text[:120]
+    assert _saque(saque)["status"] == "rejected"
+
+
+def test_paid_rejeitado_durante_a_conferencia(adm, mundo):
+    """O "Marcar pago" já relê na trava (`status = 'requested'` no update): rejeitado no meio, não paga."""
+    c = _afiliado()
+    _, _, saque = _dois(c)
+    mundo.stripe.durante = _rejeita_durante(saque)
+    assert _pagar(adm, saque).status_code == 404 and _saque(saque)["status"] == "rejected"
+
+
+def test_qr_valor_muda_durante_a_conferencia(adm, mundo, canal):
+    """Revisão parcial de outro admin encolhe o saque durante a consulta: o QR sai com o valor relido."""
+    c = _afiliado()
+    a, _, saque = _dois(c)
+    trava = threading.Lock()
+
+    def revisa():
+        with trava:
+            if _rev(a.fatura) is None:
+                registrar_reembolso(a.fatura, "partial", 30_000, datetime.now(timezone.utc))
+                resolver_parcial(_rev(a.fatura)["id"], "adm2", 6_000, "outro admin revisou", 30_000)
+    mundo.stripe.durante = revisa
+    r = _pix(adm, saque)
+    assert r.status_code == 200, r.text[:120]
+    assert r.json()["amount_cents"] == _saque(saque)["amount_cents"] == 13_000
 
 def test_corrida_webhook_entre_consulta_e_trava(adm, mundo, monkeypatch):
     """A consulta não acha nada; o webhook entra antes da trava. A regra que já existe recusa."""

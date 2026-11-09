@@ -2762,7 +2762,14 @@ possível conferir reembolsos na Stripe agora. Tente de novo em instantes."; no 
 Pix já saiu, use Pagamento já realizado."), sem recarregar, e o log `affiliate_payout_check_failed` com o
 saque e o tipo do erro, sem a fatura. Prazo total de 20 s (`PRAZO_CONFERENCIA_S`): estouro é 503, nunca
 500; a thread que estourou termina sozinha, e o que ela gravar é idempotente. O SDK sozinho espera até
-80 s por chamada, e não há prazo por chamada. "Marcar pago" não consulta saque já bloqueado ou órfão: a
+80 s por chamada, e não há prazo por chamada: dar um pede `StripeClient` com timeout em
+`cobrancas_da_fatura`, que o e-book também usa, ou mudar o cliente HTTP global do `stripe`, que vale para o
+processo inteiro. Por isso a conferência roda num executor próprio de `VAGAS_CONFERENCIA` (4) threads,
+nunca no padrão do asyncio, que as outras rotas usam via `to_thread`; com as vagas ocupadas por consultas
+presas, o QR e o "Marcar pago" recusam com o mesmo 503 na hora, sem consultar, e o "Pagamento já
+realizado" registra e marca. Depois da consulta, o QR relê o saque inteiro: rejeitado, pago, bloqueado ou
+órfão no meio recusa, e o valor do QR é o relido (revisão parcial no meio encolhe o QR). O "Marcar pago"
+relê na própria trava (`status = 'requested'` no update). "Marcar pago" não consulta saque já bloqueado ou órfão: a
 recusa que já existe responde. "Pagamento já realizado" nunca recusa: confere antes (reembolso achado
 vira recuperação no registro) e, com a Stripe fora, registra e marca `payment_check_pending` nas comissões
 do saque; `comissoes_a_conferir` não filtra status, então o worker confere a paga e, com reembolso, abre
@@ -2772,7 +2779,10 @@ acha depois; com o webhook entregue, a trava das comissões espera e recusa. (b)
 fora no "Pagamento já realizado": não há comissão para marcar, e com o webhook perdido depois ninguém
 reconfere sozinho; o script percorre as linhas com `paid_cents` (lido no código, não medido neste caso).
 (c) Sem limite de faturas por saque: muitas comissões caem no 503, e o admin tenta de novo; não medido
-com número real. (d) Tempo real de resposta no estouro do prazo não medido: o teste usa prazo de 0,5 s.
+com número real. (d) Com a Stripe presa, só 4 conferências rodam por vez no processo: a quinta recebe 503
+até uma thread soltar, o que pode levar os 80 s do SDK. Medido em 2026-11-09 com servidor real e a Stripe
+falsa presa por 30 s, 40 cliques de QR: `GET /admin/api/affiliates` no meio levou 10 ms (antes, 18,5 s)
+e `/admin/api/overview`, 21 ms (antes, 100 s). Remedir antes de reusar.
 
 **Retenção de `no_commission`:** 30 dias. `limpar_sem_comissao`, na mesma volta do worker, apaga só
 `no_commission` sem comissão, sem evento e com mais de 30 dias; é escolha operacional, não garantia
