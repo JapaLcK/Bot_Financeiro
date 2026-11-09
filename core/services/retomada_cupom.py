@@ -16,24 +16,27 @@ class CupomIndisponivel(RuntimeError):
     """Stripe fora, cupom divergente ou inválido: a venda com desconto não sai (503)."""
 
 
-def _ok(cupom, pct: int, product: str) -> bool:
+def _ok(cupom, pct: int, products: list[str]) -> bool:
     produtos = list(_sg(_sg(cupom, "applies_to", {}) or {}, "products", []) or [])
     return (
         _sg(cupom, "valid", True) is not False
         and float(_sg(cupom, "percent_off", 0) or 0) == float(pct)
         and _sg(cupom, "duration") == "repeating"
         and _sg(cupom, "duration_in_months") == 1
-        and produtos == [product]
+        and sorted(produtos) == products
     )
 
 
 def cupom_id(stripe_mod, etapa: int, pct: int, price_id: str) -> str:
-    """ID do cupom da etapa para o produto do Price, criando-o se faltar. Idempotente."""
+    """ID do cupom da etapa para o produto do Price, criando-o se faltar. Idempotente.
+    `price_id` também aceita lista/tupla de Prices: um cupom para todos os produtos deles."""
     try:
-        product = _sg(stripe_mod.Price.retrieve(price_id), "product")
-        if not isinstance(product, str):
-            product = _sg(product, "id")
-        cid = f"rm_e{etapa}_{pct}_{product}"
+        products = []
+        for pid in ([price_id] if isinstance(price_id, str) else price_id):
+            product = _sg(stripe_mod.Price.retrieve(pid), "product")
+            products.append(product if isinstance(product, str) else _sg(product, "id"))
+        products = sorted(set(products))
+        cid = f"rm_e{etapa}_{pct}_" + "_".join(products)
         try:
             cupom = stripe_mod.Coupon.retrieve(cid, expand=["applies_to"])
         except stripe_mod.error.InvalidRequestError as exc:
@@ -42,7 +45,7 @@ def cupom_id(stripe_mod, etapa: int, pct: int, price_id: str) -> str:
             try:
                 cupom = stripe_mod.Coupon.create(
                     id=cid, name=f"{pct}% OFF", percent_off=pct, duration="repeating", duration_in_months=1,
-                    applies_to={"products": [product]}, expand=["applies_to"])
+                    applies_to={"products": products}, expand=["applies_to"])
             except stripe_mod.error.InvalidRequestError as exc2:   # corrida: outro worker criou
                 if getattr(exc2, "code", None) != "resource_already_exists" \
                         and "already exists" not in str(exc2):
@@ -51,7 +54,7 @@ def cupom_id(stripe_mod, etapa: int, pct: int, price_id: str) -> str:
     except stripe_mod.error.StripeError as exc:
         logging.getLogger(__name__).error("retomada_cupom_stripe: %s", exc)
         raise CupomIndisponivel(str(exc)) from exc
-    if not _ok(cupom, pct, product):
+    if not _ok(cupom, pct, products):
         logging.getLogger(__name__).error("retomada_cupom_divergente id=%s", cid)
         raise CupomIndisponivel(cid)
     return cid

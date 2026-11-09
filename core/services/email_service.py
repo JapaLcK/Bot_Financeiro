@@ -1312,6 +1312,46 @@ def send_cupom_email(to: str, codigo: str, log_recipient: bool = True) -> bool:
                       log_recipient=log_recipient)
 
 
+def send_reconquista_email(to: str, nome: str, codigo: str, valido_ate, unsub_url: str) -> bool:
+    """Reconquista de trial vencido sem pagamento (um e-mail, 2 dias depois). `codigo` é um
+    Promotion Code exclusivo do cliente: escapado no HTML, nunca em log."""
+    import html as _h
+    from zoneinfo import ZoneInfo
+    link = f"{_public_base_url()}/precos"
+    data = valido_ate.astimezone(ZoneInfo("America/Sao_Paulo")).strftime("%d/%m")
+    saud = f"Oi, {nome.strip()}!" if (nome or "").strip() else "Oi!"
+    c = _h.escape(codigo)
+    content = f"""
+      <p>{_h.escape(saud)}</p>
+      <p>Seu teste do PigBank acabou, mas seus gastos, categorias e metas continuam aqui, do jeito que você deixou.</p>
+      <p>Nesses dias, o Piggy começou a entender para onde vai o seu dinheiro. Parar agora é perder isso de vista justo quando começou a fazer sentido.</p>
+      <p>Com o Plus, por R$ 19,90 por mês, você:</p>
+      <ul>
+        <li>sabe quanto vai sobrar antes de o mês acabar</li>
+        <li>registra tudo pelo WhatsApp, sem planilha</li>
+        <li>recebe um alerta antes de estourar o orçamento</li>
+      </ul>
+      <p style="text-align:center;margin:24px 0"><a class="btn" href="{link}">Continuar com o Piggy</a></p>
+      <p>E como você já começou, o primeiro mês sai com 10% de desconto. Use o código <b>{c}</b> até {data}.</p>
+      <p>Abraço,<br>Equipe PigBank</p>
+    """
+    html = _base_html("Seu Piggy ainda está guardando tudo", content)
+    text = (
+        f"{saud}\n\n"
+        "Seu teste do PigBank acabou, mas seus gastos, categorias e metas continuam aqui, do jeito que você deixou.\n\n"
+        "Nesses dias, o Piggy começou a entender para onde vai o seu dinheiro. Parar agora é perder isso de vista justo quando começou a fazer sentido.\n\n"
+        "Com o Plus, por R$ 19,90 por mês, você:\n"
+        "• sabe quanto vai sobrar antes de o mês acabar\n"
+        "• registra tudo pelo WhatsApp, sem planilha\n"
+        "• recebe um alerta antes de estourar o orçamento\n\n"
+        f"Continuar com o Piggy: {link}\n\n"
+        f"E como você já começou, o primeiro mês sai com 10% de desconto. Use o código {codigo} até {data}.\n\n"
+        "Abraço,\nEquipe PigBank"
+    )
+    return send_email(to=to, subject="Seu Piggy ainda está guardando tudo", html_body=html,
+                      text_body=text, headers=unsub_headers(unsub_url), log_recipient=False)
+
+
 def send_trial_ending_email(to: str, plan: str, trial_end_at, dashboard_url: str = "") -> bool:
     """E-mail 3 dias antes do trial acabar (item 38).
 
