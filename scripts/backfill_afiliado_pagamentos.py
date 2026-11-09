@@ -9,16 +9,18 @@ ATENÇÃO: `--aplicar` PODE ALTERAR SALDOS. Duas passadas, nesta ordem:
      a_estornar      total, comissão `pending` e sem saque: lista id e valor, e o total.
      segue_revisao   parcial, ou total com a comissão em saque ou paga: lista id e valor.
      sem_confirmacao exceção, `payment_record`, erro da API, sem cobrança ou disputa: lista id e
-                     motivo (só o tipo), e nada muda.
-     ja_registrada   a pendência já existe: só conta, e nada muda.
+                     motivo (só o tipo), e nada muda. Entra no código de saída.
+     ja_registrada   a pendência já é `total`, ou já tem esse devolvido: só conta, e nada muda.
+   Pendência parcial já registrada é relida: o total que o webhook perdeu é fato novo.
    `--aplicar` não confia na classificação: chama `registrar_reembolso`, a mesma função do webhook,
    que decide sob as travas com o estado de agora. Comissão que entrou em saque depois da simulação
-   vira pendência, sem estorno. A linha impressa diz o que aconteceu.
+   vira pendência, sem estorno. Com `--aplicar`, a categoria e a linha impressa são o que aconteceu.
 
 2. Clientes: completa `affiliate_referral_payments` com o que o `init_db` não alcança, fatura de
    plano sem comissão (afiliado 0% ou desativado, renovação, webhook perdido) e reembolso anterior
-   ao `charge.refunded`. Contestação aqui fica só na contagem, porque a cobrança não diz se foi
-   perdida. Conta excluída não volta: sem titular não há cliente.
+   ao `charge.refunded`. Fatura com cobrança contestada não é rotulada, só contada: a passada de
+   comissões não a confirmou, e um rótulo `total` sem pendência estornaria na rejeição sem nada
+   bloquear o pagamento. Conta excluída não volta: sem titular não há cliente.
 
 Idempotente: rodar de novo não duplica pendência, evento nem rótulo. Não imprime fatura, cliente nem
 indicado: só ids de comissão, valores e contagens.
@@ -62,9 +64,9 @@ def _comissoes() -> list[dict]:
         return conn.execute(
             """
             select c.id, c.stripe_invoice_id as fatura, c.status, c.payout_id, c.amount_cents,
-                   exists (select 1 from affiliate_refund_reviews r
-                            where r.stripe_invoice_id = c.stripe_invoice_id) as registrada
+                   r.tipo as registrada_tipo, r.refunded_cents as registrada_cents
               from affiliate_commissions c
+              left join affiliate_refund_reviews r on r.stripe_invoice_id = c.stripe_invoice_id
              where c.status <> 'reversed'
              order by c.id
             """).fetchall()
@@ -90,24 +92,38 @@ def _reembolso_confirmado(stripe, fatura_id: str, chave: str) -> tuple[str | Non
             datetime.fromtimestamp(max(datas), timezone.utc) if datas else None)
 
 
+def _categoria(c: dict, linha: dict | None) -> str:
+    """O que aconteceu, relido depois de `registrar_reembolso`: o relatório não conta previsão."""
+    with get_conn() as conn:
+        estornada = conn.execute("select status = 'reversed' as r from affiliate_commissions where id = %s",
+                                 (c["id"],)).fetchone()["r"]
+    if estornada:
+        return "a_estornar"
+    return "segue_revisao" if linha and linha["status"] in ("open", "recovery") else "ja_registrada"
+
+
 def _comissao(stripe, c: dict, chave: str, aplicar: bool, n: Counter) -> None:
     tipo, devolvido, quando = _reembolso_confirmado(stripe, c["fatura"], chave)
     if tipo is None:
         return
-    solta = c["status"] == "pending" and c["payout_id"] is None
-    categoria = "a_estornar" if tipo == "total" and solta else "segue_revisao"
-    desfecho = ""
     if aplicar:
         linha = registrar_reembolso(c["fatura"], tipo, devolvido, quando, ator="script")
-        desfecho = f" · pendência {linha['status'] if linha else 'nenhuma'}"
+        categoria, desfecho = _categoria(c, linha), f" · pendência {linha['status'] if linha else 'nenhuma'}"
+    elif c["registrada_tipo"] and devolvido <= c["registrada_cents"]:  # a mesma regra de fato novo
+        categoria, desfecho = "ja_registrada", ""
+    else:
+        solta = c["status"] == "pending" and c["payout_id"] is None
+        categoria, desfecho = ("a_estornar" if tipo == "total" and solta else "segue_revisao"), ""
     n[categoria] += 1
+    if categoria == "ja_registrada":
+        return
     n[f"{categoria}_cents"] += c["amount_cents"]
     print(f"{categoria}: comissão {c['id']} · R$ {c['amount_cents'] / 100:.2f}{desfecho}")
 
 
 def _passar_comissoes(stripe, chave: str, aplicar: bool, n: Counter) -> None:
     for c in _comissoes():
-        if c["registrada"]:
+        if c["registrada_tipo"] == "total":  # nunca reabre: nem relê a Stripe
             n["ja_registrada"] += 1
             continue
         try:
@@ -156,10 +172,13 @@ def _valor_do_plano(stripe, fatura) -> int:
 def _reembolso(stripe, fatura_id: str, chave: str, n: Counter) -> tuple[str | None, datetime | None]:
     """O tipo e a data do reembolso mais recente da fatura."""
     tipos, datas = set(), []
-    for cobranca in cobrancas_da_fatura(fatura_id, chave):
+    cobrancas = list(cobrancas_da_fatura(fatura_id, chave))
+    if any(c["disputed"] for c in cobrancas):  # a passada de comissões não confirmou: não rotula
+        n["contestadas_para_conferir"] += 1
+        return None, None
+    for cobranca in cobrancas:
         tipo = tipo_do_reembolso(cobranca)
         tipos.add(tipo)
-        n["contestadas_para_conferir"] += bool(cobranca["disputed"])
         if tipo:
             datas += _datas_de_reembolso(stripe, cobranca)
     quando = datetime.fromtimestamp(max(datas), timezone.utc) if datas else None
@@ -212,7 +231,7 @@ def main() -> int:
     print("aplicado" if args.aplicar else "simulação: nada gravado")
     for nome, valor in sorted(n.items()):
         print(f"{nome}: {valor}")
-    return 1 if n["clientes_com_falha"] else 0
+    return 1 if n["clientes_com_falha"] or n["sem_confirmacao"] else 0
 
 
 if __name__ == "__main__":

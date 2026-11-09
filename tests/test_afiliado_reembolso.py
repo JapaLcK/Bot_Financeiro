@@ -657,14 +657,15 @@ def test_script_aplica_e_e_idempotente_e_estorna_a_comissao_solta(script):
     script.stripe.cobrancas["in_parcial"] = {"amount": 40_000, "amount_refunded": 1_000, "disputed": True}
 
     n = script.rodar(aplicar=True)
-    assert (n["faturas_novas"], n["reembolsos_total"], n["reembolsos_partial"], n["contestadas_para_conferir"]) == (3, 1, 1, 1)
+    assert (n["faturas_novas"], n["reembolsos_total"], n["reembolsos_partial"], n["contestadas_para_conferir"]) == (3, 1, 0, 1)
     achado = {x["payment_ref"]: (x["amount_cents"], x["refund_status"]) for x in _linhas(c)}
-    assert achado == {com.fatura: (60_000, "total"), "in_sem_comissao": (50_000, "none"), "in_parcial": (40_000, "partial")}
+    # contestada: registrada, sem rótulo (A6)
+    assert achado == {com.fatura: (60_000, "total"), "in_sem_comissao": (50_000, "none"), "in_parcial": (40_000, "none")}
     assert _status(com)["status"] == "reversed"  # total confirmado, comissão solta: `a_estornar`
 
     n = script.rodar(aplicar=True)
     assert (n["faturas_novas"], n["faturas_ja_no_registro"]) == (0, 3)
-    assert len(_linhas(c)) == 3 and _numeros(c) == (2, 2, 1, 1, 1)
+    assert len(_linhas(c)) == 3 and _numeros(c) == (2, 2, 1, 1, 0)
 
 
 def test_script_tira_o_caderno_e_ignora_o_que_nao_e_plano(script):

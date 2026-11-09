@@ -314,9 +314,11 @@ def reivindicar(review_id: int | None = None) -> dict | None:
     return linha
 
 
-def marcar_avisada(review_id: int, refunded_cents: int) -> None:
-    """Só depois de `_send` True. O `refunded_cents` deixa pendente o fato novo que chegou no envio."""
+def marcar_avisada(review_id: int, refunded_cents: int, status: str) -> None:
+    """Só depois de `_send` True, e só se a linha segue como foi avisada: fato novo (`refunded_cents`)
+    ou mudança de estado (`status`, como o "Pagamento já realizado") durante o envio segue pendente."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("update affiliate_refund_reviews set notified_at = now(), notify_claimed_until = null"
-                    " where id = %s and refunded_cents = %s", (int(review_id), int(refunded_cents)))
+                    " where id = %s and refunded_cents = %s and status = %s",
+                    (int(review_id), int(refunded_cents), status))
         conn.commit()

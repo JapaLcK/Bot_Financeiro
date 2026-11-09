@@ -1003,7 +1003,7 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
     <div class="table-wrap">
       <table class="table as-cards">
         <thead><tr>
-          <th>Código</th><th>Email</th><th>%</th><th>Indicados</th><th>A pagar</th><th>Já pago</th><th>Chave Pix</th><th>Status</th><th></th>
+          <th>Código</th><th>Email</th><th>%</th><th>Indicados</th><th>A pagar ou em revisão</th><th>Já pago</th><th>Chave Pix</th><th>Status</th><th></th>
         </tr></thead>
         <tbody id="aff-list"></tbody>
       </table>
@@ -2597,7 +2597,7 @@ async function loadAffiliates() {
         <td data-label="Email">${esc(a.email || '—')}</td>
         <td data-label="Comissão">${(a.commission_bps / 100).toFixed(0)}%</td>
         <td data-label="Indicados">${a.referrals}</td>
-        <td data-label="A pagar">${fmtCents(a.owed_cents)}</td>
+        <td data-label="A pagar ou em revisão">${fmtCents(a.owed_cents)}</td>
         <td data-label="Já pago">${fmtCents(a.paid_cents)}</td>
         <td data-label="Chave Pix">${esc(a.pix_key || '—')}</td>
         <td data-label="Status"><span>${a.status === 'active' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:5px"></span>ativo' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>desativado'}</span></td>
@@ -2688,7 +2688,12 @@ async function payoutAction(id, action) {
     headers: { ...authH(), 'Content-Type': 'application/json' },
     body: JSON.stringify(note ? { note } : {}),
   });
-  if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.detail || 'Erro.'); return; }
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    alert(d.detail || 'Erro.');
+    if (res.status === 409) loadAffiliates();  // o saque mudou de estado: a lista mostra o de agora
+    return;
+  }
   loadAffiliates();
 }
 

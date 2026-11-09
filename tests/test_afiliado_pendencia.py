@@ -6,6 +6,8 @@ dono: comissão A de R$ 100 reembolsada em parte e comissão B de R$ 70 intacta.
 Os controles negativos e positivos (§3) estão no relato do PR; os positivos ficam aqui, nos casos
 que dizem "positivo".
 """
+import json
+import sys
 import threading
 import time
 import uuid
@@ -19,6 +21,8 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
+import core.admin_dashboard as admin_dashboard
+import core.services.afiliado_reembolso as modulo_reembolso
 import db
 import db.affiliate_reviews as reviews
 import frontend.finance_bot_websocket_custom as dashboard
@@ -26,7 +30,7 @@ from _apoio_auth_app import csrf
 from _lifespan_probe import sondar
 from core.services import admin_notify
 from core.services.afiliado_reembolso import reenviar_pendentes, tratar_evento
-from db.affiliate_reviews import reivindicar, registrar_reembolso
+from db.affiliate_reviews import PendenciaMudou, reivindicar, registrar_reembolso, resolver_parcial
 from db.affiliates import (
     SaqueComPendencia,
     get_affiliate_stats,
@@ -38,10 +42,12 @@ from db.affiliates import (
     request_payout,
 )
 from db.connection import get_conn
-from test_afiliado_area import ME, _afiliado, _comissao, _esperando_lock, _me, _painel_aberto  # noqa: F401
+from test_afiliado_area import ME, _afiliado, _comissao, _esperando_lock, _me, _painel_aberto, _sacar  # noqa: F401
 from test_afiliado_pagantes import AGORA, _admin, _indicado
 from test_afiliado_reembolso import (  # noqa: F401
+    _cliente,
     _cobranca,
+    _fatura,
     _enviar,
     _evento,
     _logs,
@@ -123,7 +129,9 @@ def _quadros(c):
 
 
 def _post(adm, caminho, corpo=None):
-    return adm.post(f"/admin/api/affiliates/{caminho}", headers=csrf(adm), json=corpo or {})
+    """Corpo já serializado: o `json=` do cliente não codifica surrogate solitário, e o servidor recebe o escape."""
+    return adm.post(f"/admin/api/affiliates/{caminho}", headers={**csrf(adm), "content-type": "application/json"},
+                    content=json.dumps(corpo or {}).encode())
 
 
 def _pagar(adm, saque):
@@ -1102,7 +1110,8 @@ def test_script_categorias(script, capsys):
     cheia = {"amount": 100_000, "amount_refunded": 100_000, "disputed": False}
     script.stripe.cobrancas |= {solta.fatura: cheia, em_saque.fatura: cheia, paga.fatura: cheia,
                                 parcial.fatura: {"amount": 50_000, "amount_refunded": 1_000, "disputed": False},
-                                disputada.fatura: {**cheia, "disputed": True}, registrada.fatura: cheia}
+                                disputada.fatura: {**cheia, "disputed": True},
+                                registrada.fatura: {"amount": 100_000, "amount_refunded": 1_000, "disputed": False}}
     n, saida = _roda(script, capsys, False)
     assert _linha_de(saida, solta).startswith("a_estornar:") and "R$ 100.00" in _linha_de(saida, solta)
     for com in (parcial, em_saque, paga):
@@ -1192,3 +1201,345 @@ def test_script_alcanca_conta_excluida(script, capsys):
     db.delete_user_data(com.indicado.uid)
     _roda(script, capsys, True)
     assert _rev(com.fatura)["status"] == "open"
+
+
+# ── Rodada 2 do Tester (A1 a A12) e mutações que sobreviveram ────────────────
+
+def _saque_com_pix(c):
+    r = _sacar(c)
+    assert r.status_code == 200, r.text
+    return r.json()["payout"]["id"]
+
+
+@pytest.mark.parametrize("como", ["rejeitado", "pago", "realizado"])
+def test_qr_so_de_saque_aberto(adm, como):
+    """A1: QR de saque fechado deixaria pagar de novo o que já saiu ou foi recusado."""
+    c = _afiliado()
+    a = _paga(c)
+    saque = _saque_com_pix(c)
+    if como == "rejeitado":
+        assert _rejeitar(adm, saque).status_code == 200
+    elif como == "pago":
+        assert _pagar(adm, saque).status_code == 200
+    else:
+        _total(a)
+        assert _realizado(adm, saque).status_code == 200
+    assert adm.get(f"/admin/api/affiliates/payouts/{saque}/pix").status_code == 409
+
+
+def _cheia():
+    return {"amount": 100_000, "amount_refunded": 100_000, "disputed": False}
+
+
+@pytest.mark.parametrize("estado", ["solta", "em_saque", "paga"])
+def test_script_ve_reembolso_maior_de_pendencia_ja_registrada(script, capsys, estado):
+    """A2: parcial já resolvida, total perdido no webhook. O script tem de chegar ao total."""
+    c = _afiliado()
+    a = _paga(c)
+    saque = None
+    if estado == "em_saque":
+        saque = request_payout(c.aff["id"])["id"]
+    elif estado == "paga":
+        saque = request_payout(c.aff["id"])["id"]
+        assert mark_payout_paid(saque)
+    registrar_reembolso(a.fatura, "partial", 30_000, AGORA)
+    assert resolver_parcial(_rev(a.fatura)["id"], "adm", 10_000, "nota de teste 1", 30_000)
+    script.stripe.cobrancas[a.fatura] = _cheia()
+    n = script.rodar(aplicar=True)
+    if estado == "solta":
+        assert _status(a)["status"] == "reversed" and n["a_estornar"] >= 1
+    elif estado == "em_saque":
+        assert _rev(a.fatura)["status"] == "open"
+        with pytest.raises(SaqueComPendencia):
+            mark_payout_paid(saque)
+    else:
+        assert (_rev(a.fatura)["status"], _rev(a.fatura)["recovery_cents"]) == ("recovery", 10_000)
+
+
+def test_script_pula_so_a_linha_ja_total(script, capsys):
+    """Positivo do A2: pendência `total` não é relida; sem fato novo, nada muda."""
+    c = _afiliado()
+    a, _ = _paga_e_saca(c)
+    registrar_reembolso(a.fatura, "total", 100_000, AGORA)
+    eventos = _acoes(a.fatura)
+    script.stripe.cobrancas[a.fatura] = _cheia()
+    n, saida = _roda(script, capsys, True)
+    assert _acoes(a.fatura) == eventos and _linha_de(saida, a) == "" and n["ja_registrada"] >= 1
+
+
+def test_aviso_velho_nao_marca_a_recuperacao(canal, adm, monkeypatch):
+    """A4: o worker manda o aviso `open`, e no meio do envio o admin registra o pagamento."""
+    _limpa_fila()
+    c = _afiliado()
+    a = _paga(c)
+    saque = request_payout(c.aff["id"])["id"]
+    monkeypatch.delenv("ADMIN_NOTIFY_WEBHOOK_URL")
+    _total(a)
+    monkeypatch.setenv("ADMIN_NOTIFY_WEBHOOK_URL", URL)
+
+    def envia_e_registra(msg):
+        canal.enviados.append(msg)
+        assert _realizado(adm, saque).status_code == 200
+        return True
+
+    monkeypatch.setattr(admin_notify, "_send", envia_e_registra)
+    assert reenviar_pendentes(limite=1) == 1
+    rev = _rev(a.fatura)
+    assert (rev["status"], rev["notified_at"]) == ("recovery", None)
+    monkeypatch.setattr(admin_notify, "_send", lambda msg: canal.enviados.append(msg) or True)
+    assert reenviar_pendentes() == 1 and "recuperação pendente" in canal.enviados[-1]
+
+
+def test_script_nao_rotula_cobranca_contestada(script, capsys):
+    """A6: a passada de pagamentos não rotula `total` o que a de comissões não confirmou."""
+    c = _afiliado()
+    a = _paga(c)
+    saque = request_payout(c.aff["id"])["id"]
+    script.stripe.cobrancas[a.fatura] = {**_cheia(), "disputed": True}
+    script.stripe.faturas[_cliente(a.indicado)] = [_fatura(a.fatura)]
+    n, saida = _roda(script, capsys, True)
+    with get_conn() as conn:
+        rotulo = conn.execute("select refund_status from affiliate_referral_payments where payment_ref = %s",
+                              (a.fatura,)).fetchone()["refund_status"]
+    assert rotulo == "none" and _rev(a.fatura) is None
+    assert _linha_de(saida, a).endswith("· disputa") and n["contestadas_para_conferir"] == 1
+    assert _status(a)["payout_id"] == saque and _status(a)["status"] == "pending"
+
+
+def test_rejeicao_fecha_pendencia_da_comissao_estornada_pelo_rotulo(mundo, adm):
+    """A8: duas cobranças na fatura. A 2ª devolvida inteira rotula `total`; a pendência segue parcial."""
+    c = _afiliado()
+    a = _paga(c)
+    saque = request_payout(c.aff["id"])["id"]
+    assert _enviar("charge.refunded", _cobranca(a.fatura, amount=60_000, devolvido=50_000)).status_code == 200
+    assert _enviar("charge.refunded", _cobranca(a.fatura, amount=40_000, devolvido=40_000)).status_code == 200
+    assert _rejeitar(adm, saque).status_code == 200
+    assert _status(a)["status"] == "reversed"
+    assert _rev(a.fatura)["status"] == "resolved" and _acoes(a.fatura)[-1] == "payout_rejected"
+    assert _quadros(c)["review"] == 0
+
+
+@pytest.mark.parametrize("veneno", ["\x00" * 12, "\ud800" * 12, " \x00\ud800 " * 6], ids=["nul", "surrogate", "misto"])
+@pytest.mark.parametrize("acao", ["aprovar", "realizado", "encerrar"])
+def test_justificativa_so_de_veneno_e_recusada(adm, veneno, acao):
+    """A9: limpa vira U+FFFD, e U+FFFD não é texto."""
+    c = _afiliado()
+    if acao == "aprovar":
+        a = _paga(c)
+        _parcial(a)
+        r = _aprovar(adm, a, 6_000, nota=veneno)
+    elif acao == "realizado":
+        a = _paga(c)
+        saque = request_payout(c.aff["id"])["id"]
+        _total(a)
+        r = _realizado(adm, saque, justification=veneno)
+    else:
+        a, _ = _paga_e_saca(c)
+        _total(a)
+        r = _encerrar(adm, a, "waived", justification=veneno)
+    assert r.status_code == 422, r.text
+
+
+def test_justificativa_com_veneno_e_texto_passa(adm):
+    """Positivo do A9: o veneno sai, o texto fica."""
+    c = _afiliado()
+    a = _paga(c)
+    _parcial(a)
+    assert _aprovar(adm, a, 6_000, nota="Ajuste\x00 do valor devolvido").status_code == 200
+
+
+def test_script_conta_pelo_desfecho_real(script, capsys, monkeypatch):
+    """A10: comissão entra em saque entre a leitura e a gravação. Não estornou: não conta como estorno."""
+    import backfill_afiliado_pagamentos as modulo
+    c = _afiliado()
+    a = _paga(c)
+    script.stripe.cobrancas[a.fatura] = _cheia()
+    real = modulo.registrar_reembolso
+
+    def saca_antes(*x, **k):
+        request_payout(c.aff["id"])
+        return real(*x, **k)
+
+    monkeypatch.setattr(modulo, "registrar_reembolso", saca_antes)
+    n, saida = _roda(script, capsys, True)
+    assert (n["a_estornar"], n["a_estornar_cents"]) == (0, 0)
+    assert n["segue_revisao"] >= 1 and _linha_de(saida, a).startswith("segue_revisao:")
+
+
+def test_script_sem_confirmacao_sai_com_erro(script, capsys, monkeypatch):
+    """A10: a API fora em toda comissão não pode sair com 0."""
+    c = _afiliado()
+    a = _paga(c)
+    script.stripe.pagamentos[a.fatura] = ConnectionError("fora")
+    monkeypatch.setattr(sys, "argv", ["backfill", "--aplicar"])
+    assert script.main() == 1
+
+
+def test_script_sem_pendencias_sai_com_zero(script, capsys, monkeypatch):
+    """Positivo do A10: com tudo confirmado, o código de saída segue 0."""
+    _paga(_afiliado())  # o Stripe falso diz "sem reembolso" para toda comissão do banco
+    monkeypatch.setattr(sys, "argv", ["backfill"])
+    assert script.main() == 0
+
+
+def test_fato_novo_reabre_o_aviso(canal):
+    """Mutação 1: reembolso maior zera `notified_at` e o admin é avisado de novo."""
+    c = _afiliado()
+    a = _paga(c)
+    request_payout(c.aff["id"])
+    _parcial(a)
+    assert len(canal.enviados) == 1 and _rev(a.fatura)["notified_at"] is not None
+    _parcial(a, 50_000)
+    assert len(canal.enviados) == 2 and _rev(a.fatura)["notified_at"] is not None
+
+
+def test_realizado_reabre_o_aviso_como_recuperacao(canal, adm):
+    """Mutação 43: o aviso `open` já saiu; a recuperação nascida no "Pagamento já realizado" sai também."""
+    c = _afiliado()
+    a = _paga(c)
+    saque = request_payout(c.aff["id"])["id"]
+    _total(a)
+    assert len(canal.enviados) == 1
+    assert _realizado(adm, saque).status_code == 200
+    assert _rev(a.fatura)["notified_at"] is None
+    assert reenviar_pendentes() >= 1 and any("recuperação pendente" in m for m in canal.enviados[1:])
+
+
+def test_recuperacao_desconta_e_acumula_o_ja_encerrado(adm):
+    """Mutações 19 e 23: duas revisões parciais numa comissão paga, cada uma encerrada, e depois o total."""
+    c = _afiliado()
+    a, _ = _paga_e_saca(c)
+    _parcial(a)
+    assert _aprovar(adm, a, 6_000).status_code == 200
+    assert _rev(a.fatura)["recovery_cents"] == 4_000
+    assert _encerrar(adm, a).status_code == 200
+    _parcial(a, 50_000)
+    assert _aprovar(adm, a, 3_000).status_code == 200
+    rev = _rev(a.fatura)
+    assert (rev["status"], rev["recovery_cents"]) == ("recovery", 3_000)  # 100 - 30 - 40 já encerrados
+    assert _encerrar(adm, a).status_code == 200
+    assert _rev(a.fatura)["recovery_closed_cents"] == 7_000
+    _total(a)
+    assert (_rev(a.fatura)["status"], _rev(a.fatura)["recovery_cents"]) == ("recovery", 3_000)
+
+
+def test_saque_pago_nao_aparece_bloqueado(adm):
+    """Mutação 47: parcial aberta sobre comissão já paga não bloqueia saque fechado."""
+    c = _afiliado()
+    _, saque = _paga_e_saca(c)
+    _parcial(SimpleNamespace(fatura=_fatura_da(saque)))
+    assert next(p for p in adm.get(OVERVIEW).json()["payouts"] if p["id"] == saque)["blocked"] is False
+
+
+def _fatura_da(saque):
+    with get_conn() as conn:
+        return conn.execute("select stripe_invoice_id from affiliate_commissions where payout_id = %s",
+                            (saque,)).fetchone()["stripe_invoice_id"]
+
+
+def test_comissao_em_saque_com_parcial_nao_esta_em_revisao(mundo):
+    """Mutação 38: `in_review` é só a comissão fora do saque; a do saque segue "em saque"."""
+    c = _afiliado()
+    a, _, _ = _dois_com_saque(c)
+    _parcial(a)
+    item = next(x for x in _me(c)["commissions"] if x["id"] == a.id)
+    assert item["in_review"] is False and item["payout_id"]
+
+
+def test_ja_pago_do_admin_vem_do_saque(adm):
+    """Mutação 46: comissão apagada pela cascata antiga não encolhe o "Já pago" do admin."""
+    c = _afiliado()
+    a, b, saque = _dois_com_saque(c)
+    assert mark_payout_paid(saque)
+    with get_conn() as conn:
+        conn.execute("delete from affiliate_commissions where id = %s", (b.id,))
+        conn.commit()
+    linha = next(x for x in adm.get(OVERVIEW).json()["affiliates"] if x["id"] == c.aff["id"])
+    assert linha["paid_cents"] == 17_000
+
+
+def test_revisao_recusa_comissao_que_saiu_do_saque_no_meio(mundo):
+    """Mutação 16: a comissão sai do saque entre a leitura e a trava; a revisão não mexe no saque velho."""
+    c = _afiliado()
+    a, _, saque = _dois_com_saque(c)
+    _parcial(a)
+    rev = _rev(a.fatura)
+    with ThreadPoolExecutor(1) as pool, get_conn() as segura:
+        _segura(segura, a)
+        try:
+            revisao = pool.submit(resolver_parcial, rev["id"], "adm", 6_000, "ajuste no meio", rev["refunded_cents"])
+            assert _esperando_lock(1)
+            segura.execute("update affiliate_commissions set payout_id = null where id = %s", (a.id,))
+        finally:
+            segura.commit()
+        assert isinstance(revisao.exception(timeout=15), PendenciaMudou)
+    assert _saque(saque)["amount_cents"] == 17_000 and _comissao_db(a)["amount_cents"] == 10_000
+
+
+@pytest.mark.parametrize("rota", ["reject", "reverse"])
+def test_autor_do_evento_e_o_admin_logado(mundo, monkeypatch, rota):
+    """Mutações 73 e 74: com usuário diferente do padrão, o evento leva quem agiu."""
+    monkeypatch.setattr(admin_dashboard, "ADMIN_DASHBOARD_USERNAME", "lucas")
+    adm = _admin(monkeypatch)
+    c = _afiliado()
+    a = _paga(c)
+    if rota == "reject":
+        saque = request_payout(c.aff["id"])["id"]
+        _total(a)
+        assert _rejeitar(adm, saque).status_code == 200
+    else:
+        _parcial(a)
+        assert _post(adm, f"commissions/{a.id}/reverse").status_code == 200
+    assert _eventos(a.fatura)[-1]["actor"] == "lucas"
+
+
+@pytest.mark.parametrize("tamanho,status", [(9, 422), (10, 200), (500, 200), (501, 422)])
+def test_justificativa_nas_bordas(adm, tamanho, status):
+    """Mutação 59: 9 e 501 recusados; 10 e 500 aceitos."""
+    c = _afiliado()
+    a = _paga(c)
+    _parcial(a)
+    assert _aprovar(adm, a, 6_000, nota="j" * tamanho).status_code == status
+
+
+class _Relogio(datetime):
+    """`now` fixo: 2026-11-06 23:30 em Brasília, já 07/11 em UTC."""
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 11, 7, 2, 30, tzinfo=ZoneInfo("UTC")).astimezone(tz)
+
+
+@pytest.mark.parametrize("dia,status", [("2026-11-07", 422), ("2026-11-06", 200)])
+def test_futuro_e_em_brasilia(adm, monkeypatch, dia, status):
+    """Mutação 55: às 23:30 de Brasília o dia seguinte ainda é futuro, mesmo já sendo amanhã em UTC."""
+    c = _afiliado()
+    a = _paga(c)
+    saque = request_payout(c.aff["id"])["id"]
+    with get_conn() as conn:
+        conn.execute("update affiliate_payouts set requested_at = '2026-11-01 12:00+00' where id = %s", (saque,))
+        conn.commit()
+    _total(a)
+    monkeypatch.setattr(modulo_reembolso, "datetime", _Relogio)
+    assert _realizado(adm, saque, paid_on=dia).status_code == status
+
+
+@pytest.mark.parametrize("pedido,dia,status", [
+    ("2026-11-02 01:30+00", "2026-11-01", 200),  # 22:30 de 01/11 em Brasília; já 02/11 em UTC
+    ("2026-11-02 03:30+00", "2026-11-01", 422),  # 00:30 de 02/11 em Brasília; ainda 01/11 a oeste
+], ids=["brasilia_atras_de_utc", "brasilia_a_frente_do_oeste"])
+def test_minimo_e_o_dia_do_pedido_em_brasilia(adm, pedido, dia, status):
+    """Mutação 65: o dia do pedido é o de Brasília, qualquer que seja o fuso da sessão do banco."""
+    c = _afiliado()
+    a = _paga(c)
+    saque = request_payout(c.aff["id"])["id"]
+    with get_conn() as conn:
+        conn.execute("update affiliate_payouts set requested_at = %s where id = %s", (pedido, saque))
+        conn.commit()
+    _total(a)
+    assert _realizado(adm, saque, paid_on=dia).status_code == status
+
+
+def test_dia_em_brasilia_nao_depende_do_fuso_de_quem_entrega():
+    """Mutação 65: o pool entrega em Brasília (a rota acima não a separa); aqui o instante vem em UTC."""
+    from datetime import date
+    assert modulo_reembolso.dia_em_brasilia(datetime(2026, 11, 2, 1, 30, tzinfo=ZoneInfo("UTC"))) == date(2026, 11, 1)

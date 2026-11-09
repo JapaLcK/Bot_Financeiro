@@ -2607,7 +2607,8 @@ indicado. Quadros: `stats.held`, `.available`, `.review`, `.requested` e `.paid`
 (`review`) é comissão `pending`, sem saque, com pendência `open`, e tem precedência sobre carência
 e disponível; comissão parcial já em saque segue em "Em saque", com o saque bloqueado.
 `stats.requested` e `stats.paid` vêm de `affiliate_payouts` (`status` `requested` e `paid`), não
-das comissões, e `admin_list_affiliates` soma o "pago" do mesmo jeito.
+das comissões, e `admin_list_affiliates` soma o "pago" do mesmo jeito. A coluna do admin "A pagar ou
+em revisão" (`owed_cents`) soma toda comissão `pending`, inclusive a em revisão e a de saque bloqueado.
 `request_payout` trava a linha de `affiliates` (`for no key update`) antes de checar o
 saque aberto: dois pedidos simultâneos dão um saque, e a FK do webhook que grava comissão
 não espera essa trava. Ele lê as comissões duas vezes: `for update` nas elegíveis e nova leitura
@@ -2669,13 +2670,16 @@ histórico. Saque abaixo do mínimo depois do ajuste paga assim mesmo: a regra �
 rejeitar o saque (estorna pelo rótulo **ou** pela pendência, e fecha com `payout_rejected`), ou
 "Pagamento já realizado". Nota sozinha não fecha. Rejeição é do admin, nunca do webhook: rejeitar
 sozinho com o Pix já feito devolveria as outras comissões ao saldo. Rejeitar com pendência `partial`
-mantém a pendência, e a comissão volta para "Em revisão". `reverse_commission` fecha a pendência
+mantém a pendência, e a comissão volta para "Em revisão", salvo se o rótulo `total` a estornou (fatura
+com mais de uma cobrança): aí a pendência fecha junto, com `payout_rejected`. O QR só sai de saque
+`requested`: pago, rejeitado ou registrado dá 409. `reverse_commission` fecha a pendência
 aberta com `commission_reversed`.
 
 **"Pagamento já realizado"** (`POST /admin/api/affiliates/payouts/{id}/payment-recorded`): para Pix
 que saiu antes do reembolso. Marca saque e comissões como pagos, sem QR, sem transferência e sem
 devolver nada ao saldo, e exige pendência aberta. `total` vai a `recovery`; `partial` segue `open`,
-sem bloqueio. Justificativa de 10 a 500 caracteres, `paid_on` não futura em Brasília nem anterior ao
+sem bloqueio. Justificativa de 10 a 500 caracteres, contados depois de limpar (NUL e surrogate
+viram U+FFFD, que não conta como texto), `paid_on` não futura em Brasília nem anterior ao
 pedido, `receipt_ref` de 4 a 120 caracteres. Referência e justificativa moram só no evento: nunca em
 log, aviso ou `affiliate_payouts.note`, que sai no `/api/affiliate/me`.
 
@@ -2689,7 +2693,8 @@ e referência) ou `waived` (sem elas), e repetir dá 409, sem novo evento.
 **Notificação.** A linha é a notificação pendente: `notified_at` nulo, gravado na mesma transação.
 `notified_at` só com `_send` True. O webhook tenta uma vez depois do commit, e o
 `_afiliado_alerta_worker` do `lifespan` repete a cada 300 s, a 1ª volta sem espera, parando na 1ª
-falha. Concorrência por claim com prazo (`reivindicar`, 2 minutos, HTTP fora da transação): processo
+falha. `marcar_avisada` só marca se `refunded_cents` e `status` seguem os do envio: fato novo ou
+"Pagamento já realizado" durante o HTTP deixam o aviso novo pendente. Concorrência por claim com prazo (`reivindicar`, 2 minutos, HTTP fora da transação): processo
 que morre deixa a linha voltar; repetição é possível, perda não. Falha de aviso responde 200; 5xx só
 por banco ou API da Stripe. Log `affiliate_refund_commission_kept` com `alerta_entregue`.
 
@@ -2718,10 +2723,14 @@ cobrança, nenhuma com `disputed`, todas com `amount_refunded >= amount`; alguma
 todas, é parcial. Categorias: `a_estornar` (total, `pending`, sem saque; lista id e valor, e o total),
 `segue_revisao` (parcial, ou total em saque ou paga), `sem_confirmacao` (exceção, `payment_record`,
 erro da API, sem cobrança, disputa; lista id e o tipo do motivo, sem alteração) e `ja_registrada`
-(só conta). O `--aplicar` não confia na classificação: chama `registrar_reembolso`, a mesma função do
-webhook, com ator `script`, e a linha impressa diz o que aconteceu. A segunda passada completa o
-registro (fatura de plano sem comissão, webhook perdido, reembolso antigo): não marca contestação
-(a cobrança não diz se foi perdida) e não recupera conta excluída. Pula o cartão recusado com Pix
+(pendência já `total`, ou já com esse devolvido; só conta). Pendência parcial registrada é relida: o
+total que o webhook perdeu é fato novo. O `--aplicar` não confia na classificação: chama
+`registrar_reembolso`, a mesma função do webhook, com ator `script`, e a categoria e a linha impressa
+são o desfecho relido depois, não a previsão. `sem_confirmacao` faz o script sair com 1. A segunda
+passada completa o registro (fatura de plano sem comissão, webhook perdido, reembolso antigo): fatura
+com cobrança contestada não é rotulada, só contada em `contestadas_para_conferir`, porque um rótulo
+`total` sem pendência estornaria na rejeição sem nada bloquear o pagamento; e não recupera conta
+excluída. Pula o cartão recusado com Pix
 cobrindo pela `MARCA` na assinatura; assinatura já morta quando a recusa rodou não grava a `MARCA`,
 e o script conta a fatura. Fatura com `payment.type = payment_record` faz `cobrancas_da_fatura`
 levantar: nessa passada, o cliente inteiro sai em `clientes_com_falha`. É idempotente, e não imprime

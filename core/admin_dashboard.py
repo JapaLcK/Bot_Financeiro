@@ -2323,6 +2323,8 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         row = await asyncio.to_thread(get_payout, payout_id)
         if not row:
             raise HTTPException(status_code=404, detail="Saque não encontrado.")
+        if row["status"] != "requested":  # pago, rejeitado ou registrado: um QR aqui pagaria de novo
+            raise HTTPException(status_code=409, detail="Este saque não está aberto.")
         if row["blocked"]:
             raise HTTPException(status_code=409, detail="Este saque tem reembolso de cliente em análise.")
 

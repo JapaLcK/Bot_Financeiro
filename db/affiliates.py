@@ -566,8 +566,8 @@ def reject_payout(payout_id: int, note: str | None = None, revisor: str = "admin
                 (int(payout_id),),
             )
             estornadas = [c["id"] for c in cur.fetchall() if c["status"] == "reversed"]
-            for r in abertas:
-                if r["tipo"] == "total":
+            for r in abertas:  # parcial sobre comissão que o rótulo `total` estornou também fecha
+                if r["tipo"] == "total" or r["commission_id"] in estornadas:
                     cur.execute("update affiliate_refund_reviews set status = 'resolved' where id = %s", (r["id"],))
                     registrar_evento(cur, r["id"], "payout_rejected", revisor, saque=int(payout_id))
             conn.commit()

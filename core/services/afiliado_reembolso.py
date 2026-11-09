@@ -79,7 +79,7 @@ def _enviar(r: dict) -> bool:
     """`r` já reivindicada. `notified_at` só com entrega confirmada."""
     entregue = admin_notify.notify_afiliado_alerta(_texto(r)) is True
     if entregue:
-        marcar_avisada(r["id"], r["refunded_cents"])
+        marcar_avisada(r["id"], r["refunded_cents"], r["status"])
     _registrar_tentativa(r, entregue)
     return entregue
 
@@ -98,9 +98,10 @@ def reenviar_pendentes(limite: int = 20) -> int:
 
 
 def validar_justificativa(valor) -> str:
-    """Regra única das três ações do admin. O erro nunca ecoa o valor."""
+    """Regra única das três ações do admin. O erro nunca ecoa o valor. Conta depois de limpar:
+    NUL e surrogate viram U+FFFD, que não é texto."""
     texto = limpa_para_pg(valor).strip() if isinstance(valor, str) else ""
-    if not 10 <= len(texto) <= 500:
+    if len(texto.replace("\ufffd", "").strip()) < 10 or len(texto) > 500:
         raise ValueError("Justificativa: de 10 a 500 caracteres.")
     return texto
 

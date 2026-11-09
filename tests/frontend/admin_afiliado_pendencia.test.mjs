@@ -23,9 +23,9 @@ const VISAO = {
 
 async function abrir({ width = 1280, height = 900, visao = VISAO, resposta = { status: 200, body: "{\"ok\":true}" } } = {}) {
   const page = await browser.newPage({ viewport: { width, height } });
-  const posts = [];
+  const posts = [], leituras = [];
   await page.route("**/admin/api/**", (r) => r.fulfill({ contentType: "application/json", body: "{}" }));
-  await page.route("**/admin/api/affiliates", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify(visao) }));
+  await page.route("**/admin/api/affiliates", (r) => { leituras.push(Date.now()); return r.fulfill({ contentType: "application/json", body: JSON.stringify(visao) }); });
   await page.route(/\/admin\/api\/affiliates\/(payouts|refund-reviews)\/\d+\/(payment-recorded|approve|close-recovery)$/, (r) => {
     posts.push({ url: new URL(r.request().url()).pathname, corpo: r.request().postDataJSON() });
     return r.fulfill({ contentType: "application/json", ...resposta });
@@ -33,7 +33,7 @@ async function abrir({ width = 1280, height = 900, visao = VISAO, resposta = { s
   await page.goto(`${ORIGIN}/admin-dashboard.html`, { waitUntil: "domcontentloaded" });
   await page.evaluate(() => window.loadAffiliates());
   await page.locator("#aff-reviews tr").first().waitFor({ state: "attached" });
-  return { page, posts };
+  return { page, posts, leituras };
 }
 const TAMANHOS = [["desktop", 1280, 900], ["celular", 390, 844], ["320", 320, 568]];
 
@@ -153,5 +153,30 @@ test("409 fica no formulário, com a mensagem do servidor", async () => {
     await page.locator("#aff-form-send").click();
     await page.locator("#aff-form-error").filter({ hasText: "A pendência mudou" }).waitFor();
     assert.equal(await page.locator("#aff-form").evaluate((d) => d.open), true);
+  } finally { await page.close(); }
+});
+
+// mutação: tirar o `loadAffiliates()` do 409 em `payoutAction`: o admin segue vendo o saque velho com botões que o servidor recusa
+test("'Marcar pago' recusado com 409 recarrega a lista", async () => {
+  const { page, leituras } = await abrir();
+  const alertas = [];
+  page.on("dialog", (d) => { if (d.type() === "alert") alertas.push(d.message()); return d.accept(); });
+  await page.route("**/admin/api/affiliates/payouts/8/paid", (r) => r.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: "Este saque tem reembolso de cliente em análise." }) }));
+  try {
+    const antes = leituras.length;
+    await page.locator("#aff-payouts tr").nth(1).getByRole("button", { name: "Marcar pago" }).click();
+    const fim = Date.now() + 4000;
+    while (leituras.length === antes && Date.now() < fim) await page.waitForTimeout(50);
+    assert.equal(leituras.length, antes + 1);
+    assert.deepEqual(alertas, ["Este saque tem reembolso de cliente em análise."]);
+  } finally { await page.close(); }
+});
+
+// mutação: voltar o cabeçalho a "A pagar": a soma inclui comissão em revisão e saque bloqueado
+test("a coluna de saldo diz que inclui o que está em revisão", async () => {
+  const { page } = await abrir();
+  try {
+    const cabecalho = await page.locator("#aff-list").locator("xpath=../thead").innerText();
+    assert.match(cabecalho, /A PAGAR OU EM REVISÃO/i);
   } finally { await page.close(); }
 });
