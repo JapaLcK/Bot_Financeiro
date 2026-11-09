@@ -180,9 +180,11 @@ def _linha(status, dias, comissao=None, evento=False):
     fatura = f"in_{uuid.uuid4().hex[:12]}"
     with get_conn() as conn:
         rid = conn.execute(
-            "insert into affiliate_refund_reviews(stripe_invoice_id, commission_id, tipo, refunded_cents, status, created_at)"
-            " values (%s, %s, 'total', 1000, %s, now() - make_interval(days => %s)) returning id",
-            (fatura, comissao, status, dias)).fetchone()["id"]
+            # Linha coerente e já avisada: a fila de aviso é do banco inteiro, e linha torta quebraria outro teste.
+            "insert into affiliate_refund_reviews(stripe_invoice_id, commission_id, tipo, refunded_cents, status, created_at,"
+            " recovery_cents, notified_at) values (%s, %s, 'total', 1000, %s, now() - make_interval(days => %s), %s, now())"
+            " returning id",
+            (fatura, comissao, status, dias, 1000 if status == "recovery" else None)).fetchone()["id"]
         if evento:
             conn.execute("insert into affiliate_refund_review_events(review_id, action, actor) values (%s, 'reopened', 'sistema')", (rid,))
         conn.commit()

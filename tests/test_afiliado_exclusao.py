@@ -11,7 +11,17 @@ from fastapi.testclient import TestClient
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 from core.services.afiliado_reembolso import reenviar_pendentes
-from db.affiliates import get_affiliate_stats, list_affiliate_payouts, mark_payout_paid, request_payout
+from db.affiliates import (
+    SaqueOrfao,
+    get_affiliate_stats,
+    list_affiliate_payouts,
+    mark_payout_paid,
+    registrar_pagamento_realizado,
+    reject_payout,
+    request_payout,
+)
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from db.connection import get_conn
 from test_afiliado_area import ME, _afiliado, _esperando_lock, _painel_aberto, _sacar  # noqa: F401
 from test_afiliado_pendencia import (  # noqa: F401
@@ -91,11 +101,11 @@ def test_recuperacao_aponta_saque_que_sobrou(canal, adm):
     assert linha["payout_paid_at"] and pago["paid_at"]
 
 
-def test_exclusao_do_afiliado_fecha_pendencia_aberta(canal, monkeypatch):
+def test_exclusao_do_afiliado_fecha_pendencia_aberta_de_comissao_solta(canal, monkeypatch):
+    """Solta, nunca paga nem em saque: não há o que bloquear nem recuperar, e a pendência fecha."""
     _limpa_fila()
     c = _afiliado()
     a = _paga(c)
-    request_payout(c.aff["id"])
     monkeypatch.delenv("ADMIN_NOTIFY_WEBHOOK_URL")
     _parcial(a)
     monkeypatch.setenv("ADMIN_NOTIFY_WEBHOOK_URL", URL)
@@ -337,3 +347,147 @@ def test_comissao_nao_paga_nao_deixa_linha(canal):
     com = _paga(c)
     _excluir(c)
     assert _rev(com.fatura) is None
+
+
+# ── Saque órfão guarda vínculo (decisão do dono): mesmo comportamento de afiliado ativo ──
+
+def _orfao_de_170(c):
+    """O exemplo do dono: saque de R$ 170, com a comissão de R$ 100 e a de R$ 70, e o afiliado exclui a conta."""
+    a, b = _paga(c), _paga(c, 70)
+    saque = _saque_com_pix(c)
+    _excluir(c)
+    return a, b, saque
+
+
+def _bloqueado(adm, saque):
+    return next(p for p in adm.get(OVERVIEW).json()["payouts"] if p["id"] == saque)["blocked"]
+
+
+def test_orfao_pago_e_depois_reembolso_total_vira_recuperacao(canal, adm):
+    c = _afiliado()
+    a, _, saque = _orfao_de_170(c)
+    assert _realizado(adm, saque).status_code == 200
+    _total(a)
+    rev = _rev(a.fatura)
+    assert (rev["status"], rev["recovery_cents"], rev["affiliate_code"]) == ("recovery", 10_000, c.aff["code"])
+    linha = next(r for r in adm.get(OVERVIEW).json()["refund_recoveries"] if r["id"] == rev["id"])
+    assert (linha["payout_id"], linha["code"]) == (saque, c.aff["code"])
+
+
+def test_reembolso_antes_do_registro_bloqueia_o_orfao(canal, adm):
+    c = _afiliado()
+    a, b, saque = _orfao_de_170(c)
+    assert _bloqueado(adm, saque) is False  # positivo: sem reembolso, nada bloqueia
+    _total(a)
+    assert _rev(a.fatura)["status"] == "open" and _bloqueado(adm, saque) is True
+    assert _pagar(adm, saque).status_code == 409
+    assert _rev(b.fatura)["status"] == "resolved"  # a de R$ 70 não teve reembolso
+    assert _realizado(adm, saque).status_code == 200  # D2: total fecha com o pagamento realizado
+    assert (_rev(a.fatura)["status"], _rev(a.fatura)["recovery_cents"]) == ("recovery", 10_000)
+
+
+@pytest.mark.parametrize("reembolso", ["total", "parcial"])
+def test_rejeitar_orfao_com_reembolso_fecha_sem_recuperacao(canal, adm, reembolso):
+    """A parcial também fecha: no saque vivo ela voltaria para revisão, mas a comissão saiu e nunca foi paga."""
+    c = _afiliado()
+    a, _, saque = _orfao_de_170(c)
+    _total(a) if reembolso == "total" else _parcial(a)
+    assert _rejeitar(adm, saque).status_code == 200
+    rev = _rev(a.fatura)
+    assert (rev["status"], rev["recovery_cents"]) == ("resolved", None)
+    assert _acoes(a.fatura)[-1] == "payout_rejected"
+    _total(a)  # reentrega depois: a comissão nunca foi paga
+    assert _rev(a.fatura)["status"] == "resolved"
+
+
+def test_orfao_rejeitado_e_depois_reembolso_nao_abre_nada(canal, adm):
+    """A comissão nunca foi paga: o reembolso depois da rejeição não bloqueia nem recupera."""
+    c = _afiliado()
+    a, _, saque = _orfao_de_170(c)
+    assert _rejeitar(adm, saque).status_code == 200
+    _total(a)
+    rev = _rev(a.fatura)
+    assert (rev["status"], rev["recovery_cents"]) == ("resolved", None) and canal.enviados == []
+
+
+def test_parcial_no_orfao_ajusta_o_saque_e_vira_recuperacao_depois_do_pagamento(canal, adm):
+    c = _afiliado()
+    a, _, saque = _orfao_de_170(c)
+    _parcial(a)
+    assert _bloqueado(adm, saque) is True
+    assert _aprovar(adm, a, 6_000).status_code == 200
+    assert _saque_db(saque)["amount_cents"] == 13_000 and _bloqueado(adm, saque) is False
+    assert _realizado(adm, saque).status_code == 200
+    _total(a)
+    assert (_rev(a.fatura)["status"], _rev(a.fatura)["recovery_cents"]) == ("recovery", 6_000)
+
+
+def test_pendencia_aberta_no_saque_sobrevive_a_exclusao_e_bloqueia(canal, adm):
+    c = _afiliado()
+    a, _ = _paga(c), _paga(c, 70)
+    saque = _saque_com_pix(c)
+    _parcial(a)
+    _excluir(c)
+    assert _rev(a.fatura)["status"] == "open" and _bloqueado(adm, saque) is True
+    assert _aprovar(adm, a, 10_000).status_code == 200  # aprovado cheio: nada muda no saque
+    assert _bloqueado(adm, saque) is False and _saque_db(saque)["amount_cents"] == 17_000
+
+
+def test_pendencia_aberta_de_comissao_paga_sobrevive_a_exclusao(canal, adm):
+    """Mesmo comportamento de afiliado ativo: a parcial de comissão paga segue para o admin decidir."""
+    c = _afiliado()
+    a, _ = _paga_e_saca(c)
+    _parcial(a)
+    _excluir(c)
+    assert _rev(a.fatura)["status"] == "open"
+    assert _aprovar(adm, a, 6_000).status_code == 200
+    assert (_rev(a.fatura)["status"], _rev(a.fatura)["recovery_cents"]) == ("recovery", 4_000)
+
+
+def test_orfao_sem_reembolso_paga_sem_recuperacao(canal, adm):
+    """Positivo: o vínculo não inventa recuperação."""
+    c = _afiliado()
+    a, b, saque = _orfao_de_170(c)
+    assert _realizado(adm, saque).status_code == 200
+    assert _saque_db(saque)["status"] == "paid"
+    assert _rev(a.fatura)["status"] == "resolved" and _rev(a.fatura)["recovery_cents"] is None
+    assert adm.get(OVERVIEW).json()["refund_recoveries"] == [] or all(
+        r["id"] not in (_rev(a.fatura)["id"], _rev(b.fatura)["id"]) for r in adm.get(OVERVIEW).json()["refund_recoveries"])
+
+
+def test_vinculo_do_orfao_nao_entra_na_limpeza(canal, adm):
+    import db.affiliate_reviews_manutencao as manutencao
+    c = _afiliado()
+    a, _, saque = _orfao_de_170(c)
+    with get_conn() as conn:
+        conn.execute("update affiliate_refund_reviews set created_at = now() - interval '400 days'"
+                     " where stripe_invoice_id = %s", (a.fatura,))
+        conn.commit()
+    manutencao.limpar_sem_comissao()
+    _total(a)
+    assert _rev(a.fatura)["status"] == "open" and _bloqueado(adm, saque) is True
+
+
+@pytest.mark.parametrize("primeiro", ["webhook", "realizado"])
+def test_orfao_corrida_webhook_e_pagamento_realizado(canal, adm, primeiro):
+    from test_afiliado_area import _esperando_lock
+    from test_afiliado_reembolso import _evento
+    from core.services.afiliado_reembolso import tratar_evento
+    c = _afiliado()
+    a, _, saque = _orfao_de_170(c)
+    evento = _evento(a.fatura)
+    realiza = lambda: registrar_pagamento_realizado(saque, datetime.now(ZoneInfo("America/Sao_Paulo")).date(),
+                                                    "Pix feito antes", "E1234567", "adm")
+    passos = [lambda: tratar_evento(evento), realiza] if primeiro == "webhook" else [realiza, lambda: tratar_evento(evento)]
+    with ThreadPoolExecutor(2) as pool, get_conn() as segura:
+        segura.execute("select id from affiliate_refund_reviews where stripe_invoice_id = %s for update", (a.fatura,))
+        try:
+            f1 = pool.submit(passos[0])
+            assert _esperando_lock(1)
+            f2 = pool.submit(passos[1])
+            assert _esperando_lock(2)
+        finally:
+            segura.commit()
+        f1.result(timeout=20)
+        f2.result(timeout=20)
+    assert (_saque_db(saque)["status"], _rev(a.fatura)["status"], _rev(a.fatura)["recovery_cents"]) == ("paid", "recovery", 10_000)

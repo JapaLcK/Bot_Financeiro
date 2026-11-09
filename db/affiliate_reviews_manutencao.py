@@ -10,9 +10,11 @@ from .connection import get_conn
 
 def desvincular_afiliado(cur, user_id: int) -> None:
     """Afiliado que exclui a conta (A3, D8 = B): pendências, histórico e saques ficam, desvinculados do
-    usuário, com os dados financeiros retidos. Chave Pix e nota do saque saem; pendência `open` fecha,
-    porque sem comissão não há o que bloquear nem o que o admin decidir. Roda na transação de
-    `delete_user_data`, antes de apagar `affiliates`, que leva as comissões em cascata.
+    usuário, com os dados financeiros retidos. Chave Pix e nota do saque saem. A comissão paga (N1) e a
+    de saque aberto ("guardar vínculo") deixam na linha da fatura o valor e o saque, para o reembolso
+    que chegar depois seguir a regra de afiliado ativo; a pendência `open` delas segue aberta. Só a
+    `open` de comissão solta fecha: nunca paga nem em saque, não há o que bloquear nem recuperar.
+    Roda na transação de `delete_user_data`, antes de apagar `affiliates`, que leva as comissões.
 
     Travas na ordem do `request_payout` (afiliado, depois comissões), com os saques no meio: afiliado,
     saques, comissões, pendências. Comissões antes do afiliado fariam ciclo com o pedido de saque."""
@@ -22,12 +24,12 @@ def desvincular_afiliado(cur, user_id: int) -> None:
         return
     cur.execute("select id from affiliate_payouts where affiliate_id = %s order by id for update", (afiliado["id"],))
     cur.execute("select id from affiliate_commissions where affiliate_id = %s order by id for update", (afiliado["id"],))
-    # Comissão paga sem linha da fatura ganha uma, `resolved`: o reembolso que chegar depois tem de achar
-    # o que foi pago (N1). O evento guarda o saque, que sobrevive (D8).
+    # Comissão paga ou em saque sem linha da fatura ganha uma, `resolved`: o reembolso que chegar depois
+    # tem de achar o que foi pago ou o saque que bloquear. O evento guarda o saque, que sobrevive (D8).
     cur.execute(
         """
         select c.id, c.stripe_invoice_id, c.amount_cents, c.payout_id from affiliate_commissions c
-         where c.affiliate_id = %s and c.status = 'paid'
+         where c.affiliate_id = %s and (c.status = 'paid' or (c.status = 'pending' and c.payout_id is not null))
            and not exists (select 1 from affiliate_refund_reviews r where r.stripe_invoice_id = c.stripe_invoice_id)
         """,
         (afiliado["id"],),
@@ -40,15 +42,18 @@ def desvincular_afiliado(cur, user_id: int) -> None:
     cur.execute(
         """
         update affiliate_refund_reviews r
-           set affiliate_code = %s, paid_cents = case when c.status = 'paid' then c.amount_cents end
+           set affiliate_code = %s,
+               paid_cents = case when c.status = 'paid' then c.amount_cents end,
+               commission_cents = case when c.status = 'pending' and c.payout_id is not null then c.amount_cents end,
+               orphan_payout_id = case when c.status = 'pending' then c.payout_id end
           from affiliate_commissions c
          where c.id = r.commission_id and c.affiliate_id = %s
-        returning r.id, r.status
+        returning r.id, r.status, c.status = 'pending' and c.payout_id is null as solta
         """,
         (afiliado["code"], afiliado["id"]),
     )
     for r in cur.fetchall():
-        if r["status"] == "open":
+        if r["status"] == "open" and r["solta"]:
             cur.execute("update affiliate_refund_reviews set status = 'resolved' where id = %s", (r["id"],))
             registrar_evento(cur, r["id"], "affiliate_deleted", "sistema")
     cur.execute("update affiliate_payouts set affiliate_code = %s, pix_key_enc = null, note = null"

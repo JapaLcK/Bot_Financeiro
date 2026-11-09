@@ -2210,7 +2210,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     @app.get("/admin/api/affiliates")
     async def admin_affiliates_overview(username: str = Depends(_get_current_admin)):
         """Lista afiliados (com saldos), pedidos de saque, pendências e recuperações."""
-        from db.affiliate_reviews import listar_admin, listar_historico
+        from db.affiliate_reviews_admin import listar_admin, listar_historico
         from db.affiliate_reviews_manutencao import resumo_da_conferencia
         from db.affiliates import admin_list_affiliates, admin_list_payouts
 

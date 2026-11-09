@@ -2794,17 +2794,26 @@ seguinte não pede. Rollback: o repair volta a FK para `cascade`, e os nulos fic
 **Afiliado que exclui a própria conta** ("mantém, sem a pessoa", A3, D8 = B, D9 = A).
 `desvincular_afiliado` roda na transação de `delete_user_data`, depois do `_lock_user` e antes de apagar
 `affiliates`, travando na ordem afiliado, saques, comissões, pendências (a do `request_payout`). Ela
-grava o código do afiliado nas pendências e nos saques, zera chave Pix e nota dos saques, e fecha as
-pendências `open` com evento `affiliate_deleted` (sem comissão, não há o que bloquear nem decidir).
-Comissão paga guarda o valor em `paid_cents` na pendência da fatura, criada `resolved` se não existia,
-com evento `affiliate_deleted` apontando o saque: reembolso que chega depois segue a regra da comissão
-paga (total vira recuperação; parcial vai para revisão, e o admin decide) e a linha nunca entra na
-limpeza. Comissão não paga sai sem linha: não há dinheiro a recuperar.
-Depois, `affiliates` cai e leva referrals, pagamentos e comissões; `affiliate_payouts.affiliate_id` e
-`affiliate_refund_reviews.commission_id` viram nulos pela FK `set null`. Recuperação segue no admin e
-encerra como antes; o histórico e a recuperação apontam o saque pelo `payout_id` do evento.
+grava o código do afiliado nas pendências e nos saques e zera chave Pix e nota dos saques. Regra: mesmo
+comportamento de afiliado ativo. A comissão paga (N1) guarda o valor em `paid_cents`, e a de saque
+aberto guarda o vínculo ("guardar vínculo", decisão do dono): `commission_cents` e `orphan_payout_id`.
+Sem linha da fatura, ela nasce `resolved`, com evento `affiliate_deleted` apontando o saque. A pendência
+`open` delas segue aberta; só a `open` de comissão solta (nunca paga nem em saque) fecha, com
+`affiliate_deleted`, porque não há o que bloquear nem recuperar. Comissão não paga e fora de saque sai
+sem linha. Essas linhas nunca entram na limpeza. Depois, `affiliates` cai e leva referrals, pagamentos
+e comissões; `affiliate_payouts.affiliate_id` e `affiliate_refund_reviews.commission_id` viram nulos
+pela FK `set null`. Reembolso que chega depois é decidido pela linha (`_comissao_que_saiu`): paga segue
+a regra da paga (total vira recuperação; parcial vai para revisão e o admin decide pelo `paid_cents`);
+no saque órfão aberto, a regra da comissão em saque, e a pendência `open` bloqueia o órfão
+(`SAQUE_BLOQUEADO_SQL` lê também `orphan_payout_id`). Recuperação segue no admin e encerra como antes;
+o histórico e a recuperação apontam o saque pelo vínculo ou pelo `payout_id` do evento.
 Saque `requested` vira órfão (D9 = A): "Marcar pago" dá 409 e o QR, 422 (sem chave); o admin registra
-"Pagamento já realizado", que no órfão grava o evento no saque, sem pendência, ou rejeita (sem nota).
+"Pagamento já realizado" ou rejeita (sem nota). "Pagamento já realizado" no órfão grava `paid_cents` nas
+linhas do vínculo: total aberta vira recuperação na hora, e reembolso posterior vira recuperação. Revisão
+parcial no órfão aberto ajusta `affiliate_payouts.amount_cents` e o `commission_cents` da linha, como no
+saque vivo. Rejeitar o órfão fecha a pendência aberta do vínculo sem recuperação, porque a comissão nunca
+foi paga, e reembolso depois não muda nada. Travas na mesma ordem de sempre: saque, linhas da fatura; o
+webhook lê o saque depois de travar a linha.
 A migração de `affiliate_payouts` (em produção) é guardada: `drop not null`, FK `cascade` para `set
 null` e `affiliate_code`, cada passo só quando há o que mudar, e o boot seguinte não pede lock.
 
@@ -2813,7 +2822,7 @@ null` e `affiliate_code`, cada passo só quando há o que mudar, e o boot seguin
 | Removido | `affiliates`, referrals, pagamentos e comissões do afiliado | Tudo, pela cascata de `affiliates` |
 | Removido | `affiliate_payouts` | `pix_key_enc` e `note`; `affiliate_id` vira nulo |
 | Retido | `affiliate_payouts` | id, valor, status, `requested_at`, `paid_at`, `affiliate_code` |
-| Retido | `affiliate_refund_reviews` e eventos | Fatura, valores, status, `affiliate_code`, referência, justificativa, autor |
+| Retido | `affiliate_refund_reviews` e eventos | Fatura, valores (`paid_cents`, `commission_cents`), status, `affiliate_code`, saque (`orphan_payout_id`), referência, justificativa, autor |
 
 Também aqui: desvinculado do usuário, dados financeiros retidos. `affiliate_code` pode ter sido escolhido
 à mão e lembrar o nome da pessoa; retido para validação de LGPD do dono.

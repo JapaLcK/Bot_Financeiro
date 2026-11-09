@@ -2332,6 +2332,9 @@ def init_db():
           commission_id bigint references affiliate_commissions(id) on delete set null,
           affiliate_code text,                     -- gravado só na exclusão do afiliado
           paid_cents bigint,                       -- comissão paga, gravado na exclusão: o reembolso depois vira recuperação
+          -- Comissão de saque aberto que saiu com o afiliado (saque órfão, "guardar vínculo"): o valor e o saque.
+          commission_cents bigint,
+          orphan_payout_id bigint references affiliate_payouts(id) on delete set null,
           tipo text not null check (tipo in ('partial', 'total')),
           refunded_cents bigint not null,          -- acumulado; maior = fato novo
           amount_cents bigint,                     -- valor ORIGINAL da comissão; nunca reescrito
@@ -2353,6 +2356,10 @@ def init_db():
         """
         create index if not exists idx_affiliate_refund_reviews_commission
           on affiliate_refund_reviews (commission_id)
+        """,
+        """
+        create index if not exists idx_affiliate_refund_reviews_orphan_payout
+          on affiliate_refund_reviews (orphan_payout_id)
         """,
         """
         create table if not exists affiliate_refund_review_events (

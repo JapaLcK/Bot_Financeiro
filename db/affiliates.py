@@ -514,9 +514,19 @@ def registrar_pagamento_realizado(payout_id: int, paid_on: date, justificativa: 
             if saque is None:
                 conn.rollback()
                 return False
-            if saque["affiliate_id"] is None:
-                registrar_evento(cur, None, "payment_recorded", revisor, saque=int(payout_id), em=paid_on,
-                                 referencia=referencia, justificativa=justificativa)
+            if saque["affiliate_id"] is None:  # órfão: as comissões saíram, o vínculo ficou nas linhas da fatura
+                cur.execute("select * from affiliate_refund_reviews where orphan_payout_id = %s order by id for update",
+                            (int(payout_id),))
+                abertas = [r for r in cur.fetchall() if r["status"] == "open"]
+                cur.execute("update affiliate_refund_reviews set paid_cents = commission_cents where orphan_payout_id = %s",
+                            (int(payout_id),))
+                for r in abertas or [None]:
+                    registrar_evento(cur, r and r["id"], "payment_recorded", revisor, saque=int(payout_id), em=paid_on,
+                                     referencia=referencia, justificativa=justificativa)
+                    if r and r["tipo"] == "total":
+                        cur.execute("update affiliate_refund_reviews set status = 'recovery', recovery_cents = %s,"
+                                    " notified_at = null, notify_claimed_until = null where id = %s",
+                                    (r["commission_cents"], r["id"]))
                 conn.commit()
                 return True
             cur.execute("select id, amount_cents from affiliate_commissions where payout_id = %s for update",
@@ -590,8 +600,10 @@ def reject_payout(payout_id: int, note: str | None = None, revisor: str = "admin
                 (int(payout_id),),
             )
             estornadas = [c["id"] for c in cur.fetchall() if c["status"] == "reversed"]
-            for r in abertas:  # parcial sobre comissão que o rótulo `total` estornou também fecha
-                if r["tipo"] == "total" or r["commission_id"] in estornadas:
+            # Parcial sobre comissão que o rótulo `total` estornou também fecha, e a do saque órfão (sem
+            # comissão), que nunca foi paga: fecha sem recuperação.
+            for r in abertas:
+                if r["tipo"] == "total" or r["commission_id"] in estornadas or r["commission_id"] is None:
                     cur.execute("update affiliate_refund_reviews set status = 'resolved' where id = %s", (r["id"],))
                     registrar_evento(cur, r["id"], "payout_rejected", revisor, saque=int(payout_id))
             conn.commit()

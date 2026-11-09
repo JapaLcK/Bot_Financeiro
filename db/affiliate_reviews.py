@@ -19,9 +19,11 @@ from .connection import get_conn
 # (`{c}` e `{saque}` são expressões SQL de quem usa).
 PENDENCIA_ABERTA_SQL = """exists (select 1 from affiliate_refund_reviews v
                                    where v.commission_id = {c}.id and v.status = 'open')"""
+# A comissão do saque, ou o vínculo que ficou quando ela saiu com o afiliado (saque órfão).
 SAQUE_BLOQUEADO_SQL = """exists (select 1 from affiliate_refund_reviews v
-                                   join affiliate_commissions vc on vc.id = v.commission_id
-                                  where v.status = 'open' and vc.payout_id = {saque})"""
+                                   left join affiliate_commissions vc on vc.id = v.commission_id
+                                  where v.status = 'open'
+                                    and (vc.payout_id = {saque} or v.orphan_payout_id = {saque}))"""
 
 
 class PendenciaMudou(Exception):
@@ -76,8 +78,8 @@ def _gravar(cur, fatura, antes, c, tipo, devolvido, quando, status, ator, recupe
 
 def _aplicar(cur, fatura, a, c, tipo, devolvido, quando, ator) -> dict | None:
     """A máquina de estados: comissão (`c`, travada) contra o reembolso. `a` é a linha que já existe."""
-    if c is None and a and a["paid_cents"] is not None:  # paga, e saiu com o afiliado (N1): segue a regra da paga
-        c = {"id": None, "status": "paid", "amount_cents": a["paid_cents"], "payout_id": None}
+    if c is None and a:
+        c = _comissao_que_saiu(cur, a)
     if c is None:  # pendência cuja comissão saiu com o afiliado (A3) fica como está: não vira `no_commission`
         if a and a["status"] != "no_commission":
             return a
@@ -103,6 +105,20 @@ def _aplicar(cur, fatura, a, c, tipo, devolvido, quando, ator) -> dict | None:
         registrar_evento(cur, linha["id"], "auto_reversed", ator, antes=c["amount_cents"], depois=0)
         return linha
     return _gravar(cur, fatura, a, c, tipo, devolvido, quando, "open", ator)
+
+
+def _comissao_que_saiu(cur, a: dict) -> dict | None:
+    """A comissão que saiu com o afiliado, refeita da linha da fatura: mesmo comportamento de afiliado
+    ativo. Paga (N1) segue a regra da paga; num saque órfão ainda aberto, a da comissão em saque, que
+    bloqueia. Órfão rejeitado: a comissão nunca foi paga, e a linha fica como está."""
+    if a["paid_cents"] is not None:
+        return {"id": None, "status": "paid", "amount_cents": a["paid_cents"], "payout_id": a["orphan_payout_id"]}
+    if a["orphan_payout_id"] is not None:
+        cur.execute("select status from affiliate_payouts where id = %s", (a["orphan_payout_id"],))
+        saque = cur.fetchone()
+        if saque and saque["status"] == "requested":
+            return {"id": None, "status": "pending", "amount_cents": a["commission_cents"], "payout_id": a["orphan_payout_id"]}
+    return None
 
 
 def registrar_reembolso(fatura: str, tipo: str, devolvido_cents: int, quando, ator: str = "sistema") -> dict | None:
@@ -140,11 +156,11 @@ def abertas_do_saque(cur, payout_id: int) -> list[dict]:
     cur.execute(
         """
         select r.* from affiliate_refund_reviews r
-          join affiliate_commissions c on c.id = r.commission_id
-         where r.status = 'open' and c.payout_id = %s
+          left join affiliate_commissions c on c.id = r.commission_id
+         where r.status = 'open' and (c.payout_id = %s or r.orphan_payout_id = %s)
          order by r.id for update of r
         """,
-        (int(payout_id),),
+        (int(payout_id), int(payout_id)),
     )
     return cur.fetchall()
 
@@ -152,63 +168,8 @@ def abertas_do_saque(cur, payout_id: int) -> list[dict]:
 def saque_bloqueado(cur, payout_id: int) -> bool:
     """Comando próprio, depois da trava das comissões: em READ COMMITTED é ele que enxerga o commit
     do webhook que a trava esperou. Aviso entregue não libera."""
-    cur.execute(f"select {SAQUE_BLOQUEADO_SQL.format(saque='%s')} as bloqueado", (int(payout_id),))
+    cur.execute(f"select {SAQUE_BLOQUEADO_SQL.format(saque='%(saque)s')} as bloqueado", {"saque": int(payout_id)})
     return cur.fetchone()["bloqueado"]
-
-
-# O saque da pendência: o da comissão, ou o do evento mais recente quando a comissão saiu com o
-# afiliado (D8). `left join` em tudo: a pendência e o histórico ficam sem comissão e sem afiliado (A3).
-_SAQUE_DA_PENDENCIA = """coalesce(c.payout_id, (select e.payout_id from affiliate_refund_review_events e
-                                                  where e.review_id = r.id and e.payout_id is not null
-                                                  order by e.id desc limit 1))"""
-
-
-def listar_admin() -> list[dict]:
-    """Pendências abertas e recuperações, para o admin. Sem fatura e sem dado do indicado."""
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            f"""
-            select r.id, r.tipo, r.status, r.refunded_cents, r.amount_cents, r.recovery_cents, r.refunded_at,
-                   r.notified_at, c.id as commission_id, c.amount_cents as commission_cents,
-                   c.status as commission_status, p.id as payout_id, p.status as payout_status,
-                   p.amount_cents as payout_cents, p.paid_at as payout_paid_at,
-                   coalesce(a.code, r.affiliate_code) as code, a.id is null as affiliate_deleted,
-                   (select e.action from affiliate_refund_review_events e
-                     where e.review_id = r.id
-                       and e.action in ('paid_before_refund', 'payment_recorded', 'partial_approved')
-                     order by e.id desc limit 1) as origem,
-                   (select e.receipt_ref from affiliate_refund_review_events e
-                     where e.review_id = r.id and e.receipt_ref is not null
-                     order by e.id desc limit 1) as referencia
-              from affiliate_refund_reviews r
-              left join affiliate_commissions c on c.id = r.commission_id
-              left join affiliates a on a.id = c.affiliate_id
-              left join affiliate_payouts p on p.id = {_SAQUE_DA_PENDENCIA}
-             where r.status in ('open', 'recovery')
-             order by r.id
-            """
-        )
-        return cur.fetchall()
-
-
-def listar_historico(limite: int = 50) -> list[dict]:
-    """Os eventos mais recentes. Só leitura: é o que sobra de uma pendência fechada."""
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            select e.id, e.review_id, e.action, e.actor, e.before_cents, e.after_cents, e.payout_id, e.event_on,
-                   e.receipt_ref, e.justification, e.created_at, r.tipo, c.id as commission_id,
-                   coalesce(a.code, r.affiliate_code, p.affiliate_code) as code
-              from affiliate_refund_review_events e
-              left join affiliate_refund_reviews r on r.id = e.review_id
-              left join affiliate_commissions c on c.id = r.commission_id
-              left join affiliates a on a.id = c.affiliate_id
-              left join affiliate_payouts p on p.id = e.payout_id
-             order by e.id desc limit %s
-            """,
-            (int(limite),),
-        )
-        return cur.fetchall()
 
 
 def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: str, visto_cents: int) -> bool:
@@ -218,10 +179,11 @@ def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: st
     Comissão paga não muda (D6): a diferença vira recuperação, atribuída e nunca somada, então
     reprocessar não duplica, e o que já foi encerrado não é cobrado de novo."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select r.commission_id, r.paid_cents, c.payout_id from affiliate_refund_reviews r"
-                    " left join affiliate_commissions c on c.id = r.commission_id where r.id = %s", (int(review_id),))
+        cur.execute("select r.commission_id, coalesce(c.payout_id, r.orphan_payout_id) as payout_id"
+                    " from affiliate_refund_reviews r left join affiliate_commissions c on c.id = r.commission_id"
+                    " where r.id = %s", (int(review_id),))
         lido = cur.fetchone()
-        if lido is None or (lido["commission_id"] is None and lido["paid_cents"] is None):
+        if lido is None:
             return False
         saque = None
         if lido["payout_id"]:
@@ -230,11 +192,11 @@ def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: st
             saque = cur.fetchone()
         cur.execute("select id, status, payout_id, amount_cents from affiliate_commissions where id = %s for update",
                     (lido["commission_id"],))
-        # Comissão que saiu com o afiliado (N1): era paga, e só a recuperação se decide.
-        c = cur.fetchone() or {"id": None, "status": "paid", "payout_id": None, "amount_cents": lido["paid_cents"]}
+        c = cur.fetchone()
         cur.execute("select * from affiliate_refund_reviews where id = %s for update", (int(review_id),))
         r = cur.fetchone()
-        if (r["status"] != "open" or r["tipo"] != "partial" or r["refunded_cents"] != visto_cents
+        c = c or _comissao_que_saiu(cur, r)  # saiu com o afiliado: paga, ou num saque órfão aberto
+        if c is None or (r["status"] != "open" or r["tipo"] != "partial" or r["refunded_cents"] != visto_cents
                 or c["payout_id"] != lido["payout_id"]):
             raise PendenciaMudou("A pendência mudou. Recarregue antes de decidir.")
         atual = c["amount_cents"]
@@ -245,7 +207,10 @@ def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: st
             falta = max(0, diferenca - r["recovery_closed_cents"]) or None
             status = "recovery" if falta else "resolved"
         elif diferenca:
-            if aprovado_cents == 0:  # equivale a estorno: `amount_cents` fica como estava
+            if c["id"] is None:  # saque órfão: o valor da comissão mora na linha
+                cur.execute("update affiliate_refund_reviews set commission_cents = %s where id = %s",
+                            (aprovado_cents, r["id"]))
+            elif aprovado_cents == 0:  # equivale a estorno: `amount_cents` fica como estava
                 cur.execute("update affiliate_commissions set status = 'reversed', payout_id = null where id = %s",
                             (c["id"],))
             else:
@@ -324,8 +289,10 @@ def reivindicar(review_id: int | None = None) -> dict | None:
                             order by id limit 1 for update skip locked)
             returning r.*,
                       (select c.status from affiliate_commissions c where c.id = r.commission_id) as commission_status,
-                      (select c.payout_id from affiliate_commissions c where c.id = r.commission_id) as payout_id,
-                      (select c.amount_cents from affiliate_commissions c where c.id = r.commission_id) as commission_cents
+                      coalesce((select c.payout_id from affiliate_commissions c where c.id = r.commission_id),
+                               r.orphan_payout_id) as payout_id,
+                      coalesce((select c.amount_cents from affiliate_commissions c where c.id = r.commission_id),
+                               r.commission_cents, r.paid_cents) as commission_cents
             """,
             args,
         )
