@@ -5,6 +5,7 @@ import { ehNegativo } from "../lib/metas-textos";
 import { ErroApi } from "../lib/v2";
 import { href, route } from "../router";
 import { Confirma } from "../conta/Confirma";
+import { falhaFamilia, familiaQuery } from "./api";
 import { FalhaFamilia, PerfilFalhou, focarTitulo, useDonoDaTela } from "./escrita";
 import { apagar, casaQuery, deveReler, falhaCasa, type Casa, type FalhaCasa, type MetaCasa, type OrcamentoCasa, type Tipo } from "./casa";
 import { AvisoCasa } from "./CasaDialogo";
@@ -31,12 +32,14 @@ const quem = (a: string | null) => (a === null ? "Ex-membro" : a === "" ? "Membr
 function Tela({ uid, perfilFalhou }: { uid: number | undefined; perfilFalhou: (() => void) | undefined }) {
   const qc = useQueryClient();
   const q = useQuery(casaQuery(uid));
+  const membro = useQuery(familiaQuery).data?.papel === "membro"; // quem não é titular não assina: o card de plano diz que a família está pausada
   const [aberto, setAberto] = useState<Aberto | null>(null);
   const [falha, setFalha] = useState<FalhaCasa | null>(null); // o erro do "Apagar" (o das demais escritas mora no diálogo)
   useEffect(focarTitulo, [aberto]); // o botão que abriu o diálogo pode ter saído da tela (item apagado)
   useEffect(() => { if (aberto && !q.data) setAberto(null); }, [aberto, q.data]); // 404/sem família: `aberto` não sobrevive ao diálogo (a família voltando não o reabre com a foto velha)
 
   const sessao = q.error instanceof ErroApi && q.error.status === 401;
+  const plano = q.error instanceof ErroApi && q.error.status === 402; // titular abaixo do Pro: sem retry (só voltar com o plano)
   const casa: Casa | null | undefined = q.isError ? undefined : q.data; // erro de carga nunca mostra o dado velho; `null` = sem família
   const fechar = () => setAberto(null);
   const abrir = (a: Aberto) => { setFalha(null); setAberto(a); };
@@ -45,6 +48,7 @@ function Tela({ uid, perfilFalhou }: { uid: number | undefined; perfilFalhou: ((
   let corpo;
   if (uid === undefined && perfilFalhou) corpo = <PerfilFalhou tentar={perfilFalhou} />;
   else if (q.isPending) corpo = <p role="status" className="faint">Carregando…</p>;
+  else if (casa === undefined && plano) corpo = <FalhaFamilia falha={falhaFamilia(q.error)} membro={membro} />;
   else if (casa === undefined) corpo = (
     <div className="empty" role="alert">
       <p>{sessao ? "Sua sessão terminou." : "Não foi possível carregar a casa."}</p>
@@ -117,7 +121,7 @@ function Tela({ uid, perfilFalhou }: { uid: number | undefined; perfilFalhou: ((
         <h1 id="page-title" tabIndex={-1}>{route("/casa").title}</h1>
       </header>
       <div className="page-grid">
-        <section className="panel span-12 conta-perfil conta-familia fam-casa" aria-label="Casa da família">{corpo}<FalhaFamilia falha={falha} /><AvisoCasa.Provider value={setFalha}>{diag}</AvisoCasa.Provider></section>
+        <section className="panel span-12 conta-perfil conta-familia fam-casa" aria-label="Casa da família">{corpo}<FalhaFamilia falha={falha} membro={membro} /><AvisoCasa.Provider value={setFalha}>{diag}</AvisoCasa.Provider></section>
       </div>
     </>
   );

@@ -61,7 +61,7 @@ function Tela({ uid, perfilFalhou }: { uid: number | undefined; perfilFalhou: ((
         <h1 id="page-title" tabIndex={-1}>{route("/conta/familia").title}</h1>
       </header>
       <div className="page-grid">
-        <section className="panel span-12 conta-perfil conta-familia" aria-label="Sua família">{corpo}<FalhaFamilia falha={falha} /></section>
+        <section className="panel span-12 conta-perfil conta-familia" aria-label="Sua família">{corpo}<FalhaFamilia falha={falha} membro={d?.papel === "membro"} /></section>
       </div>
     </>
   );

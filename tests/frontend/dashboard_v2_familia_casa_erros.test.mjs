@@ -107,13 +107,13 @@ test("422 por campo (valor/alvo, data_alvo, prazo, nome, versao): texto certo, a
 });
 
 // mutação: tirar o ramo `e.status === 402` de falhaFamilia (api.ts) ou o `falha.plano` do CasaDialogo: sem o link da cobrança
-test("402 numa escrita: 'Seu plano não inclui família.' + 'Ver cobrança'; o rascunho fica; os botões de editar seguem à mostra", async () => {
+test("402 numa escrita: 'A família faz parte do plano Pro.' + 'Ver cobrança'; o rascunho fica; os botões de editar seguem à mostra", async () => {
   await com({ antes: (_c, s) => { s.casaCriar = ERRO(402, "family_coverage_required"); } }, async (t) => {
     assert.equal(await t.bt("Nova meta").count(), 1);
     await t.bt("Nova meta").click();
     await preencher(t, { Nome: "Carro", "Quanto juntar (R$)": "10" });
     await salvar(t);
-    await t.dlg().getByText("Seu plano não inclui família.").waitFor();
+    await t.dlg().getByText("A família faz parte do plano Pro.").waitFor();
     assert.equal(await t.dlg().getByRole("link", { name: "Ver cobrança" }).getAttribute("href"), "#/conta/cobranca");
     assert.equal(await t.dlg().getByLabel("Nome").inputValue(), "Carro");
   });
@@ -168,6 +168,19 @@ test("erro de carga nunca mostra o dado velho; 'Tentar de novo' recupera; 401 pe
   });
 });
 
+// mutação: tirar o ramo `plano` da carga (CasaPagina.tsx): 402 cai em "Não foi possível carregar a casa." com "Tentar de novo" inútil
+test("402 na carga da casa: card do Pro + 'Ver o Pro', sem 'Tentar de novo' e sem dado velho", async () => {
+  await com({}, async (t) => {
+    t.s.casaLer = ERRO(402, "family_coverage_required");
+    await t.page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await t.secao.getByText("A família é do plano Pro").waitFor();
+    assert.equal(await t.secao.getByRole("link", { name: "Ver o Pro" }).getAttribute("href"), "/precos");
+    assert.equal(await t.secao.getByRole("button", { name: "Tentar de novo" }).count(), 0);
+    assert.ok(!(await t.texto()).includes("Não foi possível carregar a casa."));
+    assert.ok(!(await t.texto()).includes("R$ 1.234,56"), "dado velho com o erro na tela");
+  });
+});
+
 // mutação: `dinheiro(m.guardado)` removido do leitor (casa.ts): o número cru entra na tela
 test("contrato: dinheiro em número, lista ausente ou autor ausente viram o estado de erro (sem pageerror); campo extra é ignorado", async () => {
   const ruim = (f) => { const c = structuredClone(F.casa); f(c); return c; };
@@ -178,5 +191,14 @@ test("contrato: dinheiro em número, lista ausente ou autor ausente viram o esta
   }
   await com({ casa: { ...structuredClone(F.casa), extra: 1 } }, async (t) => {
     assert.ok((await t.texto()).includes("Viagem"));
+  });
+});
+
+test("402 na carga da casa para o membro: família pausada, sem CTA de compra", async () => {
+  await com({ visao: F.membro }, async (t) => {
+    t.s.casaLer = ERRO(402, "family_coverage_required");
+    await t.page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await t.secao.getByText("A família está pausada").waitFor();
+    assert.equal(await t.secao.getByRole("link", { name: "Ver o Pro" }).count(), 0);
   });
 });
