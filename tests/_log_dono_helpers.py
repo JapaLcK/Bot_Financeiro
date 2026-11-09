@@ -44,6 +44,20 @@ def _violacao(marcador: str) -> psycopg.errors.UniqueViolation:
         f"DETAIL:  Key (user_id, nota)=(1, {marcador} {FONE}) already exists.")
 
 
+_ALHEIO = 987654321657
+
+
+def _erro_real() -> psycopg.errors.InvalidTextRepresentation:
+    """A exceção do Postgres de verdade, com o texto do usuário (`<alheio>`) na mensagem."""
+    with get_conn() as c:
+        try:
+            c.execute("select %s::int", (f"x{_ALHEIO}",))
+        except psycopg.errors.InvalidTextRepresentation as e:
+            c.rollback()
+            return e
+    raise AssertionError("pré-condição: o cast tinha de recusar")
+
+
 def _levanta(marcador: str):
     def _f(*a, **k):
         raise _violacao(marcador)
@@ -132,7 +146,9 @@ def _nenhuma(linhas: list[dict], event_type: str, prefixo: str = "") -> None:
 
 
 def _marcador() -> str:
-    return f"MARCADOR-{uuid.uuid4().hex}"
+    """Só letras g-v: hex solto formava `cdb` (0,7% das vezes), que o `_contains_domain_hint` lê como
+    assunto de investimento e desvia a frase do tier 3 (T1 e T2 de tests/test_log_d4_conversa.py)."""
+    return "MARCADOR-" + uuid.uuid4().hex.translate(str.maketrans("0123456789abcdef", "ghijklmnopqrstuv"))
 
 
 # A falha cai no 1º visitado (prova que o laço SEGUE) e no 2º (prova que a linha é do dono da volta

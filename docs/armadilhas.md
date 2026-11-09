@@ -425,3 +425,7 @@ fixo de toda mudança de layout.
   (`1`) e as tarefas escrevem no banco daquela execução, a menos que ele mesmo
   passe `0` na env do subprocesso (`tests/test_log_falha_nivel.py:183`). A versão
   longa está no `docs/CLAUDE.md`, seção "Tarefas de fundo".
+- **O wamid carrega o telefone.** O `wamid.…` do WhatsApp é base64, e decodificado traz o número do
+  destinatário inteiro: `mask_phone` na mesma linha não adianta nada. Em log e em `details`, use
+  `mask_wamid` (`utils_phone.py`), que dá um digest e mantém a correlação entre linhas. O id real fica
+  só onde é dado: dedupe, envio, typing. A guarda é a classe `LOG_WAMID` de `tests/test_log_d4_guarda.py`.

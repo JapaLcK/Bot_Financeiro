@@ -31,7 +31,7 @@ def test_agent_report_email_sai_com_headers_one_click(monkeypatch):
     captured: dict = {}
 
     def fake_send(to, subject, html_body, text_body=None, from_addr=None,
-                  headers=None, attachments=None):
+                  headers=None, attachments=None, log_subject=None):
         captured.update(headers=headers)
         return True
 

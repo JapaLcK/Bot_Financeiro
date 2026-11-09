@@ -9,6 +9,7 @@ import logging
 import os
 import random
 from datetime import datetime
+from core.pg_text import causa_segura
 from core.services.modelo_openai import CHAT_MODEL, completion_options
 from utils_text import normalize_text
 
@@ -30,7 +31,7 @@ def _get_display_name(user_id: int | None) -> str | None:
         # usa só o primeiro nome para soar natural numa saudação
         return name.split()[0]
     except Exception as exc:
-        logger.debug("greeting display name lookup failed: %s", exc)
+        logger.debug("greeting display name lookup failed: %s", causa_segura(exc))
         return None
 
 

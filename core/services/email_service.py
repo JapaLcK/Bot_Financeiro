@@ -70,6 +70,7 @@ def send_email(
     attachments: Optional[list] = None,
     log_recipient: bool = True,
     scheduled_at: Optional[str] = None,
+    log_subject: Optional[str] = None,
 ) -> bool:
     """Envia e-mail via Resend API. Retorna True em sucesso, nunca lança exceção.
 
@@ -89,10 +90,15 @@ def send_email(
     `send_account_reauth_code_email`, que precede a exclusão; e
     `core/services/remarketing.py::send_remarketing_email`. Default `True`: os
     outros chamadores não precisam lembrar do parâmetro.
+
+    `log_subject` substitui o assunto no log e em `details.subject`, nunca no envio:
+    é para o assunto que leva texto do usuário (título de agente, formulário de
+    contato). A lista dos assuntos dinâmicos é conferida em tests/test_log_d4_guarda.py.
     """
     # Fora do `try`: um `to` que não é `str` não pode levantar aqui ("nunca lança exceção").
     to_log = ((mascarar_email(to) if isinstance(to, str) else "<destinatário inválido>")
               if log_recipient else "<destinatário omitido>")
+    log_subject = subject if log_subject is None else log_subject
     api_key = os.getenv("RESEND_API_KEY", "")
     if not api_key:
         logger.warning("Resend não configurado (RESEND_API_KEY ausente). E-mail para <%s> não enviado.", to_log)
@@ -120,8 +126,8 @@ def send_email(
         if scheduled_at:
             params["scheduled_at"] = scheduled_at  # ISO 8601; o Resend segura e envia na hora
         resend.Emails.send(params)
-        logger.info("E-mail enviado para <%s>: %s", to_log, subject)
-        _log_email_event("info", "email_sent", f"E-mail enviado para {to_log}", to=to_log, subject=subject)
+        logger.info("E-mail enviado para <%s>: %s", to_log, log_subject)
+        _log_email_event("info", "email_sent", f"E-mail enviado para {to_log}", to=to_log, subject=log_subject)
         return True
     except Exception as exc:
         # LISTA BRANCA, com ou sem `log_recipient`: o texto do provedor NÃO é
@@ -140,7 +146,7 @@ def send_email(
                                          ("type", getattr(exc, "error_type", None))) if v]
         erro = " ".join([type(exc).__name__, *enums])
         logger.error("Falha ao enviar e-mail para <%s>: %s", to_log, erro)
-        _log_email_event("error", "email_failed", f"Falha ao enviar para {to_log}: {erro}", to=to_log, subject=subject, error=erro)
+        _log_email_event("error", "email_failed", f"Falha ao enviar para {to_log}: {erro}", to=to_log, subject=log_subject, error=erro)
         return False
 
 
@@ -287,7 +293,7 @@ def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
 
 def send_agent_report_email(
     to: str, user_id: int, subject: str, content_html: str, kind: str = "",
-    text_content: str | None = None,
+    text_content: str | None = None, log_subject: str = "Relatório de agente",
 ) -> bool:
     """E-mail proativo dos Agentes do Piggy (ex.: manchete mensal do Repórter).
 
@@ -305,7 +311,8 @@ def send_agent_report_email(
         text += f"\n\n—\nCancelar inscrição: {unsub}"
     return send_email(to, subject, html, text_body=text,
                       from_addr=EMAIL_FROM_PIGGY,
-                      headers=unsub_headers(unsub) if unsub else None)
+                      headers=unsub_headers(unsub) if unsub else None,
+                      log_subject=log_subject)
 
 
 def send_verification_email(to: str, code: str) -> bool:
@@ -319,7 +326,7 @@ def send_verification_email(to: str, code: str) -> bool:
     """
     html = _base_html("Confirme seu e-mail — PigBank", content)
     text = f"PigBank — Código de verificação: {code}\n\nExpira em 15 minutos."
-    return send_email(to=to, subject=f"🔐 {code} — seu código de verificação PigBank", html_body=html, text_body=text)
+    return send_email(to=to, subject="Seu código de verificação PigBank", html_body=html, text_body=text)
 
 
 def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool:

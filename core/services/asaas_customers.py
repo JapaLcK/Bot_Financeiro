@@ -41,7 +41,7 @@ class TitularRecusado(RuntimeError):
       * **5xx** e falha de transporte (`status_code is None`) — o Asaas, não o
         dado. Continuam 503.
 
-    Carrega **só** o `code`, que já passou pelo `_codigo_seguro` (`asaas.py:96`).
+    Carrega **só** o `code`, que já passou pelo `_codigo_seguro` (`core/codigo_seguro.py`).
     Nunca `str(exc)`, nunca o corpo, nunca o `description`: a descrição do erro do
     Asaas vem no mesmo objeto que o `code` e traz o documento do titular por
     extenso — e o `details` de quem loga isto é PERSISTIDO em `system_event_logs`,

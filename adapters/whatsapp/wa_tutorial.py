@@ -30,6 +30,7 @@ from adapters.whatsapp.wa_client import (
     send_interactive_buttons,
     send_text,
 )
+from core.pg_text import causa_segura
 from utils_phone import mask_phone
 
 logger = logging.getLogger(__name__)
@@ -344,7 +345,7 @@ def send_welcome(wa_id: str, user_id: int | None = None) -> None:
                 if full:
                     first_name = full.split()[0]
         except Exception as exc:
-            logger.debug("send_welcome name lookup failed: %s", exc)
+            logger.debug("send_welcome name lookup failed: %s", causa_segura(exc))
 
     header = f"🐷 Bem-vindo, {first_name}!" if first_name else "🐷 Bem-vindo ao PigBank!"
 
