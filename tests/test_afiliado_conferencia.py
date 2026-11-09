@@ -20,7 +20,7 @@ from db.connection import get_conn
 from test_afiliado_area import _afiliado, _esperando_lock, _painel_aberto, _vence  # noqa: F401
 from test_afiliado_pagantes import AGORA, _indicado
 from test_afiliado_pendencia import _quadros, _rev
-from test_afiliado_reembolso import _cobranca, _enviar, _logs, mundo  # noqa: F401
+from test_afiliado_reembolso import _cobranca, _enviar, _logs, mundo, script  # noqa: F401
 from test_billing_webhook_lifecycle import _fake_sub
 
 
@@ -244,3 +244,97 @@ def test_worker_confere_e_limpa():
         "aviso": "core.services.afiliado_reembolso:reenviar_pendentes",
     })
     assert resultado == {"limpa": True, "confere": True, "aviso": True, "do_disco": []}, diagnostico
+
+
+# ── N2: falha de uma comissão não prende a fila; queda geral para a varredura ──
+
+@pytest.mark.parametrize("forma", ["disputa_aberta", "payment_record", "sem_cobranca"])
+def test_falha_da_propria_comissao_nao_prende_as_seguintes(fonte, monkeypatch, forma):
+    import stripe
+
+    presa_c, livre_c = _afiliado(), _afiliado()
+    (ind1, f1), (ind2, f2) = _nova(presa_c), _nova(livre_c)
+    if forma == "disputa_aberta":
+        fonte.cobra(f1, disputed=True)
+        fonte.disputas[f"pi_{f1}"] = [{"status": "needs_response", "amount": 100_000}]
+    elif forma == "payment_record":
+        real = stripe.InvoicePayment.list
+
+        def listar(**k):
+            if k.get("invoice") == f1:
+                return {"data": [{"status": "paid", "payment": {"type": "payment_record", "payment_intent": None}}]}
+            return real(**k)
+
+        monkeypatch.setattr(stripe.InvoicePayment, "list", staticmethod(listar))
+    fonte.cobra(f2)
+    fonte.falha = stripe.APIConnectionError("fora")
+    _invoice_paid(ind1, f1)
+    _invoice_paid(ind2, f2)
+    fonte.falha = None
+    servico.conferir_pendentes()
+    assert _comissao_da(f1)["payment_check_pending"] is True
+    assert _comissao_da(f2)["payment_check_pending"] is False
+
+
+def test_queda_geral_para_a_varredura(fonte):
+    import stripe
+
+    c = _afiliado()
+    for _ in range(2):
+        ind, fatura = _nova(c)
+        fonte.cobra(fatura)
+        fonte.falha = stripe.APIConnectionError("fora")
+        _invoice_paid(ind, fatura)
+    antes = fonte.consultas
+    assert servico.conferir_pendentes() == 0
+    assert fonte.consultas - antes == 1  # a primeira queda para: as outras não batem na Stripe fora
+
+
+def test_sem_cobranca_paga_mantem_a_marca(fonte):
+    """Mutação 27: fatura sem cobrança paga não é "sem reembolso"."""
+    c = _afiliado()
+    ind, fatura = _nova(c)
+    _invoice_paid(ind, fatura)
+    assert _comissao_da(fatura)["payment_check_pending"] is True
+
+
+def test_falha_de_rede_loga_o_motivo_e_nao_sobe(fonte):
+    """Mutação 26: a queda da Stripe não sobe nem fica sem registro."""
+    import stripe
+
+    c = _afiliado()
+    ind, fatura = _nova(c)
+    fonte.cobra(fatura)
+    fonte.falha = stripe.APIConnectionError("fora")
+    _invoice_paid(ind, fatura)
+    com = _comissao_da(fatura)
+    assert servico.conferir_comissao(com["id"], fatura) is None
+    with get_conn() as conn:
+        logs = conn.execute("select details from system_event_logs where event_type = 'affiliate_commission_check_pending'"
+                            " and (details->>'commission_id')::bigint = %s", (com["id"],)).fetchall()
+    assert logs and {d["details"]["motivo"] for d in logs} == {"APIConnectionError"}
+    assert fatura not in str(logs)
+
+
+# ── A6: o script usa a mesma regra de disputa da conferência ──
+
+@pytest.mark.parametrize("disputa,esperado", [
+    ("lost", ("reversed", "resolved")),
+    ("won", ("pending", None)),
+    ("needs_response", ("pending", None)),
+], ids=["perdida", "ganha", "aberta"])
+def test_script_trata_disputa_pela_regra_da_conferencia(script, capsys, disputa, esperado):
+    from test_afiliado_area import _comissao
+    c = _afiliado()
+    com = _comissao(c, 100)
+    script.stripe.cobrancas[com.fatura] = {"amount": 100_000, "amount_refunded": 0, "disputed": True}
+    script.stripe.disputas[com.fatura] = [{"status": disputa, "amount": 100_000}]
+    capsys.readouterr()
+    n = script.rodar(aplicar=True)
+    saida = capsys.readouterr().out
+    rev = _rev(com.fatura)
+    with get_conn() as conn:
+        status = conn.execute("select status from affiliate_commissions where id = %s", (com.id,)).fetchone()["status"]
+    assert (status, rev and rev["status"]) == esperado
+    if disputa == "needs_response":
+        assert f"sem_confirmacao: comissão {com.id} · disputa_aberta" in saida and n["sem_confirmacao"] >= 1

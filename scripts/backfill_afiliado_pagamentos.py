@@ -4,12 +4,13 @@ ATENÇÃO: `--aplicar` PODE ALTERAR SALDOS. Duas passadas, nesta ordem:
 
 1. Comissões (`status <> 'reversed'`), antes de tudo: a passada de rótulo, morrendo no meio, deixaria
    `total` sem pendência. Sobre comissões, e não sobre clientes, porque conta excluída só existe aqui.
-   Reembolso total confirmado = ao menos uma cobrança, nenhuma contestada, todas devolvidas por
-   inteiro. Alguma devolvida, mas não todas, é parcial. Categorias:
+   A regra é a da conferência (`devolvido_na_stripe`, uma só): disputa perdida conta como devolvida,
+   ganha não conta, aberta não confirma. Reembolso total confirmado = ao menos uma cobrança, todas
+   devolvidas por inteiro. Alguma devolvida, mas não todas, é parcial. Categorias:
      a_estornar      total, comissão `pending` e sem saque: lista id e valor, e o total.
      segue_revisao   parcial, ou total com a comissão em saque ou paga: lista id e valor.
-     sem_confirmacao exceção, `payment_record`, erro da API, sem cobrança ou disputa: lista id e
-                     motivo (só o tipo), e nada muda. Entra no código de saída.
+     sem_confirmacao erro da API, `forma_inesperada` (`payment_record`), `sem_cobranca` ou
+                     `disputa_aberta`: lista id e o motivo, e nada muda. Entra no código de saída.
      ja_registrada   a pendência já é `total`, ou já tem esse devolvido: só conta, e nada muda.
    Pendência parcial já registrada é relida: o total que o webhook perdeu é fato novo.
    `--aplicar` não confia na classificação: chama `registrar_reembolso`, a mesma função do webhook,
@@ -18,9 +19,8 @@ ATENÇÃO: `--aplicar` PODE ALTERAR SALDOS. Duas passadas, nesta ordem:
 
 2. Clientes: completa `affiliate_referral_payments` com o que o `init_db` não alcança, fatura de
    plano sem comissão (afiliado 0% ou desativado, renovação, webhook perdido) e reembolso anterior
-   ao `charge.refunded`. Fatura com cobrança contestada não é rotulada, só contada: a passada de
-   comissões não a confirmou, e um rótulo `total` sem pendência estornaria na rejeição sem nada
-   bloquear o pagamento. Conta excluída não volta: sem titular não há cliente.
+   ao `charge.refunded`. Fatura com cobrança contestada não é rotulada, só contada: o rótulo dela
+   vem da primeira passada, junto da pendência. Conta excluída não volta: sem titular não há cliente.
 
 Idempotente: rodar de novo não duplica pendência, evento nem rótulo. Não imprime fatura, cliente nem
 indicado: só ids de comissão, valores e contagens.
@@ -40,7 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.services.afiliado_reembolso import tipo_do_reembolso  # noqa: E402
+from core.services.afiliado_reembolso import SemConfirmacao, devolvido_na_stripe, tipo_do_reembolso  # noqa: E402
 from core.services.cartao_recusado_por_pix import MARCA  # noqa: E402
 from core.services.ebook_entrega import cobrancas_da_fatura  # noqa: E402
 from core.services.extras_assinar import (  # noqa: E402
@@ -55,8 +55,6 @@ from db.affiliate_reviews import registrar_reembolso  # noqa: E402
 from db.connection import get_conn  # noqa: E402
 
 
-class _SemConfirmacao(Exception):
-    """A Stripe não confirma o reembolso. O texto é o motivo, nunca dado da fatura."""
 
 
 def _comissoes() -> list[dict]:
@@ -77,19 +75,13 @@ def _datas_de_reembolso(stripe, cobranca) -> list[int]:
 
 
 def _reembolso_confirmado(stripe, fatura_id: str, chave: str) -> tuple[str | None, int, datetime | None]:
-    """O tipo, o devolvido e a data pelo critério do `--aplicar`: estornar dinheiro exige `all`."""
-    cobrancas = list(cobrancas_da_fatura(fatura_id, chave))
-    if not cobrancas:
-        raise _SemConfirmacao("sem_cobranca")
-    if any(c["disputed"] for c in cobrancas):
-        raise _SemConfirmacao("disputa")
-    tipos = [tipo_do_reembolso(c) for c in cobrancas]
-    if not any(tipos):
+    """O tipo, o devolvido e a data, pela regra da conferência (uma só, §0.7): disputa perdida conta
+    como devolvida, ganha não conta, aberta é `SemConfirmacao`. Total exige todas devolvidas."""
+    tipo, devolvido, cobrancas = devolvido_na_stripe(fatura_id, chave)
+    if tipo is None:
         return None, 0, None
-    datas = [d for c, t in zip(cobrancas, tipos) if t for d in _datas_de_reembolso(stripe, c)]
-    return ("total" if all(t == "total" for t in tipos) else "partial",
-            sum(c["amount_refunded"] for c in cobrancas),
-            datetime.fromtimestamp(max(datas), timezone.utc) if datas else None)
+    datas = [d for c in cobrancas if c["amount_refunded"] for d in _datas_de_reembolso(stripe, c)]
+    return tipo, devolvido, datetime.fromtimestamp(max(datas), timezone.utc) if datas else None
 
 
 def _categoria(c: dict, linha: dict | None) -> str:
@@ -128,7 +120,7 @@ def _passar_comissoes(stripe, chave: str, aplicar: bool, n: Counter) -> None:
             continue
         try:
             _comissao(stripe, c, chave, aplicar, n)
-        except _SemConfirmacao as exc:
+        except SemConfirmacao as exc:
             n["sem_confirmacao"] += 1
             print(f"sem_confirmacao: comissão {c['id']} · {exc}")
         except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer o id da fatura

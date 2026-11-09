@@ -101,6 +101,7 @@ async def affiliate_me(request: Request):
                 "amount": _cents(c["amount_cents"]),
                 "original_amount": _cents(c["original_amount_cents"]) if c["original_amount_cents"] is not None else None,
                 "in_review": c["in_review"],
+                "checking": c["checking"],
                 "status": c["status"],
                 "available_at": c["available_at"].isoformat(),
                 "payout_id": c["payout_id"],

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { FRONTEND, ORIGIN, RESPOSTAS, abrirPainel, servir } from "./_painel.mjs";
 
-const comissao = (id, extra) => ({ id, invoice_amount: 59.9, amount: 5.99, original_amount: null, in_review: false, status: "pending", available_at: "2026-09-20T12:00:00.000000+00:00", payout_id: null, payment_refund: "none", created_at: "2026-08-21T12:00:00.000000+00:00", ...extra });
+const comissao = (id, extra) => ({ id, invoice_amount: 59.9, amount: 5.99, original_amount: null, in_review: false, checking: false, status: "pending", available_at: "2026-09-20T12:00:00.000000+00:00", payout_id: null, payment_refund: "none", created_at: "2026-08-21T12:00:00.000000+00:00", ...extra });
 
 /** Ana: afiliada ativa, 12 cadastros, 6 pagantes (1 reembolsado), R$ 120,00 para sacar. */
 export const ATIVA = {
@@ -36,11 +36,12 @@ export const COM_SAQUE = {
 /** Reembolso parcial: R$ 100 fora do saque até a revisão, e uma comissão já ajustada pelo admin. */
 export const EM_REVISAO = {
   ...ATIVA,
-  stats: { ...ATIVA.stats, available: 70, review: 100, generated: 400 },
+  stats: { ...ATIVA.stats, held: 70, available: 70, review: 100, generated: 440 },
   commissions: [
     comissao(10, { amount: 100, invoice_amount: 1000, in_review: true, payment_refund: "partial" }),
     comissao(11, { amount: 60, original_amount: 100, invoice_amount: 1000, payment_refund: "partial" }),
     comissao(12, { status: "paid", amount: 200, invoice_amount: 2000, payment_refund: "total" }),
+    comissao(13, { amount: 40, invoice_amount: 400, checking: true }), // vencida, mas ainda em conferência na Stripe
   ],
 };
 export const REJEITADO = { ...ATIVA, payouts: [{ id: 7, amount: 90, status: "rejected", requested_at: "2026-09-10T12:00:00+00:00", paid_at: null, note: "Chave Pix não encontrada" }] };

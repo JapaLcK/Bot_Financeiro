@@ -192,7 +192,7 @@ test("comissão em saque mostra 'em saque'; o quadro Em saque traz o valor", asy
   });
 });
 
-// mutação: tirar o quadro de `Area`, o `c.in_review` de `situacao` ou o `original_amount` de Historico.tsx
+// mutação: tirar o quadro de `Area`, o `c.in_review` ou o `c.checking` de `situacao`, ou o `original_amount` de Historico.tsx
 for (const [nome, width, height] of [["desktop", 1280, 800], ["celular", 390, 844]]) {
   test(`reembolso em análise (${nome}): quadro, selo, 'ajustada de' e o selo do pagamento reembolsado`, async () => {
     await comAfiliado(browser(), { corpo: EM_REVISAO, width, height }, async (t) => {
@@ -207,6 +207,8 @@ for (const [nome, width, height] of [["desktop", 1280, 800], ["celular", 390, 84
       assert.match(await itens.nth(1).innerText(), /ajustada de R\$ 100,00/);
       assert.match(await itens.nth(1).innerText(), /R\$ 60,00/);
       assert.match(await itens.nth(2).innerText(), /paga[\s\S]*pagamento reembolsado/);
+      assert.match(await itens.nth(3).innerText(), /em conferência/);  // vencida, mas a Stripe ainda não confirmou
+      assert.doesNotMatch(await itens.nth(3).innerText(), /disponível/);
       assert.equal(await t.page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
     });
   });

@@ -22,9 +22,25 @@ def desvincular_afiliado(cur, user_id: int) -> None:
         return
     cur.execute("select id from affiliate_payouts where affiliate_id = %s order by id for update", (afiliado["id"],))
     cur.execute("select id from affiliate_commissions where affiliate_id = %s order by id for update", (afiliado["id"],))
+    # Comissão paga sem linha da fatura ganha uma, `resolved`: o reembolso que chegar depois tem de achar
+    # o que foi pago (N1). O evento guarda o saque, que sobrevive (D8).
     cur.execute(
         """
-        update affiliate_refund_reviews r set affiliate_code = %s
+        select c.id, c.stripe_invoice_id, c.amount_cents, c.payout_id from affiliate_commissions c
+         where c.affiliate_id = %s and c.status = 'paid'
+           and not exists (select 1 from affiliate_refund_reviews r where r.stripe_invoice_id = c.stripe_invoice_id)
+        """,
+        (afiliado["id"],),
+    )
+    for c in cur.fetchall():
+        cur.execute("insert into affiliate_refund_reviews(stripe_invoice_id, commission_id, tipo, refunded_cents,"
+                    " amount_cents, status) values (%s, %s, 'partial', 0, %s, 'resolved') returning id",
+                    (c["stripe_invoice_id"], c["id"], c["amount_cents"]))
+        registrar_evento(cur, cur.fetchone()["id"], "affiliate_deleted", "sistema", saque=c["payout_id"])
+    cur.execute(
+        """
+        update affiliate_refund_reviews r
+           set affiliate_code = %s, paid_cents = case when c.status = 'paid' then c.amount_cents end
           from affiliate_commissions c
          where c.id = r.commission_id and c.affiliate_id = %s
         returning r.id, r.status

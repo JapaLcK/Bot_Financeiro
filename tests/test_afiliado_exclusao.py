@@ -18,6 +18,7 @@ from test_afiliado_pendencia import (  # noqa: F401
     OVERVIEW,
     URL,
     _acoes,
+    _aprovar,
     _encerrar,
     _eventos,
     _limpa_fila,
@@ -279,11 +280,60 @@ def test_reembolso_maior_depois_da_exclusao_nao_desfaz_a_recuperacao(canal, adm)
     _parcial(a)
     _excluir(c)
     _total(a)
-    rev = _rev(a.fatura)
-    assert (rev["status"], rev["affiliate_code"]) == ("resolved", c.aff["code"])
+    rev = _rev(a.fatura)  # paga, com parcial, depois total: a recuperação de antes da exclusão (N1)
+    assert (rev["status"], rev["recovery_cents"], rev["affiliate_code"]) == ("recovery", 10_000, c.aff["code"])
     c2 = _afiliado()
     b, _ = _paga_e_saca(c2)
     _total(b)
     _excluir(c2)
     _total(b)
     assert (_rev(b.fatura)["status"], _rev(b.fatura)["recovery_cents"]) == ("recovery", 10_000)
+
+
+# ── N1: comissão paga de afiliado que excluiu a conta, e o reembolso que chega depois ──
+
+def test_reembolso_total_de_comissao_paga_depois_da_exclusao_vira_recuperacao(canal, adm):
+    """Sem exclusão daria `recovery` de R$ 100; a exclusão não pode mudar isso nem deixar a limpeza levar a linha."""
+    import db.affiliate_reviews_manutencao as manutencao
+    c = _afiliado()
+    com, saque = _paga_e_saca(c)
+    _excluir(c)
+    _total(com)
+    rev = _rev(com.fatura)
+    assert (rev["status"], rev["recovery_cents"], rev["affiliate_code"]) == ("recovery", 10_000, c.aff["code"])
+    assert len(canal.enviados) == 1 and "conta excluída" in canal.enviados[0]
+    linha = next(r for r in adm.get(OVERVIEW).json()["refund_recoveries"] if r["id"] == rev["id"])
+    assert (linha["payout_id"], linha["payout_cents"]) == (saque, 10_000)
+    with get_conn() as conn:
+        conn.execute("update affiliate_refund_reviews set created_at = now() - interval '400 days' where id = %s", (rev["id"],))
+        conn.commit()
+    manutencao.limpar_sem_comissao()
+    assert _rev(com.fatura)["status"] == "recovery"
+
+
+def test_parcial_aprovada_cheia_exclusao_e_total_vira_recuperacao(canal, adm):
+    c = _afiliado()
+    com, _ = _paga_e_saca(c)
+    _parcial(com)
+    assert _aprovar(adm, com, 10_000).status_code == 200  # aprovou cheio: nada a recuperar ainda
+    _excluir(c)
+    _total(com)
+    assert (_rev(com.fatura)["status"], _rev(com.fatura)["recovery_cents"]) == ("recovery", 10_000)
+
+
+def test_parcial_depois_da_exclusao_vai_para_revisao_e_o_admin_decide(canal, adm):
+    c = _afiliado()
+    com, _ = _paga_e_saca(c)
+    _excluir(c)
+    _parcial(com)
+    assert _rev(com.fatura)["status"] == "open"
+    assert _aprovar(adm, com, 6_000).status_code == 200
+    assert (_rev(com.fatura)["status"], _rev(com.fatura)["recovery_cents"]) == ("recovery", 4_000)
+
+
+def test_comissao_nao_paga_nao_deixa_linha(canal):
+    """Positivo: só comissão paga fica; a não paga sai com o afiliado, sem dinheiro a recuperar."""
+    c = _afiliado()
+    com = _paga(c)
+    _excluir(c)
+    assert _rev(com.fatura) is None

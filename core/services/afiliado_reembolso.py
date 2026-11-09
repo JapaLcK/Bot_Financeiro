@@ -169,51 +169,64 @@ def tratar_evento(event) -> None:
         _enviar(r)
 
 
-class _AindaNao(Exception):
-    """A Stripe ainda não permite concluir: disputa aberta, ou nenhuma cobrança paga."""
+class SemConfirmacao(Exception):
+    """A fatura ainda não permite concluir: disputa aberta, nenhuma cobrança paga ou forma inesperada
+    (`payment_record`). É da própria fatura: quem varre segue para a próxima. O texto é só o motivo."""
 
 
-def _devolvido_na_stripe(fatura: str, chave: str) -> tuple[str | None, int]:
-    """O tipo e o devolvido da fatura, contando disputa perdida como devolução; ganha não conta."""
+def devolvido_na_stripe(fatura: str, chave: str) -> tuple[str | None, int, list]:
+    """O tipo, o devolvido e as cobranças da fatura. Regra única da conferência e do script (A6):
+    disputa perdida conta como devolvida, ganha não conta, aberta não confirma nada."""
     import stripe  # noqa: PLC0415
 
     from core.services.ebook_entrega import cobrancas_da_fatura  # noqa: PLC0415
 
-    cobrancas = list(cobrancas_da_fatura(fatura, chave))
+    try:
+        cobrancas = list(cobrancas_da_fatura(fatura, chave))
+    except RuntimeError as exc:  # a forma que `cobrancas_da_fatura` recusa; erro da Stripe é `StripeError`
+        raise SemConfirmacao("forma_inesperada") from exc
     if not cobrancas:
-        raise _AindaNao("sem_cobranca")
+        raise SemConfirmacao("sem_cobranca")
     devolvido, inteiras = 0, True
     for c in cobrancas:
         perdida = 0
         if c["disputed"]:
             disputas = stripe.Dispute.list(charge=c["id"], limit=10, api_key=chave)["data"]
             if any(d["status"] not in ("won", "lost", "warning_closed") for d in disputas):
-                raise _AindaNao("disputa_aberta")
+                raise SemConfirmacao("disputa_aberta")
             perdida = sum(d["amount"] for d in disputas if d["status"] == "lost")
         volta = min(c["amount"], c["amount_refunded"] + perdida)
         devolvido += volta
         inteiras = inteiras and volta >= c["amount"]
-    return (("total" if inteiras else "partial") if devolvido else None), devolvido
+    return (("total" if inteiras else "partial") if devolvido else None), devolvido, cobrancas
 
 
-def conferir_comissao(commission_id: int, fatura: str) -> bool:
+def _adiada(commission_id: int, motivo: str) -> None:
+    log_system_event_sync(
+        "warning", "affiliate_commission_check_pending",
+        "Conferencia de comissao na Stripe adiada.", source="affiliates",
+        details={"commission_id": int(commission_id), "motivo": motivo},
+    )
+
+
+def conferir_comissao(commission_id: int, fatura: str) -> bool | None:
     """Confere na Stripe a comissão que nasceu sem linha da fatura (A5). True se a marca saiu.
 
     Fora de transação. Reembolso vira pendência pela mesma máquina do webhook; sem reembolso a
-    comissão segue o fluxo normal. Sem chave, falha da Stripe ou disputa aberta: a marca fica, e o
-    worker tenta de novo, sem prazo. Erro de banco sobe para quem chamou."""
+    comissão segue o fluxo normal. A marca fica, e o worker tenta de novo, sem prazo, em dois casos:
+    False quando a fatura ainda não permite concluir (`SemConfirmacao`), e None quando a Stripe
+    falhou ou não há chave, o que vale para todas. Erro de banco sobe para quem chamou."""
     chave = os.getenv("STRIPE_SECRET_KEY")
     if not chave:
-        return False
+        return None
     try:
-        tipo, devolvido = _devolvido_na_stripe(fatura, chave)
-    except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer a fatura
-        log_system_event_sync(
-            "warning", "affiliate_commission_check_pending",
-            "Conferencia de comissao na Stripe adiada.", source="affiliates",
-            details={"commission_id": int(commission_id), "motivo": str(exc) if isinstance(exc, _AindaNao) else type(exc).__name__},
-        )
+        tipo, devolvido, _ = devolvido_na_stripe(fatura, chave)
+    except SemConfirmacao as exc:
+        _adiada(commission_id, str(exc))
         return False
+    except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer a fatura
+        _adiada(commission_id, type(exc).__name__)
+        return None
     if tipo:
         registrar_reembolso(fatura, tipo, devolvido, datetime.now(timezone.utc), ator="sistema")
     liberar_conferencia(commission_id)
@@ -221,12 +234,14 @@ def conferir_comissao(commission_id: int, fatura: str) -> bool:
 
 
 def conferir_pendentes(limite: int = 20) -> int:
-    """Passada do `_afiliado_alerta_worker`. Sem chave não consulta nada; para na 1ª que não sai."""
+    """Passada do `_afiliado_alerta_worker`. Fatura que ainda não permite concluir fica para a próxima
+    volta e não segura as seguintes; queda da Stripe para a passada, que as outras bateriam nela."""
     if not os.getenv("STRIPE_SECRET_KEY"):
         return 0
     conferidas = 0
     for c in comissoes_a_conferir(limite):
-        if not conferir_comissao(c["id"], c["stripe_invoice_id"]):
+        feita = conferir_comissao(c["id"], c["stripe_invoice_id"])
+        if feita is None:
             break
-        conferidas += 1
+        conferidas += feita
     return conferidas

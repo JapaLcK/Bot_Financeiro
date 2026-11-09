@@ -76,6 +76,8 @@ def _gravar(cur, fatura, antes, c, tipo, devolvido, quando, status, ator, recupe
 
 def _aplicar(cur, fatura, a, c, tipo, devolvido, quando, ator) -> dict | None:
     """A máquina de estados: comissão (`c`, travada) contra o reembolso. `a` é a linha que já existe."""
+    if c is None and a and a["paid_cents"] is not None:  # paga, e saiu com o afiliado (N1): segue a regra da paga
+        c = {"id": None, "status": "paid", "amount_cents": a["paid_cents"], "payout_id": None}
     if c is None:  # pendência cuja comissão saiu com o afiliado (A3) fica como está: não vira `no_commission`
         if a and a["status"] != "no_commission":
             return a
@@ -216,10 +218,10 @@ def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: st
     Comissão paga não muda (D6): a diferença vira recuperação, atribuída e nunca somada, então
     reprocessar não duplica, e o que já foi encerrado não é cobrado de novo."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select r.commission_id, c.payout_id from affiliate_refund_reviews r"
-                    " join affiliate_commissions c on c.id = r.commission_id where r.id = %s", (int(review_id),))
+        cur.execute("select r.commission_id, r.paid_cents, c.payout_id from affiliate_refund_reviews r"
+                    " left join affiliate_commissions c on c.id = r.commission_id where r.id = %s", (int(review_id),))
         lido = cur.fetchone()
-        if lido is None:
+        if lido is None or (lido["commission_id"] is None and lido["paid_cents"] is None):
             return False
         saque = None
         if lido["payout_id"]:
@@ -228,7 +230,8 @@ def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: st
             saque = cur.fetchone()
         cur.execute("select id, status, payout_id, amount_cents from affiliate_commissions where id = %s for update",
                     (lido["commission_id"],))
-        c = cur.fetchone()
+        # Comissão que saiu com o afiliado (N1): era paga, e só a recuperação se decide.
+        c = cur.fetchone() or {"id": None, "status": "paid", "payout_id": None, "amount_cents": lido["paid_cents"]}
         cur.execute("select * from affiliate_refund_reviews where id = %s for update", (int(review_id),))
         r = cur.fetchone()
         if (r["status"] != "open" or r["tipo"] != "partial" or r["refunded_cents"] != visto_cents

@@ -582,7 +582,7 @@ class _StripeDoScript(_FakeStripe):
     def __init__(self):
         super().__init__()
         self.faturas, self.cobrancas, self.quebra, self.assinaturas = {}, {}, set(), {}
-        self.reembolsos, self.pagamentos = {}, {}
+        self.reembolsos, self.pagamentos, self.disputas = {}, {}, {}
         outer = self
 
         class Invoice:
@@ -613,7 +613,13 @@ class _StripeDoScript(_FakeStripe):
             def list(charge, limit):
                 return {"data": [{"created": t} for t in outer.reembolsos.get(charge, [1_790_500_000])]}
 
+        class Dispute:
+            @staticmethod
+            def list(charge, limit, api_key):
+                return {"data": outer.disputas.get(charge, [])}
+
         self.Invoice, self.InvoicePayment, self.PaymentIntent, self.Refund = Invoice, InvoicePayment, PaymentIntent, Refund
+        self.Dispute = Dispute
         self.Subscription = SimpleNamespace(retrieve=lambda sid: outer.assinaturas.get(sid, {"metadata": {}}))
 
 

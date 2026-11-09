@@ -316,7 +316,7 @@ test("'Mostrando as mais recentes' só no limite da API: 50 comissões e 20 saqu
   } finally { await b.ctx.close(); }
 });
 
-// mutação: tirar o quadro "Em revisão", o `c.in_review` de `_affiliateCommissionStatus` ou o "ajustada de"
+// mutação: tirar o quadro "Em revisão", o `c.in_review` ou o `c.checking` de `_affiliateCommissionStatus`, ou o "ajustada de"
 for (const [nome, width, height] of [["desktop", 1280, 800], ["celular", 390, 844]]) {
   test(`reembolso em análise (${nome}): quadro, selo e 'ajustada de'`, async () => {
     const { ctx, page } = await abrir({ corpo: EM_REVISAO, width, height });
@@ -329,6 +329,7 @@ for (const [nome, width, height] of [["desktop", 1280, 800], ["celular", 390, 84
       assert.match(corpo, /em revisão/);
       assert.match(corpo, /ajustada de R\$\s*100,00/);
       assert.match(corpo, /pagamento reembolsado/);
+      assert.match(corpo, /em conferência/);
     } finally { await ctx.close(); }
   });
 }

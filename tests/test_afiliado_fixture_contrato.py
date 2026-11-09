@@ -134,6 +134,10 @@ def _resposta_real():
     assert resolver_parcial(pendencia, "admin", 600, "Ajuste do valor aprovado", 3000)
     _comissao(c, 10, disponivel=False)
     request_payout(c.aff["id"])
+    em_conferencia = _comissao(c, 10)  # depois do saque, para ficar fora dele
+    with get_conn() as conn:
+        conn.execute("update affiliate_commissions set payment_check_pending = true where id = %s", (em_conferencia.id,))
+        conn.commit()
     ativa = _me(c)
     assert set_affiliate_status(c.aff["id"], "disabled")
     return ativa, _me(c)

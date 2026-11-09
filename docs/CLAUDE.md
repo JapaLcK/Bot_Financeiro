@@ -2735,7 +2735,11 @@ chamadas no caso comum) e, só com `disputed`, `Dispute.list`; disputa perdida c
 ganha não conta, aberta mantém a marca. Com reembolso, `registrar_reembolso` com ator `sistema` (total
 solta estorna, parcial vai para revisão); sem, a marca sai. Falha da Stripe, `payment_record`, nenhuma
 cobrança paga ou falta de `STRIPE_SECRET_KEY` deixam a marca, e o `_afiliado_alerta_worker` repete
-`conferir_pendentes` a cada 5 min, sem prazo e sem script manual. Comissão antiga nasce `false` na
+`conferir_pendentes` a cada 5 min, sem prazo e sem script manual. Na passada, fatura que ainda não
+permite concluir (disputa aberta, `payment_record`, sem cobrança paga) fica para a próxima volta sem
+segurar as seguintes; só a queda da Stripe (erro da API) para a passada. Toda adiada deixa o log
+`affiliate_commission_check_pending` com o motivo, sem a fatura. Na lista do afiliado, a marcada
+aparece "em conferência" (`commissions[].checking`), no `/painel` e no `/app`. Comissão antiga nasce `false` na
 migração, sem conferência em massa. O overview do admin mostra quantas aguardam e a mais antiga
 (`commission_checks`), para notar queda longa. Com linha da fatura, `promover` decide e não há consulta.
 **Retenção de `no_commission`:** 30 dias. `limpar_sem_comissao`, na mesma volta do worker, apaga só
@@ -2748,19 +2752,21 @@ alterar saldos: estorna comissão solta com reembolso total confirmado.** Sem el
 com `DATABASE_URL` e `STRIPE_SECRET_KEY` de produção:
 `.venv/bin/python scripts/backfill_afiliado_pagamentos.py [--aplicar]`. A primeira passada é sobre
 comissões `status <> 'reversed'`, antes da de rótulo, que morrendo no meio deixaria `total` sem
-pendência, e porque conta excluída só existe por ali. Reembolso total confirmado é ao menos uma
-cobrança, nenhuma com `disputed`, todas com `amount_refunded >= amount`; alguma devolvida, mas não
-todas, é parcial. Categorias: `a_estornar` (total, `pending`, sem saque; lista id e valor, e o total),
-`segue_revisao` (parcial, ou total em saque ou paga), `sem_confirmacao` (exceção, `payment_record`,
-erro da API, sem cobrança, disputa; lista id e o tipo do motivo, sem alteração) e `ja_registrada`
+pendência, e porque conta excluída só existe por ali. **O script trata disputa** (decisão do dono, muda
+o D5): usa `devolvido_na_stripe`, a mesma regra da conferência, numa função só. Disputa perdida conta
+como devolvida e segue estorno ou revisão; ganha não conta; aberta fica listada sem alteração.
+Reembolso total confirmado é ao menos uma cobrança e todas devolvidas por inteiro (reembolso mais
+disputa perdida); alguma devolvida, mas não todas, é parcial. Categorias: `a_estornar` (total,
+`pending`, sem saque; lista id e valor, e o total), `segue_revisao` (parcial, ou total em saque ou
+paga), `sem_confirmacao` (erro da API, `forma_inesperada` como `payment_record`, `sem_cobranca`,
+`disputa_aberta`; lista id e o motivo, sem alteração) e `ja_registrada`
 (pendência já `total`, ou já com esse devolvido; só conta). Pendência parcial registrada é relida: o
 total que o webhook perdeu é fato novo. O `--aplicar` não confia na classificação: chama
 `registrar_reembolso`, a mesma função do webhook, com ator `script`, e a categoria e a linha impressa
 são o desfecho relido depois, não a previsão. `sem_confirmacao` faz o script sair com 1. A segunda
 passada completa o registro (fatura de plano sem comissão, webhook perdido, reembolso antigo): fatura
-com cobrança contestada não é rotulada, só contada em `contestadas_para_conferir`, porque um rótulo
-`total` sem pendência estornaria na rejeição sem nada bloquear o pagamento; e não recupera conta
-excluída. Pula o cartão recusado com Pix
+com cobrança contestada não é rotulada, só contada em `contestadas_para_conferir`: o rótulo dela vem
+da primeira passada, junto da pendência, quando a disputa se resolve; e não recupera conta excluída. Pula o cartão recusado com Pix
 cobrindo pela `MARCA` na assinatura; assinatura já morta quando a recusa rodou não grava a `MARCA`,
 e o script conta a fatura. Fatura com `payment.type = payment_record` faz `cobrancas_da_fatura`
 levantar: nessa passada, o cliente inteiro sai em `clientes_com_falha`. É idempotente, e não imprime
@@ -2790,6 +2796,10 @@ seguinte não pede. Rollback: o repair volta a FK para `cascade`, e os nulos fic
 `affiliates`, travando na ordem afiliado, saques, comissões, pendências (a do `request_payout`). Ela
 grava o código do afiliado nas pendências e nos saques, zera chave Pix e nota dos saques, e fecha as
 pendências `open` com evento `affiliate_deleted` (sem comissão, não há o que bloquear nem decidir).
+Comissão paga guarda o valor em `paid_cents` na pendência da fatura, criada `resolved` se não existia,
+com evento `affiliate_deleted` apontando o saque: reembolso que chega depois segue a regra da comissão
+paga (total vira recuperação; parcial vai para revisão, e o admin decide) e a linha nunca entra na
+limpeza. Comissão não paga sai sem linha: não há dinheiro a recuperar.
 Depois, `affiliates` cai e leva referrals, pagamentos e comissões; `affiliate_payouts.affiliate_id` e
 `affiliate_refund_reviews.commission_id` viram nulos pela FK `set null`. Recuperação segue no admin e
 encerra como antes; o histórico e a recuperação apontam o saque pelo `payout_id` do evento.

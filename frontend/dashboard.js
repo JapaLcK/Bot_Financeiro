@@ -11908,6 +11908,7 @@ function _affiliateCommissionStatus(c) {
   if (c.status === "reversed") return { label: "estornada", color: "var(--red)" };
   if (c.status === "paid") return { label: "paga", color: "var(--green)" };
   if (c.in_review) return { label: "em revisão", color: "var(--text-3)" };
+  if (c.checking) return { label: "em conferência", color: "var(--text-3)" };
   if (c.payout_id) return { label: "em saque", color: "var(--blue)" };
   if (new Date(c.available_at) <= new Date()) return { label: "disponível", color: "var(--green)" };
   const d = new Date(c.available_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });

@@ -333,6 +333,7 @@ def list_affiliate_commissions(affiliate_id: int, limit: int = 50) -> list[dict]
                                     and p.payment_ref = c.stripe_invoice_id), 'none') as payment_refund,
                        c.status = 'pending' and c.payout_id is null
                          and {PENDENCIA_ABERTA_SQL.format(c="c")} as in_review,
+                       c.status = 'pending' and c.payment_check_pending as checking,
                        (select v.amount_cents from affiliate_refund_reviews v
                          where v.commission_id = c.id and v.amount_cents <> c.amount_cents) as original_amount_cents
                   from affiliate_commissions c

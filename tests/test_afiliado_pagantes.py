@@ -514,7 +514,7 @@ def test_resposta_so_leva_contagens_e_rotulo(cobrar):
     assert set(m["stats"]) == {"referrals", "held", "available", "review", "requested", "paid", "generated",
                                "paying_clients", "refunded_clients", "refunds"}
     assert set(m["stats"]["refunds"]) == {"total", "partial"}
-    assert set(m["commissions"][0]) == {"id", "invoice_amount", "amount", "original_amount", "in_review", "status",
+    assert set(m["commissions"][0]) == {"id", "invoice_amount", "amount", "original_amount", "in_review", "checking", "status",
                                         "available_at", "created_at", "payout_id", "payment_refund"}
     assert [p for p in (fatura, ind.email, str(ind.uid), "referral_id", "refunded_at",
                         "stripe", "source") if p in r.text] == []

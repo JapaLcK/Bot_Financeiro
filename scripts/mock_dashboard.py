@@ -32,7 +32,7 @@ async def afiliado():
     modo = os.environ.get("MOCK_AFILIADO", "")
     if modo not in ("ativa", "desativada", "zero"):
         return JSONResponse({"detail": "Você não faz parte do programa de afiliados."}, status_code=404)
-    comissao = {"id": 1, "invoice_amount": 59.9, "amount": 5.99, "original_amount": None, "in_review": False,
+    comissao = {"id": 1, "invoice_amount": 59.9, "amount": 5.99, "original_amount": None, "in_review": False, "checking": False,
                 "status": "pending",
                 "available_at": "2026-01-01T12:00:00+00:00", "payout_id": None,
                 "payment_refund": "partial", "created_at": "2025-12-02T12:00:00+00:00"}

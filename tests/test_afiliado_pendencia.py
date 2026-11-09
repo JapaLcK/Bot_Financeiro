@@ -1106,17 +1106,18 @@ def test_script_categorias(script, capsys):
     paga = _paga_e_saca(e)[0]
     f = _afiliado()
     disputada, intacta, registrada = _paga(f), _paga(f), _paga(f)
+    script.stripe.disputas[disputada.fatura] = [{"status": "needs_response", "amount": 100_000}]
     registrar_reembolso(registrada.fatura, "partial", 1_000, AGORA)
     cheia = {"amount": 100_000, "amount_refunded": 100_000, "disputed": False}
     script.stripe.cobrancas |= {solta.fatura: cheia, em_saque.fatura: cheia, paga.fatura: cheia,
                                 parcial.fatura: {"amount": 50_000, "amount_refunded": 1_000, "disputed": False},
-                                disputada.fatura: {**cheia, "disputed": True},
+                                disputada.fatura: {**cheia, "disputed": True},  # disputa aberta abaixo
                                 registrada.fatura: {"amount": 100_000, "amount_refunded": 1_000, "disputed": False}}
     n, saida = _roda(script, capsys, False)
     assert _linha_de(saida, solta).startswith("a_estornar:") and "R$ 100.00" in _linha_de(saida, solta)
     for com in (parcial, em_saque, paga):
         assert _linha_de(saida, com).startswith("segue_revisao:")
-    assert _linha_de(saida, disputada).endswith("· disputa")
+    assert _linha_de(saida, disputada).endswith("· disputa_aberta")
     assert _linha_de(saida, intacta) == "" and _linha_de(saida, registrada) == ""
     assert n["a_estornar_cents"] >= 10_000 and n["ja_registrada"] >= 1
     assert _status(solta)["status"] == "pending" and _rev(solta.fatura) is None  # simulação não grava
@@ -1129,7 +1130,7 @@ def test_script_categorias(script, capsys):
     assert _rev(disputada.fatura) is None and _rev(intacta.fatura) is None
 
 
-@pytest.mark.parametrize("caso,motivo", [("uma_de_duas", None), ("disputa", "disputa"), ("payment_record", "RuntimeError"),
+@pytest.mark.parametrize("caso,motivo", [("uma_de_duas", None), ("disputa", "disputa_aberta"), ("payment_record", "forma_inesperada"),
                                          ("erro_api", "ConnectionError"), ("vazio", "sem_cobranca")])
 def test_script_confirmacao(script, capsys, caso, motivo):
     c = _afiliado()
@@ -1141,6 +1142,7 @@ def test_script_confirmacao(script, capsys, caso, motivo):
         script.stripe.cobrancas |= {com.fatura: cheia, "pi_b": {"amount": 100_000, "amount_refunded": 0, "disputed": False}}
     elif caso == "disputa":
         script.stripe.cobrancas[com.fatura] = {**cheia, "disputed": True}
+        script.stripe.disputas[com.fatura] = [{"status": "needs_response", "amount": 100_000}]
     elif caso == "payment_record":
         script.stripe.pagamentos[com.fatura] = [{"status": "paid", "payment": {"type": "payment_record", "payment_intent": None}}]
     elif caso == "erro_api":
@@ -1159,7 +1161,7 @@ def test_script_confirmacao(script, capsys, caso, motivo):
 
 def test_script_revalida(script, capsys, monkeypatch):
     """A comissão entra em saque depois da leitura do script: o `--aplicar` não estorna."""
-    import backfill_afiliado_pagamentos as modulo
+    import core.services.ebook_entrega as modulo  # a passada de comissões lê a Stripe pela regra da conferência
     c = _afiliado()
     com = _paga(c)
     script.stripe.cobrancas[com.fatura] = {"amount": 100_000, "amount_refunded": 100_000, "disputed": False}
@@ -1291,18 +1293,20 @@ def test_aviso_velho_nao_marca_a_recuperacao(canal, adm, monkeypatch):
 
 
 def test_script_nao_rotula_cobranca_contestada(script, capsys):
-    """A6: a passada de pagamentos não rotula `total` o que a de comissões não confirmou."""
+    """A6: disputa aberta não confirma nada, e a passada de pagamentos não rotula o que a de comissões
+    não confirmou."""
     c = _afiliado()
     a = _paga(c)
     saque = request_payout(c.aff["id"])["id"]
     script.stripe.cobrancas[a.fatura] = {**_cheia(), "disputed": True}
+    script.stripe.disputas[a.fatura] = [{"status": "needs_response", "amount": 100_000}]
     script.stripe.faturas[_cliente(a.indicado)] = [_fatura(a.fatura)]
     n, saida = _roda(script, capsys, True)
     with get_conn() as conn:
         rotulo = conn.execute("select refund_status from affiliate_referral_payments where payment_ref = %s",
                               (a.fatura,)).fetchone()["refund_status"]
     assert rotulo == "none" and _rev(a.fatura) is None
-    assert _linha_de(saida, a).endswith("· disputa") and n["contestadas_para_conferir"] == 1
+    assert _linha_de(saida, a).endswith("· disputa_aberta") and n["contestadas_para_conferir"] == 1
     assert _status(a)["payout_id"] == saque and _status(a)["status"] == "pending"
 
 

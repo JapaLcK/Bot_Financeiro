@@ -2331,6 +2331,7 @@ def init_db():
           -- Nulo em `no_commission` e quando o afiliado excluiu a conta (A3): a pendência e o histórico ficam.
           commission_id bigint references affiliate_commissions(id) on delete set null,
           affiliate_code text,                     -- gravado só na exclusão do afiliado
+          paid_cents bigint,                       -- comissão paga, gravado na exclusão: o reembolso depois vira recuperação
           tipo text not null check (tipo in ('partial', 'total')),
           refunded_cents bigint not null,          -- acumulado; maior = fato novo
           amount_cents bigint,                     -- valor ORIGINAL da comissão; nunca reescrito
