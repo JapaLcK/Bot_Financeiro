@@ -61,11 +61,11 @@ test("uma escrita e um erro por tela: 402 em gerar e depois em remover = uma men
     s.convidar = ERRO(402, "family_coverage_required");
     s.remover = ERRO(402, "family_coverage_required");
     await bt("Gerar link de convite").click();
-    await secao.getByText("Seu plano não inclui família.").waitFor();
+    await secao.getByText("A família é do plano Pro").waitFor();
     await page.getByRole("button", { name: "Remover" }).click();
     await dlg().getByRole("button", { name: "Remover", exact: true }).click();
     await page.getByRole("dialog").waitFor({ state: "detached" });
-    assert.equal(await secao.getByText("Seu plano não inclui família.").count(), 1);
+    assert.equal(await secao.getByText("A família é do plano Pro").count(), 1);
     assert.equal(await secao.getByRole("alert").count(), 1);
   });
 });
@@ -126,7 +126,7 @@ test("um erro de ação some quando a ação seguinte dá certo", async () => {
   await com({ visao: titular({ membros: [MARIA] }) }, async ({ s, bt, secao }) => {
     s.convidar = ERRO(402, "family_coverage_required");
     await bt("Gerar link de convite").click();
-    await secao.getByText("Seu plano não inclui família.").waitFor();
+    await secao.getByText("A família é do plano Pro").waitFor();
     s.convidar = null;
     await bt("Gerar link de convite").click();
     await secao.getByText("tok-1").waitFor();

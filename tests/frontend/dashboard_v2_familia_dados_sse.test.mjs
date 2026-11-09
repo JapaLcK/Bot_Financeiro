@@ -268,11 +268,11 @@ test("o membro sai da lista com o painel aberto e volta com o mesmo ref: painel 
 });
 
 // mutação: tirar o ramo 402 de `motivoDe` (dados.ts) ou o `plano` de `falhaFamilia` (api.ts): cairia em "Não foi possível carregar."
-test("402 no resumo: 'Seu plano não inclui família.' e o link para a cobrança", async () => {
+test("402 no resumo: card do Pro com o CTA para /precos", async () => {
   await comErro((s) => { s.agregados = ERRO(402, "family_coverage_required"); }, async ({ secao }) => {
-    await secao.getByText("Seu plano não inclui família.").waitFor();
-    const a = secao.getByRole("link", { name: "Ver cobrança" });
-    assert.match(await a.getAttribute("href"), /conta\/cobranca$/);
+    await secao.getByText("A família é do plano Pro").waitFor();
+    const a = secao.getByRole("link", { name: "Ver o Pro" });
+    assert.equal(await a.getAttribute("href"), "/precos");
   });
 });
 

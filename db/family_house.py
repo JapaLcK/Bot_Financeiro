@@ -4,7 +4,7 @@
 prévia de dissolução). Qualquer membro ativo, titular incluso, lê e edita: o vínculo ativo, reconferido sob o lock do
 grupo, é a fronteira de autorização. Toda query de item filtra `id = %s AND group_id = <grupo do chamador>`; ref de
 outro grupo, inexistente ou malformado é o mesmo `item_not_found`. Nada aqui toca lançamento, conta ou caixinha.
-Erros (FamilyError): not_member, item_not_found, edit_conflict, category_taken, insufficient, prazo_passado.
+Erros (FamilyError): not_member, coverage_required (o titular do grupo sem cobertura Pro: a casa fecha, o vínculo fica), item_not_found, edit_conflict, category_taken, insufficient, prazo_passado.
 """
 from psycopg import errors as pgerr
 
@@ -52,14 +52,23 @@ def _le(cur, gid: int) -> tuple[dict, set]:
     return {"mes": mes, "metas": metas, "orcamentos": orcamentos}, {r["user_id"] for r in cur.fetchall()}
 
 
+def _exige_cobertura(cur, owner_id: int) -> None:
+    """A casa é do plano Pro do titular: sem ele, leitura e escrita (dele e dos membros) fecham; nada é apagado."""
+    from core.services.family_access import titular_pro_no_lock  # lazy: family_access importa db.family
+    if not titular_pro_no_lock(cur, owner_id):
+        raise FamilyError("coverage_required")
+
+
 def casa(uid: int) -> dict:
     """{"mes", "metas", "orcamentos"} (centavos) do grupo de `uid`, ou FamilyError("not_member")."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("set transaction isolation level repeatable read, read only")  # vínculo e leituras: um snapshot só
-        cur.execute("select group_id from family_members where user_id = %s and left_at is null", (uid,))
+        cur.execute("select m.group_id, g.owner_user_id from family_members m join family_groups g on g.id = m.group_id"
+                    " where m.user_id = %s and m.left_at is null", (uid,))
         m = cur.fetchone()
         if not m:
             raise FamilyError("not_member")
+        _exige_cobertura(cur, m["owner_user_id"])
         lido = _le(cur, m["group_id"])
     return _nomeia(*lido)
 
@@ -69,7 +78,8 @@ def _escreve(uid: int, fazer) -> dict:
     Lê a casa na MESMA transação, antes do commit; os nomes saem depois dele (`_primeiro_nome` não levanta),
     então a resposta não falha com a escrita gravada e nenhuma 2a conexão é pedida com o lock na mão."""
     with get_conn() as conn, conn.cursor() as cur:
-        gid, _ = _lock_member_group(cur, uid, com_titular=True)
+        gid, owner_id = _lock_member_group(cur, uid, com_titular=True)
+        _exige_cobertura(cur, owner_id)
         try:
             fazer(cur, gid)
         except pgerr.UniqueViolation:  # a corrida em si o lock serializa; o índice é a rede
