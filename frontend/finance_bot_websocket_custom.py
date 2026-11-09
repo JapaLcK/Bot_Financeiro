@@ -2183,6 +2183,22 @@ async def lifespan(app: FastAPI):
                 print(f"[stripe_email] erro: {exc}", file=sys.stderr)
             await asyncio.sleep(300)
 
+    async def _afiliado_avisos_worker():
+        """Reenvia ao admin os avisos de reembolso de afiliado que ficaram pendentes por falta de
+        canal, a cada 5 min, a 1ª volta sem delay. Inerte sem `ADMIN_NOTIFY_WEBHOOK_URL`. Ver
+        `core/services/afiliado_reembolso.py`."""
+        from core.services.afiliado_reembolso import reenviar_avisos_pendentes  # noqa: PLC0415
+        while True:
+            try:
+                n = await asyncio.to_thread(reenviar_avisos_pendentes)
+                if n:
+                    print(f"[afiliado_avisos] {n} aviso(s) entregue(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[afiliado_avisos] erro: {type(exc).__name__}", file=sys.stderr)
+            await asyncio.sleep(300)
+
     async def _remarketing_worker():
         """Régua de remarketing do checkout abandonado, a cada 5 min. Inerte sem
         `REMARKETING_DESDE` (nem consulta o banco). Ver `core/services/remarketing.py`."""
@@ -2299,6 +2315,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
+                asyncio.create_task(_afiliado_avisos_worker(), name="afiliado_avisos"),
                 asyncio.create_task(_remarketing_worker(), name="remarketing_worker"),
                 asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
                 asyncio.create_task(_tarefa_finito_checks(), name="finito_checks"),

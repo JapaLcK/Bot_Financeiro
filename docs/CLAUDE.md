@@ -2596,11 +2596,31 @@ em vez de perdê-lo. Comissão em saque reembolsada por inteiro não volta a ser
 `reverse_commission` trava a linha pelo `id` antes do `update`, e o webhook o repete depois do
 rótulo. As três partes juntas fecham a corrida: qualquer uma a menos deixa a comissão solta.
 
+Aviso ao admin, separado do "tratado" (estorno + rótulo): `affiliate_commissions.refund_alert`
+(`partial`/`total`, nunca rebaixa) e `refund_alert_sent_at` (nulo = não entregue). Invariante,
+pelo webhook: o rótulo que ele grava só vem depois do aviso entregue ou registrado pendente, então
+o retorno antecipado da reentrega nunca cala um aviso perdido. O rótulo gravado pelo script
+(`scripts/backfill_afiliado_pagamentos.py`) não deixa aviso nem pendência e cala as reentregas
+posteriores do evento (no total, o estorno de comissão fora de saque ainda acontece). Dois caminhos:
+canal configurado que recusa (timeout, não-2xx) → 5xx sem rótulo e a Stripe reentrega; canal
+ausente → 200 com pendência e log `error` com `event_id` e `commission_id`, e o laço
+`afiliado_avisos` entrega quando `ADMIN_NOTIFY_WEBHOOK_URL` existir. Pendência de comissão já
+`reversed` não é enviada.
+
 Limites do reembolso: (1) o que chega antes do `invoice.paid` é no-op e se perde; quem repara é
 o script. (2) Reembolso só do caderno rotula `partial`, sem distinguir. (3) Plano inteiro devolvido
 com o caderno mantido também vira `partial`: a comissão fica e só o alerta sai. (4) Sem linha no
-registro não há rótulo, e o saque rejeitado devolve a comissão; o alerta sai no reembolso. (5) Sem
-`ADMIN_NOTIFY_WEBHOOK_URL` o alerta se perde, e sobra o log `affiliate_refund_commission_kept`.
+registro não há rótulo, e o saque rejeitado devolve a comissão; o alerta sai no reembolso. (5) Canal
+configurado fora do ar além da janela de reentrega da Stripe (janela não conferida aqui) deixa o
+evento inteiro sem efeito, não só o aviso: o rótulo `refund_status` não é gravado, o estorno que
+depende dele não acontece, e um `reject_payout` nesse intervalo devolve a comissão a `pending` em
+vez de estorná-la (ele só estorna com `refund_status = 'total'`). Sobram o log `error`
+`affiliate_refund_commission_kept` e o evento falho no painel da Stripe. Esgotada a reentrega, o
+aviso não volta, nem por reembolso nem por disputa. O script, rodado à mão, repara só o rótulo de
+reembolso (pelo `amount_refunded`), sem aviso e sem estornar a comissão; disputa só entra na
+contagem `contestadas_para_conferir`, sem rótulo. A ordem importa: reenviar o evento falho pelo
+painel da Stripe primeiro e rodar o script depois, porque o rótulo do script cala o reenvio.
+Exclusão da conta do indicado apaga a comissão em cascata, e a pendência some junto.
 (6) Disputa parcial seguida de reembolso do restante fica `partial`, sem novo alerta: o
 `charge.refunded` só olha o devolvido. Hipótese não verificada por trás disso e do cálculo da
 disputa: `charge.amount_refunded` não inclui disputa. Conferir com disputa real no modo de teste
@@ -2989,7 +3009,10 @@ entrega do e-book da `/assinar`
 1ª volta sem delay; inerte sem `STRIPE_SECRET_KEY` no ambiente), o e-mail trocado em
 `/settings` levado ao cliente do Stripe (`_stripe_email_worker` →
 `core/services/stripe_email_sync.sincronizar_pendentes`, mesma cadência e mesma guarda da
-chave), e a foto diária do
+chave), os avisos de reembolso de afiliado pendentes (`_afiliado_avisos_worker` →
+`core/services/afiliado_reembolso.reenviar_avisos_pendentes`, a cada 5 min, a 1ª volta sem
+delay, lote de 20, para na 1ª falha do canal, `for update skip locked` por linha; inerte sem
+`ADMIN_NOTIFY_WEBHOOK_URL`), e a foto diária do
 patrimônio (`_patrimonio_foto` → `core/services/patrimonio_foto.py`, a cada hora, a partir
 das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos`; atrás de
 `PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não

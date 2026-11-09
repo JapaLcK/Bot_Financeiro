@@ -16,6 +16,7 @@ Fluxo:
 """
 import re
 import secrets
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 from .affiliate_payments import resumo_conversao
@@ -343,6 +344,75 @@ def reverse_commission(commission_id: int) -> bool:
             )
             conn.commit()
             return cur.rowcount > 0
+
+
+def registrar_aviso_reembolso(commission_id: int, tipo: str, entregue: bool) -> None:
+    """Grava o aviso de reembolso da comissão: entregue agora, ou pendente (`sent_at` nulo).
+    Não rebaixa `total` para `partial`, e o mesmo tipo não entregue não apaga um `sent_at` antigo
+    (reentrega sem canal de aviso que já saiu)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update affiliate_commissions
+                   set refund_alert = %s,
+                       refund_alert_sent_at = case when %s then now()
+                                                   when refund_alert is not distinct from %s
+                                                   then refund_alert_sent_at
+                                                   else null end
+                 where id = %s and not (refund_alert is not distinct from 'total' and %s = 'partial')
+                """,
+                (tipo, bool(entregue), tipo, int(commission_id), tipo),
+            )
+            conn.commit()
+
+
+def entregar_avisos_pendentes(enviar: Callable[[dict, str], bool], limite: int = 20) -> int:
+    """Reenvia avisos de reembolso pendentes, um por transação. `enviar(comissao, tipo)` devolve
+    se o canal aceitou; a 1ª recusa para o lote (a falha é do canal, não da linha). Devolve
+    quantos foram entregues.
+
+    `for update skip locked` por linha, molde de `db/webhook_outbox.py::reservar_evento`: o
+    lock vive durante o envio, e outra passada concorrente pula a linha em vez de repetir.
+    `ponytail:` teto — uma conexão presa por até o timeout do canal (5s) por aviso."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id from affiliate_commissions
+                 where refund_alert is not null and refund_alert_sent_at is null
+                   and status <> 'reversed'
+                 order by id
+                 limit %s
+                """,
+                (int(limite),),
+            )
+            ids = [r["id"] for r in cur.fetchall()]
+    entregues = 0
+    for cid in ids:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select id, status, payout_id, amount_cents, refund_alert
+                      from affiliate_commissions
+                     where id = %s and refund_alert is not null and refund_alert_sent_at is null
+                       and status <> 'reversed'
+                       for update skip locked
+                    """,
+                    (cid,),
+                )
+                linha = cur.fetchone()
+                if linha is None:
+                    continue
+                if not enviar(linha, linha["refund_alert"]):
+                    conn.rollback()
+                    break
+                cur.execute("update affiliate_commissions set refund_alert_sent_at = now() where id = %s",
+                            (cid,))
+                conn.commit()
+                entregues += 1
+    return entregues
 
 
 # ─── Saque ────────────────────────────────────────────────────────────────────

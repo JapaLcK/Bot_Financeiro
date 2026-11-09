@@ -21,6 +21,7 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
+import requests
 from fastapi.testclient import TestClient
 
 import db
@@ -29,10 +30,17 @@ from _apoio_auth_app import csrf
 from _billing_grants_helpers import garantir_system_event_logs
 from core.services import admin_notify, email_service
 import core.services.afiliado_reembolso as modulo_reembolso
-from core.services.afiliado_reembolso import tratar_evento
+from core.services.afiliado_reembolso import reenviar_avisos_pendentes, tratar_evento
 from core.services.cartao_recusado_por_pix import MARCA
 from db.affiliate_payments import marcar_reembolso, registrar_pagamento
-from db.affiliates import get_affiliate_stats, mark_payout_paid, reject_payout, request_payout
+from db.affiliates import (
+    get_affiliate_stats,
+    mark_payout_paid,
+    registrar_aviso_reembolso,
+    reject_payout,
+    request_payout,
+    reverse_commission,
+)
 from db.connection import get_conn
 from test_afiliado_area import (  # noqa: F401
     SENHA,
@@ -46,9 +54,12 @@ from test_afiliado_area import (  # noqa: F401
     _saques,
 )
 from test_afiliado_pagantes import AGORA, _admin, _indicado, _linhas, _numeros
+from _lifespan_probe import sondar
 from test_billing_webhook_lifecycle import _FakeStripe, _fake_sub
 
 SEGREDO = "whsec_teste"
+_SEND_REAL = admin_notify._send  # antes de qualquer fixture trocar
+URL = "https://discord.com/api/webhooks/1/x"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 
@@ -264,17 +275,278 @@ def test_em_saque_nao_muda_e_avisa(mundo):
     assert len(mundo.alertas) == 1 and f"saque `{saque['id']}`" in mundo.alertas[0]
 
 
-def test_falha_no_alerta_repete_o_aviso_na_reentrega(mundo, monkeypatch):
-    """A comissão vem antes do rótulo: com o rótulo primeiro, a reentrega acharia `total` e calaria."""
+# ── Aviso ao admin: tratado × entregue ───────────────────────────────────────
+
+@pytest.fixture
+def canal(mundo, monkeypatch):
+    """`_send` de verdade até o `requests.post`, que é falso. Sem URL até `canal.ligar()`.
+    `canal.falha`: None (204), "timeout" ou 503. `posts` = tentativas, `ok` = aceitas."""
+    k = SimpleNamespace(posts=[], ok=[], falha=None, trava=None, dentro=threading.Event())
+
+    def post(url, json, timeout):
+        k.posts.append(json["content"])
+        if k.trava and len(k.posts) == 1:
+            k.dentro.set()
+            k.trava.wait(10)
+        if k.falha == "timeout":
+            raise requests.exceptions.Timeout()
+        if k.falha == 503:
+            return SimpleNamespace(status_code=503, text="x")
+        k.ok.append(json["content"])
+        return SimpleNamespace(status_code=204, text="")
+
+    monkeypatch.setattr(admin_notify, "_send", _SEND_REAL)
+    monkeypatch.setattr(admin_notify, "requests", SimpleNamespace(post=post))
+    monkeypatch.delenv("ADMIN_NOTIFY_WEBHOOK_URL", raising=False)
+    k.ligar = lambda: monkeypatch.setenv("ADMIN_NOTIFY_WEBHOOK_URL", URL)
+    _zera_pendencias()
+    return k
+
+
+def _zera_pendencias():
+    """O banco é da execução inteira: pendência de outro teste entraria na conta do lote."""
+    with get_conn() as conn:
+        conn.execute("update affiliate_commissions set refund_alert_sent_at = now()"
+                     " where refund_alert is not null and refund_alert_sent_at is null")
+        conn.commit()
+
+
+def _aviso(com):
+    with get_conn() as conn:
+        r = conn.execute("select refund_alert, refund_alert_sent_at from affiliate_commissions where id = %s",
+                         (com.id,)).fetchone()
+    return r["refund_alert"], r["refund_alert_sent_at"] is not None
+
+
+def _log_mantida(evento):
+    with get_conn() as conn:
+        return conn.execute("select level, details from system_event_logs"
+                            " where event_type = 'affiliate_refund_commission_kept' and details->>'event_id' = %s",
+                            (evento,)).fetchall()
+
+
+def _cenario(nome, c, mundo):
+    """(objeto do evento, tipo do evento, status esperado da comissão, `_numeros` depois)."""
+    com = _paga(c)
+    if nome == "em_saque_total":
+        saque = request_payout(c.aff["id"])["id"]
+        return com, "charge.refunded", _cobranca(com.fatura), ("pending", saque), (1, 1, 1, 1, 0), "total"
+    if nome == "paga_total":
+        saque = request_payout(c.aff["id"])["id"]
+        assert mark_payout_paid(saque)
+        return com, "charge.refunded", _cobranca(com.fatura), ("paid", saque), (1, 1, 1, 1, 0), "total"
+    if nome == "parcial":
+        return com, "charge.refunded", _cobranca(com.fatura, devolvido=30_000), ("pending", None), (1, 1, 0, 0, 1), "partial"
+    saque = request_payout(c.aff["id"])["id"]
+    mundo.cobrancas["ch_disputa"] = _cobranca(com.fatura, devolvido=0)
+    disputa = {"object": "dispute", "status": "lost", "charge": "ch_disputa", "amount": 100_000}
+    return com, "charge.dispute.closed", disputa, ("pending", saque), (1, 1, 1, 1, 0), "total"
+
+
+def _canal_que_falha_vira_5xx_e_a_reentrega_avisa(canal, mundo, nome, falha):
+    c = _afiliado()
+    com, tipo_evento, objeto, (status, saque), numeros, alerta = _cenario(nome, c, mundo)
+    evento = f"evt_{uuid.uuid4().hex}"
+    canal.ligar()
+    canal.falha = falha
+    r = _enviar(tipo_evento, objeto, evento=evento)
+    if falha:
+        assert r.status_code == 500
+        assert _numeros(c) == (1, 1, 0, 0, 0)  # sem rótulo
+        assert _status(com) == {"status": status, "payout_id": saque}
+        assert _aviso(com) == (None, False) and canal.ok == []
+        assert [x["level"] for x in _log_mantida(evento)] == ["error"]
+        canal.falha = None
+        r = _enviar(tipo_evento, objeto, evento=evento)
+    assert r.status_code == 200, r.text
+    assert _numeros(c) == numeros
+    assert _status(com) == {"status": status, "payout_id": saque}
+    assert _aviso(com) == (alerta, True) and len(canal.ok) == 1
+    tentativas = len(canal.posts)
+    assert _enviar(tipo_evento, objeto, evento=evento).status_code == 200
+    assert len(canal.posts) == tentativas  # 3ª entrega: nada
+
+
+@pytest.mark.parametrize("falha", [None, "timeout", 503])
+def test_canal_configurado_que_falha_vira_5xx_e_a_reentrega_avisa(canal, mundo, falha):
+    """D1. `None` é o controle positivo: canal bom responde 200 na 1ª."""
+    _canal_que_falha_vira_5xx_e_a_reentrega_avisa(canal, mundo, "em_saque_total", falha)
+
+
+@pytest.mark.parametrize("nome", ["paga_total", "parcial", "disputa_em_saque"])
+def test_canal_configurado_que_falha_vira_5xx_nos_outros_avisos(canal, mundo, nome):
+    _canal_que_falha_vira_5xx_e_a_reentrega_avisa(canal, mundo, nome, 503)
+
+
+def test_sem_canal_responde_200_e_deixa_o_aviso_pendente(canal, mundo, monkeypatch):
+    """D2: rótulo e pendência; a recuperação entrega quando a URL existir."""
+    c = _afiliado()
+    com = _paga(c)
+    saque = request_payout(c.aff["id"])["id"]
+    evento = f"evt_{uuid.uuid4().hex}"
+    objeto = _cobranca(com.fatura)
+    assert _enviar("charge.refunded", objeto, evento=evento).status_code == 200
+    assert _numeros(c) == (1, 1, 1, 1, 0)
+    assert _status(com) == {"status": "pending", "payout_id": saque}
+    assert _aviso(com) == ("total", False)
+    logs = _log_mantida(evento)
+    assert [(x["level"], x["details"]["commission_id"]) for x in logs] == [("error", com.id)]
+    assert _enviar("charge.refunded", objeto, evento=evento).status_code == 200
+    assert canal.posts == []
+    with monkeypatch.context() as m:  # sem canal, nem consulta o banco
+        m.setattr(modulo_reembolso, "entregar_avisos_pendentes", lambda *a, **k: pytest.fail("consultou"))
+        assert reenviar_avisos_pendentes() == 0
+
+    canal.ligar()
+    assert reenviar_avisos_pendentes() == 1
+    assert len(canal.ok) == 1 and f"comissão `{com.id}`" in canal.ok[0]
+    assert _aviso(com) == ("total", True)
+    assert reenviar_avisos_pendentes() == 0 and len(canal.posts) == 1
+
+
+def test_recuperacao_para_na_primeira_falha_do_canal(canal):
+    c = _afiliado()
+    comissoes = [_comissao(c, 10) for _ in range(3)]
+    for com in comissoes:
+        registrar_aviso_reembolso(com.id, "total", False)
+    canal.ligar()
+    canal.falha = 503
+    assert reenviar_avisos_pendentes() == 0
+    assert len(canal.posts) == 1
+    assert [_aviso(com) for com in comissoes] == [("total", False)] * 3
+    canal.falha = None
+    assert reenviar_avisos_pendentes() == 3
+
+
+def test_recuperacao_nao_avisa_comissao_estornada_depois(canal, monkeypatch):
+    """R2: pendência, e o admin rejeita o saque pela rota, o que estorna a comissão."""
+    c = _afiliado()
+    com = _paga(c)
+    saque = request_payout(c.aff["id"])["id"]
+    _reembolsa(com.fatura)
+    assert _aviso(com) == ("total", False)
+    admin = _admin(monkeypatch)
+    r = admin.post(f"/admin/api/affiliates/payouts/{saque}/reject", headers=csrf(admin), json={"note": "x"})
+    assert r.status_code == 200, r.text
+    assert _status(com)["status"] == "reversed"
+    canal.ligar()
+    assert reenviar_avisos_pendentes() == 0 and canal.posts == []
+
+
+def test_pendencia_parcial_vira_total_e_nao_rebaixa(canal):
     c = _afiliado()
     com = _paga(c)
     request_payout(c.aff["id"])
+    _reembolsa(com.fatura, devolvido=30_000)
+    assert _aviso(com) == ("partial", False)
+    _reembolsa(com.fatura)
+    assert _aviso(com) == ("total", False)
+    registrar_aviso_reembolso(com.id, "partial", False)
+    assert _aviso(com) == ("total", False)
+
+
+def test_5xx_depois_saque_rejeitado_e_a_reentrega_estorna_sem_avisar(canal, monkeypatch):
+    c = _afiliado()
+    com = _paga(c)
+    saque = request_payout(c.aff["id"])["id"]
+    canal.ligar()
+    canal.falha = 503
     objeto = _cobranca(com.fatura)
-    with monkeypatch.context() as m:
-        m.setattr(admin_notify, "notify_afiliado_alerta", lambda msg: 1 / 0)
-        assert _enviar("charge.refunded", objeto).status_code == 500
-    assert _enviar("charge.refunded", objeto).status_code == 200
-    assert len(mundo.alertas) == 1 and _numeros(c) == (1, 1, 1, 1, 0)
+    assert _enviar("charge.refunded", objeto, evento="evt_t4").status_code == 500
+    admin = _admin(monkeypatch)
+    r = admin.post(f"/admin/api/affiliates/payouts/{saque}/reject", headers=csrf(admin), json={"note": "x"})
+    assert r.status_code == 200, r.text
+    tentativas = len(canal.posts)
+    canal.falha = None
+    assert _enviar("charge.refunded", objeto, evento="evt_t4").status_code == 200
+    assert _status(com) == {"status": "reversed", "payout_id": None}
+    assert len(canal.posts) == tentativas and _numeros(c) == (1, 1, 1, 1, 0)
+
+
+def test_recuperacao_concorrente_envia_uma_vez(canal):
+    c = _afiliado()
+    com = _comissao(c, 10)
+    registrar_aviso_reembolso(com.id, "total", False)
+    canal.ligar()
+    canal.trava = threading.Event()
+    with ThreadPoolExecutor(1) as pool:
+        primeira = pool.submit(reenviar_avisos_pendentes)
+        assert canal.dentro.wait(10)
+        inicio = time.monotonic()
+        try:
+            assert reenviar_avisos_pendentes() == 0
+            assert time.monotonic() - inicio < 3  # pulou, não esperou o lock
+        finally:
+            canal.trava.set()
+        assert primeira.result(timeout=15) == 1
+    assert len(canal.posts) == 1 and _aviso(com) == ("total", True)
+
+
+def test_recuperacao_nao_prende_a_fila_em_comissoes_estornadas(canal):
+    """20 pendências `reversed` no topo do `order by id` não podem ocupar o lote."""
+    c = _afiliado()
+    for _ in range(20):
+        com = _comissao(c, 10)
+        registrar_aviso_reembolso(com.id, "total", False)
+        assert reverse_commission(com.id)
+    viva = _comissao(c, 10)
+    registrar_aviso_reembolso(viva.id, "total", False)
+    canal.ligar()
+    assert [reenviar_avisos_pendentes() for _ in range(3)] == [1, 0, 0]
+    assert len(canal.posts) == 1 and _aviso(viva) == ("total", True)
+
+
+def test_recuperacao_rele_e_pula_comissao_estornada_depois_da_listagem(canal, monkeypatch):
+    c = _afiliado()
+    primeira, segunda = _comissao(c, 10), _comissao(c, 10)
+    for com in (primeira, segunda):
+        registrar_aviso_reembolso(com.id, "total", False)
+    canal.ligar()
+    post = admin_notify.requests.post
+
+    def estorna_a_segunda(*a, **k):
+        if not canal.posts:  # já listada, ainda não relida
+            assert reverse_commission(segunda.id)
+        return post(*a, **k)
+
+    monkeypatch.setattr(admin_notify, "requests", SimpleNamespace(post=estorna_a_segunda))
+    assert reenviar_avisos_pendentes() == 1
+    assert len(canal.posts) == 1 and _aviso(segunda) == ("total", False)
+
+
+def test_reentrega_sem_canal_nao_desfaz_aviso_ja_entregue(canal, monkeypatch):
+    """Limite 4: sem linha no registro não há rótulo, e cada reentrega passa por `_avisar`."""
+    c = _afiliado()
+    com = _comissao(c, 100)
+    request_payout(c.aff["id"])
+    objeto = _cobranca(com.fatura, devolvido=30_000)
+    canal.ligar()
+    assert _enviar("charge.refunded", objeto, evento="evt_limite4").status_code == 200
+    assert _aviso(com) == ("partial", True) and len(canal.posts) == 1
+    monkeypatch.delenv("ADMIN_NOTIFY_WEBHOOK_URL")
+    assert _enviar("charge.refunded", objeto, evento="evt_limite4").status_code == 200
+    assert _aviso(com) == ("partial", True)
+    canal.ligar()
+    assert reenviar_avisos_pendentes() == 0 and len(canal.posts) == 1
+    monkeypatch.delenv("ADMIN_NOTIFY_WEBHOOK_URL")  # positivo: total é aviso novo, fica pendente
+    _reembolsa(com.fatura)
+    assert _aviso(com) == ("total", False)
+
+
+def test_processo_do_app_liga_o_laco_de_avisos():
+    resultado, diagnostico = sondar({"afiliado_avisos": "core.services.afiliado_reembolso:reenviar_avisos_pendentes"})
+    assert resultado == {"afiliado_avisos": True, "do_disco": []}, diagnostico
+
+
+def test_recuperacao_vai_em_lotes_de_20(canal):
+    c = _afiliado()
+    comissoes = [_comissao(c, 10) for _ in range(25)]
+    for com in comissoes:
+        registrar_aviso_reembolso(com.id, "total", False)
+    canal.ligar()
+    assert [reenviar_avisos_pendentes() for _ in range(3)] == [20, 5, 0]
+    assert len(canal.posts) == 25
+    assert all(_aviso(com) == ("total", True) for com in comissoes)
 
 
 def test_ja_paga_nao_muda_e_avisa(mundo):
