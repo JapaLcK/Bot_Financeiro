@@ -340,3 +340,10 @@ falhas, presos em `enviando`, cliques, recuperados (`completed` depois de
   `allow_promotion_codes`.
 - Só fora daqui: PARAR e templates no aparelho; página própria e Express no navegador
   do WhatsApp; Pix no sandbox; entrega da Meta em produção.
+
+## Etapa 0: campanha (Black Friday 2026)
+
+A campanha (`core/services/oferta_campanha.py`) reaproveita o cupom Stripe da retomada com etapa 0:
+`rm_e{etapa}_40_{produto}` (só campanha: `e0`; com link: a etapa dele), `repeating` por 1 mês (cobre a 1ª cobrança real, também depois do trial de 7 dias do anual).
+Com o link na janela vale o maior % (nunca a soma); Essencial só tem o % do link. O `plans-config` devolve
+`campanha` (None fora da janela) com os textos prontos; / e /assinar só exibem os textos prontos; a /precos formata os preços com `fmt` e `aplicarDescontoRetomada` (cards e tabela, inclusive o "Equivale a …/mês").

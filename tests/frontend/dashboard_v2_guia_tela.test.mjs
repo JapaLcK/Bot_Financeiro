@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAINEL, PROTOTIPO, RAIZ, servir } from "./_painel.mjs";
-import { FAZER, PASSOS, PASSOS_TODOS, tocarAba, abrir, acoes, ajudaDoMenu, bora, esperaTitulo, irAoAlvo, navegador } from "./_guia.mjs";
+import { FAZER, PASSOS, PASSOS_TODOS, tocarAba, abrir, acoes, ajudaDoMenu, ajudaDoTrilho, bora, esperaTitulo, irAoAlvo, navegador } from "./_guia.mjs";
 
 const browser = navegador();
 
@@ -35,7 +35,7 @@ test("Piggy e balão entram já no lugar: o left/top calculado é o gravado, sem
         if (g.some((v, i) => !(Math.abs(v - c[i]) <= 1))) window.__moveu.push({ el: e.className, g, c });
       })).observe(document.body, { attributes: true, attributeFilter: ["style"], subtree: true });
     });
-    if (width < 761) await ajudaDoMenu(page); else await page.getByRole("button", { name: "Ajuda" }).click();
+    if (width < 761) await ajudaDoMenu(page); else await ajudaDoTrilho(page);
     await esperaTitulo(page, PASSOS[0].fala.titulo);
     await FAZER["mes.trocado"](page);
     await esperaTitulo(page, PASSOS[1].fala.titulo);

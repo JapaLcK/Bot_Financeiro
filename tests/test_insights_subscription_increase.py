@@ -47,6 +47,15 @@ from utils_date import day_tz, now_tz
 from utils_text import VALOR_MAX
 
 HOJE = day_tz(now_tz())
+
+
+@pytest.fixture(autouse=True)
+def _hoje_da_execucao():
+    """Relê o dia a cada teste: a suíte leva ~10 min e pode cruzar a meia-noite depois do import."""
+    global HOJE
+    HOJE = day_tz(now_tz())
+
+
 NETFLIX = comerciante_id("netflix")
 PADRAO = (105, 75, 45, 15)  # dias atrás de cada cobrança: intervalo de 30 dias, mensal
 

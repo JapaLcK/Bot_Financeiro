@@ -1,0 +1,51 @@
+# Drift do Expo: confere `app/` contra o que o api.expo.dev recomenda HOJE.
+#
+# Separado do `app.yml` de propósito: lá o passo roda com `EXPO_OFFLINE` para o
+# resultado depender só do commit. Aqui o resultado muda sem commit nosso, porque
+# basta o Expo publicar um patch. Não bloqueia PR nenhum.
+#
+# Leia o log antes de agir. Vermelho pode ser drift ou erro da API (503, corpo que
+# não é JSON, conexão recusada). Verde não prova que a API foi consultada: se o DNS
+# falha ou a conexão dá timeout, o `expo` liga o modo offline sozinho e o job fica
+# verde sem consultá-la.
+#
+# Drift quase nunca é urgente: o Expo publica patch quase toda semana, então vermelho
+# aqui é esperado. Mas o mapa remoto também serve a correção de emergência do Expo
+# (`getCombinedKnownVersionsAsync` em `getVersionedPackages.js`), por isso se lê o log.
+# Salvo correção de emergência, o bump vai em PR próprio e só com patches que já
+# passaram do `cooldown` do Dependabot em `/app`, que existe contra versão
+# recém-publicada e comprometida. O comando é `npx expo install --fix` em `app/`
+# (`--check` sem TTY só reprova), e ele instala o que a API recomenda hoje, sem olhar
+# essa janela.
+#
+# Sem `push` na main de propósito: ele só dispararia com `paths`, e pintaria a main
+# de vermelho por um drift sem relação com o commit.
+name: App (Expo online)
+
+on:
+  schedule:
+    # Segunda, o mesmo dia do Dependabot. Fora da hora cheia, em que a fila de
+    # `schedule` do GitHub atrasa e descarta runs.
+    - cron: "23 11 * * 1"
+  workflow_dispatch:
+
+jobs:
+  expo-online:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - run: npm ci
+
+      - name: Confere versões nativas contra o api.expo.dev
+        run: npx expo install --check

@@ -142,10 +142,13 @@
   }
   #plans-v2 .price-flow-host { display: inline-flex; }
   /* Link de retomada: o preço com desconto é texto estático (o servidor manda a conta pronta), então
-     o NumberFlow sai de cena. Sem a classe `rm-on` nada acima muda. */
-  #plans-v2.rm-on .price-flow-host, #plans-v2.rm-on .price-eq { display: none !important; }
-  #plans-v2.rm-on .price.has-number-flow > [data-price-monthly],
-  #plans-v2.rm-on .price.has-number-flow > [data-price-annual] { position: static; opacity: 1; pointer-events: auto; }
+     o NumberFlow sai de cena. Sem a classe `rm-on` NO CARD nada acima muda (Essencial da campanha fica
+     intacto). A classe é posta depois do mount da ilha, que recria os `article.plan`. */
+  #plans-v2 .plan.rm-on .price-flow-host, #plans-v2 .plan.rm-on .price-eq { display: none !important; }
+  #plans-v2 .plan.rm-on .price.has-number-flow > [data-price-monthly],
+  #plans-v2 .plan.rm-on .price.has-number-flow > [data-price-annual] { position: static; opacity: 1; pointer-events: auto; }
+  #oferta-faixa { display: block; margin: 0 0 16px; padding: 12px 16px; border: 1px solid #FF2D8E; border-radius: 12px; background: #FFF0F7; color: var(--ink, #111); font-weight: 600; text-align: center; }
+  #oferta-faixa[hidden] { display: none; }
   #plans-v2 .price s.rm-cheio { display: block; font-size: .95rem; font-weight: 500; letter-spacing: 0; color: var(--ink-3); }
   #plans-v2 .price .rm-selo { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: #FF2D8E; color: #fff; font-size: .72rem; font-weight: 700; letter-spacing: 0; vertical-align: middle; }
   /* site.css reduz TODO `span` dentro de `.price` para a tipografia do /mês.
@@ -330,6 +333,7 @@
            e os cards laterais com a largura do mockup; em telas menores usa a
            largura disponível e deixa o grid reduzir as colunas. -->
 <div id="plans-v2-wrap" style="width:min(1080px,calc(100vw - 48px));margin-left:50%;transform:translateX(-50%)">
+<p id="oferta-faixa" hidden></p>
 <div class="cycle-wrap">
 <div class="cycle-toggle">
 <span class="cycle-label is-active" id="cycle-monthly-label">Mensal</span>
@@ -533,10 +537,10 @@ const PLAN_PRICES = {
 function aplicarDescontoRetomada(r, diasTrial) {
   if (!r?.desconto_pct || !r.precos) return;
   const fmt = c => "R$\u00a0" + (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: c % 100 ? 2 : 0, maximumFractionDigits: 2 });
-  document.getElementById("plans-v2").classList.add("rm-on");
   document.querySelectorAll("#plans-v2 article.plan").forEach(card => {
     const p = r.precos[card.querySelector("[data-plan-btn]")?.dataset.planBtn];
-    if (!p) return;
+    if (!p) return;   // tier sem desconto (Essencial na campanha) fica como está
+    card.classList.add("rm-on");
     [["monthly", "data-price-monthly", "copyMonthly"], ["annual", "data-price-annual", "copyAnnual"]].forEach(([ciclo, attr, copia]) => {
       const el = card.querySelector(`.price [${attr}]`);
       if (!el) return;
@@ -545,7 +549,7 @@ function aplicarDescontoRetomada(r, diasTrial) {
       cheio.textContent = el.firstChild.textContent;
       const selo = document.createElement("span");
       selo.className = "rm-selo";
-      selo.textContent = r.desconto_pct + "% OFF";
+      selo.textContent = p.pct + "% OFF";
       const per = el.querySelector(".per");
       el.textContent = "";
       el.append(cheio, fmt(p[ciclo]), per, selo);
@@ -553,11 +557,35 @@ function aplicarDescontoRetomada(r, diasTrial) {
       const txt = card.querySelector(".price-cycle-copy");
       if (!txt) return;
       txt.dataset[copia] = r.trial && diasTrial
-        ? `${diasTrial} dias grátis no cartão, depois ${fmt(p[ciclo])} (${r.desconto_pct}% OFF na 1ª cobrança)`
-        : `${r.desconto_pct}% OFF na 1ª cobrança, depois ${cheio.textContent.trim()}`;
+        ? `${diasTrial} dias grátis no cartão, ${p.pct}% OFF na 1ª cobrança, depois ${cheio.textContent.trim()}`
+        : `${p.pct}% OFF na 1ª cobrança, depois ${cheio.textContent.trim()}`;
       if (currentCycle === ciclo) txt.textContent = txt.dataset[copia];
     });
   });
+  // Tabela comparativa (ilha `#cmp-v2`): mesmo preço, cheio riscado. O `setCycle` alterna pelo display.
+  Object.entries(r.precos).forEach(([tier, p]) => {
+    [["monthly", "data-price-monthly"], ["annual", "data-price-annual"]].forEach(([ciclo, attr]) => {
+      const el = document.querySelector(`#cmp-v2 [data-plano="${tier}"] [${attr}]`);
+      if (!el || el.dataset.rm) return;
+      el.dataset.rm = "1";
+      const cheio = document.createElement("s");
+      cheio.style.cssText = "display:block;font-size:.75rem;font-weight:500;opacity:.6";
+      cheio.textContent = el.textContent;
+      el.textContent = "";
+      el.append(cheio, fmt(p[ciclo]));
+    });
+    // 2º [data-price-annual] da coluna = "Equivale a …/mês": recalcula do preço com desconto (piso, como o servidor).
+    const eq = document.querySelectorAll(`#cmp-v2 [data-plano="${tier}"] [data-price-annual]`)[1];
+    if (eq) eq.textContent = `Equivale a ${fmt(Math.floor(p.annual / 12))}/mês`;
+  });
+}
+
+/* Depois do mount da ilha (script síncrono no fim do body): ela recria os cards e a tabela. */
+const aposMontagem = fn => document.readyState === "loading"
+  ? document.addEventListener("DOMContentLoaded", fn, { once: true }) : fn();
+function faixaDeOferta(frase) {
+  const f = document.getElementById("oferta-faixa");
+  if (f) { f.textContent = frase; f.hidden = false; }
 }
 
 /* Valor numérico do plano pros eventos do GA4 (`value`/`price`), lido do
@@ -1004,7 +1032,7 @@ async function cancelChange() {
     if (resp.ok) {
       cfgPlanos = await resp.json();
       const cfg = cfgPlanos;
-      aplicarDescontoRetomada(cfg.retomada, cfg.trial_days);
+      aposMontagem(() => aplicarDescontoRetomada(cfg.retomada, cfg.trial_days));
       // Plano sem price configurado no Stripe → botão vira "Indisponível" (não
       // deixa o usuário clicar pra tomar um erro). querySelectorAll, não
       // querySelector: um seletor cobre todos os botões do plano.
@@ -1031,10 +1059,23 @@ async function cancelChange() {
     // próprio checkout, que consulta a assinatura apenas nesse caso.
     if (purchaseContinuationPage) return;
     // Comprador do link de retomada (cookie, sem sessão): não há assinatura a consultar.
-    if (cfgPlanos?.retomada) { window.pbPlanAuthState = "retomada"; publicarPix(null, true); return; }
+    if (cfgPlanos?.retomada) {
+      window.pbPlanAuthState = "retomada"; publicarPix(null, true);
+      // Link + campanha: só a faixa. Repintar com a campanha sobrescreveria os preços do link e, se o link
+      // for maior (ex.: 45% contra 40%), perderia o desconto.
+      if (cfgPlanos.campanha) aposMontagem(() => faixaDeOferta(cfgPlanos.campanha.frase));
+      return;
+    }
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
     const resolvida = await loadSubscription();
     refreshPlanButtons();
+    // Campanha: só com a assinatura RESOLVIDA. Assinante ativo (cartão, trial ou Pix) não ganha preço de
+    // oferta no cartão, só a frase do Pix; vitalício não vê nada.
+    const campanha = cfgPlanos?.campanha;
+    if (campanha && resolvida && !subState?.degraded) {   // degraded: Stripe falhou, não se sabe se assina; a / também deixa como está
+      if (!subState?.active) aposMontagem(() => { faixaDeOferta(campanha.frase); aplicarDescontoRetomada(campanha, cfgPlanos.trial_days); });
+      else if (!subState.lifetime) faixaDeOferta(campanha.frase_assinante);
+    }
     // `resolvida`, não `true`: 5xx, rede fora e JSON malformado guardam o mesmo
     // `subState = null` do 401 do deslogado. Chamar de resolvido revelava a
     // etiqueta ao vitalício indefinidamente sempre que a consulta falhasse.

@@ -125,10 +125,23 @@ export const esperaTitulo = async (page, t) => {
   }
   await alvo.waitFor({ timeout: 10000 });
 };
-// No celular a Ajuda mora no Menu da barra de baixo (parts/MenuTelas.tsx): abre a folha e toca o item.
+// A Ajuda é uma tela (#/ajuda, parts/AjudaTela.tsx): vai até ela e toca `item` ("Guia do painel" abre o guia, que
+// começa pedindo a aba do passo 1 porque a Ajuda não é a tela dele). No desktop pelo trilho; no celular, pelo Menu.
+export const ajudaDoTrilho = async (page, item = "Guia do painel") => {
+  await page.locator(".rail").getByRole("link", { name: "Ajuda" }).click();
+  await page.locator("main").getByRole("button", { name: item }).click();
+};
+// O Cmd-K abre o guia SEM sair da tela em que a pessoa está (a Ajuda leva à tela Ajuda): para os testes que medem o guia
+// reaberto no lugar (Resumo organizando, mola do Piggy).
+export const guiaPorCmdK = async (page) => {
+  await page.keyboard.press("Meta+k");
+  await page.locator(".cmdk input").fill("guia");
+  await page.keyboard.press("Enter");
+};
 export const ajudaDoMenu = async (page, item = "Guia do painel") => {
   await page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
-  await page.locator(".menu-telas").getByRole("button", { name: item }).click();
+  await page.locator(".menu-telas").getByRole("link", { name: "Ajuda" }).click();
+  await page.locator("main").getByRole("button", { name: item }).click();
 };
 export const bora = async (page) => { await page.getByRole("button", { name: "Bora", exact: true }).click(); await esperaTitulo(page, PASSOS[0].fala.titulo); };
 

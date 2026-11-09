@@ -3,14 +3,18 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Dica, Guia } from "../lib/api-v2.gen";
 import { ICON } from "../lib/brand";
 import { apiPost, guiaQuery } from "../lib/v2";
-import type { Path } from "../router";
+import { go, type Path } from "../router";
 
 // A dica de primeiro uso de uma tela (#728): o texto e o "já vista" vêm do servidor (`DICAS`
 // em api/v2/guia.py, só a da tela que o plano dá). Aparece sozinha uma vez; depois, só pela
-// Ajuda ou pelo Cmd-K ("Como funciona esta tela").
+// Ajuda (parts/AjudaTela.tsx) ou pelo Cmd-K ("Como funciona esta tela").
 export const TELA: Record<Dica["tela"], Path> = { assinaturas: "/assinaturas", previsao: "/previsao", metas: "/metas", patrimonio: "/patrimonio", simulador: "/simulador" };
 export const dicaDe = (g: Guia | undefined, path: Path) => g?.dicas?.find((d) => TELA[d.tela] === path);
 export const abrirDica = () => window.dispatchEvent(new Event("dash:dica"));
+// Pela Ajuda: a dica é de outra tela, que só monta depois da navegação. O pedido espera no módulo e a
+// `DicaDaTela` daquela tela o lê ao montar (um evento disparado antes não teria ouvinte).
+let pedida: Path | null = null;
+export const pedirDica = (tela: Path) => { pedida = tela; go(tela); };
 
 // O guia aberto (parts/Guia.tsx avisa): a dica não briga com o balão e espera ele fechar.
 let guiaAberto = false;
@@ -44,6 +48,8 @@ export function DicaDaTela({ path }: { path: Path }) {
 
   // Pela Ajuda ou pelo Cmd-K: a pessoa pediu, o foco vai para o título.
   useEffect(() => {
+    if (pedida !== null && pedida === path) { focar.current = true; setMostrar(true); }
+    pedida = null; // pedido de outra tela que não montou (navegação recusada) não fica à espera de uma dica alheia
     const on = () => { focar.current = true; setMostrar(true); };
     window.addEventListener("dash:dica", on);
     return () => window.removeEventListener("dash:dica", on);

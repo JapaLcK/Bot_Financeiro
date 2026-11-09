@@ -197,7 +197,7 @@ def test_plans_config_devolve_precos_ja_com_desconto(monkeypatch):
     _trial(monkeypatch, True)
     r = _cliente(a, 3).get("/billing/plans-config").json()["retomada"]
     assert r["desconto_pct"] == 20 and r["trial"] is True
-    assert r["precos"]["essencial"] == {"monthly": 792, "annual": 7920, "pix": 7920}
+    assert r["precos"]["essencial"] == {"pct": 20, "monthly": 792, "annual": 7920, "pix": 7920}
     assert r["precos"]["pro"]["annual"] == 39920 and r["precos"]["plus"]["monthly"] == 1592
     assert _cliente().get("/billing/plans-config").json()["retomada"] is None
     forjado = _cliente().get("/billing/plans-config?etapa=3").json()["retomada"]

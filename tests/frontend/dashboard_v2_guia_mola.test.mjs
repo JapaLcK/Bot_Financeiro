@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { RAIZ } from "./_painel.mjs";
-import { FAZER, PASSOS, abrir, bora, entendi, esperaTitulo, navegador } from "./_guia.mjs";
+import { FAZER, PASSOS, abrir, bora, guiaPorCmdK, entendi, esperaTitulo, navegador } from "./_guia.mjs";
 
 navegador();
 
@@ -138,7 +138,7 @@ test("bolinhas: a atual é a larga e rosa, uma por passo; o \"Passo N de 3\" fic
 // O que guarda a mola e o recorte (voo, mira, último recorte, furo) é do Piggy montado: fechar em
 // pleno voo e reabrir antes de a mola assentar não pode dar ao Piggy e ao balão novos o transform
 // da mola órfã. Relógio de verdade: o defeito só aparece com o tempo correndo.
-test("fechar em pleno voo (Pular e Esc) e reabrir pela Ajuda em < 1 s: o Piggy e o balão nascem sem a mola anterior", async () => {
+test("fechar em pleno voo (Pular e Esc) e reabrir (Cmd-K) em < 1 s: o Piggy e o balão nascem sem a mola anterior", async () => {
   const r = [];
   for (const como of ["Pular", "Esc"]) {
     const { ctx, page, erros } = await abrir({ motion: "no-preference" });
@@ -149,7 +149,7 @@ test("fechar em pleno voo (Pular e Esc) e reabrir pela Ajuda em < 1 s: o Piggy e
     if (como === "Esc") await page.keyboard.press("Escape");
     else await page.getByRole("button", { name: "Pular guia" }).click();
     await page.waitForTimeout(50);
-    await page.getByRole("button", { name: "Ajuda" }).click();
+    await guiaPorCmdK(page); // a Ajuda leva à tela dela, e aí o guia começa pela aba: aqui o guia reabre no lugar
     await esperaTitulo(page, PASSOS[0].fala.titulo);
     await page.waitForTimeout(50);
     r.push([como, await page.evaluate(() => [".guia-piggy", ".guia-balao"].map((s) => document.querySelector(s).style.transform)), erros]);

@@ -112,6 +112,7 @@ a{color:inherit}a:hover{opacity:.85}
 /* o número da fatura é um filho do .pb-fat-n: sem isto o `.pb-bento *{font-size:12px!important}` do celular o encolhe a ~12px */
 .pb-bento .pb-fat-n [data-alvo]{font-size:inherit!important}
 #planos[data-ciclo=anual] .so-mensal,#planos[data-ciclo=mensal] .so-anual{display:none!important}
+.pb-cmp{transition:background-color .16s cubic-bezier(.23,1,.32,1)}.pb-cmp:hover{background:#ECE9E4}.pb-cmp:focus-visible{outline:2px solid #111111;outline-offset:2px}@media (prefers-reduced-motion: reduce){.pb-cmp{transition:none}}
 .pb-ciclo{background:transparent;color:#111111}
 .pb-ciclo[aria-pressed=true]{background:#111111;color:#FFFFFF}
 details[name=faq]>summary{list-style:none}
@@ -175,6 +176,7 @@ img{height:auto}
 <a class="pb-nav-cta" href="/assinar?plano=plus&amp;ciclo=monthly" data-utm style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 15px; padding: 12px 22px; border-radius: 999px; min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center;">7 dias grátis</a>
 </div>
 </nav>
+<p id="oferta-faixa" hidden style="max-width: 1180px; margin: 20px auto 0; padding: 12px 18px; border: 1px solid #FF2D8E; border-radius: 16px; color: #FFFFFF; font-weight: 700; font-size: 15px; line-height: 1.4; text-align: center;"></p>
 
 <div class="pb-hero" id="conteudo" tabindex="-1" style="max-width: 1180px; margin: 0 auto; padding: 72px 0 96px; display: flex; flex-wrap: wrap; align-items: center; gap: 56px;">
 <div class="pb-hl" style="flex: 1 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 28px;">
@@ -958,6 +960,7 @@ Assistente financeiro com IA no WhatsApp
 <a href="/assinar?plano=pro&amp;ciclo=monthly" class="pb-plbtn so-mensal" data-utm style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Pro</a>
 </div>
 </div>
+<a href="/precos#comparar" class="pb-cmp" style="margin-top: -16px; color: #111111; text-decoration: none; font-weight: 700; font-size: 16px; padding: 12px 28px; border-radius: 999px; border: 1.5px solid #111111; min-height: 48px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; text-align: center;">Comparar os planos</a>
 <div style="width: 100%; background: #111111; color: #FFFFFF; border-radius: 32px; padding: 30px 36px; display: flex; flex-wrap: wrap; align-items: center; gap: 24px 40px; box-sizing: border-box;">
 <img src="/brand/oferta/d6cdf9600304bc874e257d4bc6425236.webp" alt="Piggy fazendo joinha" style="flex: 0 0 auto; width: 120px; height: auto;" width="240" height="276" loading="lazy">
 <div style="flex: 1 1 420px; display: flex; flex-direction: column; gap: 8px;">
@@ -997,7 +1000,7 @@ Assistente financeiro com IA no WhatsApp
 </details>
 <details name="faq" style="border-top: 1px solid #E4E1DC;">
 <summary style="width: 100%; box-sizing: border-box; text-align: left; cursor: pointer; font-family: inherit; color: #111111; font-size: 19px; font-weight: 700; padding: 24px 0; min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">Preciso conectar o banco?<span class="fq-i" aria-hidden="true" style="flex: 0 0 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;"></span></summary>
-<p style="margin: 0; padding: 0 56px 26px 0; font-size: 17px; line-height: 1.6; color: #555555;">Não. Dá pra usar 100% pelo WhatsApp, com texto, áudio ou foto do comprovante.</p>
+<p style="margin: 0; padding: 0 56px 26px 0; font-size: 17px; line-height: 1.6; color: #555555;">Não é obrigatório, mas é o jeito automático. Sem banco, você lança pelo WhatsApp com texto, áudio ou foto do comprovante.</p>
 </details>
 <details name="faq" style="border-top: 1px solid #E4E1DC;">
 <summary style="width: 100%; box-sizing: border-box; text-align: left; cursor: pointer; font-family: inherit; color: #111111; font-size: 19px; font-weight: 700; padding: 24px 0; min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">Preciso baixar algum app?<span class="fq-i" aria-hidden="true" style="flex: 0 0 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;"></span></summary>

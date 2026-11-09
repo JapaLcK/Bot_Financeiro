@@ -113,8 +113,9 @@ PODE_SQL = f"""case
       when paga_conta then array['categoria','data']
       when fundido or pendente then array['categoria','descricao','apagar']
       else array['categoria','descricao','data','valor','apagar'] end"""
-# `paga_conta` sem apagar (dono, 2026-10-03): apagar o pagamento de conta devolve o dinheiro e
-# a conta segue paga. O de fatura do cartão manual (`bill_id`) cai no mesmo ramo e sai junto,
+# `paga_conta` sem apagar (dono, 2026-10-03, o painel segue assim): apagar o pagamento de conta
+# devolve o dinheiro; o apagar do /app e do WhatsApp também reabre a conta (pending).
+# O de fatura do cartão manual (`bill_id`) cai no mesmo ramo e sai junto,
 # por conservadorismo. O /app e o WhatsApp seguem apagando os dois.
 
 # O `pode` da compra no cartão (alias `ct`): só a do Open Finance edita, e só P5.

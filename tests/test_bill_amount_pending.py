@@ -767,12 +767,9 @@ def test_falha_no_debito_devolve_a_conta_e_a_retentativa_paga(monkeypatch):
     assert len(db.list_launches(uid, limit=5)) == 1
 
 
-def test_devolucao_nao_reabre_conta_que_ja_tem_lancamento(monkeypatch):
-    """Controle do teste acima: a devolução é condicionada, não incondicional.
-
-    Se, entre a reserva e a falha, a conta já tiver um lançamento ligado, ela
-    NÃO pode voltar para 'pending' — isso duplicaria o débito na retentativa.
-    """
+def test_falha_na_ligacao_desfaz_debito_e_reserva(monkeypatch):
+    """Transação única: se a ligação do lançamento à conta estoura, nada fica
+    (sem lançamento, saldo intacto, conta pendente)."""
     import uuid
     import db
     import db.accounts as ACC
@@ -783,20 +780,15 @@ def test_devolucao_nao_reabre_conta_que_ja_tem_lancamento(monkeypatch):
     real = ACC.add_launch_and_update_balance
 
     def _lanca_e_estoura(*a, **k):
-        lid, seq, bal = real(*a, **k)
-        with db.get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("update bill_instances set launch_id=%s where id=%s",
-                            (lid, int(conta["id"])))
-            conn.commit()
+        real(*a, **k)
         raise RuntimeError("caiu depois de debitar")
 
     monkeypatch.setattr(ACC, "add_launch_and_update_balance", _lanca_e_estoura)
     with pytest.raises(RuntimeError):
         B.mark_bill_paid(uid, int(conta["id"]), 100.0, metodo="carteira")
-
     depois = B.list_bills(uid, include_paid=True)[0]
-    assert depois["status"] == "paid", "reabriu uma conta que já tinha lançamento"
+    assert depois["status"] == "pending" and depois["launch_id"] is None
+    assert db.list_launches(uid, limit=5) == []
 
 
 @pytest.mark.parametrize("valor", [float("inf"), float("-inf"), float("nan")])
@@ -1643,20 +1635,15 @@ def test_botao_devolucao_nao_atropela_pergunta_mais_nova(monkeypatch):
 def test_commit_ambiguo_do_pagamento_nao_rearma_a_pergunta(monkeypatch):
     """A janela ambígua do P1 do Codex, no caminho da conta.
 
-    `mark_bill_paid` reserva a conta, cria o lançamento que debita e só então
-    liga o `launch_id`. Se a conexão cai ENQUANTO o Postgres confirma o COMMIT
-    do lançamento, o débito passa e a chamada levanta — e o `except` de
-    `mark_bill_paid` devolve a conta para `pending`, achando que nada gravou.
-
-    Medido (`db.connection.commits_ambiguos` sobe 1): saldo 1000 → 900 com a
-    conta de volta em `pending`; responder o valor de novo leva a 800. Débito
-    dobrado, sem retentativa. Por isso a devolução da pergunta não pode
-    acontecer aqui.
+    `mark_bill_paid` é uma transação só (reserva + débito + ligação). Se a conexão
+    cai ENQUANTO o Postgres confirma o COMMIT, o débito passa e a chamada levanta.
+    No desenho antigo a conta voltava a `pending` (débito dobrado ao repetir o
+    valor); agora ela fica `paid` junto com o débito, mas a devolução da pergunta
+    continua proibida aqui.
 
     Negativo por causa: com o `if commits_ambiguos() == antes` fora de
     `db/pending.py`, a pendência volta e este caso fica vermelho.
     """
-    import contextlib
     import datetime
     import uuid
     import psycopg
@@ -1683,25 +1670,21 @@ def test_commit_ambiguo_do_pagamento_nao_rearma_a_pergunta(monkeypatch):
             armado["on"] = False
             raise psycopg.OperationalError("connection lost while committing")
 
-    monkeypatch.setattr(psycopg.Connection, "commit", commit_e_perde_a_conexao)
+    # Arma depois do débito: o próximo COMMIT é o da transação única do pagamento.
+    add_real = db.accounts.add_launch_and_update_balance
 
-    # Arma só a transação do lançamento (a que move o dinheiro): a reserva da
-    # conta e a devolução compensatória usam outros `get_conn`, de db/bills.py.
-    gc_real = db.accounts.get_conn
+    def add_e_arma(*a, **k):
+        r = add_real(*a, **k)
+        armado["on"] = True
+        return r
 
-    @contextlib.contextmanager
-    def gc_armado():
-        with gc_real() as conn:
-            armado["on"] = True
-            try:
-                yield conn
-            finally:
-                armado["on"] = False
-
-    monkeypatch.setattr(db.accounts, "get_conn", gc_armado)
-
-    with pytest.raises(psycopg.OperationalError):
-        H.resolve_bill_amount(uid, "100", pending)
+    with monkeypatch.context() as mc:  # escopo próprio: só o commit sai daqui
+        mc.setattr(psycopg.Connection, "commit", commit_e_perde_a_conexao)
+        mc.setattr(db.accounts, "add_launch_and_update_balance", add_e_arma)
+        with pytest.raises(psycopg.OperationalError):
+            H.resolve_bill_amount(uid, "100", pending)
+    assert db.bills.get_bill(uid, int(bill["id"]))["status"] == "paid", (
+        "reserva e débito commitam juntos: débito feito => conta paga")
 
     assert float(db.get_balance(uid)) == 900.0, (
         "o commit não passou — a janela ambígua não foi simulada")
