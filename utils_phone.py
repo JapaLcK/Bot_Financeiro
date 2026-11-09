@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 
 
@@ -58,3 +59,10 @@ def mask_phone(phone: str | None) -> str:
     if len(digits) < 8:
         return digits or "numero desconhecido"
     return f"{digits[:4]}******{digits[-4:]}"
+
+
+def mask_wamid(wamid: str | None) -> str:
+    """O que o log pode dizer de um wamid: o base64 dele traz o telefone inteiro. O digest do id
+    todo correlaciona as linhas sem depender do formato, que é da Meta. Levantaria só com `__bool__`
+    ou `__str__` hostil, que o JSON do webhook não produz; surrogate não levanta."""
+    return hashlib.sha256(str(wamid or "").encode("utf-8", "replace")).hexdigest()[:12]
