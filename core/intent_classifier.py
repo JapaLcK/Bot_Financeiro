@@ -18,6 +18,7 @@ import unicodedata
 from difflib import get_close_matches
 from dataclasses import dataclass, field
 from typing import Any
+from core.pg_text import causa_do_provedor
 from core.services.modelo_openai import CHAT_MODEL, completion_options
 from utils_text import PT_NUM_ALT_NO_ARTICLE, parse_money
 
@@ -1234,7 +1235,7 @@ def _classify_llm_call(user_content: str, user_id: int | None) -> IntentResult:
         )
 
     except Exception as e:
-        print(f"[intent_classifier] AI error: {e}")
+        print(f"[intent_classifier] AI error: {causa_do_provedor(e)}")
         return IntentResult(intent="out_of_scope", confidence=0.0)
 
 

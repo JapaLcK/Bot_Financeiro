@@ -1277,6 +1277,7 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
                 ok = send_agent_report_email(
                     email, user_id, _agent_email_subject(kind, events),
                     _compose_agent_email(kind, events), kind=kind,
+                    log_subject=_AGENT_EMAIL_LABEL.get(kind, "PigBank"),
                 )
             except Exception:
                 unclaim_agent_events(claimed_ids)  # nada saiu → devolve pra fila

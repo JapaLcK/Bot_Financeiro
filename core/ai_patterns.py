@@ -724,8 +724,8 @@ def _ratio_claim_is_consistent(title: str, subtitle: str) -> bool:
     if abs(actual - claimed) / actual <= 0.15:
         return True
     logger.info(
-        "ai_patterns: ratio inconsistente descartado — title=%r claimed=%.2f actual=%.2f",
-        title, claimed, actual,
+        "ai_patterns: ratio inconsistente descartado — claimed=%.2f actual=%.2f",
+        claimed, actual,
     )
     return False
 

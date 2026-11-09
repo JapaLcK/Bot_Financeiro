@@ -46,11 +46,11 @@ import core.services.pluggy_sync as ps
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from _log_dono_helpers import _ALHEIO, _erro_real
 from conftest import promote_to_pro
 from core.services import plan_service
 from core.services.pluggy import PluggyApiError
 from core.services.pluggy_bills import list_pluggy_bills
-from db.connection import get_conn
 from test_of_item_ownership import _auth, eventos  # noqa: F401 — fixture
 from test_of_connection_state import ITEM_SAUDAVEL, _conta_pluggy, _mock_pluggy, _tx_pluggy
 from test_of_log_dono_coluna import HOST, _de, _host_fora, _levanta
@@ -236,20 +236,6 @@ def test_tick_do_refresh_nao_imprime_uid(user_id, monkeypatch, capsys):
     linhas = [ln for ln in capsys.readouterr().out.splitlines() if "[open_finance_refresh]" in ln]
     assert linhas == ["[open_finance_refresh] triggered=1 total=1 origin=periodic failures=[]"], linhas
     assert str(user_id) not in linhas[0], linhas
-
-
-_ALHEIO = 987654321657
-
-
-def _erro_real() -> psycopg.errors.InvalidTextRepresentation:
-    """A exceção do Postgres de verdade, com o texto do usuário (`<alheio>`) na mensagem."""
-    with get_conn() as c:
-        try:
-            c.execute("select %s::int", (f"x{_ALHEIO}",))
-        except psycopg.errors.InvalidTextRepresentation as e:
-            c.rollback()
-            return e
-    raise AssertionError("pré-condição: o cast tinha de recusar")
 
 
 def _hold(mp, uid, erro):

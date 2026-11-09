@@ -1483,6 +1483,7 @@ async def contact_submit(request: Request, body: ContactBody):
         html_body,
         text_body=text_body,
         headers={"Reply-To": email},
+        log_subject="Contato site",
     )
     if not ok:
         raise HTTPException(
