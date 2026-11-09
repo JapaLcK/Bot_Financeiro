@@ -26,6 +26,12 @@
     $(id).classList.toggle("show", !!texto);
   }
 
+  /** Desconto automático (campanha, link de retomada) vem SEM código: o Stripe recusa código por cima, então "Tem cupom?" some. */
+  function semCupom(s) {
+    const d = s && Array.isArray(s.discountAmounts) ? s.discountAmounts : [];
+    if (d.some(function (x) { return x && !x.promotionCode; })) $("pp-cupom-abre").hidden = true;
+  }
+
   /** Apaga a tela de uma montagem anterior (outra conta, sessão expirada): nada dela fica visível nem clicável. */
   function limpa() {
     $("pp-resumo").textContent = $("pp-bump").textContent = $("pp-cupom-cod").value = "";
@@ -202,6 +208,7 @@
       checkout.on("change", function (s) {
         if (!vivo || !s) return;
         if (expirada(s)) return ctx.expirou();
+        semCupom(s);
         temTotal = T.resumo(s, td, por) !== null;
         pinta();
       });
@@ -239,6 +246,7 @@
         let s0 = null;
         try { s0 = actions.getSession(); } catch (_) { /* fica para o `change` */ }
         if (expirada(s0)) return ctx.expirou();
+        semCupom(s0);
         if (s0) temTotal = T.resumo(s0, td, por) !== null;
         pinta();
       }, function () { clearTimeout(prazo); if (vivo) ctx.falha(); });

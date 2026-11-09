@@ -10,7 +10,7 @@ outro usuário dá o mesmo 404 de id inexistente.
 Controles por mutação (relato do PR): rota sem `exigir_pode` → vermelho em
 `test_apagar_sombra_e_409_e_nada_muda`; `pode_da_linha` antes do lock → vermelho nos dois
 `test_pode_sob_lock_*`; `[0-9]` → `\\d` no valor → vermelho em `test_valor_e_data_invalidos`;
-`mark_bill_paid` com a marca na criação → vermelho em `test_pagamento_de_conta_entre_os_dois_*`.
+`mark_bill_paid` em duas transações → vermelho em `test_pagamento_de_conta_ainda_nao_commitado_*`.
 """
 from __future__ import annotations
 
@@ -251,76 +251,43 @@ def test_saldo_inicial_regravado_segue_interno_e_trocado_segue_a_categoria(liber
     assert linha(lid)["is_internal_movement"] is False
 
 
-def test_pagamento_de_conta_entre_os_dois_commits_nao_apaga(libera, monkeypatch):
-    """`mark_bill_paid` commita o lançamento e só depois o liga à conta. Pausado entre os dois,
-    a linha não pode parecer carteira pura: sem a marca ela é só leitura, e o apagar dá 409."""
+def test_pagamento_de_conta_ainda_nao_commitado_e_invisivel_e_depois_vem_ligado(libera, monkeypatch):
+    """`mark_bill_paid` é uma transação só (reserva + débito + ligação). Pausado DENTRO do
+    lançamento, a linha é invisível para as outras conexões (não existe lista com ela sem
+    marca, que o apagar da v2 poderia tocar). Commitado, a conta aponta para ele e ele nasce com origem 'carteira'."""
     import db.accounts as A
     a = usuario_pagante()
     conta_luz = B.create_boleto(a, "Luz", 120, today_tz(), category="moradia")
     libera(a)
-    criado, solta, erros = threading.Event(), threading.Event(), []
+    dentro, solta, erros = threading.Event(), threading.Event(), []
     original = A.add_launch_and_update_balance
 
-    def pausa_depois_do_commit(*args, **kw):
+    def pausa_dentro(*args, **kw):
         r = original(*args, **kw)
-        criado.set()
+        dentro.set()
         solta.wait(15)
         return r
 
-    monkeypatch.setattr(A, "add_launch_and_update_balance", pausa_depois_do_commit)
+    monkeypatch.setattr(A, "add_launch_and_update_balance", pausa_dentro)
 
     def paga():
         try:
             B.mark_bill_paid(a, conta_luz["id"], metodo="carteira")
-        except Exception as e:  # noqa: BLE001 — a FK quebrada do código antigo vem por aqui
+        except Exception as e:  # noqa: BLE001
             erros.append(e)
 
     t = threading.Thread(target=paga)
     t.start()
     try:
-        assert criado.wait(15)
-        lid = q("select id from launches where user_id = %s and alvo = 'conta:Luz'", (a,))["id"]
-        antes = saldo(a)
-        for rota, corpo in (("apagar", {}), ("editar", {"descricao": "x"})):
-            r = post(a, rota, {"id": f"l{lid}", **corpo})
-            assert r.status_code == 409 and codigo(r)[1] == "nao_editavel", (rota, r.text)
-        assert (linha(lid) is not None, saldo(a)) == (True, antes)
+        assert dentro.wait(15)
+        assert q("select count(*) as n from launches where user_id = %s and alvo = 'conta:Luz'", (a,))["n"] == 0
     finally:
         solta.set()
         t.join(15)
     assert not erros, erros
+    lid = q("select id from launches where user_id = %s and alvo = 'conta:Luz'", (a,))["id"]
     assert B.get_bill(a, conta_luz["id"])["launch_id"] == lid
     assert (linha(lid)["origem"], item(a, lid)["pode"]) == ("carteira", ["categoria", "data"])
-
-
-def test_conta_apagada_entre_os_dois_commits_deixa_o_lancamento_sem_marca(libera, monkeypatch):
-    """A conta some na janela (apagar o recorrente leva a instância no cascade): sem a ligação
-    a marca não entra, senão o lançamento órfão vira carteira pura e o PODE libera tudo."""
-    import db.accounts as A
-    a = usuario_pagante()
-    conta_luz = B.create_boleto(a, "Luz", 120, today_tz())
-    criado, solta = threading.Event(), threading.Event()
-    original = A.add_launch_and_update_balance
-
-    def pausa_depois_do_commit(*args, **kw):
-        r = original(*args, **kw)
-        criado.set()
-        solta.wait(15)
-        return r
-
-    monkeypatch.setattr(A, "add_launch_and_update_balance", pausa_depois_do_commit)
-    t = threading.Thread(target=B.mark_bill_paid, args=(a, conta_luz["id"]),
-                         kwargs={"metodo": "carteira"})
-    t.start()
-    try:
-        assert criado.wait(15)
-        q("delete from bill_instances where id = %s and user_id = %s", (conta_luz["id"], a))
-    finally:
-        solta.set()
-        t.join(15)
-    lid = q("select id from launches where user_id = %s and alvo = 'conta:Luz'", (a,))["id"]
-    libera(a)
-    assert (linha(lid)["origem"], item(a, lid)["pode"]) == (None, [])
 
 
 def test_par_pendente_com_o_banco(libera):

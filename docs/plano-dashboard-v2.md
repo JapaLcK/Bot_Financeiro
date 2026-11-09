@@ -612,7 +612,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     carteira (`db/bills.mark_bill_paid`) nasce sem a marca e a ganha no mesmo statement que o
     liga à conta: entre os dois commits a linha parecia carteira pura, o v2 a apagava e o
     passo seguinte quebrava a FK, deixando a conta paga sem lançamento. A mesma janela por um
-    apagar do `/app`/WhatsApp já existia e fica para o conserto do apagar pagamento de conta.
+    apagar do `/app`/WhatsApp já existia e fica para o conserto do apagar pagamento de conta
+    (resolvido depois pela #793: a marca entra no insert, numa transação só, e apagar reabre a conta).
     Riscos aceitos: dois POST iguais gravam dois lançamentos (comentário `ponytail:` na rota);
     o apagar antigo do `/app` (trava `launches` e depois `accounts`) e o do v2 (`accounts` e
     depois `launches`) na mesma linha do mesmo usuário ao mesmo tempo dão deadlock, e o

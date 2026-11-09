@@ -140,15 +140,23 @@ jobs:
       - run: npm ci
 
       # `expo install --check` só confere as dependências DECLARADAS em
-      # `package.json` (`dependencies`) contra o SDK — não entra no lockfile.
-      # Hoje reanimated/gesture-handler/worklets estão instalados como
-      # TRANSITIVOS (peer opcional do expo-router; entram no
-      # `package-lock.json`, mas não em `dependencies`) em versão errada para
-      # o Expo Go 57, e este passo dá "up to date" porque nem olha para eles.
-      # Só passa a importar quando alguém IMPORTAR um dos três: aí precisa
-      # declarar via `expo install` (o pacote entra em `dependencies`), e a
-      # partir daí este passo pega a versão errada.
+      # `package.json`, mas pela versão INSTALADA, que vem do lockfile.
+      # `react-native-gesture-handler` é transitivo e fica de fora: a versão do
+      # lock está fora do que o SDK pede (`expo/bundledNativeModules.json`), e
+      # ninguém em `app/` importa. Quem passar a importar precisa declarar via
+      # `expo install`, e aí este passo pega a versão errada.
+      #
+      # `EXPO_OFFLINE` troca a referência do api.expo.dev pelo
+      # `expo/bundledNativeModules.json` do `expo` instalado, que vem do lockfile:
+      # o resultado depende só do commit. Online, cada patch publicado pelo Expo
+      # deixava este job vermelho sem commit nosso e pulava lint, typecheck e
+      # testes (#1417, #1408; o #1439 foi conserto temporário).
+      # Offline sai da conferência quem esse arquivo não lista: o próprio `expo` e
+      # ferramentas como `typescript` e `jest`. Eles e os patches novos ficam com
+      # o `app-expo-online.yml`, semanal e fora do PR.
       - name: Confere versões nativas contra o SDK do Expo
+        env:
+          EXPO_OFFLINE: "1"
         run: npx expo install --check
 
       - name: Lint

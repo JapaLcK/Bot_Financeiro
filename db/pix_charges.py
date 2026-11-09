@@ -22,7 +22,7 @@ Três regras que valem para TODA escrita daqui:
     **não** autoriza pular efeito nenhum (§8.2 C; ver `transicionar`). Ler o
     status e depois escrever seria a mesma corrida com mais linhas.
   • **Toda query do dado do usuário filtra por `user_id`** (CLAUDE.md §0), com
-    **TRÊS exceções, e uma delas é ESCRITA**. Todas do dreno, todas nomeadas
+    **QUATRO exceções, e duas delas são ESCRITA**. Todas do dreno, todas nomeadas
     nas próprias funções:
 
     | função | leitura/escrita | chave |
@@ -30,8 +30,9 @@ Três regras que valem para TODA escrita daqui:
     | `buscar_por_external_reference` | leitura | `external_reference` (unique) |
     | `buscar_por_asaas_payment_id`   | leitura | `asaas_payment_id` (unique) |
     | `transicionar`                  | **ESCRITA** | `charge_id` |
+    | `reabrir_baixa` (saga)          | **ESCRITA** | `charge_id` |
 
-    O motivo é o mesmo para as três: o dreno não tem usuário na requisição, e
+    O motivo é o mesmo para as quatro: o dreno não tem usuário na requisição, e
     a cobrança pode legitimamente ter `user_id is null` (conta excluída, §13.4).
 
     **Mas a de escrita é chaveada por `charge_id`, que é um bigserial

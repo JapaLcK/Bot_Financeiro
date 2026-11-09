@@ -15,12 +15,6 @@ import { abrir, navegador } from "./_guia.mjs";
 
 const browser = navegador();
 
-// Roda na página: TODOS os botões do menu da Ajuda (centro e os 4 cantos, 1px para dentro) estão por cima de qualquer coisa (a .askbar do Piggy, fixa).
-const menuPorCima = () => [...document.querySelectorAll(".rail .ajuda-menu button")].every((el) => {
-  const b = el.getBoundingClientRect();
-  return [[.5, .5], [0, 0], [1, 0], [0, 1], [1, 1]].every(([x, y]) => document.elementFromPoint(b.left + 1 + (b.width - 2) * x, b.top + 1 + (b.height - 2) * y)?.closest(".ajuda-menu") != null);
-});
-
 const CONTA = { display_name: "Ana Teste", email: "ana.teste@exemplo.com", user_id: 7, whatsapp_linked: false };
 // `logout`: "ok" responde 200; "offline" derruba a conexão (o fetch REJEITA); "lento" responde em 3s (o clique e a leitura do `disabled` cabem folgados antes de a página navegar).
 // `perfil`: o corpo do /auth/dashboard-profile. `posts`: o que chegou no logout; `perfis`: os caminhos pedidos do perfil.
@@ -153,34 +147,32 @@ test("⌘K lista as rotas da Conta", async () => {
 
 // O trilho é sticky, com a altura da janela e sem rolagem. O grupo Conta nasce FECHADO fora da Conta (parts/RailConta.tsx): o subtítulo é um botão de 44px e o Sair, fora do grupo, é o último
 // item à vista (o aberto é medido em sidenav_rail_altura.test.mjs). Fechado, o trilho cabe sem rolar até 1366×600 (a Casa, PR 6c, entrou no menu).
-// 1366×657 é a janela útil de um 1366×768 (barras do navegador). 1280×640 e 761×640 já caem no @media (max-height:650px) (overflow-y:auto, menu da Ajuda fixo).
+// 1366×657 é a janela útil de um 1366×768 (barras do navegador). 1280×640 e 761×640 já caem no @media (max-height:650px) (overflow-y:auto).
 // 1440×741, 1440×745, 1440×768 e 1440×769 caem na faixa compacta (itens de 32px, até 801px de altura, ver shell.css): o grupo fechado cabe nelas sem rolar.
 for (const [width, height] of [[1440, 900], [1366, 657], [1366, 600], [1280, 640], [1440, 625], [1024, 768], [1181, 657], [1180, 657], [761, 640], [1440, 741], [1440, 745], [1440, 768], [1440, 769]]) {
-  test(`trilho ${width}×${height}: o Sair cabe sem rolar o trilho (grupo Conta fechado), nada se sobrepõe e o popover da Ajuda não é cortado`, async () => {
+  test(`trilho ${width}×${height}: o Sair cabe sem rolar o trilho (grupo Conta fechado), nada se sobrepõe e a Ajuda continua à vista`, async () => {
     const { antes } = conta();
     const { ctx, page } = await abrir({ guia: "concluido", width, height, rota: "/assinaturas", antes });
     await page.locator(".rail-conta").waitFor();
-    await page.locator(".rail .ajuda > button").click();
     const r = await page.evaluate(() => {
       const rect = (el) => el.getBoundingClientRect();
       const rail = document.querySelector(".rail"), sair = document.querySelector('.rail-conta button[title="Sair"]');
       const filhos = [...rail.children].filter((e) => e.getClientRects().length).map(rect);
-      const pop = rect(document.querySelector(".rail .ajuda-menu"));
+      const aj = [...document.querySelectorAll(".rail-list a")].find((a) => a.textContent.trim() === "Ajuda"), ab = rect(aj);
       return {
         sairFundo: Math.round(rect(sair).bottom), altura: innerHeight,
         footFundo: Math.round(rect(document.querySelector(".rail-foot")).bottom), // 0 quando o rodapé some (≤1180px de largura)
         railRola: rail.scrollHeight - rail.clientHeight,
         sobrepoe: filhos.some((f, i) => i && f.top < filhos[i - 1].bottom - 0.5),
-        popover: pop.top >= 0 && pop.bottom <= innerHeight && pop.right <= innerWidth,
+        ajuda: ab.top >= 0 && ab.bottom <= innerHeight && document.elementFromPoint(ab.left + ab.width / 2, ab.top + ab.height / 2)?.closest("a") === aj,
         sairNaTela: document.elementFromPoint(rect(sair).left + 4, rect(sair).top + rect(sair).height / 2)?.closest(".rail-conta button") === sair,
         lateral: document.documentElement.scrollWidth - innerWidth,
       };
     });
-    r.popoverPorCima = await page.evaluate(menuPorCima);
     await ctx.close();
     assert.ok(r.sairFundo <= r.altura, `Sair termina em ${r.sairFundo} e a janela tem ${r.altura}`);
     assert.ok(r.footFundo <= r.altura, `o rodapé do trilho termina em ${r.footFundo} e a janela tem ${r.altura}`);
-    assert.deepEqual({ ...r, sairFundo: 0, altura: 0, footFundo: 0 }, { sairFundo: 0, altura: 0, footFundo: 0, railRola: 0, sobrepoe: false, popover: true, popoverPorCima: true, sairNaTela: true, lateral: 0 });
+    assert.deepEqual({ ...r, sairFundo: 0, altura: 0, footFundo: 0 }, { sairFundo: 0, altura: 0, footFundo: 0, railRola: 0, sobrepoe: false, ajuda: true, sairNaTela: true, lateral: 0 });
   });
 }
 
@@ -202,9 +194,9 @@ for (const [width, height] of [[1440, 900], [1024, 768]]) {
 }
 
 // Janela mais baixa que o trilho (zoom 150% num 1366×657 vira ~911×438): o trilho rola. Sair se alcança com Tab, numa página mais
-// alta que a janela (/lancamentos: o trilho sticky não anda com a página), e o menu da Ajuda (/assinaturas) abre inteiro, ao lado do trilho.
+// alta que a janela (/lancamentos: o trilho sticky não anda com a página).
 for (const [width, height] of [[1440, 500], [1440, 440], [911, 438], [1024, 420], [1280, 600], [1181, 438], [1180, 438], [761, 420], [769, 500], [1000, 500]]) {
-  test(`janela baixa ${width}×${height}: o Sair se alcança com Tab e o menu da Ajuda não é cortado`, async () => {
+  test(`janela baixa ${width}×${height}: o Sair se alcança com Tab`, async () => {
     const { antes } = conta();
     const { ctx, page } = await abrir({ guia: "concluido", width, height, rota: "/lancamentos", antes });
     await page.locator(".rail-conta").waitFor();
@@ -220,34 +212,21 @@ for (const [width, height] of [[1440, 500], [1440, 440], [911, 438], [1024, 420]
         porCima: document.elementFromPoint(s.left + s.width / 2, s.top + s.height / 2)?.closest("button") === sair,
       };
     });
-    await page.evaluate(() => { location.hash = "#/assinaturas"; });
-    await page.locator(".rail .ajuda > button").click();
-    const m = await page.evaluate(() => {
-      const rect = (e) => e.getBoundingClientRect();
-      const pop = rect(document.querySelector(".rail .ajuda-menu")), rail = rect(document.querySelector(".rail"));
-      return {
-        dentro: pop.top >= 0 && pop.bottom <= innerHeight && pop.right <= innerWidth,
-        direita: pop.left >= rail.right,
-        lateral: document.documentElement.scrollWidth - innerWidth,
-      };
-    });
-    m.porCima = await page.evaluate(menuPorCima);
     await ctx.close();
     assert.deepEqual(r, { ehSair: true, paginaAlta: true, noAlto: true, porCima: true });
-    assert.deepEqual(m, { dentro: true, direita: true, porCima: true, lateral: 0 });
   });
 }
 
-// A barra do Piggy (.askbar, fixa, z-index 40) ficava POR CIMA do menu da Ajuda em janela baixa: o clique no centro do 2º item era morto.
-test("janela baixa 769×500: clicar no centro de 'Como funciona esta tela' abre a dica (a barra do Piggy não cobre o menu)", async () => {
+// A barra do Piggy (.askbar, fixa, z-index 40) ficava POR CIMA do menu da Ajuda em janela baixa: o clique no centro do item era morto.
+// A Ajuda agora é um link do trilho: o clique no centro dele, nessa janela, tem de abrir a tela.
+test("janela baixa 769×500: clicar no centro da Ajuda do trilho abre a tela (a barra do Piggy não a cobre)", async () => {
   const { antes } = conta();
   const { ctx, page } = await abrir({ guia: "concluido", width: 769, height: 500, rota: "/assinaturas", antes });
-  await page.locator(".rail .ajuda > button").click();
-  const b = await page.locator(".rail .ajuda-menu button").nth(1).boundingBox();
+  const b = await page.locator(".rail").getByRole("link", { name: "Ajuda" }).boundingBox();
   await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
-  const aberta = await page.locator(".dica-tela").waitFor({ timeout: 3000 }).then(() => true, () => false);
+  const aberta = await page.waitForFunction(() => location.hash === "#/ajuda", null, { timeout: 3000 }).then(() => true, () => false);
   await ctx.close();
-  assert.ok(aberta, "a dica não abriu: o clique caiu fora do item");
+  assert.ok(aberta, "a Ajuda não abriu: o clique caiu fora do link");
 });
 
 // display_name/email que não são texto (123, {}) não derrubam o painel: a página abre sem nome nem e-mail.

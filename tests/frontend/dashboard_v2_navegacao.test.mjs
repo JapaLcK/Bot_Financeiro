@@ -130,7 +130,7 @@ for (const semDialog of [false, true]) {
     r.atual = await textos(page, '.menu-telas a[aria-current="page"]');
     r.foco = await foco();
     r.guias = await page.locator(".menu-telas [data-guia]").count();
-    // 18 Tabs (fecha + 10 telas + 4 da Conta + Sair + Guia do painel = 17, então dá a volta): o foco nunca para num
+    // 18 Tabs (fecha + 10 telas + 4 da Conta + Sair + Ajuda = 17, então dá a volta): o foco nunca para num
     // elemento de fora da folha. No nativo, a volta passa um Tab pelo navegador (document.body).
     r.tabs = [];
     for (let i = 0; i < 18; i++) { await page.keyboard.press("Tab"); r.tabs.push(await page.evaluate(() => { const a = document.activeElement; return a === document.body || a?.closest(".menu-telas") != null; })); }
@@ -156,15 +156,15 @@ for (const semDialog of [false, true]) {
     r.navegou = [await visivel(), await page.evaluate(() => [location.hash, document.activeElement?.id])];
     await botao.click();
     r.atualDepois = await textos(page, '.menu-telas a[aria-current="page"]');
-    // A Ajuda do Menu abre o guia (o mesmo evento da Ajuda do trilho) e fecha a folha.
-    await page.evaluate(() => { window.__guia = 0; window.addEventListener("dash:guia", () => window.__guia++); });
-    await folha.getByRole("button", { name: "Guia do painel" }).click();
-    r.ajuda = [await visivel(), await page.evaluate(() => window.__guia)];
+    // A Ajuda do Menu é um link para a tela dela (como o item do trilho): navega e fecha a folha.
+    await folha.getByRole("link", { name: "Ajuda" }).click();
+    await page.waitForFunction(() => location.hash === "#/ajuda");
+    r.ajuda = [await visivel(), await page.evaluate(() => location.hash)];
     await ctx.close();
     assert.deepEqual(r, {
-      fechada: false, aberta: true, rotulos: [...ROTULOS_LOGADO, "Perfil", "Cobrança", "Configurações", "Bancos conectados", "Família"], atual: ["Resumo"], foco: [true, "Resumo"], guias: 0,
+      fechada: false, aberta: true, rotulos: ["Ajuda", ...ROTULOS_LOGADO, "Perfil", "Cobrança", "Configurações", "Bancos conectados", "Família"], atual: ["Resumo"], foco: [true, "Resumo"], guias: 0,
       tabs: Array(18).fill(true), cmdk: 0, escFechou: true, escFoco: true, foraFechou: true, mesmaTela: true,
-      navegou: [false, ["#/previsao", "page-title"]], atualDepois: ["Previsão"], ajuda: [false, 1],
+      navegou: [false, ["#/previsao", "page-title"]], atualDepois: ["Previsão"], ajuda: [false, "#/ajuda"],
     });
   });
 }
@@ -195,24 +195,24 @@ test("protótipo (DEMO, mesmo bundle): a barra é Resumo, Gastos, Piggy, Extrato
 // Geometria da folha: o "Fechar" cobre o ponto onde estava o botão Menu (duplo toque, ver
 // dashboard_v2_dica.test.mjs), a Ajuda fica à vista sem rolar e o Menu se destaca fora da barra.
 for (const [w, h] of [[320, 568], [375, 812], [390, 844]]) {
-  test(`celular ${w}×${h}: o Fechar cobre o botão Menu; a Ajuda fica no topo, à vista e com nome de grupo`, async () => {
+  test(`celular ${w}×${h}: o Fechar cobre o botão Menu; a Ajuda fica no topo, à vista`, async () => {
     const { ctx, page } = await abrir(w, "#/", { height: h });
     const botao = page.locator(".tabbar").getByRole("button", { name: "Menu" });
     const b = await botao.boundingBox();
     await botao.click();
     const r = await page.evaluate((m) => {
       const f = document.querySelector(".menu-telas"), fr = f.getBoundingClientRect();
-      const x = document.querySelector(".menu-telas-fechar").getBoundingClientRect(), a = document.querySelector('.menu-telas [role="group"] li:last-child').getBoundingClientRect();
+      const x = document.querySelector(".menu-telas-fechar").getBoundingClientRect(), a = document.querySelector(".menu-telas li").getBoundingClientRect();
       // Os 4 cantos do botão Menu e o centro: o 2º toque de um duplo toque pode cair em qualquer ponto dele.
       const [x0, y0, x1, y1] = [m.x + 1, m.y + 1, m.x + m.width - 1, m.y + m.height - 1];
       const sobre = [[x0, y0], [x1, y0], [x0, y1], [x1, y1], [(x0 + x1) / 2, (y0 + y1) / 2]].map(([px, py]) => document.elementFromPoint(px, py)?.textContent.trim());
       return { sobre, alto: Math.round(x.height) >= 48, larga: Math.round(x.width) === innerWidth, rolou: f.scrollTop,
         cobreBarra: x.top <= document.querySelector(".tabbar").getBoundingClientRect().top, // a barra inteira, não só o botão
-        ajudaVisivel: a.bottom <= fr.bottom - x.height && a.top >= fr.top, grupo: document.querySelector('.menu-telas [role="group"]').getAttribute("aria-labelledby") };
+        ajudaVisivel: a.bottom <= fr.bottom - x.height && a.top >= fr.top, primeiro: document.querySelector(".menu-telas li").textContent.trim() };
     }, b);
     const fechar = await page.locator(".menu-telas-fechar").count();
     await ctx.close();
-    assert.deepEqual(r, { sobre: Array(5).fill("Fechar"), alto: true, larga: true, rolou: 0, cobreBarra: true, ajudaVisivel: true, grupo: "menu-ajuda" });
+    assert.deepEqual(r, { sobre: Array(5).fill("Fechar"), alto: true, larga: true, rolou: 0, cobreBarra: true, ajudaVisivel: true, primeiro: "Ajuda" });
     assert.equal(fechar, 1); // um só botão Fechar
   });
 }

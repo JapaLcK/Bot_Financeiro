@@ -27,7 +27,7 @@ after(async () => { await browser?.close(); server?.kill(); });
 
 /** Contexto novo por caso. `erros` junta pageerror e resposta >= 400. */
 async function abrir({ js = true, calmo = false, mobile = false, relogio = false, largura, logado = false, disponivel = {}, planosDepois = 0,
-                       assinatura = { active: false, trial_disponivel: true }, query = "" } = {}) {
+                       assinatura = { active: false, trial_disponivel: true }, query = "", caminho = "/index.html" } = {}) {
   const ctx = await browser.newContext({
     viewport: largura ? { width: largura, height: 800 } : mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 },
     javaScriptEnabled: js, reducedMotion: calmo ? "reduce" : "no-preference",
@@ -52,7 +52,7 @@ async function abrir({ js = true, calmo = false, mobile = false, relogio = false
   page.on("pageerror", e => erros.push("pageerror: " + e.message));
   page.on("response", r => { if (r.status() >= 400 && !r.url().endsWith("/auth/validate")) erros.push(`${r.status()} ${r.url()}`); });
   if (relogio) await page.clock.install({ time: new Date("2026-01-01T08:00:00") });
-  await page.goto(`${ORIGIN}/index.html${query}`, { waitUntil: "load" });
+  await page.goto(`${ORIGIN}${caminho}${query}`, { waitUntil: "load" });
   if (relogio) await page.clock.pauseAt(new Date("2026-01-01T09:00:00")); // daqui o tempo só anda no runFor
   return { page, ctx, erros, subs };
 }
@@ -386,6 +386,17 @@ for (const [nome, assinatura] of [["403 (sem credencial)", 403], ["degraded", { 
   });
 }
 
+for (const largura of [1280, 390]) {
+  test(`fbclid na entrada de / a ${largura}px: os 4 CTAs levam ao Plus mensal com utm_source e fbclid`, async () => {
+    const { page, ctx, erros, subs } = await abrir({ caminho: "/", largura, query: "?utm_source=x&fbclid=abc" });
+    await assentou(page, subs, 0);
+    assert.deepEqual(await page.$$eval(CTAS_UTM, as => as.map(a => a.getAttribute("href"))),
+                     Array(4).fill(PLUS_MENSAL + "&utm_source=x&fbclid=abc"));
+    await ctx.close();
+    assert.deepEqual(erros, []);
+  });
+}
+
 test("anônimo: nenhuma chamada ao /billing/subscription, textos originais, UTM repassada; sem query o href é o exato", async () => {
   const comUtm = await abrir({ query: "?utm_source=ig&x=1&UTM_Campaign=a%20b&fbclid=AbC" });
   await assentou(comUtm.page, comUtm.subs, 0);
@@ -560,4 +571,37 @@ test("teste-piggy.js atrasado e o Plus 'Indisponível' antes dele: os cartões r
   assert.deepEqual(r.filter(([t]) => t === "pro").map(([, h]) => h),
     ["/assinar?plano=pro&ciclo=annual&utm_source=fb&fbclid=abc", "/assinar?plano=pro&ciclo=monthly&utm_source=fb&fbclid=abc"]);
   assert.deepEqual(erros, []);
+});
+
+// ── "Comparar os planos": botão secundário entre a grade de cartões e o bloco de garantia ────
+const COMPARAR = 'section#planos a[href="/precos#comparar"]';
+const posicao = page => page.evaluate(sel => {
+  const a = document.querySelector(sel), grade = document.querySelector("#planos [data-plano]").parentElement;
+  const garantia = [...document.querySelectorAll("#planos > div > div")].find(d => d.textContent.includes("7 dias grátis."));
+  const depois = (x, y) => !!(x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING);
+  return { a: !!a, aposGrade: a && depois(grade, a), antesGarantia: a && garantia && depois(a, garantia),
+           alturas: a && a.getBoundingClientRect().height, href: a && a.getAttribute("href"),
+           overflow: document.documentElement.scrollWidth - innerWidth };
+}, COMPARAR);
+
+test("Comparar os planos: depois da grade, antes da garantia, href exato (UTM e assinante), nos dois ciclos, >= 44px, sem overflow", async () => {
+  for (const [nome, opts] of [["anônimo", {}], ["com UTM", { query: "?utm_source=ig&fbclid=x" }],
+                              ["assinante ativo", { logado: true, assinatura: { active: true, plan: "plus" } }]]) {
+    for (const largura of [1280, 320]) {
+      const { page, ctx, erros, subs } = await abrir({ largura, ...opts });
+      if (opts.logado) await assentou(page, subs);
+      for (const ciclo of ["mensal", "anual"]) {
+        await page.click(`#planos button[data-set="${ciclo}"]`);
+        const p = await posicao(page);
+        const ou = `${nome} ${largura} ${ciclo}`;
+        assert.equal(p.a, true, ou);
+        assert.equal(p.aposGrade, true, ou); assert.equal(p.antesGarantia, true, ou);
+        assert.equal(p.href, "/precos#comparar", ou);
+        assert.ok(p.alturas >= 44, `${ou}: altura ${p.alturas}`);
+        assert.ok(p.overflow <= 0, `${ou}: overflow ${p.overflow}`);
+      }
+      await ctx.close();
+      assert.deepEqual(erros.filter(e => !e.includes("/billing/subscription")), []);
+    }
+  }
 });

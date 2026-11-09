@@ -212,6 +212,7 @@ export default function ComparisonBlock() {
                   {plans.map((plan) => (
                     <TableHead
                       key={plan.name}
+                      data-plano={plan.id}
                       className={cn(
                         "sticky top-0 z-20 border-b border-border text-center align-bottom",
                         plan.highlighted ? "bg-primary/5" : "bg-background",

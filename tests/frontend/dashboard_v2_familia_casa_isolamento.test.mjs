@@ -14,7 +14,7 @@ void browser;
 const perfil = (uid) => (ctx) => ctx.route((u) => u.pathname === "/auth/dashboard-profile", (r) => r.fulfill({ json: { display_name: "Ana", email: "a@exemplo.com", user_id: uid.v, whatsapp_linked: false } }));
 const foco = (page) => page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
 
-// mutação: tirar o `key={chave}` de PaginaCasa (Casa.tsx): o diálogo da conta 7 reabre sobre a casa da 8.
+// mutação: tirar o `key={chave}` de PaginaCasa (CasaPagina.tsx): o diálogo da conta 7 reabre sobre a casa da 8.
 // A chave por uid tem uma 2ª defesa na LEITURA (main.tsx reseta as ["conta", assunto] sem uid): só a chave sem uid E sem esse reset (as duas mutações juntas) mostra o dado da 7; sozinha cada uma fica verde.
 // O reset não cobre um `setQueryData` tardio de escrita em voo: esse é o caso do teste de baixo (a chave capturada com o uid antigo).
 test("troca de conta com a casa e o diálogo abertos: nada da conta 7 aparece enquanto a casa da 8 está presa; o rascunho some", async () => {

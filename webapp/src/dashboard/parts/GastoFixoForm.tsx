@@ -3,7 +3,7 @@
 import { useId, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ERRO_VALOR, normalizaValor, valorInvalido } from "../lib/format.js";
-import { ErroApi, apiPost, categoriasQuery } from "../lib/v2";
+import { ErroApi, apiPost, categoriasQuery, comPrazoLeitura } from "../lib/v2";
 import { CRIAR_SENHA } from "./Entrada";
 import { NATIVE, useDialogo } from "./dialog";
 
@@ -40,7 +40,7 @@ export function GastoFixoForm({ feito, fechar }: { feito: () => void; fechar: ()
   const m = useMutation({
     retry: false, networkMode: "always",
     mutationFn: (c: Parameters<typeof apiPost<"/gastos-fixos">>[1]) => apiPost("/gastos-fixos", c),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["previsao"] }), // entra na Previsão; no erro perdido, relê o que o servidor tem
+    onSettled: () => comPrazoLeitura(qc.invalidateQueries({ queryKey: ["previsao"] })), // entra na Previsão; no erro perdido, relê o que o servidor tem. O fechar espera a lista nova, mas só até o prazo
   });
 
   const escolhida = cat || cats.data?.categorias[0]?.nome || "";

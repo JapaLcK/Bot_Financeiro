@@ -141,8 +141,10 @@ from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.billing_bump import router as billing_bump_router
 from frontend.routes.retomada import (
-    COOKIE as RETOMADA_COOKIE, Comprador, comprador, desconto_config, email_mascarado, router as retomada_router,
+    COOKIE as RETOMADA_COOKIE, Comprador, campanha_config, comprador, desconto_config, email_mascarado,
+    router as retomada_router,
 )
+from core.services.oferta_campanha import pct_da_oferta
 from core.services.retomada import desconto_da_etapa
 from core.services.retomada_cupom import CupomIndisponivel, cupom_id
 from db.remarketing import ja_comprou
@@ -5399,6 +5401,12 @@ async def _billing_user_lock(user_id: int):
                 await cur.execute("select pg_advisory_unlock(hashtext(%s))", (lock_key,))
 
 
+def _pct_checkout(plan: str, retomada_etapa) -> int | None:
+    """% efetivo do cartão: o maior entre o link e a campanha. `plan` é o PÚBLICO."""
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
+    return pct_da_oferta(TIER_TO_STORED_PLAN.get(plan, plan), desconto_da_etapa(retomada_etapa))
+
+
 def _checkout_session_matches(session, user_id: int, plan: str, interval: str, price_id: str,
                               origem: str = "precos", embutido: bool = False,
                               elementos: bool = False, retomada_etapa: int | None = None) -> bool:
@@ -5423,8 +5431,9 @@ def _checkout_session_matches(session, user_id: int, plan: str, interval: str, p
         # Sessão de retomada (`rm_etapa`) só é reaproveitada pela retomada da MESMA etapa,
         # e a do fluxo logado nunca por ela: o rastro da compra não se mistura.
         and str(_sg(metadata, "rm_etapa") or "") == str(retomada_etapa or "")
-        # O desconto também: sessão de antes do 6b (sem `rm_desc`) ou de outra tabela não é reaproveitada.
-        and str(_sg(metadata, "rm_desc") or "") == str(desconto_da_etapa(retomada_etapa) or "")
+        # O desconto também (% efetivo, com a campanha): sessão sem `rm_desc`, de outra tabela ou de
+        # antes/depois da janela não é reaproveitada.
+        and str(_sg(metadata, "rm_desc") or "") == str(_pct_checkout(plan, retomada_etapa) or "")
         and modo_ok
     )
 
@@ -5475,6 +5484,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
     if desconto and await asyncio.to_thread(ja_comprou, user_id):
         raise HTTPException(status_code=409, detail={
             "error": "ja_comprou", "message": "Você já é cliente. O desconto de retomada vale só no 1º pagamento."})
+    desconto = _pct_checkout(plan, retomada_etapa)   # campanha: vale o maior, nunca a soma
 
     customer_id = user.get("stripe_customer_id")
     if customer_id:
@@ -5630,7 +5640,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
     cupom = None
     if desconto:   # antes de criar qualquer coisa: cupom divergente é 503, sem sessão
         try:
-            cupom = await asyncio.to_thread(cupom_id, stripe_mod, retomada_etapa, desconto, price_id)
+            cupom = await asyncio.to_thread(cupom_id, stripe_mod, retomada_etapa or 0, desconto, price_id)
         except CupomIndisponivel:
             raise HTTPException(status_code=503, detail="Não consegui aplicar o desconto agora. Tenta de novo em instantes.")
 
@@ -5796,6 +5806,7 @@ async def billing_plans_config(request: Request, response: Response):
         "pix_annual_available": pix_annual_available(),
         "pagina_propria": pagina_propria_ligada(),
         "retomada": retomada,
+        "campanha": campanha_config(),
     }
 
 

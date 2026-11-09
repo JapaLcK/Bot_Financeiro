@@ -77,7 +77,9 @@ const STRIPE_FALSO = `(function () {
     getSession: entrega,
     runServerUpdate: function (fn) {
       reg.run++;
-      return Promise.resolve().then(fn).then(function () { muda(cfg.depoisBump); return { type: "success" }; },
+      // \`depoisBump\` em lista = uma sessão por chamada (a última se repete): marcar e desmarcar.
+      var nova = Array.isArray(cfg.depoisBump) ? cfg.depoisBump[Math.min(reg.run, cfg.depoisBump.length) - 1] : cfg.depoisBump;
+      return Promise.resolve().then(fn).then(function () { muda(nova); return { type: "success" }; },
         function (e) { return { type: "error", error: { message: String(e) } }; });
     },
     confirm: function (op) {

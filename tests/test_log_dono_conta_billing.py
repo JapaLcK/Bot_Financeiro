@@ -24,7 +24,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import date, timedelta
 
 import pytest
 import stripe
@@ -38,7 +37,6 @@ import core.services.email_service as email_service
 import core.services.extras_assinar as extras_assinar
 import db
 import db.accounts as accounts
-import db.bills as bills
 import db.checkout_funnel as funnel
 import db.open_finance as open_finance
 import db.rendimento_contratado as rendimento
@@ -46,7 +44,7 @@ import db.users as users
 import frontend.finance_bot_websocket_custom as dashboard
 from _apoio_auth_app import sessao_de
 from _log_dono_helpers import (  # noqa: F401 (banco_real é fixture autouse)
-    _isola_e_apaga, _levanta, _limpa, _linhas, _marca, _marcador, _uid, _uma, _violacao, banco_real)
+    _isola_e_apaga, _levanta, _limpa, _linhas, _marca, _marcador, _uid, _uma, banco_real)
 from core.services.retomada import mascarar_email
 from db.connection import get_conn
 from db.signup_quiz import boas_vindas_da_conta
@@ -190,28 +188,6 @@ def test_tb2_founder_e_funil_com_o_banco_falhando_engolem(monkeypatch):
 
 
 # ── T-B3 dinheiro ────────────────────────────────────────────────────────────
-
-def test_tb3_conta_paga_relanca_a_original_mesmo_com_a_devolucao_falhando(monkeypatch):
-    real = bills.get_conn
-
-    def caso(uid, marca):
-        m1, mark = _marcador(), _marcador()
-        original = _violacao(m1)
-        conta = bills.create_boleto(uid, "Luz", 20, date.today() + timedelta(days=1))
-        debitou = []
-
-        def debita(*a, **k):
-            debitou.append(1)
-            raise original
-        monkeypatch.setattr(accounts, "add_launch_and_update_balance", debita)
-        monkeypatch.setattr(bills, "get_conn", lambda *a, **k: _levanta(mark)() if debitou else real(*a, **k))
-        with pytest.raises(type(original)) as e:
-            bills.mark_bill_paid(uid, conta["id"], metodo="carteira")
-        assert e.value is original, "a devolução que falha não pode mascarar o erro do débito"
-        monkeypatch.setattr(bills, "get_conn", real)
-        return _linha(marca, uid, "error", "db.bills", "falha ao devolver a conta", mark, m1)
-    _a_e_b(caso)
-
 
 def test_tb3_carteira_com_o_consolidado_falhando_cai_no_saldo_cru(monkeypatch):
     def caso(uid, marca):
