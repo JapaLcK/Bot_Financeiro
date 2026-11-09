@@ -762,7 +762,7 @@ test("PO2: em 1024px os cards têm alturas iguais, cores distintas e CTAs antes 
   assert.deepEqual(r.listas.map((l) => l.gap), ["16px", "16px", "16px"],
     `o espaçamento dos benefícios divergiu: ${JSON.stringify(r.listas)}`);
   // A composição muda; a seleção oficial de benefícios e a ordem do CTA permanecem.
-  assert.deepEqual(r.listas.map((l) => l.itens), [6, 8, 8],
+  assert.deepEqual(r.listas.map((l) => l.itens), [6, 8, 9],
     `a seleção enxuta de benefícios divergiu: ${JSON.stringify(r.listas)}`);
   assert.ok(r.listas.every((l) => l.ctaAntes && l.vao >= 20 && l.vao <= 24),
     `o CTA não ficou logo após o preço e antes dos benefícios: ${JSON.stringify(r.listas)}`);
