@@ -77,9 +77,18 @@ def _comissao(c, reais, disponivel=True):
     assert record_referral(c.aff["code"], indicado.uid)
     fatura = f"in_{uuid.uuid4().hex[:12]}"
     linha = record_commission_for_invoice(indicado.uid, fatura, reais * 1000)
+    _conferida(linha["id"])
     if disponivel:
         _vence(linha["id"])
     return SimpleNamespace(id=linha["id"], indicado=indicado, fatura=fatura)
+
+
+def _conferida(comissao_id):
+    """A comissão já passou pela conferência na Stripe (A5), sem reembolso. Quem mede a conferência é
+    `tests/test_afiliado_conferencia.py`; aqui ela só não pode ficar no caminho."""
+    with get_conn() as conn:
+        conn.execute("update affiliate_commissions set payment_check_pending = false where id = %s", (comissao_id,))
+        conn.commit()
 
 
 def _vence(comissao_id):
@@ -286,6 +295,7 @@ def test_fluxo_real_do_link_ao_pix_comissao_so_na_primeira_cobranca(monkeypatch)
     assert m["stats"]["held"] == 60 and m["stats"]["available"] == 0
 
     assert _sacar(c).status_code == 400  # ainda em carência
+    _conferida(m["commissions"][0]["id"])  # sem STRIPE_SECRET_KEY aqui: a marca fica, e é o lado seguro (A5)
     _vence(m["commissions"][0]["id"])
     r = _sacar(c)
     assert r.status_code == 200, r.text

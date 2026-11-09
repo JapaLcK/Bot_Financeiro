@@ -76,7 +76,9 @@ def _gravar(cur, fatura, antes, c, tipo, devolvido, quando, status, ator, recupe
 
 def _aplicar(cur, fatura, a, c, tipo, devolvido, quando, ator) -> dict | None:
     """A máquina de estados: comissão (`c`, travada) contra o reembolso. `a` é a linha que já existe."""
-    if c is None:
+    if c is None:  # pendência cuja comissão saiu com o afiliado (A3) fica como está: não vira `no_commission`
+        if a and a["status"] != "no_commission":
+            return a
         return _gravar(cur, fatura, a, None, tipo, devolvido, quando, "no_commission", ator)
     if c["status"] == "reversed":
         if not (a and a["status"] == "open" and tipo == "total"):
@@ -90,7 +92,8 @@ def _aplicar(cur, fatura, a, c, tipo, devolvido, quando, ator) -> dict | None:
         falta = max(0, c["amount_cents"] - (a["recovery_closed_cents"] if a else 0))
         status = "recovery" if falta else "resolved"
         linha = _gravar(cur, fatura, a, c, tipo, devolvido, quando, status, ator, falta or None)
-        registrar_evento(cur, linha["id"], "paid_before_refund", ator, depois=c["amount_cents"])
+        # O saque guarda valor e data e sobrevive à exclusão do afiliado (D8): o evento aponta para ele.
+        registrar_evento(cur, linha["id"], "paid_before_refund", ator, depois=c["amount_cents"], saque=c["payout_id"])
         return linha
     if tipo == "total" and c["payout_id"] is None:  # solta: D9, estorna sozinha
         cur.execute("update affiliate_commissions set status = 'reversed' where id = %s", (c["id"],))
@@ -117,15 +120,17 @@ def registrar_reembolso(fatura: str, tipo: str, devolvido_cents: int, quando, at
     return a
 
 
-def promover(cur, comissao: dict) -> None:
+def promover(cur, comissao: dict) -> bool:
     """Reembolso que chegou antes do `invoice.paid`: a comissão recém-criada passa pela mesma máquina.
-    Total nasce `reversed`, parcial nasce em revisão. Quem chama já tem a `trava_fatura`."""
+    Total nasce `reversed`, parcial nasce em revisão. Quem chama já tem a `trava_fatura`.
+    False = não havia linha da fatura: quem decide é a conferência na Stripe (A5)."""
     cur.execute("select * from affiliate_refund_reviews where stripe_invoice_id = %s"
                 " and status = 'no_commission' for update", (comissao["stripe_invoice_id"],))
     a = cur.fetchone()
     if a:
         _aplicar(cur, comissao["stripe_invoice_id"], a, comissao, a["tipo"], a["refunded_cents"],
                  a["refunded_at"], "sistema")
+    return a is not None
 
 
 def abertas_do_saque(cur, payout_id: int) -> list[dict]:
@@ -149,14 +154,23 @@ def saque_bloqueado(cur, payout_id: int) -> bool:
     return cur.fetchone()["bloqueado"]
 
 
+# O saque da pendência: o da comissão, ou o do evento mais recente quando a comissão saiu com o
+# afiliado (D8). `left join` em tudo: a pendência e o histórico ficam sem comissão e sem afiliado (A3).
+_SAQUE_DA_PENDENCIA = """coalesce(c.payout_id, (select e.payout_id from affiliate_refund_review_events e
+                                                  where e.review_id = r.id and e.payout_id is not null
+                                                  order by e.id desc limit 1))"""
+
+
 def listar_admin() -> list[dict]:
     """Pendências abertas e recuperações, para o admin. Sem fatura e sem dado do indicado."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            """
+            f"""
             select r.id, r.tipo, r.status, r.refunded_cents, r.amount_cents, r.recovery_cents, r.refunded_at,
                    r.notified_at, c.id as commission_id, c.amount_cents as commission_cents,
-                   c.status as commission_status, c.payout_id, p.status as payout_status, a.code,
+                   c.status as commission_status, p.id as payout_id, p.status as payout_status,
+                   p.amount_cents as payout_cents, p.paid_at as payout_paid_at,
+                   coalesce(a.code, r.affiliate_code) as code, a.id is null as affiliate_deleted,
                    (select e.action from affiliate_refund_review_events e
                      where e.review_id = r.id
                        and e.action in ('paid_before_refund', 'payment_recorded', 'partial_approved')
@@ -165,9 +179,9 @@ def listar_admin() -> list[dict]:
                      where e.review_id = r.id and e.receipt_ref is not null
                      order by e.id desc limit 1) as referencia
               from affiliate_refund_reviews r
-              join affiliate_commissions c on c.id = r.commission_id
-              join affiliates a on a.id = c.affiliate_id
-              left join affiliate_payouts p on p.id = c.payout_id
+              left join affiliate_commissions c on c.id = r.commission_id
+              left join affiliates a on a.id = c.affiliate_id
+              left join affiliate_payouts p on p.id = {_SAQUE_DA_PENDENCIA}
              where r.status in ('open', 'recovery')
              order by r.id
             """
@@ -181,11 +195,13 @@ def listar_historico(limite: int = 50) -> list[dict]:
         cur.execute(
             """
             select e.id, e.review_id, e.action, e.actor, e.before_cents, e.after_cents, e.payout_id, e.event_on,
-                   e.receipt_ref, e.justification, e.created_at, r.tipo, c.id as commission_id, a.code
+                   e.receipt_ref, e.justification, e.created_at, r.tipo, c.id as commission_id,
+                   coalesce(a.code, r.affiliate_code, p.affiliate_code) as code
               from affiliate_refund_review_events e
-              join affiliate_refund_reviews r on r.id = e.review_id
-              join affiliate_commissions c on c.id = r.commission_id
-              join affiliates a on a.id = c.affiliate_id
+              left join affiliate_refund_reviews r on r.id = e.review_id
+              left join affiliate_commissions c on c.id = r.commission_id
+              left join affiliates a on a.id = c.affiliate_id
+              left join affiliate_payouts p on p.id = e.payout_id
              order by e.id desc limit %s
             """,
             (int(limite),),
@@ -298,14 +314,15 @@ def reivindicar(review_id: int | None = None) -> dict | None:
             f"""
             update affiliate_refund_reviews r
                set notify_claimed_until = now() + interval '2 minutes'
-              from affiliate_commissions c
-             where c.id = r.commission_id
-               and r.id = (select id from affiliate_refund_reviews
+             where r.id = (select id from affiliate_refund_reviews
                             where status in ('open', 'recovery') and notified_at is null
                               and (notify_claimed_until is null or notify_claimed_until < now())
                               {filtro}
                             order by id limit 1 for update skip locked)
-            returning r.*, c.status as commission_status, c.payout_id, c.amount_cents as commission_cents
+            returning r.*,
+                      (select c.status from affiliate_commissions c where c.id = r.commission_id) as commission_status,
+                      (select c.payout_id from affiliate_commissions c where c.id = r.commission_id) as payout_id,
+                      (select c.amount_cents from affiliate_commissions c where c.id = r.commission_id) as commission_cents
             """,
             args,
         )

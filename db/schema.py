@@ -2221,14 +2221,37 @@ def init_db():
         """
         create table if not exists affiliate_payouts (
           id bigserial primary key,
-          affiliate_id bigint not null references affiliates(id) on delete cascade,
+          -- Nulo = o afiliado excluiu a conta: o saque fica, desvinculado do usuário (D8).
+          affiliate_id bigint references affiliates(id) on delete set null,
           amount_cents bigint not null,
           status text not null default 'requested', -- 'requested' | 'paid' | 'rejected'
           pix_key_enc text,                         -- snapshot da chave no momento do pedido
           note text,
           requested_at timestamptz not null default now(),
-          paid_at timestamptz
+          paid_at timestamptz,
+          affiliate_code text                       -- gravado só na exclusão do afiliado
         )
+        """,
+        # Banco antigo (D8): `not null`, `cascade` e sem `affiliate_code`. Cada passo só roda quando há
+        # o que mudar: `alter table`, mesmo com `if not exists`, pede lock exclusivo, e no boot faria
+        # fila atrás de leitura aberta.
+        """
+        do $$ declare fk record; begin
+          if exists (select 1 from pg_attribute where attrelid = 'affiliate_payouts'::regclass
+                        and attname = 'affiliate_id' and attnotnull) then
+            alter table affiliate_payouts alter column affiliate_id drop not null;
+          end if;
+          for fk in select conname from pg_constraint where conrelid = 'affiliate_payouts'::regclass
+                      and confrelid = 'affiliates'::regclass and contype = 'f' and confdeltype = 'c' loop
+            execute format('alter table affiliate_payouts drop constraint %I, add constraint %I'
+                           ' foreign key (affiliate_id) references affiliates(id) on delete set null',
+                           fk.conname, fk.conname);
+          end loop;
+          if not exists (select 1 from pg_attribute where attrelid = 'affiliate_payouts'::regclass
+                            and attname = 'affiliate_code' and not attisdropped) then
+            alter table affiliate_payouts add column affiliate_code text;
+          end if;
+        end $$
         """,
         """
         create index if not exists idx_affiliate_payouts_affiliate
@@ -2253,7 +2276,9 @@ def init_db():
           status text not null default 'pending',
           available_at timestamptz not null,        -- created_at + carência (estorno/chargeback)
           payout_id bigint references affiliate_payouts(id) on delete set null,
-          created_at timestamptz not null default now()
+          created_at timestamptz not null default now(),
+          -- Conferência na Stripe pendente (A5): fora do disponível até `conferir_comissao` liberar.
+          payment_check_pending boolean not null default false
         )
         """,
         # Mesma guarda do `drop not null` de `affiliate_referrals`, e pelo mesmo motivo.
@@ -2263,6 +2288,11 @@ def init_db():
                       where attrelid = 'affiliate_commissions'::regclass
                         and attname = 'referred_user_id' and attnotnull) then
             alter table affiliate_commissions alter column referred_user_id drop not null;
+          end if;
+          -- `false` de propósito: comissão antiga segue como estava, sem conferência em massa no deploy.
+          if not exists (select 1 from pg_attribute where attrelid = 'affiliate_commissions'::regclass
+                            and attname = 'payment_check_pending' and not attisdropped) then
+            alter table affiliate_commissions add column payment_check_pending boolean not null default false;
           end if;
         end $$
         """,
@@ -2298,7 +2328,9 @@ def init_db():
         create table if not exists affiliate_refund_reviews (
           id bigserial primary key,
           stripe_invoice_id text not null unique,
-          commission_id bigint references affiliate_commissions(id) on delete cascade,  -- nulo só em `no_commission`
+          -- Nulo em `no_commission` e quando o afiliado excluiu a conta (A3): a pendência e o histórico ficam.
+          commission_id bigint references affiliate_commissions(id) on delete set null,
+          affiliate_code text,                     -- gravado só na exclusão do afiliado
           tipo text not null check (tipo in ('partial', 'total')),
           refunded_cents bigint not null,          -- acumulado; maior = fato novo
           amount_cents bigint,                     -- valor ORIGINAL da comissão; nunca reescrito
@@ -2324,10 +2356,11 @@ def init_db():
         """
         create table if not exists affiliate_refund_review_events (
           id bigserial primary key,
-          review_id bigint not null references affiliate_refund_reviews(id) on delete cascade,
+          -- Nulo só no "Pagamento já realizado" de saque órfão (D9), que não tem pendência.
+          review_id bigint references affiliate_refund_reviews(id) on delete cascade,
           action text not null check (action in ('partial_approved', 'payout_rejected', 'payment_recorded',
             'paid_before_refund', 'auto_reversed', 'commission_reversed', 'recovery_recovered',
-            'recovery_waived', 'reopened')),
+            'recovery_waived', 'reopened', 'affiliate_deleted')),
           actor text not null,                     -- username do admin, 'sistema' ou 'script'
           before_cents bigint,
           after_cents bigint,
@@ -2335,7 +2368,8 @@ def init_db():
           event_on date,
           receipt_ref text,
           justification text,
-          created_at timestamptz not null default now()
+          created_at timestamptz not null default now(),
+          check (review_id is not null or payout_id is not null)
         )
         """,
         """

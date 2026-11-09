@@ -2211,18 +2211,21 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     async def admin_affiliates_overview(username: str = Depends(_get_current_admin)):
         """Lista afiliados (com saldos), pedidos de saque, pendências e recuperações."""
         from db.affiliate_reviews import listar_admin, listar_historico
+        from db.affiliate_reviews_manutencao import resumo_da_conferencia
         from db.affiliates import admin_list_affiliates, admin_list_payouts
 
         affiliates = await asyncio.to_thread(admin_list_affiliates)
         payouts = await asyncio.to_thread(admin_list_payouts, None, 100)
         pendencias = await asyncio.to_thread(listar_admin)
         historico = await asyncio.to_thread(listar_historico)
+        conferencia = await asyncio.to_thread(resumo_da_conferencia)
         return JSONResponse(content=_json_safe({
             "affiliates": [_decrypt_affiliate_row(r, username) for r in affiliates],
             "payouts": [_decrypt_affiliate_row(r, username) for r in payouts],
             "refund_reviews": [r for r in pendencias if r["status"] == "open"],
             "refund_recoveries": [r for r in pendencias if r["status"] == "recovery"],
             "refund_history": historico,
+            "commission_checks": conferencia,
         }))
 
     @app.post("/admin/api/affiliates")
@@ -2352,7 +2355,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         payout_id: int, request: Request, username: str = Depends(_get_current_admin)
     ):
         """Marca o saque como pago (Pix já feito por fora). Body: {"note": "..."}"""
-        from db.affiliates import SaqueComPendencia, mark_payout_paid
+        from db.affiliates import SaqueComPendencia, SaqueOrfao, mark_payout_paid
 
         try:
             payload = await request.json()
@@ -2374,7 +2377,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
         try:
             ok = await asyncio.to_thread(mark_payout_paid, payout_id, note)
-        except SaqueComPendencia as exc:
+        except (SaqueComPendencia, SaqueOrfao) as exc:
             raise HTTPException(status_code=409, detail=detalhe_seguro(exc))
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")

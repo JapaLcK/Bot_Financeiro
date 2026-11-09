@@ -180,3 +180,39 @@ test("a coluna de saldo diz que inclui o que está em revisão", async () => {
     assert.match(cabecalho, /A PAGAR OU EM REVISÃO/i);
   } finally { await page.close(); }
 });
+
+const ORFA = {
+  ...VISAO,
+  payouts: [saque(9, { code: "EVA2026", email: null, pix_key: null, orphan: true }), saque(8)],
+  refund_recoveries: [pendencia(3, { status: "recovery", recovery_cents: 4000, origem: "paid_before_refund", commission_id: null, commission_cents: null, commission_status: null, affiliate_deleted: true })],
+  commission_checks: { count: 2, oldest: "2026-11-01T12:00:00+00:00" },
+};
+
+// mutação: tirar o `|| p.orphan` de `pagar`: o saque de quem excluiu a conta volta a mostrar "Pagar via Pix" e "Marcar pago"
+for (const [nome, width, height] of TAMANHOS) {
+  test(`saque órfão: selo 'conta excluída', só registrar ou rejeitar (${nome})`, async () => {
+    const { page } = await abrir({ width, height, visao: ORFA });
+    try {
+      const [orfao, vivo] = await page.locator("#aff-payouts tr").all();
+      const texto = await orfao.innerText();
+      assert.match(texto, /conta excluída/);
+      assert.doesNotMatch(texto, /Pagar via Pix|Marcar pago/);
+      assert.match(texto, /Pagamento já realizado[\s\S]*Rejeitar/);
+      assert.doesNotMatch(await vivo.innerText(), /conta excluída/);  // positivo
+      assert.match(await page.locator("#aff-recoveries").innerText(), /conta excluída/);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+    } finally { await page.close(); }
+  });
+}
+
+// mutação: tirar o texto de `#aff-checks` em `renderRefundBlocks`: queda longa da Stripe some da tela
+test("comissões aguardando conferência aparecem com a mais antiga; sem nenhuma, a linha some", async () => {
+  const com = await abrir({ visao: ORFA });
+  try {
+    assert.equal(await com.page.locator("#aff-checks").innerText(), "2 comissões aguardam conferência na Stripe, a mais antiga de 01/11/2026");
+  } finally { await com.page.close(); }
+  const sem = await abrir();
+  try {
+    assert.equal(await sem.page.locator("#aff-checks").isVisible(), false);
+  } finally { await sem.page.close(); }
+});

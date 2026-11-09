@@ -425,6 +425,9 @@ button:disabled { opacity: .6; cursor: wait; }
 .aff-form-erro { color: #fca5a5; font-size: 13px; }
 .aff-form-erro:empty { display: none; }
 .aff-form-botoes { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.aff-selo { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.aff-checks { margin: 0 0 8px; }
+.aff-checks:empty { display: none; }
 
 /* Barra de estatísticas de e-mail (era flex inline no HTML) */
 .stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
@@ -1024,6 +1027,7 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
       <h2><i class="ph ph-receipt" aria-hidden="true"></i> Reembolsos para revisar</h2>
       <span class="meta">Enquanto estiver aqui, o saque que contém a comissão não paga</span>
     </div>
+    <p id="aff-checks" class="meta aff-checks" role="status"></p>
     <div class="table-wrap">
       <table class="table as-cards">
         <thead><tr>
@@ -2609,8 +2613,10 @@ async function loadAffiliates() {
     const payouts = data.payouts || [];
     $id('aff-payouts').innerHTML = payouts.map(p => {
       const when = new Date(p.requested_at).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+      const orfao = p.orphan ? ' · <span class="aff-selo">conta excluída</span>' : '';
       const st = p.blocked ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>bloqueado: reembolso em análise' : p.status === 'paid' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:5px"></span>pago' : (p.status === 'rejected' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>rejeitado' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;margin-right:5px"></span>aguardando');
-      const pagar = p.blocked ? `
+      // Órfão (afiliado excluiu a conta) não tem chave nem "Marcar pago": registra o pagamento ou rejeita.
+      const pagar = p.blocked || p.orphan ? `
         <button class="btn-primary btn-xs" type="button" onclick="openRecordedForm(${p.id})">Pagamento já realizado</button>` : `
         <button class="btn-primary btn-xs btn-sky" type="button" onclick="showPayoutPix(${p.id})"><i class="ph ph-sparkle" aria-hidden="true"></i> Pagar via Pix</button>
         <button class="btn-primary btn-xs" type="button" onclick="payoutAction(${p.id}, 'paid')">Marcar pago</button>`;
@@ -2622,7 +2628,7 @@ async function loadAffiliates() {
         <td data-label="Pedido em">${when}</td>
         <td data-label="Valor"><strong>${fmtCents(p.amount_cents)}</strong></td>
         <td data-label="Chave Pix">${esc(p.pix_key || '—')}</td>
-        <td data-label="Status"><span>${st}${p.note ? ' · ' + esc(p.note) : ''}</span></td>
+        <td data-label="Status"><span>${st}${orfao}${p.note ? ' · ' + esc(p.note) : ''}</span></td>
         <td data-actions style="white-space:nowrap">${actions}</td>
       </tr>`;
     }).join('') || '<tr><td colspan="6" style="color:var(--muted)">Nenhum saque solicitado.</td></tr>';
@@ -2701,7 +2707,8 @@ async function payoutAction(id, action) {
 const AFF_ORIGEM = { paid_before_refund: 'Comissão já paga', payment_recorded: 'Pagamento já realizado', partial_approved: 'Revisão parcial' };
 const AFF_ACAO = { partial_approved: 'Revisão parcial', payout_rejected: 'Saque rejeitado', payment_recorded: 'Pagamento já realizado',
   paid_before_refund: 'Já paga antes do reembolso', auto_reversed: 'Estorno automático', commission_reversed: 'Estorno manual',
-  recovery_recovered: 'Valor recuperado', recovery_waived: 'Recuperação dispensada', reopened: 'Reaberta por reembolso maior' };
+  recovery_recovered: 'Valor recuperado', recovery_waived: 'Recuperação dispensada', reopened: 'Reaberta por reembolso maior',
+  affiliate_deleted: 'Afiliado excluiu a conta' };
 const fmtDia = d => d ? new Date(d).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—';
 const hojeBrasilia = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 let affPendencias = new Map();
@@ -2710,6 +2717,10 @@ let affFormAtual = null;
 function renderRefundBlocks(data) {
   const reviews = data.refund_reviews || [], recoveries = data.refund_recoveries || [];
   affPendencias = new Map([...reviews, ...recoveries].map(r => [r.id, r]));
+  const checks = data.commission_checks || {};
+  $id('aff-checks').textContent = checks.count
+    ? `${checks.count} comiss${checks.count === 1 ? 'ão aguarda' : 'ões aguardam'} conferência na Stripe, a mais antiga de ${fmtDia(checks.oldest)}`
+    : '';
   $id('aff-reviews').innerHTML = reviews.map(r => {
     const onde = r.commission_status === 'paid' ? 'já paga' : (r.payout_id ? `no saque ${r.payout_id}` : 'fora do saque');
     const acao = r.tipo === 'partial'
@@ -2731,7 +2742,7 @@ function renderRefundBlocks(data) {
         <td data-primary data-label="Afiliado"><code>${esc(r.code)}</code></td>
         <td data-label="Valor"><strong>${fmtCents(r.recovery_cents)}</strong></td>
         <td data-label="Reembolso em">${fmtDia(r.refunded_at)}</td>
-        <td data-label="Origem">${esc(AFF_ORIGEM[r.origem] || '—')}</td>
+        <td data-label="Origem"><span>${esc(AFF_ORIGEM[r.origem] || '—')}${r.affiliate_deleted ? ' · <span class="aff-selo">conta excluída</span>' : ''}</span></td>
         <td data-label="Referência">${esc(r.referencia || '—')}</td>
         <td data-actions><button class="btn-primary btn-xs" type="button" onclick="openRecoveryForm(${r.id})">Encerrar</button></td>
       </tr>`).join('') || '<tr><td colspan="6" style="color:var(--muted)">Nenhuma recuperação aberta.</td></tr>';

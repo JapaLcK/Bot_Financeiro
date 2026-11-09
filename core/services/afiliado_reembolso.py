@@ -9,6 +9,7 @@ pendente até `reenviar_pendentes`. Falha de banco ou da Stripe sobe: 5xx e a St
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
@@ -18,6 +19,7 @@ from core.pg_text import limpa_para_pg
 from core.services import admin_notify
 from core.services.extras_assinar import _ler
 from db.affiliate_reviews import marcar_avisada, registrar_reembolso, reivindicar
+from db.affiliate_reviews_manutencao import comissoes_a_conferir, liberar_conferencia
 
 _FUSO = ZoneInfo("America/Sao_Paulo")
 _DATA = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
@@ -58,12 +60,15 @@ def fatura_da_cobranca(cobranca) -> str | None:
 
 def _texto(r: dict) -> str:
     saque = f" · saque `{r['payout_id']}`" if r["payout_id"] else ""
-    cabeca = f"⚠️ **Afiliado: {{}}** comissão `{r['commission_id']}` ({r['commission_status']}) · "
+    quem = (f"comissão `{r['commission_id']}` ({r['commission_status']})" if r["commission_id"]
+            else f"afiliado `{r['affiliate_code']}` (conta excluída)")
+    cabeca = f"⚠️ **Afiliado: {{}}** {quem} · "
     if r["status"] == "recovery":
         return (cabeca.format("recuperação pendente") + f"R$ {r['recovery_cents'] / 100:.2f}{saque} · "
                 "o dinheiro saiu antes do reembolso, confira.")
     onde = {"partial": "reembolso parcial", "total": "reembolso total com a comissão fora de alcance"}[r["tipo"]]
-    return cabeca.format(onde) + f"R$ {r['commission_cents'] / 100:.2f}{saque} · a comissão NÃO foi alterada, confira."
+    valor = r["commission_cents"] if r["commission_cents"] is not None else r["amount_cents"]
+    return cabeca.format(onde) + f"R$ {(valor or 0) / 100:.2f}{saque} · a comissão NÃO foi alterada, confira."
 
 
 def _registrar_tentativa(r: dict, entregue: bool) -> None:
@@ -162,3 +167,66 @@ def tratar_evento(event) -> None:
     r = reivindicar(linha["id"])
     if r:
         _enviar(r)
+
+
+class _AindaNao(Exception):
+    """A Stripe ainda não permite concluir: disputa aberta, ou nenhuma cobrança paga."""
+
+
+def _devolvido_na_stripe(fatura: str, chave: str) -> tuple[str | None, int]:
+    """O tipo e o devolvido da fatura, contando disputa perdida como devolução; ganha não conta."""
+    import stripe  # noqa: PLC0415
+
+    from core.services.ebook_entrega import cobrancas_da_fatura  # noqa: PLC0415
+
+    cobrancas = list(cobrancas_da_fatura(fatura, chave))
+    if not cobrancas:
+        raise _AindaNao("sem_cobranca")
+    devolvido, inteiras = 0, True
+    for c in cobrancas:
+        perdida = 0
+        if c["disputed"]:
+            disputas = stripe.Dispute.list(charge=c["id"], limit=10, api_key=chave)["data"]
+            if any(d["status"] not in ("won", "lost", "warning_closed") for d in disputas):
+                raise _AindaNao("disputa_aberta")
+            perdida = sum(d["amount"] for d in disputas if d["status"] == "lost")
+        volta = min(c["amount"], c["amount_refunded"] + perdida)
+        devolvido += volta
+        inteiras = inteiras and volta >= c["amount"]
+    return (("total" if inteiras else "partial") if devolvido else None), devolvido
+
+
+def conferir_comissao(commission_id: int, fatura: str) -> bool:
+    """Confere na Stripe a comissão que nasceu sem linha da fatura (A5). True se a marca saiu.
+
+    Fora de transação. Reembolso vira pendência pela mesma máquina do webhook; sem reembolso a
+    comissão segue o fluxo normal. Sem chave, falha da Stripe ou disputa aberta: a marca fica, e o
+    worker tenta de novo, sem prazo. Erro de banco sobe para quem chamou."""
+    chave = os.getenv("STRIPE_SECRET_KEY")
+    if not chave:
+        return False
+    try:
+        tipo, devolvido = _devolvido_na_stripe(fatura, chave)
+    except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer a fatura
+        log_system_event_sync(
+            "warning", "affiliate_commission_check_pending",
+            "Conferencia de comissao na Stripe adiada.", source="affiliates",
+            details={"commission_id": int(commission_id), "motivo": str(exc) if isinstance(exc, _AindaNao) else type(exc).__name__},
+        )
+        return False
+    if tipo:
+        registrar_reembolso(fatura, tipo, devolvido, datetime.now(timezone.utc), ator="sistema")
+    liberar_conferencia(commission_id)
+    return True
+
+
+def conferir_pendentes(limite: int = 20) -> int:
+    """Passada do `_afiliado_alerta_worker`. Sem chave não consulta nada; para na 1ª que não sai."""
+    if not os.getenv("STRIPE_SECRET_KEY"):
+        return 0
+    conferidas = 0
+    for c in comissoes_a_conferir(limite):
+        if not conferir_comissao(c["id"], c["stripe_invoice_id"]):
+            break
+        conferidas += 1
+    return conferidas

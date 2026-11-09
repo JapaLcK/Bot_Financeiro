@@ -717,7 +717,7 @@ def test_backfill_nao_prende_o_boot_atras_de_transacao_aberta(monkeypatch, caplo
     assert [x["payment_ref"] for x in _linhas(c)] == ["in_trava"]
 
 
-@pytest.mark.parametrize("tabela", ["affiliate_referrals", "affiliate_commissions"])
+@pytest.mark.parametrize("tabela", ["affiliate_referrals", "affiliate_commissions", "affiliate_payouts"])
 def test_boot_nao_pede_lock_exclusivo_quando_a_coluna_ja_aceita_nulo(tabela):
     leitor = _em_outra_conexao()
     leitor.execute(f"select count(*) from {tabela}")  # fica ocioso na transação, como um relatório

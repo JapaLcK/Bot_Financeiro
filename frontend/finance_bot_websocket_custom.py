@@ -2185,13 +2185,17 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(300)
 
     async def _afiliado_alerta_worker():
-        """Reenvia ao admin as pendências de reembolso de afiliado ainda sem aviso, a cada
-        5 min, a 1ª volta sem delay: é a retomada depois de reinício. Laço próprio, como o do
-        e-book. Inerte sem `ADMIN_NOTIFY_WEBHOOK_URL`. Ver `core/services/afiliado_reembolso.py`."""
-        from core.services.afiliado_reembolso import reenviar_pendentes  # noqa: PLC0415
+        """Manutenção das pendências de reembolso de afiliado, a cada 5 min, a 1ª volta sem
+        delay (a retomada depois de reinício): limpa `no_commission` antiga, confere na Stripe a
+        comissão marcada (inerte sem `STRIPE_SECRET_KEY`) e reenvia ao admin o aviso pendente
+        (inerte sem `ADMIN_NOTIFY_WEBHOOK_URL`). Ver `core/services/afiliado_reembolso.py`."""
+        from core.services import afiliado_reembolso  # noqa: PLC0415
+        from db import affiliate_reviews_manutencao  # noqa: PLC0415
         while True:
             try:
-                n = await asyncio.to_thread(reenviar_pendentes)
+                await asyncio.to_thread(affiliate_reviews_manutencao.limpar_sem_comissao)
+                await asyncio.to_thread(afiliado_reembolso.conferir_pendentes)
+                n = await asyncio.to_thread(afiliado_reembolso.reenviar_pendentes)
                 if n:
                     print(f"[afiliado] {n} aviso(s) de reembolso entregue(s).", flush=True)
             except asyncio.CancelledError:
@@ -7008,6 +7012,11 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                         record_commission_for_invoice,
                         user_id, invoice_id, int(amount_cents),
                     )
+                    if commission and commission["payment_check_pending"]:
+                        # Sem linha da fatura: confere na Stripe antes de a comissão poder ser paga (A5).
+                        # Falha deixa a marca, e o worker tenta de novo; nunca derruba o webhook.
+                        from core.services.afiliado_reembolso import conferir_comissao
+                        await asyncio.to_thread(conferir_comissao, commission["id"], invoice_id)
                     if commission:
                         await log_system_event(
                             "info",
