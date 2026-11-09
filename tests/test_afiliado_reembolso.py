@@ -27,6 +27,7 @@ import db
 import frontend.finance_bot_websocket_custom as dashboard
 from _apoio_auth_app import csrf
 from _billing_grants_helpers import garantir_system_event_logs
+from _afiliado_stripe import simular_stripe
 from core.services import admin_notify, email_service
 import core.services.afiliado_reembolso as modulo_reembolso
 from core.services.afiliado_reembolso import tratar_evento
@@ -76,7 +77,8 @@ def mundo(monkeypatch):
 
     monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
     monkeypatch.setattr(dashboard, "STRIPE_WEBHOOK_SECRET", SEGREDO)
-    monkeypatch.setattr(stripe.InvoicePayment, "list", staticmethod(listar))
+    # `InvoicePayment.list(payment=...)` acha a fatura do reembolso; `(invoice=...)` é a conferência antes de pagar
+    m.stripe = simular_stripe(monkeypatch, por_pagamento=listar)
     monkeypatch.setattr(stripe.Charge, "retrieve", staticmethod(cobranca))
     monkeypatch.setattr(stripe.Subscription, "retrieve", staticmethod(lambda sid, **k: m.subs[sid]))
     monkeypatch.setenv("ADMIN_NOTIFY_WEBHOOK_URL", "https://discord.com/api/webhooks/1/x")

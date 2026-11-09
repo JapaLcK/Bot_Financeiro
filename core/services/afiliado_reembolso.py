@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -18,8 +19,8 @@ from core.observability import log_system_event_sync
 from core.pg_text import limpa_para_pg
 from core.services import admin_notify
 from core.services.extras_assinar import _ler
-from db.affiliate_reviews import marcar_avisada, registrar_reembolso, reivindicar
-from db.affiliate_reviews_manutencao import comissoes_a_conferir, liberar_conferencia
+from db.affiliate_reviews import faturas_do_saque, marcar_avisada, registrar_reembolso, reivindicar
+from db.affiliate_reviews_manutencao import comissoes_a_conferir, liberar_conferencia, marcar_conferencia
 
 _FUSO = ZoneInfo("America/Sao_Paulo")
 _DATA = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
@@ -245,3 +246,47 @@ def conferir_pendentes(limite: int = 20) -> int:
             break
         conferidas += feita
     return conferidas
+
+
+class StripeIndisponivel(Exception):
+    """Sem chave, ou a Stripe falhou numa fatura do saque. Quem paga recusa (503); o registro marca e segue."""
+
+
+def _consultar(fatura: str, chave: str) -> tuple:
+    """(tipo, devolvido, motivo de sem confirmação, erro). Erro da Stripe não sobe: a passada decide."""
+    try:
+        tipo, devolvido, _ = devolvido_na_stripe(fatura, chave)
+        return tipo, devolvido, None, None
+    except SemConfirmacao as exc:
+        return None, 0, str(exc), None
+    except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer a fatura
+        return None, 0, None, type(exc).__name__
+
+
+def conferir_saque(payout_id: int) -> dict:
+    """Confere na Stripe cada fatura do saque antes de o dinheiro sair: QR, "Marcar pago" e "Pagamento já
+    realizado", porque o `charge.refunded` pode se perder. HTTP fora de transação e de trava, 4 em paralelo.
+
+    Reembolso achado vira pendência por `registrar_reembolso`, cada um na própria transação; quem recusa é a
+    regra de bloqueio que já existe. Fatura sem confirmação (disputa aberta) marca a comissão (D10).
+    Devolve `{"reembolso", "disputa"}`; sem chave ou com erro da Stripe, levanta `StripeIndisponivel`,
+    depois de gravar o que achou."""
+    chave = os.getenv("STRIPE_SECRET_KEY")
+    if not chave:
+        raise StripeIndisponivel("sem_chave")
+    faturas = faturas_do_saque(payout_id)
+    with ThreadPoolExecutor(4) as pool:
+        lidas = list(zip(faturas, pool.map(lambda f: _consultar(f["fatura"], chave), faturas)))
+    agora = datetime.now(timezone.utc)
+    for f, (tipo, devolvido, _, _) in lidas:
+        if tipo:
+            registrar_reembolso(f["fatura"], tipo, devolvido, agora, ator="sistema")
+    disputadas = [f["commission_id"] for f, (_, _, motivo, _) in lidas if motivo and f["commission_id"]]
+    marcar_conferencia(disputadas)
+    erros = sorted({erro for _, (_, _, _, erro) in lidas if erro})
+    if erros:
+        log_system_event_sync("warning", "affiliate_payout_check_failed", "Conferencia do saque na Stripe falhou.",
+                              source="affiliates", details={"payout_id": int(payout_id), "motivo": ",".join(erros)})
+        raise StripeIndisponivel(",".join(erros))
+    return {"reembolso": any(tipo for _, (tipo, _, _, _) in lidas),
+            "disputa": any(motivo for _, (_, _, motivo, _) in lidas)}

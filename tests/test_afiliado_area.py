@@ -25,6 +25,7 @@ import core.admin_dashboard as admin_dashboard
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 from _apoio_auth_app import bearer, csrf, sessao_de
+from _afiliado_stripe import simular_stripe
 from _billing_grants_helpers import garantir_system_event_logs
 from conftest import promote_to_pro
 from core.services import email_service
@@ -277,6 +278,7 @@ def test_fluxo_real_do_link_ao_pix_comissao_so_na_primeira_cobranca(monkeypatch)
     monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
     fake = _FakeStripe()
     monkeypatch.setitem(__import__("sys").modules, "stripe", fake)
+    simular_stripe(monkeypatch, fake)  # sem reembolso: o "Marcar pago" confere a Stripe antes
     stripe = TestClient(dashboard.app)
     fake.subs["sub_afil"] = _fake_sub("active")
 

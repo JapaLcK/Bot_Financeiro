@@ -50,10 +50,6 @@ class SaqueOrfao(ValueError):
     """Saque de afiliado que excluiu a conta (D9 = A): só "Pagamento já realizado" ou rejeitar."""
 
 
-class SaqueSemPendencia(ValueError):
-    """"Pagamento já realizado" exige pendência aberta: sem ela, o caminho é "Marcar pago"."""
-
-
 def _now():
     return datetime.now(timezone.utc)
 
@@ -502,7 +498,8 @@ def registrar_pagamento_realizado(payout_id: int, paid_on: date, justificativa: 
     """O Pix saiu antes do reembolso: marca saque e comissões como pagos, sem QR, sem transferência e
     sem devolver nada ao saldo. Pendência `total` vira recuperação; a parcial segue `open`, sem
     bloqueio, e a revisão usa o caminho da comissão paga. False = saque que não está mais aberto.
-    Saque órfão (D9 = A) não tem pendência: o evento fica no saque, sem `review_id`.
+    Nunca recusa por falta de pendência: com a Stripe fora, é o único registro do Pix já feito. Sem
+    pendência (e no saque órfão, D9 = A), o evento fica no saque, sem `review_id`.
 
     Justificativa e referência só no evento: a nota do saque sai no `/api/affiliate/me`."""
     pago_em = datetime.combine(paid_on, time(12), _FUSO)
@@ -532,15 +529,12 @@ def registrar_pagamento_realizado(payout_id: int, paid_on: date, justificativa: 
             cur.execute("select id, amount_cents from affiliate_commissions where payout_id = %s for update",
                         (int(payout_id),))
             valores = {c["id"]: c["amount_cents"] for c in cur.fetchall()}
-            abertas = abertas_do_saque(cur, payout_id)
-            if not abertas:
-                conn.rollback()
-                raise SaqueSemPendencia("Este saque não tem pendência aberta. Use Marcar pago.")
+            abertas = abertas_do_saque(cur, payout_id)  # sem pendência também registra: nunca recusa
             cur.execute("update affiliate_commissions set status = 'paid' where payout_id = %s", (int(payout_id),))
-            for r in abertas:
-                registrar_evento(cur, r["id"], "payment_recorded", revisor, saque=int(payout_id), em=paid_on,
+            for r in abertas or [None]:  # sem pendência, o comprovante fica no saque
+                registrar_evento(cur, r and r["id"], "payment_recorded", revisor, saque=int(payout_id), em=paid_on,
                                  referencia=referencia, justificativa=justificativa)
-                if r["tipo"] == "total":
+                if r and r["tipo"] == "total":
                     cur.execute("update affiliate_refund_reviews set status = 'recovery', recovery_cents = %s,"
                                 " notified_at = null, notify_claimed_until = null where id = %s",
                                 (valores[r["commission_id"]], r["id"]))

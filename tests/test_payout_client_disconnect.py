@@ -22,6 +22,7 @@ import pytest
 from starlette.requests import ClientDisconnect, Request
 
 import core.admin_dashboard as admin_dashboard
+from _afiliado_stripe import simular_stripe
 import db
 from db import ensure_user
 from db.affiliates import (
@@ -103,6 +104,12 @@ def _set_note(payout_id: int, note: str) -> None:
         with conn.cursor() as cur:
             cur.execute("update affiliate_payouts set note = %s where id = %s", (note, payout_id))
         conn.commit()
+
+
+@pytest.fixture(autouse=True)
+def _stripe_sem_reembolso(monkeypatch):
+    """"Marcar pago" confere a Stripe antes de liquidar; aqui ela não tem reembolso nenhum."""
+    simular_stripe(monkeypatch)
 
 
 @pytest.fixture(autouse=True)

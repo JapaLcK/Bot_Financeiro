@@ -430,13 +430,20 @@ def test_pagamento_realizado(adm):
         request_payout(c.aff["id"])
 
 
-def test_pagamento_realizado_sem_pendencia(adm):
+def test_pagamento_realizado_sem_pendencia_registra(adm):
+    """Conferir antes de pagar: o registro nunca recusa por falta de pendência, e o comprovante fica no saque."""
     c = _afiliado()
     _paga(c)
     saque = request_payout(c.aff["id"])["id"]
-    assert _realizado(adm, saque).status_code == 409
-    assert _saque(saque)["status"] == "requested"
-    assert _pagar(adm, saque).status_code == 200  # positivo: saque sem pendência paga
+    assert _realizado(adm, saque, receipt_ref="E-SEM-PEND").status_code == 200
+    assert _saque(saque)["status"] == "paid"
+    with get_conn() as conn:
+        e = conn.execute("select review_id, receipt_ref from affiliate_refund_review_events where payout_id = %s"
+                         " and action = 'payment_recorded'", (saque,)).fetchone()
+    assert (e["review_id"], e["receipt_ref"]) == (None, "E-SEM-PEND")
+    outro = _afiliado()
+    _paga(outro)
+    assert _pagar(adm, request_payout(outro.aff["id"])["id"]).status_code == 200  # positivo: "Marcar pago" segue
 
 
 @pytest.mark.parametrize("campos", [

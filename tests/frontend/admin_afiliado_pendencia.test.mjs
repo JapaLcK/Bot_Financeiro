@@ -37,9 +37,10 @@ async function abrir({ width = 1280, height = 900, visao = VISAO, resposta = { s
 }
 const TAMANHOS = [["desktop", 1280, 900], ["celular", 390, 844], ["320", 320, 568]];
 
-// mutação: tirar o ramo `p.blocked` de `loadAffiliates`: o saque bloqueado volta a mostrar "Pagar via Pix"
+// mutação: tirar o ramo `p.blocked` de `loadAffiliates`: o saque bloqueado volta a mostrar "Pagar via Pix";
+// ou tirar "Pagamento já realizado" do saque livre: com a Stripe fora o "Marcar pago" dá 503 e o Pix já feito fica sem registro
 for (const [nome, width, height] of TAMANHOS) {
-  test(`saque bloqueado sem botões de pagar, e o livre com eles (${nome})`, async () => {
+  test(`saque bloqueado sem botões de pagar, e o livre com as quatro ações (${nome})`, async () => {
     const { page } = await abrir({ width, height });
     try {
       const [bloqueado, livre] = await page.locator("#aff-payouts tr").all();
@@ -48,9 +49,12 @@ for (const [nome, width, height] of TAMANHOS) {
       assert.match(texto, /Pagamento já realizado/);
       assert.match(texto, /Rejeitar/);
       assert.match(texto, /reembolso em análise/);
-      assert.match(await livre.innerText(), /Pagar via Pix[\s\S]*Marcar pago[\s\S]*Rejeitar/);  // positivo
-      assert.doesNotMatch(await livre.innerText(), /Pagamento já realizado/);
+      assert.match(await livre.innerText(), /Pagar via Pix[\s\S]*Marcar pago[\s\S]*Pagamento já realizado[\s\S]*Rejeitar/);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+      for (const caixa of await livre.locator("button").evaluateAll((bs) => bs.map((b) => b.getBoundingClientRect().toJSON()))) {
+        assert.ok(caixa.right <= width, `botão passa da tela: ${JSON.stringify(caixa)}`);
+        if (width <= 820) assert.ok(caixa.height >= 44, `alvo de toque baixo: ${caixa.height}`);
+      }
     } finally { await page.close(); }
   });
 }
@@ -111,10 +115,10 @@ test("revisão: valor acima da comissão nem sai do navegador", async () => {
 });
 
 // mutação: tirar um dos três campos de `openRecordedForm`
-test("'Pagamento já realizado' pede os três campos e manda para a rota certa", async () => {
+for (const [linha, id] of [[0, 7], [1, 8]]) test(`'Pagamento já realizado' pede os três campos e manda para a rota certa (saque ${id === 7 ? "bloqueado" : "livre"})`, async () => {
   const { page, posts } = await abrir();
   try {
-    await page.getByRole("button", { name: "Pagamento já realizado" }).click();
+    await page.locator("#aff-payouts tr").nth(linha).getByRole("button", { name: "Pagamento já realizado" }).click();
     await page.locator("#aff-form-send").click();
     await page.waitForTimeout(100);
     assert.deepEqual(posts, []);  // justificativa e referência vazias
@@ -122,7 +126,7 @@ test("'Pagamento já realizado' pede os três campos e manda para a rota certa",
     await page.locator("#aff-f-just").fill("Pix feito antes do reembolso");
     await page.locator("#aff-form-send").click();
     await page.waitForFunction(() => !document.getElementById("aff-form").open);
-    assert.equal(posts[0].url, "/admin/api/affiliates/payouts/7/payment-recorded");
+    assert.equal(posts[0].url, `/admin/api/affiliates/payouts/${id}/payment-recorded`);
     assert.deepEqual(Object.keys(posts[0].corpo).sort(), ["justification", "paid_on", "receipt_ref"]);
     assert.match(posts[0].corpo.paid_on, /^\d{4}-\d{2}-\d{2}$/);
   } finally { await page.close(); }
@@ -171,6 +175,37 @@ test("'Marcar pago' recusado com 409 recarrega a lista", async () => {
     assert.deepEqual(alertas, ["Este saque tem reembolso de cliente em análise."]);
   } finally { await page.close(); }
 });
+
+// mutação: tirar o `loadAffiliates()` do 409 em `showPayoutPix`: a conferência na Stripe bloqueou e o admin segue vendo "Pagar via Pix"
+for (const [nome, width, height] of TAMANHOS.slice(0, 2)) {
+  test(`QR recusado pela conferência na Stripe: 409 recarrega a lista, 503 só avisa (${nome})`, async () => {
+    const { page, leituras } = await abrir({ width, height });
+    const alertas = [];
+    page.on("dialog", (d) => { if (d.type() === "alert") alertas.push(d.message()); return d.accept(); });
+    const mensagens = ["Reembolso de cliente achado na Stripe: o saque ficou bloqueado para revisão.",
+      "Não foi possível conferir reembolsos na Stripe agora. Tente de novo em instantes."];
+    const respostas = [[409, mensagens[0]], [503, mensagens[1]]];
+    await page.route("**/admin/api/affiliates/payouts/8/pix", (r) => {
+      const [status, detail] = respostas.shift();
+      return r.fulfill({ status, contentType: "application/json", body: JSON.stringify({ detail }) });
+    });
+    try {
+      const pix = () => page.locator("#aff-payouts tr").nth(1).getByRole("button", { name: "Pagar via Pix" }).click();
+      const antes = leituras.length;
+      await pix();
+      const fim = Date.now() + 4000;
+      while (leituras.length === antes && Date.now() < fim) await page.waitForTimeout(50);
+      assert.equal(leituras.length, antes + 1);
+      await page.locator("#aff-payouts tr").nth(1).waitFor();
+      await pix();  // positivo: 503 avisa e não recarrega; a lista segue como estava
+      while (alertas.length < 2 && Date.now() < fim + 4000) await page.waitForTimeout(50);
+      await page.waitForTimeout(300);
+      assert.equal(leituras.length, antes + 1);
+      assert.deepEqual(alertas, mensagens);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+    } finally { await page.close(); }
+  });
+}
 
 // mutação: voltar o cabeçalho a "A pagar": a soma inclui comissão em revisão e saque bloqueado
 test("a coluna de saldo diz que inclui o que está em revisão", async () => {

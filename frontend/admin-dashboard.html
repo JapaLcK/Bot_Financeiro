@@ -2616,10 +2616,12 @@ async function loadAffiliates() {
       const orfao = p.orphan ? ' · <span class="aff-selo">conta excluída</span>' : '';
       const st = p.blocked ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>bloqueado: reembolso em análise' : p.status === 'paid' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:5px"></span>pago' : (p.status === 'rejected' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>rejeitado' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;margin-right:5px"></span>aguardando');
       // Órfão (afiliado excluiu a conta) não tem chave nem "Marcar pago": registra o pagamento ou rejeita.
+      // No livre, "Pagamento já realizado" é a saída quando o "Marcar pago" dá 503 com a Stripe fora e o Pix já saiu.
       const pagar = p.blocked || p.orphan ? `
         <button class="btn-primary btn-xs" type="button" onclick="openRecordedForm(${p.id})">Pagamento já realizado</button>` : `
         <button class="btn-primary btn-xs btn-sky" type="button" onclick="showPayoutPix(${p.id})"><i class="ph ph-sparkle" aria-hidden="true"></i> Pagar via Pix</button>
-        <button class="btn-primary btn-xs" type="button" onclick="payoutAction(${p.id}, 'paid')">Marcar pago</button>`;
+        <button class="btn-primary btn-xs" type="button" onclick="payoutAction(${p.id}, 'paid')">Marcar pago</button>
+        <button class="btn-xs" type="button" onclick="openRecordedForm(${p.id})">Pagamento já realizado</button>`;
       const actions = p.status === 'requested' ? `${pagar}
         <button class="btn-danger btn-xs" type="button" onclick="payoutAction(${p.id}, 'reject')">Rejeitar</button>` : '';
       return `
@@ -2807,7 +2809,7 @@ function openReviewForm(id) {
 function openRecordedForm(id) {
   openAffForm({
     title: 'Pagamento já realizado',
-    hint: 'Para Pix que saiu antes do reembolso. Marca o saque e as comissões como pagos, sem novo Pix e sem devolver nada ao saldo.',
+    hint: 'Para Pix que já saiu: antes do reembolso, ou quando "Marcar pago" não conseguiu conferir a Stripe. Marca o saque e as comissões como pagos, sem novo Pix e sem devolver nada ao saldo.',
     campos: ['date', 'ref', 'just'],
     caminho: `/admin/api/affiliates/payouts/${id}/payment-recorded`,
     corpo: () => ({ paid_on: $id('aff-f-date').value, receipt_ref: $id('aff-f-ref').value, justification: $id('aff-f-just').value }),
@@ -2863,6 +2865,7 @@ async function showPayoutPix(id) {
   if (!res.ok) {
     const d = await res.json().catch(() => ({}));
     alert(d.detail || 'Não consegui gerar o Pix deste saque.');
+    if (res.status === 409) loadAffiliates();  // a conferência na Stripe bloqueou: a lista mostra o saque como está
     return;
   }
   const d = await res.json();

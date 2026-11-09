@@ -165,6 +165,22 @@ def abertas_do_saque(cur, payout_id: int) -> list[dict]:
     return cur.fetchall()
 
 
+def faturas_do_saque(payout_id: int) -> list[dict]:
+    """As faturas a conferir antes de pagar: as das comissões do saque e, no saque órfão, as que ficaram nas
+    linhas gravadas na exclusão. Sem trava: o conjunto só encolhe, e quem decide é a trava de quem paga."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select c.id as commission_id, c.stripe_invoice_id as fatura from affiliate_commissions c where c.payout_id = %s
+            union all
+            select null, r.stripe_invoice_id from affiliate_refund_reviews r
+             where r.orphan_payout_id = %s and r.commission_id is null
+            """,
+            (int(payout_id), int(payout_id)),
+        )
+        return cur.fetchall()
+
+
 def saque_bloqueado(cur, payout_id: int) -> bool:
     """Comando próprio, depois da trava das comissões: em READ COMMITTED é ele que enxerga o commit
     do webhook que a trava esperou. Aviso entregue não libera."""

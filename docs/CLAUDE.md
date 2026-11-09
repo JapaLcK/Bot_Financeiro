@@ -2683,9 +2683,12 @@ com mais de uma cobrança): aí a pendência fecha junto, com `payout_rejected`.
 aberta com `commission_reversed`.
 
 **"Pagamento já realizado"** (`POST /admin/api/affiliates/payouts/{id}/payment-recorded`): para Pix
-que saiu antes do reembolso. Marca saque e comissões como pagos, sem QR, sem transferência e sem
-devolver nada ao saldo, e exige pendência aberta. `total` vai a `recovery`; `partial` segue `open`,
-sem bloqueio. Justificativa de 10 a 500 caracteres, contados depois de limpar (NUL e surrogate
+que já saiu. Marca saque e comissões como pagos, sem QR, sem transferência e sem devolver nada ao
+saldo. Nunca recusa por falta de pendência: com a Stripe fora, é o único registro do Pix já feito, e
+sem pendência o evento fica no saque, sem `review_id`. O botão aparece em todo saque `requested`: no
+livre, ao lado de "Pagar via Pix", "Marcar pago" e "Rejeitar" (é a saída quando o "Marcar pago" dá 503 com
+o Pix já feito); no bloqueado e no órfão, só ele e "Rejeitar". Justificativa, data e comprovante seguem
+obrigatórios. `total` vai a `recovery`; `partial` segue `open`, sem bloqueio. Justificativa de 10 a 500 caracteres, contados depois de limpar (NUL e surrogate
 viram U+FFFD, que não conta como texto), `paid_on` não futura em Brasília nem anterior ao
 pedido, `receipt_ref` de 4 a 120 caracteres. Referência e justificativa moram só no evento: nunca em
 log, aviso ou `affiliate_payouts.note`, que sai no `/api/affiliate/me`.
@@ -2743,6 +2746,34 @@ segurar as seguintes; só a queda da Stripe (erro da API) para a passada. Toda a
 aparece "em conferência" (`commissions[].checking`), no `/painel` e no `/app`. Comissão antiga nasce `false` na
 migração, sem conferência em massa. O overview do admin mostra quantas aguardam e a mais antiga
 (`commission_checks`), para notar queda longa. Com linha da fatura, `promover` decide e não há consulta.
+**Conferir antes de pagar.** O `charge.refunded` pode se perder, então o QR, o "Marcar pago" e o
+"Pagamento já realizado" consultam a Stripe por cada fatura do saque antes de o dinheiro sair
+(`conferir_saque`): as das comissões do saque e, no saque órfão, as das linhas do vínculo. A regra é a
+mesma da conferência e do script (`devolvido_na_stripe`), 2 chamadas por fatura no caso comum, até 4
+faturas em paralelo, com o HTTP fora de transação e de trava. Reembolso achado vai por
+`registrar_reembolso` com ator `sistema`, e quem recusa é a regra de bloqueio que já existe: QR 409
+("Reembolso de cliente achado na Stripe: o saque ficou bloqueado para revisão.", e a tela recarrega a
+lista) e "Marcar pago" 409 ("Reembolso achado na Stripe: o saque ficou bloqueado. Se o Pix já saiu, use
+Pagamento já realizado."). Disputa aberta (D10 = A): 409 ("Uma comissão deste saque tem disputa aberta na
+Stripe. Rejeite o saque para liberar as outras; ela volta quando a disputa fechar."), e a comissão ganha
+`payment_check_pending`: rejeitado o saque, ela fica "Em carência" até o worker do A5 liberar ou abrir
+pendência, e o novo pedido sai sem ela. Erro da Stripe ou falta de `STRIPE_SECRET_KEY`: 503 ("Não foi
+possível conferir reembolsos na Stripe agora. Tente de novo em instantes."; no "Marcar pago", mais "Se o
+Pix já saiu, use Pagamento já realizado."), sem recarregar, e o log `affiliate_payout_check_failed` com o
+saque e o tipo do erro, sem a fatura. Prazo total de 20 s (`PRAZO_CONFERENCIA_S`): estouro é 503, nunca
+500; a thread que estourou termina sozinha, e o que ela gravar é idempotente. O SDK sozinho espera até
+80 s por chamada, e não há prazo por chamada. "Marcar pago" não consulta saque já bloqueado ou órfão: a
+recusa que já existe responde. "Pagamento já realizado" nunca recusa: confere antes (reembolso achado
+vira recuperação no registro) e, com a Stripe fora, registra e marca `payment_check_pending` nas comissões
+do saque; `comissoes_a_conferir` não filtra status, então o worker confere a paga e, com reembolso, abre
+recuperação. Limites: (a) reembolso na janela entre a consulta e a trava de `mark_payout_paid`, com o
+webhook perdido, não é visto na hora: o saque paga, e só o script (primeira passada, comissão paga) o
+acha depois; com o webhook entregue, a trava das comissões espera e recusa. (b) Saque órfão com a Stripe
+fora no "Pagamento já realizado": não há comissão para marcar, e com o webhook perdido depois ninguém
+reconfere sozinho; o script percorre as linhas com `paid_cents` (lido no código, não medido neste caso).
+(c) Sem limite de faturas por saque: muitas comissões caem no 503, e o admin tenta de novo; não medido
+com número real. (d) Tempo real de resposta no estouro do prazo não medido: o teste usa prazo de 0,5 s.
+
 **Retenção de `no_commission`:** 30 dias. `limpar_sem_comissao`, na mesma volta do worker, apaga só
 `no_commission` sem comissão, sem evento e com mais de 30 dias; é escolha operacional, não garantia
 contra evento atrasado, que é coberto pela conferência. Pendência ligada a comissão ou a afiliado que

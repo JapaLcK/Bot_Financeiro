@@ -91,6 +91,16 @@ def comissoes_a_conferir(limite: int = 20) -> list[dict]:
         return cur.fetchall()
 
 
+def marcar_conferencia(commission_ids: list[int]) -> None:
+    """Fica para o worker conferir: disputa aberta (D10) ou Stripe fora no "Pagamento já realizado"."""
+    if not commission_ids:
+        return
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update affiliate_commissions set payment_check_pending = true where id = any(%s)",
+                    ([int(i) for i in commission_ids],))
+        conn.commit()
+
+
 def liberar_conferencia(commission_id: int) -> None:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("update affiliate_commissions set payment_check_pending = false where id = %s", (int(commission_id),))
