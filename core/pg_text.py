@@ -246,9 +246,9 @@ def quadros_da_cadeia(exc: BaseException) -> tuple[str, str | None]:
     return "".join(partes), sqlstate
 
 
-def _atributo(exc: BaseException, nome: str):
+def _atributo(obj: object, nome: str):
     try:
-        return getattr(exc, nome, None)
+        return getattr(obj, nome, None)
     except Exception:  # noqa: BLE001
         return None
 
@@ -258,11 +258,14 @@ def causa_segura(exc: BaseException) -> str:
 
     Roda dentro de `except`: atributo que levanta ou fora da forma esperada sai `None`, e o `type(...)
     is` barra `bool` e subclasse com `__format__` próprio. Só levantaria com metaclasse hostil no
-    `__name__` da exceção, o que nenhuma biblioteca faz."""
+    `__name__` da exceção, o que nenhuma biblioteca faz. O status vem de `response.status_code` quando
+    a exceção não traz o próprio (httpx, requests)."""
     sqlstate, status = _atributo(exc, "sqlstate"), _atributo(exc, "status_code")
+    if type(status) is not int:  # httpx.HTTPStatusError, requests.HTTPError
+        status = _atributo(_atributo(exc, "response"), "status_code")
     if not (type(sqlstate) is str and re.fullmatch(r"[0-9A-Z]{5}", sqlstate)):
         sqlstate = None
-    return f"motivo={type(exc).__name__} sqlstate={sqlstate} status={status if type(status) is int else None}"
+    return f"motivo={type(exc).__name__} sqlstate={sqlstate} status={status if type(status) is int and 100 <= status <= 999 else None}"
 
 
 def causa_do_provedor(exc: BaseException) -> str:

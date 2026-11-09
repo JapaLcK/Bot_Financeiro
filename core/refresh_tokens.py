@@ -20,6 +20,7 @@ import secrets
 import sys
 from datetime import datetime, timedelta, timezone
 
+from core.pg_text import causa_segura
 from db.connection import get_conn
 
 logger = logging.getLogger(__name__)
@@ -239,7 +240,7 @@ def revoke_refresh_token(plain_token: str) -> bool:
             conn.commit()
         return ok
     except Exception as exc:
-        print(f"[refresh] revoke falhou: {exc}", file=sys.stderr)
+        print(f"[refresh] revoke falhou: {causa_segura(exc)}", file=sys.stderr)
         return False
 
 
@@ -257,7 +258,7 @@ def revoke_session_refresh_tokens(session_jti: str) -> int:
             conn.commit()
         return n or 0
     except Exception as exc:
-        print(f"[refresh] revoke_session falhou: {exc}", file=sys.stderr)
+        print(f"[refresh] revoke_session falhou: {causa_segura(exc)}", file=sys.stderr)
         return 0
 
 
@@ -273,7 +274,7 @@ def revoke_user_refresh_tokens(user_id: int) -> int:
             conn.commit()
         return n or 0
     except Exception as exc:
-        print(f"[refresh] revoke_user falhou: {exc}", file=sys.stderr)
+        print(f"[refresh] revoke_user falhou: {causa_segura(exc)}", file=sys.stderr)
         return 0
 
 

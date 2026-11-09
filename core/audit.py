@@ -21,7 +21,7 @@ from psycopg.types.json import Jsonb
 
 from core.client_ip import client_ip
 from core.crypto import PiiAccessContext, decrypt_pii_optional
-from core.pg_text import limpa_para_pg
+from core.pg_text import causa_segura, limpa_para_pg
 from db.connection import get_conn
 
 
@@ -95,7 +95,7 @@ def list_audit_events(
                     )
                 rows = list(cur.fetchall())
     except Exception as exc:
-        print(f"[audit] list_audit_events failed for user {user_id}: {exc}", file=sys.stderr)
+        print(f"[audit] list_audit_events failed for user {user_id}: {causa_segura(exc)}", file=sys.stderr)
         return []
 
     for row in rows:
@@ -145,7 +145,7 @@ def record_audit_event(
                 )
             conn.commit()
     except Exception as exc:
-        print(f"[audit] failed to record {event} for user {user_id}: {exc}", file=sys.stderr)
+        print(f"[audit] failed to record {event} for user {user_id}: {causa_segura(exc)}", file=sys.stderr)
 
 
 def is_known_login_ip(user_id: int, ip: str | None) -> bool:
@@ -178,7 +178,7 @@ def is_known_login_ip(user_id: int, ip: str | None) -> bool:
                 )
                 return cur.fetchone() is not None
     except Exception as exc:
-        print(f"[audit] is_known_login_ip query failed: {exc}", file=sys.stderr)
+        print(f"[audit] is_known_login_ip query failed: {causa_segura(exc)}", file=sys.stderr)
         return True
 
 
@@ -276,4 +276,4 @@ def _dispatch_new_login_email(user_id: int, ip: str | None, user_agent: str | No
         city = lookup_city(ip)
         send_new_login_alert(to=email, ip=ip, city=city, user_agent=user_agent)
     except Exception as exc:
-        print(f"[audit] new-login email dispatch failed for user {user_id}: {exc}", file=sys.stderr)
+        print(f"[audit] new-login email dispatch failed for user {user_id}: {causa_segura(exc)}", file=sys.stderr)

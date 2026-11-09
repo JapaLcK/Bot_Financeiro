@@ -40,7 +40,7 @@ O QUE ESTA GUARDA NÃO VÊ (não é prova de completude):
     Código de 6 dígitos não entra, porque o sufixo seria o código inteiro;
   * logger sem "log" no nome do receptor;
   * texto do usuário com outro nome (`alvo`, `row`, `d`): `_TXT` é lista negra por nome;
-  * os `_SANEADORES` valem pelo nome, e `_desfecho` ainda não é um deles;
+  * os `_SANEADORES` valem pelo nome, e `_desfecho` é um deles;
   * trocar uma dívida por outra na mesma função passa, e homônimas dividem a chave;
   * exceção relançada, que o uvicorn imprime sozinho;
   * `scripts/`, `app/e2e/`, `marketing/`, `harness_tests/`, `harness_support/`, `admin.py` e
