@@ -18,6 +18,7 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
+from .affiliate_payments import resumo_conversao
 from .connection import get_conn
 
 DEFAULT_COMMISSION_BPS = 1000       # 10%
@@ -51,8 +52,8 @@ def create_affiliate(user_id: int, code: str | None = None,
         code = _normalize_code(code)
         if not _CODE_RE.match(code):
             raise ValueError("Código inválido: use 4-20 letras/números.")
-    if not (0 < int(commission_bps) <= 10_000):
-        raise ValueError("commission_bps deve estar entre 1 e 10000.")
+    if not (0 <= int(commission_bps) <= 10_000):
+        raise ValueError("commission_bps deve estar entre 0 e 10000.")
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -236,7 +237,7 @@ def record_commission_for_invoice(referred_user_id: int, stripe_invoice_id: str,
 
 
 def get_affiliate_stats(affiliate_id: int) -> dict:
-    """Saldos em centavos por bucket + total de indicados."""
+    """Saldos em centavos por bucket + cadastros, pagantes e reembolsos."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -251,24 +252,33 @@ def get_affiliate_stats(affiliate_id: int) -> dict:
                     where status = 'pending' and payout_id is null and available_at >  now()), 0) as held_cents,
                   coalesce(sum(amount_cents) filter (
                     where status = 'pending' and payout_id is null and available_at <= now()), 0) as available_cents,
-                  coalesce(sum(amount_cents) filter (
-                    where status = 'pending' and payout_id is not null), 0) as requested_cents,
-                  coalesce(sum(amount_cents) filter (where status = 'paid'), 0) as paid_cents,
+                  -- Do saque, não da comissão: excluir a conta do indicado apaga a
+                  -- comissão em cascata, e o saque aberto ou o Pix já feito não podem
+                  -- sumir do total.
+                  (select coalesce(sum(amount_cents), 0) from affiliate_payouts
+                    where affiliate_id = %s and status = 'requested') as requested_cents,
+                  (select coalesce(sum(amount_cents), 0) from affiliate_payouts
+                    where affiliate_id = %s and status = 'paid') as paid_cents,
                   count(*) filter (where status <> 'reversed') as commission_count
                   from affiliate_commissions
                  where affiliate_id = %s
                 """,
-                (int(affiliate_id),),
+                (int(affiliate_id), int(affiliate_id), int(affiliate_id)),
             )
             sums = cur.fetchone()
-            return {
-                "referrals": referrals,
-                "held_cents": int(sums["held_cents"]),            # em carência
-                "available_cents": int(sums["available_cents"]),  # sacável agora
-                "requested_cents": int(sums["requested_cents"]),  # em saque pendente
-                "paid_cents": int(sums["paid_cents"]),
-                "commission_count": int(sums["commission_count"]),
-            }
+    buckets = ("held_cents", "available_cents", "requested_cents", "paid_cents")
+    return {
+        "referrals": referrals,
+        "held_cents": int(sums["held_cents"]),            # em carência
+        "available_cents": int(sums["available_cents"]),  # sacável agora
+        "requested_cents": int(sums["requested_cents"]),  # em saque pendente
+        "paid_cents": int(sums["paid_cents"]),
+        # Soma dos quadros: estornada fora, e saque aberto ou pago não encolhe.
+        "generated_cents": sum(int(sums[b]) for b in buckets),
+        "commission_count": int(sums["commission_count"]),
+        # Fora do `with`: abre a própria conexão, e duas na mão esgotam o pool sob carga.
+        **resumo_conversao(affiliate_id),
+    }
 
 
 def list_affiliate_commissions(affiliate_id: int, limit: int = 50) -> list[dict]:
@@ -276,11 +286,17 @@ def list_affiliate_commissions(affiliate_id: int, limit: int = 50) -> list[dict]
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select id, invoice_amount_cents, amount_cents, status,
-                       available_at, payout_id, created_at
-                  from affiliate_commissions
-                 where affiliate_id = %s
-                 order by created_at desc
+                select c.id, c.invoice_amount_cents, c.amount_cents, c.status,
+                       c.available_at, c.payout_id, c.created_at,
+                       coalesce(p.refund_status, 'none') as payment_refund
+                  from affiliate_commissions c
+                  left join affiliate_referrals r
+                    on r.affiliate_id = c.affiliate_id and r.referred_user_id = c.referred_user_id
+                  left join affiliate_referral_payments p
+                    on p.referral_id = r.id and p.source = 'stripe'
+                   and p.payment_ref = c.stripe_invoice_id
+                 where c.affiliate_id = %s
+                 order by c.created_at desc
                  limit %s
                 """,
                 (int(affiliate_id), int(limit)),
@@ -310,10 +326,20 @@ def reverse_commission(commission_id: int) -> bool:
 def request_payout(affiliate_id: int, pix_key_enc: str | None = None) -> dict:
     """Cria um pedido de saque com TODO o saldo disponível, travando as comissões.
 
-    Levanta ValueError se: já existe saque em aberto, ou saldo < MIN_PAYOUT_CENTS.
+    Levanta ValueError se: afiliado sumiu, já existe saque em aberto, ou saldo <
+    MIN_PAYOUT_CENTS.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Serializa os saques do afiliado: sem isto a checagem abaixo corre sem
+            # trava. `no key` não bloqueia a FK do webhook que grava comissão.
+            cur.execute(
+                "select id from affiliates where id = %s for no key update",
+                (int(affiliate_id),),
+            )
+            if not cur.fetchone():
+                raise ValueError("Afiliado não encontrado.")
+
             cur.execute(
                 """
                 select id from affiliate_payouts
