@@ -117,9 +117,12 @@ def _sem_log_no_banco(monkeypatch):
 def saque(user_id):
     """Saque em aberto (`status='requested'`) com 1 comissão travada nele.
 
-    As três colunas que o `request_payout` exige (db/affiliates.py):
-    `invoice_amount_cents` acima do mínimo, `available_at` no passado e
-    `status='pending'` — sem elas ele recusa com "Saldo disponível (R$ 0.00)".
+    As colunas que o `request_payout` exige (db/affiliates.py):
+    `invoice_amount_cents` acima do mínimo, `available_at` no passado,
+    `status='pending'` e a conferência na Stripe já feita
+    (`payment_check_pending = false`, A5; quem a mede é
+    `tests/test_afiliado_conferencia.py`) — sem elas ele recusa com
+    "Saldo disponível (R$ 0.00)".
     """
     indicado = int(uuid.uuid4().int % 10_000_000_000)
     ensure_user(indicado)
@@ -129,7 +132,8 @@ def saque(user_id):
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update affiliate_commissions set available_at = now() - interval '1 day' where id = %s",
+                "update affiliate_commissions set available_at = now() - interval '1 day',"
+                " payment_check_pending = false where id = %s",
                 (comissao["id"],),
             )
         conn.commit()
