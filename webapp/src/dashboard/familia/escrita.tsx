@@ -1,8 +1,7 @@
 import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ErroApi, contaQuery } from "../lib/v2";
-import { href } from "../router";
-import { familiaQuery, falhaFamilia, type Falha } from "./api";
+import { AVISO_PRO, familiaQuery, falhaFamilia, type Falha } from "./api";
 
 // Uma escrita por vez: a trava é uma ref (dois cliques no mesmo tick não passam pelo estado). Falha vira texto; 404/409 (o estado mudou) relê a família.
 export function useEscrita() {
@@ -25,9 +24,23 @@ export function useEscrita() {
   return { ocupado, falha, rodar, limpar: () => setFalha(null) };
 }
 
-export const FalhaFamilia = ({ falha }: { falha: Falha | null }) => falha && (
-  <p role="alert" className="warn fam-falha">{falha.texto}{falha.plano && <> <a href={href("/conta/cobranca")}>Ver cobrança</a></>}</p>
-);
+// 402 de plano vira um card de upgrade (inline); `membro`: quem não pode assinar vê que a família está pausada, sem compra. No app iOS o CTA some (3.1.1, como o legado: auth-refresh.js).
+export const FalhaFamilia = ({ falha, membro = false }: { falha: Falha | null; membro?: boolean }) => {
+  if (!falha) return null;
+  if (!falha.plano) return <p role="alert" className="warn fam-falha">{falha.texto}</p>;
+  const a = membro ? AVISO_PRO.membro : AVISO_PRO.titular;
+  const noApp = (window as { PB_IN_APP?: boolean }).PB_IN_APP;
+  return (
+    <div role="alert" className="fam-upgrade">
+      <span className="fam-up-ico" aria-hidden="true"><i className="ph ph-users-three" /></span>
+      <div className="fam-up-corpo">
+        <p className="fam-up-tit">{a.titulo}</p>
+        <p className="fam-up-txt">{a.texto}</p>
+        {!membro && !noApp && <a className="btn btn-primary" href="/precos">Ver o Pro <i className="ph ph-arrow-right" aria-hidden="true" /></a>}
+      </div>
+    </div>
+  );
+};
 
 // O perfil (de onde vem o uid) falhou: sem ele as leituras de membro nem começam. Refazer o perfil destrava as duas telas.
 export const PerfilFalhou = ({ tentar }: { tentar: () => void }) => (

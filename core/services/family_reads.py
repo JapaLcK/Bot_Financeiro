@@ -10,6 +10,7 @@ from typing import Callable, TypeVar
 from db import family_consents as fc
 from db.family_consents import Escopo
 from db import family_views as views
+from core.services.family_access import titular_pro
 from db.family import FamilyError
 from utils_date import day_tz
 
@@ -18,11 +19,13 @@ T = TypeVar("T")
 
 def ler_do_membro(viewer_uid: int, ref: str, escopo: Escopo, mes: str,
                   ler: Callable[[int], T]) -> T:
-    """`mes` = "AAAA-MM" já validado. Erros (FamilyError): not_member (404), no_consent (403), month_out_of_range (422)."""
+    """`mes` = "AAAA-MM" já validado. Erros (FamilyError): not_member (404), coverage_required (402), no_consent (403), month_out_of_range (422)."""
     banco = fc.ESCOPO_BANCO[escopo]
     membro = views.member_user_id(viewer_uid, ref)
     if membro is None:
         raise FamilyError("not_member")
+    if not titular_pro(viewer_uid):  # só o titular Pro lê o membro; vínculo e consentimento ficam, voltam com o Pro
+        raise FamilyError("coverage_required")
     permissao = fc.active_consent(viewer_uid, membro, banco)
     if permissao is None:
         raise FamilyError("no_consent")

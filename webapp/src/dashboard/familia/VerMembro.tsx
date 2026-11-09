@@ -19,7 +19,7 @@ import { MembroLancamentos } from "./MembroLancamentos";
 //   403 consent_required no resumo                 | parou             | parou                           | segue          | parou
 //   403 consent_required nos lançamentos           | n/a               | texto dos lançamentos           | n/a            | segue
 //   404 (resumo ou lançamentos)                    | "não está mais na família"; a lista é relida (no resumo e nos lançamentos), o "Ver" some e o painel fecha
-//   402 (plano)                                    | "Seu plano não inclui família." + link da cobrança; não relê
+//   402 (plano)                                    | card "A família é do plano Pro" + "Ver o Pro"; não relê
 //   401 (sessão)                                   | "Sua sessão terminou." + Recarregar; não relê
 //   5xx / rede                                     | 3 GETs, depois "Não foi possível carregar." + "Tentar de novo" (relê só o que falhou)
 //   422 mes (resumo)                               | "Sem dados antes de {Nome} entrar."; trava o "Mês anterior"
