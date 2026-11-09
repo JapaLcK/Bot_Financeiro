@@ -43,7 +43,7 @@ from typing import Any
 import db
 from db.ai_turno import trava_do_turno
 from core.services.comparacao_periodos import MESES
-from core.pg_text import MSG_VALOR_WHATSAPP, violacao_finito
+from core.pg_text import MSG_VALOR_WHATSAPP, causa_segura, violacao_finito
 from utils_date import ano_do_mes, today_tz
 from core.services.modelo_openai import CHAT_MODEL, completion_options
 
@@ -574,8 +574,8 @@ def _log_unsupported_claims(user_id: int, reply: str, messages: list[dict[str, A
                 "n_resultados_de_tool": len(evidencia),
             },
         )
-    except Exception:
-        logger.debug("guarda de afirmações falhou — ignorado", exc_info=True)
+    except Exception as exc:
+        logger.debug("guarda de afirmações falhou — ignorado: %s", causa_segura(exc))
 
 
 _CARDS_DAS_OCULTAS = ("contas", "hero", "fatura", "parcelas", "renda")  # onde está o dado das tools de OCULTAS_NO_APP

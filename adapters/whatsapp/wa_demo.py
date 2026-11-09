@@ -26,7 +26,7 @@ from adapters.whatsapp.wa_parse import InboundMessage, get_interactive_id
 from core.dashboard_links import base_url_publica
 from core.intent_classifier import _normalize
 from core.services.demo.dados import CODIGO_PADRAO, LIMITE_MSGS
-from utils_phone import mask_phone
+from utils_phone import mask_phone, mask_wamid
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +191,7 @@ def _responder(plano: Plano, message: InboundMessage, msg_id: str) -> None:
         try:
             wa_client.send_typing_indicator(msg_id)
         except Exception as exc:
-            logger.warning("WA demo typing indicator failed message_id=%s error=%s", msg_id, exc)
+            logger.warning("WA demo typing indicator failed message_id=%s error=%s", mask_wamid(msg_id), exc)
         resposta = conversa.responder(plano.h, pergunta, ultima=n >= LIMITE_MSGS)
     except Exception as exc:
         # Sem resposta, sem desconto: a mensagem volta e a pessoa tenta de novo.
