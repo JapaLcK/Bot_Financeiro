@@ -2206,7 +2206,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[reconquista] erro: {exc}", file=sys.stderr)
+                print(f"[reconquista] erro: {type(exc).__name__}", file=sys.stderr)
             await asyncio.sleep(300)
 
     async def _account_deletion_worker():
@@ -7487,7 +7487,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     await asyncio.to_thread(
                         agendar, int(user_id), datetime.fromtimestamp(_te, timezone.utc))
             except Exception as exc:
-                print(f"[billing] reconquista agendar falhou user={user_id}: {exc}")
+                print(f"[billing] reconquista agendar falhou user={user_id}: {type(exc).__name__}")
             # Email de confirmacao de cancelamento (item 41)
             # O plano sai do PRICE do `obj`, que é a própria Subscription do
             # evento (#351) — e não da conta, porque o `update_user_plan(...,

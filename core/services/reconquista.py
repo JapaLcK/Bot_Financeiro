@@ -83,7 +83,7 @@ def rodar_uma_vez(limite: int = 20) -> int:
         try:
             status, motivo = _processar(stripe, uid, precos)
         except Exception as exc:    # inclui falha do Stripe: sem retentativa, é um e-mail só
-            _log.error("reconquista user=%s: %s", uid, type(exc).__name__)
+            _log.error("reconquista falhou: %s", type(exc).__name__, extra={"user_id": uid})
             status, motivo = "pulado", f"erro:{type(exc).__name__}"
         fechar(uid, status, motivo)
     return n
