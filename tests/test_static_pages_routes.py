@@ -932,11 +932,13 @@ def test_quiz_e_faq_dizem_o_que_o_manual_cobre_com_e_sem_banco():
     assert "do seu jeito: texto, áudio ou foto do cupom" not in quiz
     assert "chega sozinh" not in quiz
     home = client.get("/").text
-    sem_banco = "mas é o jeito automático. Sem banco, você lança pelo WhatsApp com texto, áudio ou foto do comprovante."
+    sem_banco = ("mas é com o banco que cartão, parcela e fatura entram sozinhos. Sem banco, o Piggy anota"
+                 " o gasto em dinheiro, por áudio ou foto no WhatsApp.")
     faq = home.split("Preciso conectar o banco?", 1)[1].split("</details>", 1)[0]   # só o <details> desta pergunta
     assert f">Não é obrigatório, {sem_banco}</p>" in faq
     assert "100% pelo WhatsApp" not in home
     assert "Prefere não conectar o banco?" not in home
+    assert "você lança pelo WhatsApp com texto" not in home   # o texto antigo dizia que sem banco entra tudo
 
 
 def test_precos_logado_e_continuar_compra_sem_o_link_do_teste(monkeypatch):
