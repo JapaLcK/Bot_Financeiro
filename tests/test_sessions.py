@@ -266,6 +266,25 @@ def test_logout_revokes_current_session(user_id):
     assert get_active_session(jti) is None
 
 
+def test_logout_so_com_dashboard_token_revoga_a_sessao(user_id):
+    """#1093: parado no /painel, o auth_token de 15 min expirou e o cookie de refresh
+    não vai para /auth/logout; só o dashboard_token identifica a sessão."""
+    user = db.register_auth_user(f"dash-out-{user_id}@t.com", "senha-forte-123")
+    real_uid = int(user["user_id"])
+    jti = create_session(real_uid, ip="1.1.1.1")
+    outra = create_session(real_uid, ip="2.2.2.2")
+    client = TestClient(dashboard.app)
+    client.cookies.set(
+        dashboard.DASHBOARD_COOKIE_NAME,
+        dashboard.make_dashboard_token(real_uid, hours=1, jti=jti),
+    )
+
+    assert client.post("/auth/logout", headers=_csrf_headers(client)).status_code == 200
+
+    assert get_active_session(jti) is None
+    assert get_active_session(outra) is not None
+
+
 # ── dashboard_token jti binding ────────────────────────────────────────────
 
 def test_dashboard_token_with_revoked_jti_is_rejected(user_id):

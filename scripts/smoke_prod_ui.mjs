@@ -109,10 +109,17 @@ pagina.on("requestfailed", (req) => {
   falhas.push(`[${telaAtual}] request falhou (${erro}) em ${req.url().replace(BASE, "")}`);
 });
 
+// frontend/app-mode.css:23 põe `@view-transition { navigation: auto }` em toda página
+// que o carrega; o /login tem e o destino do login (/painel) não. O Chromium rejeita a
+// transição no destino com AbortError sem stack, sem código nosso e sem efeito visível:
+// ruído. Só esse trio exato, só no /login — o resto continua reprovando.
+const transicaoPulada = (e) =>
+  e.name === "AbortError" && e.message === "Transition was skipped" && telaAtual === "/login";
+
 // pageerror = exceção que subiu até o topo e interrompeu a execução do script
 // que a lançou. Vale mesmo vindo de terceiro: Chart.js estourando deixa o
 // gráfico sem desenhar, e isso É a tela quebrada (o P1-05 do roteiro).
-pagina.on("pageerror", (e) => falhas.push(`[${telaAtual}] erro de JS: ${e.message}`));
+pagina.on("pageerror", (e) => !transicaoPulada(e) && falhas.push(`[${telaAtual}] erro de JS: ${e.message}`));
 
 // console.error: só o de script da nossa origem. `console.error` de biblioteca
 // de terceiro é barulho dela, não defeito nosso. Sem `location.url` (chamada
@@ -136,6 +143,11 @@ try {
   await pagina.fill("#senha", SENHA);
   await pagina.click("#btn-login");
   await pagina.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 30000 });
+  // O AbortError da view transition nasce quando o destino é revelado (1º quadro), depois do load:
+  // espere esse quadro (2 rAF) antes de trocar telaAtual; teto de 3 s se o rAF não rodar.
+  // catch: destino que redireciona destrói o contexto, ou o navegador fechou.
+  await pagina.evaluate(() => new Promise((r) => { setTimeout(r, 3000); requestAnimationFrame(() => requestAnimationFrame(r)); })).catch(() => {});
+  console.log(`login foi para ${new URL(pagina.url()).pathname}`);
 
   if (await pagina.locator("#form-mfa").isVisible().catch(() => false)) {
     throw new Error("PARADA: a conta de automação tem MFA ligado — o smoke não passa do 2º fator");

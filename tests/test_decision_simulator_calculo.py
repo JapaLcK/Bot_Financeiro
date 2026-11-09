@@ -17,6 +17,13 @@ from core.services.decision_simulator import (
 HOJE = date.today()
 
 
+@pytest.fixture(autouse=True)
+def _hoje_da_execucao():
+    """Relê o dia a cada teste: a suíte leva ~10 min e pode cruzar a meia-noite depois do import."""
+    global HOJE
+    HOJE = date.today()
+
+
 def _sim(*cenarios, reserva=0.0):
     return Simulacao.model_validate({"reserva_minima": reserva, "cenarios": list(cenarios)})
 

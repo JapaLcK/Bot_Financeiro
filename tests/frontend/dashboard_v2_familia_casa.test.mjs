@@ -15,7 +15,7 @@ const com = comCasa;
 const linha = (t, nome) => t.page.locator(".casa-lista li", { hasText: nome });
 const preencher = async (t, campos) => { for (const [rotulo, valor] of Object.entries(campos)) await t.dlg().getByLabel(rotulo).fill(valor); };
 
-// mutação: `quem` (Casa.tsx) trocado por `a ?? "Membro"`: o "Ex-membro" some; ou `semZero(m.falta)` por `false`: o "Meta batida" some
+// mutação: `quem` (CasaPagina.tsx) trocado por `a ?? "Membro"`: o "Ex-membro" some; ou `semZero(m.falta)` por `false`: o "Meta batida" some
 test("a casa: valores como texto do servidor, selos de autor, prazo, estados vazios; 1 GET só", async () => {
   await com({}, async (t) => {
     const x = await t.texto();
@@ -123,7 +123,7 @@ test("criar e editar orçamento: corpo exato; o PUT leva a `versao`", async () =
   });
 });
 
-// mutação: `sinal: "subtrair"` trocado por "somar" no botão "Tirar" (Casa.tsx), ou o caminho sem `/movimentos` (casa.ts)
+// mutação: `sinal: "subtrair"` trocado por "somar" no botão "Tirar" (CasaPagina.tsx), ou o caminho sem `/movimentos` (casa.ts)
 test("movimentos: Guardar/Tirar numa meta e Lançar/Desfazer gasto num orçamento: corpo exato, tela com a Casa devolvida", async () => {
   await com({}, async (t) => {
     await linha(t, "Viagem").getByRole("button", { name: "Guardar" }).click();
@@ -153,7 +153,7 @@ test("movimentos: Guardar/Tirar numa meta e Lançar/Desfazer gasto num orçament
   });
 });
 
-// mutação: tirar o `void reler()` do `agir` do Apagar (Casa.tsx): o item continua na tela
+// mutação: tirar o `void reler()` do `agir` do Apagar (CasaPagina.tsx): o item continua na tela
 test("apagar: confirma antes, DELETE no ref, e a casa é relida (204 não traz corpo)", async () => {
   await com({}, async (t) => {
     await linha(t, "Reserva").getByRole("button", { name: "Editar" }).click();

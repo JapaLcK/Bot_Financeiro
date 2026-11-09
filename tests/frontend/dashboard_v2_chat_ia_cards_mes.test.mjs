@@ -154,9 +154,12 @@ test("categorias com 2 abas de mês: o Seg troca o mês (título, total), o esta
 // Abre tudo o que abre agora (os "+N" também). Pelos `elementHandles`: um `locator.all()` reavalia o seletor a cada clique, e a linha aberta já não casa com `aria-expanded=false`.
 const abreTudo = async (page) => { for (const h of await page.locator(".card-ia button[aria-expanded=false]").elementHandles()) { await h.click(); await page.waitForTimeout(60); } };
 const linhasDe = (page, sel) => page.locator(sel).evaluateAll((ls) => ls.map((l) => l.innerText.replace(/\s+/g, " ").trim()));
+// O card nasce com a chave crua ("Alimentacao") e troca pelo nome quando `/api/v2/categorias` responde: quem compara nomes espera o catálogo.
+const comCatalogo = (page) => page.locator(".card-ia .ci-cat", { hasText: "Alimentação" }).first().waitFor({ timeout: 5000 });
 
 test("categorias: 7 categorias viram as 4 maiores e \"Outras\" (a soma exata das restantes, % da soma); \"Outras\" abre as 3 escondidas; até 5, todas pelo nome", async () => {
   const { page } = await responde([blocoDoCaso("categorias")]);
+  await comCatalogo(page);
   assert.deepEqual(await linhasDe(page, ".card-ia > .ci-corpo > .ci-lista > li > .ci-cat"), [
     "Alimentação 33% R$ 980,50", "Casa 30% R$ 900,00", "Mercado 14% R$ 420,00", "Transporte 10% R$ 300,00", "Outras 14% R$ 410,00",
   ]);
@@ -168,6 +171,7 @@ test("categorias: 7 categorias viram as 4 maiores e \"Outras\" (a soma exata das
   assert.equal(await page.locator(".card-ia .ci-cat[aria-expanded=true]").count(), 1, "uma aberta por vez: abrir a 1ª fecha \"Outras\"");
   await page.context().close();
   const cinco = await responde([blocoDoCaso("categorias", { detalhes: { ...D, categorias: D.categorias.slice(0, 5) } })]);
+  await comCatalogo(cinco.page);
   assert.deepEqual((await linhasDe(cinco.page, ".card-ia .ci-cat")).map((t) => t.split(" ")[0]), ["Alimentação", "Casa", "Mercado", "Transporte", "Lazer"]);
   await cinco.page.context().close();
   const nenhuma = await responde([blocoDoCaso("categorias", { detalhes: { ...D, categorias: [], motivos: ["inicio_do_historico"] } })]);
