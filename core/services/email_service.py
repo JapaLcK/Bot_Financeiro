@@ -1334,6 +1334,7 @@ def send_reconquista_email(to: str, nome: str, codigo: str, valido_ate, unsub_ur
       <p style="text-align:center;margin:24px 0"><a class="btn" href="{link}">Continuar com o Piggy</a></p>
       <p>E como você já começou, o primeiro mês sai com 10% de desconto. Use o código <b>{c}</b> até {data}.</p>
       <p>Abraço,<br>Equipe PigBank</p>
+      <p style="font-size:12px;color:#7E7E7C">Não quer mais estes avisos? <a href="{_h.escape(unsub_url)}">Cancelar inscrição</a>.</p>
     """
     html = _base_html("Seu Piggy ainda está guardando tudo", content)
     text = (
@@ -1346,7 +1347,8 @@ def send_reconquista_email(to: str, nome: str, codigo: str, valido_ate, unsub_ur
         "• recebe um alerta antes de estourar o orçamento\n\n"
         f"Continuar com o Piggy: {link}\n\n"
         f"E como você já começou, o primeiro mês sai com 10% de desconto. Use o código {codigo} até {data}.\n\n"
-        "Abraço,\nEquipe PigBank"
+        "Abraço,\nEquipe PigBank\n\n"
+        f"Não quer mais estes avisos? {unsub_url}"
     )
     return send_email(to=to, subject="Seu Piggy ainda está guardando tudo", html_body=html,
                       text_body=text, headers=unsub_headers(unsub_url), log_recipient=False)

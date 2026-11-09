@@ -39,6 +39,7 @@ def _processar(stripe_mod, uid: int, precos: list[str]) -> tuple[str, str | None
         make_unsub_url, send_reconquista_email)
     from core.services.retomada_cupom import cupom_id  # noqa: PLC0415
     from db import get_auth_user  # noqa: PLC0415
+    from db.reconquista import saindo  # noqa: PLC0415
 
     user = get_auth_user(uid) or {}
     cus, email = user.get("stripe_customer_id"), (user.get("email") or "").strip()
@@ -46,6 +47,8 @@ def _processar(stripe_mod, uid: int, precos: list[str]) -> tuple[str, str | None
         return "pulado", "assinou"
     if user.get("engagement_opt_out"):
         return "pulado", "opt_out"
+    if saindo(uid):
+        return "pulado", "saindo"
     if not email:
         return "pulado", "sem_email"
     if not cus:

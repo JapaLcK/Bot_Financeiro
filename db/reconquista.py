@@ -40,3 +40,16 @@ def fechar(user_id: int, status: str, motivo: str | None = None) -> None:
             (status, motivo, status, int(user_id)),
         )
         conn.commit()
+
+
+def saindo(user_id: int) -> bool:
+    """Exclusão de conta agendada ou em curso (mesma expressão de `remarketing.estado_fresco`)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select 1 from auth_accounts where user_id = %s and deletion_status in ('scheduled', 'processing')"
+            " and deletion_scheduled_for is not null limit 1",
+            (int(user_id),),
+        )
+        r = cur.fetchone()
+        conn.commit()
+    return r is not None

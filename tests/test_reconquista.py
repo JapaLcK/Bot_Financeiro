@@ -216,6 +216,7 @@ def test_tick_envia_uma_vez_com_promo_exclusivo(mundo):
 @pytest.mark.parametrize("motivo,kw,faturas", [
     ("ja_pagou", {}, [{"amount_paid": 0}, {"amount_paid": 1990}]),
     ("opt_out", {"engagement_opt_out": True}, []),
+    ("saindo", {"deletion_status": "scheduled", "deletion_scheduled_for": AGORA + timedelta(days=5)}, []),
     ("assinou", {"plan": "pro", "plan_expires_at": AGORA + timedelta(days=20)}, []),
 ])
 def test_tick_pula_sem_enviar(mundo, motivo, kw, faturas):
@@ -282,7 +283,9 @@ Continuar com o Piggy: {link}
 E como você já começou, o primeiro mês sai com 10% de desconto. Use o código ABC123 até 20/11.
 
 Abraço,
-Equipe PigBank"""
+Equipe PigBank
+
+Não quer mais estes avisos? https://x/u"""
 
 
 def test_email_texto_literal_e_escape(monkeypatch):
@@ -294,10 +297,12 @@ def test_email_texto_literal_e_escape(monkeypatch):
     assert v["subject"] == "Seu Piggy ainda está guardando tudo"
     assert v["text_body"] == TEXTO.format(link=f"{email_service._public_base_url()}/precos")
     assert v["log_recipient"] is False and "List-Unsubscribe" in v["headers"]
+    assert 'href="https://x/u"' in v["html_body"] and v["html_body"].index("Equipe PigBank") < v["html_body"].index("Cancelar inscrição")
     assert "Continuar com o Piggy" in v["html_body"] and "<b>ABC123</b> até 20/11" in v["html_body"]
 
-    email_service.send_reconquista_email("a@b.com", "<script>x</script>", "A<b>", ate, "https://x/u")
+    email_service.send_reconquista_email("a@b.com", "<script>x</script>", "A<b>", ate, "https://x/u?a=1&b=<2>")
     h = vistos[1]["html_body"]
+    assert 'href="https://x/u?a=1&amp;b=&lt;2&gt;"' in h
     assert "<script>x</script>" not in h and "&lt;script&gt;" in h and "A<b>" not in h
 
     email_service.send_reconquista_email("a@b.com", "", "ABC123", ate, "https://x/u")
