@@ -8,7 +8,10 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { FRONTEND, ORIGIN, RESPOSTAS, abrirPainel, servir } from "./_painel.mjs";
 
-const comissao = (id, extra) => ({ id, invoice_amount: 59.9, amount: 5.99, original_amount: null, in_review: false, checking: false, status: "pending", available_at: "2026-09-20T12:00:00.000000+00:00", payout_id: null, payment_refund: "none", created_at: "2026-08-21T12:00:00.000000+00:00", ...extra });
+const comissao = (id, extra) => ({ id, invoice_amount: 59.9, amount: 5.99, original_amount: null, in_review: false, checking: false, status: "pending", available_at: "2026-09-20T12:00:00.000000+00:00", payout_id: null, payment_refund: "none", paid_months: 1, created_at: "2026-08-21T12:00:00.000000+00:00", ...extra });
+
+/** O texto da regra, igual no /painel e no /app (`Afiliado.tsx` e `dashboard.js`). `p` já em português. */
+export const regra = (p) => `Você recebe ${p}% do valor efetivamente pago na primeira cobrança da assinatura de cada cliente indicado pelo seu link. A comissão acontece uma única vez por cliente. Renovações e reativações não geram novas comissões. Nos planos anuais, a comissão é calculada sobre 1/12 do valor pago, o equivalente a um mês.`;
 
 /** Ana: afiliada ativa, 12 cadastros, 6 pagantes (1 reembolsado), R$ 120,00 para sacar. */
 export const ATIVA = {
@@ -16,7 +19,7 @@ export const ATIVA = {
   stats: { referrals: 12, held: 30, available: 120, review: 0, requested: 0, paid: 200, generated: 350, paying_clients: 6, refunded_clients: 1, refunds: { total: 2, partial: 1 } },
   commissions: [
     comissao(1, { available_at: "2026-10-20T12:00:00+00:00" }),
-    comissao(2),
+    comissao(2, { invoice_amount: 199, amount: 1.66, paid_months: 12 }),  // plano anual: 10% de 199 ÷ 12
     comissao(3, { status: "paid", amount: 200, invoice_amount: 2000 }),
     comissao(4, { status: "reversed", payment_refund: "total" }),
     comissao(5, { payment_refund: "partial" }),

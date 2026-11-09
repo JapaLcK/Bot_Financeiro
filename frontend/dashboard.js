@@ -11923,8 +11923,9 @@ function _renderAffiliateView(data) {
   const s = data.stats || {};
   const refunds = s.refunds || {};
   const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
-  // 0% é um valor (afiliado sem comissão): nunca `|| 10`. Comissão só existe na 1ª cobrança no cartão.
-  const regra = data.commission_percent === 0 ? "sem comissão neste programa" : `${Number(data.commission_percent).toLocaleString("pt-BR")}% da primeira cobrança do plano no cartão`;
+  // 0% é um valor (afiliado sem comissão): nunca `|| 10`. Comissão só existe na 1ª cobrança paga de cada cliente.
+  const pct = Number(data.commission_percent).toLocaleString("pt-BR");
+  const regra = data.commission_percent === 0 ? "sem comissão neste programa" : `${pct}% da primeira cobrança`;
   stats.innerHTML = `
     <div class="stat-tile" style="animation-delay:0ms">
       <div class="stat-label">Cadastros indicados</div>
@@ -11991,7 +11992,7 @@ function _renderAffiliateView(data) {
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--glass-border)">
         <div>
           <div style="font-weight:600">${fmt(c.amount)}</div>
-          <div style="font-size:.72rem;color:var(--text-3)">fatura de ${fmt(c.invoice_amount)} · ${fmtDate(c.created_at)}${c.original_amount !== null && c.original_amount !== undefined ? ` · ajustada de ${fmt(c.original_amount)}` : ""}</div>
+          <div style="font-size:.72rem;color:var(--text-3)">${c.paid_months === 12 ? `plano anual de ${fmt(c.invoice_amount)} (base 1/12)` : `fatura de ${fmt(c.invoice_amount)}`} · ${fmtDate(c.created_at)}${c.original_amount !== null && c.original_amount !== undefined ? ` · ajustada de ${fmt(c.original_amount)}` : ""}</div>
         </div>
         <span style="font-size:.75rem;color:${st.color};text-align:right">${st.label}${refund ? `<br><span style="color:var(--text-3)">${refund}</span>` : ""}</span>
       </div>`;
@@ -12024,7 +12025,7 @@ function _renderAffiliateView(data) {
     <div class="mock-card">
       <h3 style="margin:0 0 6px">Seu link de divulgação</h3>
       <p style="font-size:.78rem;color:var(--text-3);margin:0 0 12px">
-        ${data.commission_percent === 0 ? "Você participa sem comissão neste programa." : `Você ganha ${regra}. Pagamento por Pix não gera comissão.`}
+        ${data.commission_percent === 0 ? "Você participa sem comissão neste programa." : `Você recebe ${pct}% do valor efetivamente pago na primeira cobrança da assinatura de cada cliente indicado pelo seu link. A comissão acontece uma única vez por cliente. Renovações e reativações não geram novas comissões. Nos planos anuais, a comissão é calculada sobre 1/12 do valor pago, o equivalente a um mês.`}
       </p>
       ${[["code", "Código", data.code], ["link", "Link", data.link]].map(([id, nome, valor]) => `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">
         <input id="affiliate-${id}-input" type="text" readonly aria-label="${nome}" value="${esc(valor)}"

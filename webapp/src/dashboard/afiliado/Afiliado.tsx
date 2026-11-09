@@ -81,7 +81,7 @@ function Divulgar({ d, semComissao }: { d: Dados; semComissao: boolean }) {
   };
   return <section className="panel span-7" aria-labelledby="afil-divulgar">
     <h2 id="afil-divulgar">Seu link de divulgação</h2>
-    <p className="faint">{semComissao ? "Você participa sem comissão neste programa." : `Você ganha ${d.commission_percent.toLocaleString("pt-BR")}% da primeira cobrança do plano no cartão. Pagamento por Pix não gera comissão.`}</p>
+    <p className="faint">{semComissao ? "Você participa sem comissão neste programa." : `Você recebe ${d.commission_percent.toLocaleString("pt-BR")}% do valor efetivamente pago na primeira cobrança da assinatura de cada cliente indicado pelo seu link. A comissão acontece uma única vez por cliente. Renovações e reativações não geram novas comissões. Nos planos anuais, a comissão é calculada sobre 1/12 do valor pago, o equivalente a um mês.`}</p>
     <div className="afil-copia">
       <span>Código</span><code>{d.code}</code>
       <button type="button" className="btn btn-ghost" aria-label="Copiar código" onClick={() => copia(d.code, "Código copiado")}><i className="ph ph-clipboard-text" aria-hidden="true" />Copiar</button>

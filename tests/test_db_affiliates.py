@@ -61,7 +61,7 @@ def test_create_affiliate_gera_codigo_e_eh_idempotente(user_id):
     a1 = create_affiliate(user_id)
     assert a1["code"] and len(a1["code"]) == 8
     assert a1["status"] == "active"
-    assert a1["commission_bps"] == 1000
+    assert a1["commission_bps"] == 10_000  # padrão: 100%
 
     a2 = create_affiliate(user_id)  # segunda chamada devolve o mesmo
     assert a2["id"] == a1["id"]
@@ -69,7 +69,7 @@ def test_create_affiliate_gera_codigo_e_eh_idempotente(user_id):
 
 
 def test_referral_atribui_uma_vez_e_bloqueia_auto_indicacao(user_id, referred_user_id):
-    aff = create_affiliate(user_id)
+    aff = create_affiliate(user_id, commission_bps=1000)  # 10%: os valores abaixo contam com ele
 
     assert record_referral(aff["code"], referred_user_id) is True
     # segunda atribuição do mesmo user não sobrescreve (primeiro ganha)
@@ -83,7 +83,7 @@ def test_referral_atribui_uma_vez_e_bloqueia_auto_indicacao(user_id, referred_us
 
 
 def test_referral_nao_atribui_com_afiliado_desativado(user_id, referred_user_id):
-    aff = create_affiliate(user_id)
+    aff = create_affiliate(user_id, commission_bps=1000)  # 10%: os valores abaixo contam com ele
     set_affiliate_status(aff["id"], "disabled")
     assert record_referral(aff["code"], referred_user_id) is False
     set_affiliate_status(aff["id"], "active")
@@ -91,7 +91,7 @@ def test_referral_nao_atribui_com_afiliado_desativado(user_id, referred_user_id)
 
 
 def test_comissao_10pct_idempotente_e_em_carencia(user_id, referred_user_id):
-    aff = create_affiliate(user_id)
+    aff = create_affiliate(user_id, commission_bps=1000)  # 10%: os valores abaixo contam com ele
     record_referral(aff["code"], referred_user_id)
 
     invoice = _inv()
@@ -116,21 +116,27 @@ def test_comissao_nao_gera_sem_referral_nem_com_afiliado_desativado(user_id, ref
     # sem referral → nada
     assert record_commission_for_invoice(referred_user_id, _inv(), 1990) is None
 
-    aff = create_affiliate(user_id)
+    aff = create_affiliate(user_id, commission_bps=1000)  # 10%: os valores abaixo contam com ele
     record_referral(aff["code"], referred_user_id)
     set_affiliate_status(aff["id"], "disabled")
     # afiliado desativado → para de acumular ("vitalício até eu dizer chega")
     assert record_commission_for_invoice(referred_user_id, _inv(), 1990) is None
 
+    # reativado: a 1ª cobrança deste cliente já decidiu (sem comissão), então a seguinte
+    # não vira "primeira"; um cliente novo gera
     set_affiliate_status(aff["id"], "active")
-    assert record_commission_for_invoice(referred_user_id, _inv(), 1990) is not None
+    assert record_commission_for_invoice(referred_user_id, _inv(), 1990) is None
+    ru2 = int(uuid.uuid4().int % 10_000_000_000)
+    ensure_user(ru2)
+    record_referral(aff["code"], ru2)
+    assert record_commission_for_invoice(ru2, _inv(), 1990) is not None
 
     # valor zero (fatura de trial) → nada
     assert record_commission_for_invoice(referred_user_id, _inv(), 0) is None
 
 
 def test_saque_minimo_e_ciclo_pagamento(user_id, referred_user_id):
-    aff = create_affiliate(user_id)
+    aff = create_affiliate(user_id, commission_bps=1000)  # 10%: os valores abaixo contam com ele
     record_referral(aff["code"], referred_user_id)
 
     # 1 comissão de R$ 19,90 → R$ 1,99 disponível: abaixo do mínimo
@@ -172,7 +178,7 @@ def test_saque_minimo_e_ciclo_pagamento(user_id, referred_user_id):
 
 
 def test_saque_rejeitado_devolve_saldo(user_id, referred_user_id):
-    aff = create_affiliate(user_id)
+    aff = create_affiliate(user_id, commission_bps=1000)  # 10%: os valores abaixo contam com ele
     record_referral(aff["code"], referred_user_id)
     big = record_commission_for_invoice(referred_user_id, _inv(), 100000)  # R$ 1000 → R$ 100
     _make_available(big["id"])
@@ -186,7 +192,7 @@ def test_saque_rejeitado_devolve_saldo(user_id, referred_user_id):
 
 
 def test_estorno_de_comissao(user_id, referred_user_id):
-    aff = create_affiliate(user_id)
+    aff = create_affiliate(user_id, commission_bps=1000)  # 10%: os valores abaixo contam com ele
     record_referral(aff["code"], referred_user_id)
     c = record_commission_for_invoice(referred_user_id, _inv(), 1990)
 

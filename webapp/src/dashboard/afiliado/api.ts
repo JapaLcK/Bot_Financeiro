@@ -8,7 +8,7 @@ const STATUS_COMISSAO = ["pending", "paid", "reversed"] as const;
 const REEMBOLSOS = ["none", "partial", "total"] as const;
 const STATUS_SAQUE = ["requested", "paid", "rejected"] as const;
 
-export type Comissao = { id: number; invoice_amount: number; amount: number; original_amount: number | null; in_review: boolean; checking: boolean; status: (typeof STATUS_COMISSAO)[number]; available_at: string; payout_id: number | null; payment_refund: (typeof REEMBOLSOS)[number]; created_at: string };
+export type Comissao = { id: number; invoice_amount: number; amount: number; original_amount: number | null; in_review: boolean; checking: boolean; status: (typeof STATUS_COMISSAO)[number]; available_at: string; payout_id: number | null; payment_refund: (typeof REEMBOLSOS)[number]; paid_months: number; created_at: string };
 export type Pedido = { id: number; amount: number; status: (typeof STATUS_SAQUE)[number]; requested_at: string; note: string | null };
 export type Stats = { referrals: number; paying_clients: number; refunded_clients: number; generated: number; held: number; available: number; review: number; requested: number; paid: number; refunds: { total: number; partial: number } };
 export type Afiliado = { code: string; link: string; status: "active" | "disabled"; commission_percent: number; has_pix_key: boolean; min_payout: number; hold_days: number; stats: Stats; commissions: Comissao[]; payouts: Pedido[] };
@@ -18,8 +18,8 @@ const data = (v: unknown): v is string => texto(v) && Number.isFinite(instante(v
 const um = <T extends string>(v: unknown, lista: readonly T[]): v is T => lista.includes(v as T);
 
 function comissaoDe(c: unknown): Comissao {
-  if (!objeto(c) || !inteiro(c.id) || !valor(c.invoice_amount) || !valor(c.amount) || !(c.original_amount === null || valor(c.original_amount)) || typeof c.in_review !== "boolean" || typeof c.checking !== "boolean" || !um(c.status, STATUS_COMISSAO) || !data(c.available_at) || !(c.payout_id === null || inteiro(c.payout_id)) || !um(c.payment_refund, REEMBOLSOS) || !data(c.created_at)) throw contrato();
-  return { id: c.id, invoice_amount: c.invoice_amount, amount: c.amount, original_amount: c.original_amount, in_review: c.in_review, checking: c.checking, status: c.status, available_at: c.available_at, payout_id: c.payout_id, payment_refund: c.payment_refund, created_at: c.created_at };
+  if (!objeto(c) || !inteiro(c.id) || !valor(c.invoice_amount) || !valor(c.amount) || !(c.original_amount === null || valor(c.original_amount)) || typeof c.in_review !== "boolean" || typeof c.checking !== "boolean" || !um(c.status, STATUS_COMISSAO) || !data(c.available_at) || !(c.payout_id === null || inteiro(c.payout_id)) || !um(c.payment_refund, REEMBOLSOS) || !inteiro(c.paid_months) || !data(c.created_at)) throw contrato();
+  return { id: c.id, invoice_amount: c.invoice_amount, amount: c.amount, original_amount: c.original_amount, in_review: c.in_review, checking: c.checking, status: c.status, available_at: c.available_at, payout_id: c.payout_id, payment_refund: c.payment_refund, paid_months: c.paid_months, created_at: c.created_at };
 }
 
 function pedidoDe(p: unknown): Pedido {

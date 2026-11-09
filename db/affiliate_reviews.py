@@ -8,8 +8,8 @@ fica fora de saque novo e o saque que a contém não é pago. A linha é também
 Estados: `no_commission` (fatura sem comissão, ainda), `open` (admin decide), `recovery` (dinheiro
 já saiu e falta recuperar), `resolved`. `tipo` nunca rebaixa, e linha `total` nunca reabre.
 
-Ordem de travas: nas ações do admin, saque, comissões, pendência; no webhook, fatura, comissão,
-pendência, sem saque. Sem ciclo. Nada aqui guarda dado do indicado; referência do comprovante e
+Ordem de travas: nas ações do admin, saque, comissões, pendência; no webhook, fatura, (indicado),
+comissão, pendência, sem saque. Sem ciclo. Nada aqui guarda dado do indicado; referência do comprovante e
 justificativa moram só em `affiliate_refund_review_events`, nunca em log, aviso ou nota do saque.
 """
 from .affiliate_payments import _rotular
@@ -34,6 +34,11 @@ def trava_fatura(cur, fatura: str) -> None:
     """Serializa reembolso e nascimento da comissão da mesma fatura: sem ela, o reembolso não vê
     a comissão, a comissão não vê o reembolso, e nenhum dos dois a segura."""
     cur.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"afiliado_fatura:{fatura}",))
+
+
+def trava_indicado(cur, referred_user_id: int) -> None:
+    """Serializa a 1ª cobrança do mesmo cliente (Pix e cartão). Só depois da `trava_fatura`: sem ciclo."""
+    cur.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"afiliado_indicado:{int(referred_user_id)}",))
 
 
 def registrar_evento(cur, review_id: int, action: str, actor: str, *, antes=None, depois=None,

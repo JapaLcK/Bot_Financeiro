@@ -5,7 +5,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { startServer } from "./_server.mjs";
-import { ATIVA, COM_SAQUE, EM_REVISAO, ZERO } from "./_afiliado.mjs";
+import { ATIVA, COM_SAQUE, EM_REVISAO, ZERO, regra } from "./_afiliado.mjs";
 
 let ORIGIN, server, browser;
 before(async () => { ({ proc: server, origin: ORIGIN } = await startServer()); browser = await chromium.launch(); });
@@ -65,8 +65,11 @@ test("os quadros, o código com copiar, a regra certa e os rótulos do pagamento
     const labels = await page.locator("#affiliate-stats .stat-label").allInnerTexts();
     assert.deepEqual(labels.map((l) => l.toLowerCase()), ["cadastros indicados", "clientes que pagaram", "comissões geradas", "disponível pra saque", "em carência", "em revisão", "em saque", "já pago"]);
     const area = await page.locator("#affiliate-view").innerText();
-    assert.match(area, /10% da primeira cobrança do plano no cartão/);
-    assert.match(area, /Pix não gera comissão/);
+    assert.ok(area.includes(regra("10")), "a regra inteira, com o anual");
+    assert.doesNotMatch(area, /Pix não gera comissão|no cartão/);
+    assert.match(area, /plano anual de R\$\s*199,00 \(base 1\/12\)/);
+    assert.equal((area.match(/plano anual de/g) || []).length, 1, "só a linha com paid_months 12");
+    assert.match(area, /fatura de R\$\s*59,90/);
     assert.doesNotMatch(area, /por cobrança|PigBank\+/);
     assert.match(area, /libera 30 dias/);
     assert.match(area, /pagamento reembolsado/);
@@ -86,8 +89,8 @@ test("afiliado 0%: 'sem comissão neste programa', sem nenhum percentual", async
   try {
     await naArea(page);
     const area = await page.locator("#affiliate-view").innerText();
-    assert.match(area, /sem comissão neste programa/);
-    assert.doesNotMatch(area, /10\s*%/);
+    assert.match(area, /Você participa sem comissão neste programa\./);
+    assert.doesNotMatch(area, /10\s*%|Você recebe/);
   } finally { await ctx.close(); }
 });
 
@@ -236,6 +239,7 @@ test("percentual fracionado sai em português, igual ao /painel", async () => {
     await naArea(page);
     const area = await page.locator("#affiliate-view").innerText();
     assert.match(area, /12,5% da primeira cobrança/);
+    assert.ok(area.includes(regra("12,5")));
     assert.doesNotMatch(area, /12\.5/);
   } finally { await ctx.close(); }
 });

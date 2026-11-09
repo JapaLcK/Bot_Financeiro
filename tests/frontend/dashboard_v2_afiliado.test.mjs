@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { navegador } from "./_guia.mjs";
 import { PROTOTIPO, RAIZ, servir } from "./_painel.mjs";
-import { ABAIXO, ATIVA, COM_SAQUE, DESATIVADA, EM_REVISAO, REJEITADO, ZERO, comAfiliado, quadros, servidor } from "./_afiliado.mjs";
+import { ABAIXO, ATIVA, COM_SAQUE, DESATIVADA, EM_REVISAO, REJEITADO, ZERO, comAfiliado, quadros, regra, servidor } from "./_afiliado.mjs";
 
 const browser = navegador();
 const itemLateral = (page) => page.locator(".rail-list a", { hasText: "Afiliado" });
@@ -149,12 +149,22 @@ test("afiliado 0%: 'sem comissão neste programa', nenhuma promessa de percentua
   });
 });
 
-// mutação: tirar a frase do Pix ou prometer "por cobrança": o texto volta a prometer o que o backend não paga
-test("a regra da comissão: só a primeira cobrança no cartão, e Pix não gera", async () => {
+// mutação: voltar ao texto antigo ("no cartão", "Pix não gera") ou tirar a frase do anual: a tela promete outra regra
+for (const [pct, p] of [[10, "10"], [100, "100"], [12.5, "12,5"]]) {
+  test(`a regra da comissão com ${p}%: uma vez por cliente, anual sobre 1/12`, async () => {
+    await comAfiliado(browser(), { corpo: { ...ATIVA, commission_percent: pct } }, async (t) => {
+      assert.equal(await t.page.locator("#afil-divulgar + p").innerText(), regra(p));
+    });
+  });
+}
+
+// mutação: tirar o ramo `paid_months === 12` de `Comissoes`: a linha anual volta a dizer "fatura de R$ 199,00"
+test("comissão anual: 'plano anual de R$ 199,00 (base 1/12)'; as mensais seguem 'fatura de'", async () => {
   await comAfiliado(browser(), {}, async (t) => {
-    const texto = await t.page.locator("#afil-divulgar + p").innerText();
-    assert.match(texto, /10% da primeira cobrança do plano no cartão/);
-    assert.match(texto, /Pix não gera comissão/);
+    await t.page.locator(".afil-lista").first().waitFor();
+    const linhas = await t.page.locator("#afil-comissoes ~ .afil-lista li p").allInnerTexts();
+    assert.match(linhas[1], /^plano anual de R\$\s*199,00 \(base 1\/12\) · /);
+    assert.equal(linhas.filter((l) => /^fatura de R\$/.test(l)).length, linhas.length - 1);
   });
 });
 

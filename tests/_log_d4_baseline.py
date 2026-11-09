@@ -13,6 +13,6 @@ DIVIDA: dict[tuple[str, str, str], int] = {
     ('frontend/finance_bot_websocket_custom.py', '_apply_referral_attribution', 'PRINT_CRU'): 1,
     ('frontend/finance_bot_websocket_custom.py', '_fire_email', 'PRINT_CRU'): 2,
     ('frontend/finance_bot_websocket_custom.py', 'billing_change_plan', 'PRINT_CRU'): 1,
-    ('frontend/finance_bot_websocket_custom.py', 'billing_webhook', 'PRINT_CRU'): 12,
+    ('frontend/finance_bot_websocket_custom.py', 'billing_webhook', 'PRINT_CRU'): 11,
     ('frontend/finance_bot_websocket_custom.py', 'websocket_endpoint', 'PRINT_CRU'): 1,
 }
