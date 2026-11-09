@@ -32,6 +32,7 @@ python3 -c "import fastapi" 2>&1 | tail -1     # ModuleNotFoundError → não é
 
   Vale também a partir de um worktree de `.claude/worktrees/` — o venv da raiz serve
   os dois.
+- **Em APFS o build do dashboard falha** (`./familia/Casa` resolve `casa.ts`): buildar `webapp/` num volume case-sensitive (`hdiutil create -fs "Case-sensitive APFS"`) e copiar `frontend/dashboard-app.*` de volta.
 - **As variáveis de ambiente continuam obrigatórias** (§3 do `CLAUDE.md`). Sem elas o import de
   `frontend/finance_bot_websocket_custom.py` chama `sys.exit(1)` na linha 277
   (`DATABASE_URL`) e o pytest morre com `INTERNALERROR` — de novo, não é falha de

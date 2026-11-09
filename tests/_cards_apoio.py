@@ -9,7 +9,6 @@ from decimal import Decimal
 import pytest
 
 import db
-from core.ai_patterns import generate_ai_insights
 import frontend.finance_bot_websocket_custom as dashboard
 from conftest import usuario_pagante
 from core.services.ai_chat import streaming
@@ -111,8 +110,6 @@ def mundo(monkeypatch):
     # a chave do /painel novo: o card `metas` e a tool `list_metas` só leem para quem a tem (P1-b).
     # Depois de semear: com a chave, a escrita manual de investimento é recusada (fonte única).
     monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", f"{a},{b}")
-    for uid in (a, b):
-        generate_ai_insights(uid, force=False)  # o card piggy só lê o cache de 6 h
     return a, b
 
 

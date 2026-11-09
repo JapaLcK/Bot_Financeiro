@@ -191,8 +191,7 @@ def detect_positive_result(user_id: int) -> list[dict[str, Any]]:
     calar o aviso por mais tempo, nunca celebrar sem motivo; o banco que parou antes do período comparado não cala), só
     a partir do dia `SOBRA_DESDE_DIA` do mês seguinte (P7) e algum lançamento nos primeiros `SOBRA_COBERTURA_DIAS` dias
     do mês base (P8). Fica no feed o resto do mês seguinte (P2), como `info`, sem `impacto` nem `acoes` (P3), por último
-    no laço (Q4b). O Repórter chama de sobra outra conta (P4, issue #1360). Limite (P9): o cache de insights não sabe de
-    um lançamento novo; a sobra mostrada pode estar até um TTL atrasada (D13). Gate: o de `insights`; `comparar_mes`
+    no laço (Q4b). O Repórter chama de sobra outra conta (P4, issue #1360). Gate: o de `insights`; `comparar_mes`
     exige `financial_comparison`, o mesmo tier."""
     from datetime import timedelta
 

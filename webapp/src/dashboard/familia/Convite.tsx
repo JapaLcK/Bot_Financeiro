@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { copiar as paraAreaDeTransferencia } from "../lib/copiar";
 import { ErroApi } from "../lib/v2";
 import { familiaQuery, gerarConvite, revogarConvite, validade, type Convite as DadosConvite } from "./api";
 import { focarTitulo, type useEscrita } from "./escrita";
@@ -31,7 +32,7 @@ export function Convite({ cheio, escrita }: { cheio: boolean; escrita: ReturnTyp
   };
   const copiar = () => {
     if (!convite) return;
-    Promise.resolve().then(() => navigator.clipboard.writeText(convite.link)).then(() => setAviso("Link copiado"), () => setAviso("Não foi possível copiar"));
+    paraAreaDeTransferencia(convite.link).then(() => setAviso("Link copiado"), () => setAviso("Não foi possível copiar"));
   };
   const compartilhar = () => { if (convite) navigator.share({ url: convite.link }).catch(() => {}); }; // cancelar o painel rejeita: não é erro
 

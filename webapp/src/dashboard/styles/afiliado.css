@@ -1,0 +1,57 @@
+/* A área do afiliado (afiliado/*.tsx). Sem flex gap (Safari 14): grid com gap ou margem negativa. Sem `overflow-wrap: anywhere` (idem): `word-break: break-word`. Rosa só no botão de ação; verde só em valor positivo e sucesso. */
+.afiliado h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.afiliado p { margin: 0; }
+.afiliado .panel { display: grid; row-gap: 12px; min-width: 0; padding: 16px 20px; }
+.afiliado .btn { min-height: 44px; height: auto; }
+.afiliado .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.afil-fora { display: grid; row-gap: 12px; justify-items: start; padding: 16px 20px; }
+.afil-aviso { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; margin: 0; padding: 12px 16px; border-radius: 8px; background: var(--warn-wash); font-size: 14px; word-break: break-word; }
+.afil-aviso p { margin: 0; }
+.afil-aviso .btn { min-height: 44px; height: auto; }
+p.afil-aviso { display: block; }
+
+/* Os 7 números numa folha só, não 7 cartões: a leitura é em fileira. */
+.afil-quadros { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 0; }
+@media (max-width: 760px) { .afil-quadros { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; } }
+.afil-quadros > div { min-width: 0; }
+.afil-quadros dt { font-size: 13px; color: var(--ink-3); }
+.afil-quadros dd { margin: 2px 0 0; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; word-break: break-word; }
+.afil-nota, .afil-quadros dd.afil-nota { font-size: 12px; font-weight: 400; }
+.afil-reembolsos { padding-top: 12px; border-top: 1px solid var(--rule); font-size: 14px; }
+
+.afil-copia { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; column-gap: 12px; }
+.afil-copia span { font-size: 13px; color: var(--ink-3); }
+.afil-copia code { min-width: 0; padding: 10px 12px; border-radius: 8px; background: var(--plane-2); font-size: 14px; word-break: break-all; }
+.afil-status:empty { display: none; }
+.afil-status { font-size: 14px; }
+
+.afil-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+.afil-form label { grid-column: 1 / -1; font-size: 13px; color: var(--ink-3); }
+.afil-campo { min-width: 0; min-height: 44px; padding: 0 12px; border: 1px solid var(--rule-strong); border-radius: 8px; background: var(--plane-2); color: var(--ink); font: inherit; font-size: 16px; } /* 16px: o Safari do iPhone não dá zoom ao focar */
+.afil-campo:disabled { opacity: 0.5; }
+
+.afil-lista { list-style: none; margin: 0; padding: 0; }
+.afil-lista li { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--rule); word-break: break-word; }
+.afil-lista li:last-child { border-bottom: 0; }
+.afil-lista b { font-size: 15px; font-weight: 600; }
+.afil-lista .faint { font-size: 12px; }
+.afil-motivo { font-size: 13px; margin-top: 4px; }
+.afil-motivo span { unicode-bidi: isolate; } /* texto do admin: a direção dele não vira a da frase */
+.afil-selos { display: grid; row-gap: 4px; justify-items: end; align-content: start; }
+.afil-selos .selo { height: auto; min-height: 22px; white-space: normal; text-align: right; }
+.afil-selos .selo.gain { color: var(--gain); } /* o `.selo` (controls.css) vem depois do `.gain` (base.css) e levaria a cor */
+.afil-selos .selo.warn { color: var(--warn); }
+/* Celular: o código e o link ganham a linha toda (ao lado do botão quebravam a cada 7 caracteres), e o campo da chave não divide a linha com o botão. */
+@media (max-width: 480px) {
+  .afil-copia { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
+  .afil-copia span { grid-column: 1 / -1; }
+  .afil-form { grid-template-columns: minmax(0, 1fr); }
+}
+.afil-vazio { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 10px; font-size: 14px; }
+
+/* O GET /afiliado: página própria, fora do `.shell`, e a única do /painel que o WebView do app alcança. O painel.html não carrega o shim de área segura: os insets são daqui (docs/armadilhas.md). */
+.afil-so { min-height: 100vh; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.afil-so-topo { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: 8px; max-width: 1240px; margin: 0 auto; padding: 12px var(--gutter); }
+.afil-so-topo .btn { min-height: 44px; height: auto; }
+.afil-so-marca { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 8px; font-weight: 600; }
+.afil-so .page { padding-bottom: 32px; }

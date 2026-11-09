@@ -36,6 +36,7 @@ from _billing_grants_helpers import conta, garantir_system_event_logs
 from _dreno_pix_helpers import efeitos, entregar, evento, ler, mundo_externo, nova_cobranca
 from core.services import email_service
 from core.services.pix_drain import drenar_evento
+from core.services.pix_drain_effects import EXECUTORES
 from db.affiliate_payments import marcar_reembolso, registrar_pagamento
 from db.affiliates import (
     create_affiliate,
@@ -292,6 +293,108 @@ def test_pix_parcial_com_o_afiliado_pendente_rotula_na_retentativa(externo, monk
     entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)  # ainda sem linha para marcar
     drenar_evento(eid)
     assert _numeros(c) == (1, 1, 0, 0, 1)
+
+
+def _grants_pix(ind):
+    return [g["status"] for g in list_grants(ind.uid) if g["source"] == "pix"]
+
+
+@pytest.mark.parametrize("depois", [("PAYMENT_REFUNDED",),
+                                    ("PAYMENT_PARTIALLY_REFUNDED", "PAYMENT_REFUNDED"),
+                                    ("PAYMENT_REFUNDED", "PAYMENT_CONFIRMED")],
+                         ids=["direto", "parcial_antes", "confirmed_depois"])
+@pytest.mark.parametrize("causa", ["registro", "email"])
+def test_pix_total_com_o_afiliado_pendente_grava_pagante_e_nao_reconcede(externo, monkeypatch, causa, depois):
+    """A retentativa da compra morre em D3: o pagante tem de nascer no estorno, e nada de compra
+    pode rodar. `grant` já está registrado nestas sequências, então é `afiliado` fora dos efeitos
+    e o e-mail sem repetir que ficam vermelhos se a guarda sair; o status do grant, não."""
+    c = _afiliado()
+    ind = _indicado(c)
+    cobranca = _pix(ind)
+    with monkeypatch.context() as m:
+        if causa == "registro":
+            m.setattr(pagamentos, "registrar_pagamento", _quebra)
+        externo["email_ok"] = causa != "email"
+        eid = entregar("PAYMENT_RECEIVED", cobranca)
+    externo["email_ok"] = True
+    assert evento(eid)["processed_at"] is None
+    for tipo in depois:
+        entregar(tipo, cobranca)
+    assert _numeros(c) == (1, 1, 1, 1, 0)  # antes de boot e de retentativa
+    drenar_evento(eid)
+    assert evento(eid)["processed_at"] is not None
+    assert _numeros(c) == (1, 1, 1, 1, 0)
+    assert _grants_pix(ind) == ["revoked"]
+    assert (externo["ga4"], externo["capi"], externo["email"]) == (1, 1, 1)
+    feito = efeitos(cobranca["asaas_payment_id"])
+    assert "grant" in feito and "afiliado" not in feito
+
+
+def test_pix_estorno_antes_do_pagamento_nao_cria_pagante(externo):
+    c = _afiliado()
+    ind = _indicado(c)
+    cobranca = _pix(ind)
+
+    def sem_pagante():
+        assert _linhas(c) == [] and _grants_pix(ind) == []
+        assert ler(cobranca["id"])["status"] == "pending"
+
+    entregar("PAYMENT_REFUNDED", cobranca)
+    sem_pagante()
+    entregar("PAYMENT_RECEIVED", cobranca)
+    sem_pagante()
+    db.init_db()
+    sem_pagante()
+
+
+def test_pix_falha_no_estorno_retenta_sem_reconceder(externo, monkeypatch):
+    c = _afiliado()
+    ind = _indicado(c)
+    cobranca = _pix(ind)
+    with monkeypatch.context() as m:
+        m.setattr(pagamentos, "registrar_pagamento", _quebra)
+        compra = entregar("PAYMENT_RECEIVED", cobranca)
+        estorno = entregar("PAYMENT_REFUNDED", cobranca)
+    assert evento(estorno)["processed_at"] is None and evento(estorno)["attempts"] == 1
+    feito = efeitos(cobranca["asaas_payment_id"])
+    assert "revoke" in feito and "afiliado_estorno" not in feito
+    assert _numeros(c) == (1, 0, 0, 0, 0)
+    drenar_evento(estorno)
+    assert evento(estorno)["processed_at"] is not None
+    assert "afiliado_estorno" in efeitos(cobranca["asaas_payment_id"])
+    drenar_evento(compra)
+    assert _numeros(c) == (1, 1, 1, 1, 0)
+    assert _grants_pix(ind) == ["revoked"]
+
+
+def test_pix_grant_que_falhou_nao_nasce_na_retentativa_depois_do_estorno(externo, monkeypatch):
+    """O único caso em que a D3 segura uma concessão de verdade: o `grant` ainda não rodou, e
+    a retentativa da compra reconcederia acesso a dinheiro devolvido."""
+    c = _afiliado()
+    ind = _indicado(c)
+    cobranca = _pix(ind)
+    with monkeypatch.context() as m:
+        m.setitem(EXECUTORES, "grant", _quebra)
+        compra = entregar("PAYMENT_RECEIVED", cobranca)
+    entregar("PAYMENT_REFUNDED", cobranca)
+    drenar_evento(compra)
+    assert evento(compra)["processed_at"] is not None and _grants_pix(ind) == []
+    assert "grant" not in efeitos(cobranca["asaas_payment_id"])
+    assert (externo["ga4"], externo["capi"], externo["email"]) == (0, 0, 0)
+
+
+def test_pix_estorno_em_chargeback_rotula_a_linha_que_ja_existe(externo):
+    """`chargeback` (reparo manual) não é origem do `PAYMENT_REFUNDED`: a cobrança chega ao
+    efeito sem virar `refunded`, e a linha gravada na compra ainda tem de ganhar o rótulo."""
+    c = _afiliado()
+    cobranca = _pix(_indicado(c))
+    entregar("PAYMENT_RECEIVED", cobranca)
+    with get_conn() as conn:
+        conn.execute("update pix_charges set status = 'chargeback' where id = %s", (cobranca["id"],))
+        conn.commit()
+    entregar("PAYMENT_REFUNDED", cobranca)
+    assert ler(cobranca["id"])["status"] == "chargeback"
+    assert _numeros(c) == (1, 1, 1, 1, 0)
 
 
 @pytest.mark.parametrize("tipo,esperado", [("PAYMENT_REFUNDED", (1, 1, 1, 1, 0)),

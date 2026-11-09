@@ -8,11 +8,14 @@ conexão (chrome renderiza; dados ficam vazios). Estender com dados fake
 quando precisar validar os gráficos.
 
 Uso:  python scripts/mock_dashboard.py      → http://localhost:8010/
+      MOCK_AFILIADO=ativa|desativada|zero python scripts/mock_dashboard.py
+      → a área do afiliado do /app; sem a variável, 404 (não é afiliado).
 Nada aqui toca .env, banco ou a app real.
 """
 from __future__ import annotations
 
 import mimetypes
+import os
 import pathlib
 
 import uvicorn
@@ -22,6 +25,24 @@ from fastapi.websockets import WebSocketDisconnect
 
 FRONTEND = pathlib.Path(__file__).resolve().parent.parent / "frontend"
 app = FastAPI()
+
+
+@app.get("/api/affiliate/me")
+async def afiliado():
+    modo = os.environ.get("MOCK_AFILIADO", "")
+    if modo not in ("ativa", "desativada", "zero"):
+        return JSONResponse({"detail": "Você não faz parte do programa de afiliados."}, status_code=404)
+    comissao = {"id": 1, "invoice_amount": 59.9, "amount": 5.99, "status": "pending",
+                "available_at": "2026-01-01T12:00:00+00:00", "payout_id": None,
+                "payment_refund": "partial", "created_at": "2025-12-02T12:00:00+00:00"}
+    return {"code": "ANA2026", "status": "disabled" if modo == "desativada" else "active",
+            "link": "http://localhost:8010/r/ANA2026",
+            "commission_percent": 0 if modo == "zero" else 10.0,
+            "has_pix_key": False, "min_payout": 50.0, "hold_days": 30,
+            "stats": {"referrals": 12, "paying_clients": 6, "refunded_clients": 1,
+                      "generated": 390.0, "held": 30.0, "available": 120.0,
+                      "requested": 40.0, "paid": 200.0, "refunds": {"total": 1, "partial": 1}},
+            "commissions": [comissao], "payouts": []}
 
 
 @app.get("/auth/validate")
