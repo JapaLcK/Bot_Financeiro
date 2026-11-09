@@ -20,8 +20,12 @@ def listar_admin() -> list[dict]:
         cur.execute(
             f"""
             select r.id, r.tipo, r.status, r.refunded_cents, r.amount_cents, r.recovery_cents, r.refunded_at,
-                   r.notified_at, c.id as commission_id, coalesce(c.amount_cents, r.commission_cents) as commission_cents,
-                   c.status as commission_status, p.id as payout_id, p.status as payout_status,
+                   r.notified_at, c.id as commission_id,
+                   -- A comissão que saiu com o afiliado é a da linha: paga (`paid_cents`) ou no saque órfão.
+                   coalesce(c.amount_cents, r.paid_cents, r.commission_cents) as commission_cents,
+                   coalesce(c.status, case when r.paid_cents is not null then 'paid'
+                                           when r.orphan_payout_id is not null then 'pending' end) as commission_status,
+                   p.id as payout_id, p.status as payout_status,
                    p.amount_cents as payout_cents, p.paid_at as payout_paid_at,
                    coalesce(a.code, r.affiliate_code) as code, a.id is null as affiliate_deleted,
                    (select e.action from affiliate_refund_review_events e

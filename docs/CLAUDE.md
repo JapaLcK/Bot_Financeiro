@@ -2752,7 +2752,9 @@ alterar saldos: estorna comissão solta com reembolso total confirmado.** Sem el
 com `DATABASE_URL` e `STRIPE_SECRET_KEY` de produção:
 `.venv/bin/python scripts/backfill_afiliado_pagamentos.py [--aplicar]`. A primeira passada é sobre
 comissões `status <> 'reversed'`, antes da de rótulo, que morrendo no meio deixaria `total` sem
-pendência, e porque conta excluída só existe por ali. **O script trata disputa** (decisão do dono, muda
+pendência, e porque conta excluída só existe por ali. Ela percorre também a linha da fatura cuja
+comissão saiu com o afiliado (`paid_cents`, ou `orphan_payout_id` de saque órfão ainda aberto), pela
+mesma `registrar_reembolso`, e a lista como `pendência N`; órfão rejeitado fica fora. **O script trata disputa** (decisão do dono, muda
 o D5): usa `devolvido_na_stripe`, a mesma regra da conferência, numa função só. Disputa perdida conta
 como devolvida e segue estorno ou revisão; ganha não conta; aberta fica listada sem alteração.
 Reembolso total confirmado é ao menos uma cobrança e todas devolvidas por inteiro (reembolso mais
@@ -2806,7 +2808,9 @@ pela FK `set null`. Reembolso que chega depois é decidido pela linha (`_comissa
 a regra da paga (total vira recuperação; parcial vai para revisão e o admin decide pelo `paid_cents`);
 no saque órfão aberto, a regra da comissão em saque, e a pendência `open` bloqueia o órfão
 (`SAQUE_BLOQUEADO_SQL` lê também `orphan_payout_id`). Recuperação segue no admin e encerra como antes;
-o histórico e a recuperação apontam o saque pelo vínculo ou pelo `payout_id` do evento.
+o histórico e a recuperação apontam o saque pelo vínculo ou pelo `payout_id` do evento. No bloco
+"Reembolsos para revisar", a linha mostra o valor e a situação que a comissão tinha (paga ou no saque
+órfão), com o selo "conta excluída", e a revisão de comissão paga diz que a diferença vira recuperação.
 Saque `requested` vira órfão (D9 = A): "Marcar pago" dá 409 e o QR, 422 (sem chave); o admin registra
 "Pagamento já realizado" ou rejeita (sem nota). "Pagamento já realizado" no órfão grava `paid_cents` nas
 linhas do vínculo: total aberta vira recuperação na hora, e reembolso posterior vira recuperação. Revisão

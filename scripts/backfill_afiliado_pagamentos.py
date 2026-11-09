@@ -4,6 +4,8 @@ ATENÇÃO: `--aplicar` PODE ALTERAR SALDOS. Duas passadas, nesta ordem:
 
 1. Comissões (`status <> 'reversed'`), antes de tudo: a passada de rótulo, morrendo no meio, deixaria
    `total` sem pendência. Sobre comissões, e não sobre clientes, porque conta excluída só existe aqui.
+   Inclui a linha da fatura cuja comissão saiu com o afiliado (paga, ou em saque órfão aberto),
+   listada como `pendência N`.
    A regra é a da conferência (`devolvido_na_stripe`, uma só): disputa perdida conta como devolvida,
    ganha não conta, aberta não confirma. Reembolso total confirmado = ao menos uma cobrança, todas
    devolvidas por inteiro. Alguma devolvida, mas não todas, é parcial. Categorias:
@@ -62,11 +64,20 @@ def _comissoes() -> list[dict]:
         return conn.execute(
             """
             select c.id, c.stripe_invoice_id as fatura, c.status, c.payout_id, c.amount_cents,
-                   r.tipo as registrada_tipo, r.refunded_cents as registrada_cents
+                   r.tipo as registrada_tipo, r.refunded_cents as registrada_cents, false as sem_comissao
               from affiliate_commissions c
               left join affiliate_refund_reviews r on r.stripe_invoice_id = c.stripe_invoice_id
              where c.status <> 'reversed'
-             order by c.id
+            union all
+            -- A comissão saiu com o afiliado (N5): a linha da fatura guarda o que foi pago ou o saque órfão
+            -- ainda aberto. Órfão rejeitado fica fora: a comissão nunca foi paga.
+            select r.id, r.stripe_invoice_id, case when r.paid_cents is not null then 'paid' else 'pending' end,
+                   r.orphan_payout_id, coalesce(r.paid_cents, r.commission_cents), r.tipo, r.refunded_cents, true
+              from affiliate_refund_reviews r
+             where r.commission_id is null
+               and (r.paid_cents is not null
+                    or exists (select 1 from affiliate_payouts p where p.id = r.orphan_payout_id and p.status = 'requested'))
+             order by sem_comissao, id
             """).fetchall()
 
 
@@ -86,6 +97,8 @@ def _reembolso_confirmado(stripe, fatura_id: str, chave: str) -> tuple[str | Non
 
 def _categoria(c: dict, linha: dict | None) -> str:
     """O que aconteceu, relido depois de `registrar_reembolso`: o relatório não conta previsão."""
+    if c["sem_comissao"]:  # sem comissão não há o que estornar
+        return "segue_revisao" if linha and linha["status"] in ("open", "recovery") else "ja_registrada"
     with get_conn() as conn:
         estornada = conn.execute("select status = 'reversed' as r from affiliate_commissions where id = %s",
                                  (c["id"],)).fetchone()["r"]
@@ -110,7 +123,11 @@ def _comissao(stripe, c: dict, chave: str, aplicar: bool, n: Counter) -> None:
     if categoria == "ja_registrada":
         return
     n[f"{categoria}_cents"] += c["amount_cents"]
-    print(f"{categoria}: comissão {c['id']} · R$ {c['amount_cents'] / 100:.2f}{desfecho}")
+    print(f"{categoria}: {_quem(c)} · R$ {c['amount_cents'] / 100:.2f}{desfecho}")
+
+
+def _quem(c: dict) -> str:
+    return f"pendência {c['id']}" if c["sem_comissao"] else f"comissão {c['id']}"
 
 
 def _passar_comissoes(stripe, chave: str, aplicar: bool, n: Counter) -> None:
@@ -122,10 +139,10 @@ def _passar_comissoes(stripe, chave: str, aplicar: bool, n: Counter) -> None:
             _comissao(stripe, c, chave, aplicar, n)
         except SemConfirmacao as exc:
             n["sem_confirmacao"] += 1
-            print(f"sem_confirmacao: comissão {c['id']} · {exc}")
+            print(f"sem_confirmacao: {_quem(c)} · {exc}")
         except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer o id da fatura
             n["sem_confirmacao"] += 1
-            print(f"sem_confirmacao: comissão {c['id']} · {type(exc).__name__}")
+            print(f"sem_confirmacao: {_quem(c)} · {type(exc).__name__}")
 
 
 def _clientes() -> list[dict]:

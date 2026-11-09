@@ -216,3 +216,32 @@ test("comissões aguardando conferência aparecem com a mais antiga; sem nenhuma
     assert.equal(await sem.page.locator("#aff-checks").isVisible(), false);
   } finally { await sem.page.close(); }
 });
+
+const EXCLUIDO = {
+  ...VISAO,
+  refund_reviews: [
+    pendencia(4, { code: "EVA2026", commission_id: null, commission_cents: 8000, commission_status: "paid", payout_id: 5, affiliate_deleted: true, refunded_cents: 24000 }),
+    pendencia(5, { code: "EVA2026", commission_id: null, commission_status: "pending", payout_id: 9, affiliate_deleted: true }),
+    pendencia(6),
+  ],
+};
+
+// mutação: tirar o selo de `renderRefundBlocks`, ou o ramo `commission_status === 'paid'` do formulário
+for (const [nome, width, height] of TAMANHOS) {
+  test(`revisão de afiliado excluído: selo, valor pago e o texto de recuperação (${nome})`, async () => {
+    const { page } = await abrir({ width, height, visao: EXCLUIDO });
+    try {
+      const [paga, orfa, viva] = await page.locator("#aff-reviews tr").all();
+      assert.match(await paga.innerText(), /R\$ 80,00[\s\S]*já paga[\s\S]*conta excluída/);
+      assert.match(await orfa.innerText(), /no saque 9[\s\S]*conta excluída/);
+      assert.doesNotMatch(await viva.innerText(), /conta excluída/);  // positivo
+      await paga.getByRole("button", { name: "Revisar valor" }).click();
+      assert.equal(await page.locator("#aff-f-value").getAttribute("max"), "80.00");
+      const dica = await page.locator("#aff-form-hint").innerText();
+      assert.match(dica, /já paga/i);
+      assert.match(dica, /diferença vira recuperação/);
+      assert.doesNotMatch(dica, /volta ao saldo/);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+    } finally { await page.close(); }
+  });
+}

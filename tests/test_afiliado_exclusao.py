@@ -44,7 +44,7 @@ from test_afiliado_pendencia import (  # noqa: F401
     adm,
     canal,
 )
-from test_afiliado_reembolso import _logs, _paga, mundo  # noqa: F401
+from test_afiliado_reembolso import _logs, _paga, mundo, script  # noqa: F401
 
 
 def _excluir(c):
@@ -491,3 +491,88 @@ def test_orfao_corrida_webhook_e_pagamento_realizado(canal, adm, primeiro):
         f1.result(timeout=20)
         f2.result(timeout=20)
     assert (_saque_db(saque)["status"], _rev(a.fatura)["status"], _rev(a.fatura)["recovery_cents"]) == ("paid", "recovery", 10_000)
+
+
+# ── B1: o admin vê a comissão que saiu com o afiliado como ela era ──
+
+def _revisar_no_admin(adm, rev):
+    return next(r for r in adm.get(OVERVIEW).json()["refund_reviews"] if r["id"] == rev["id"])
+
+
+def test_admin_ve_comissao_paga_de_afiliado_excluido(canal, adm):
+    """Paga de R$ 80, reembolso de 30%, exclusão: o admin vê R$ 80 já pagos, e a diferença vira recuperação."""
+    from test_afiliado_reembolso import _cobranca, _enviar
+    c = _afiliado()
+    com, saque = _paga_e_saca(c, 80)
+    assert _enviar("charge.refunded", _cobranca(com.fatura, amount=80_000, devolvido=24_000)).status_code == 200
+    _excluir(c)
+    linha = _revisar_no_admin(adm, _rev(com.fatura))
+    assert (linha["commission_cents"], linha["commission_status"], linha["affiliate_deleted"], linha["code"]) == (
+        8_000, "paid", True, c.aff["code"])
+    assert _aprovar(adm, com, 5_600).status_code == 200
+    assert (_rev(com.fatura)["status"], _rev(com.fatura)["recovery_cents"]) == ("recovery", 2_400)
+
+
+def test_admin_ve_pendencia_do_saque_orfao(canal, adm):
+    """A parcial que já estava aberta no saque: valor, saque e "conta excluída" vêm do vínculo."""
+    c = _afiliado()
+    a, _ = _paga(c), _paga(c, 70)
+    saque = _saque_com_pix(c)
+    _parcial(a)
+    _excluir(c)
+    linha = _revisar_no_admin(adm, _rev(a.fatura))
+    assert (linha["commission_cents"], linha["commission_status"], linha["payout_id"], linha["affiliate_deleted"]) == (
+        10_000, "pending", saque, True)
+
+
+def test_admin_ve_comissao_viva_como_antes(canal, adm):
+    """Positivo: afiliado ativo segue com valor, status e saque da comissão, sem o selo."""
+    c = _afiliado()
+    a, _ = _paga(c), _paga(c, 70)
+    saque = _saque_com_pix(c)
+    _parcial(a)
+    linha = _revisar_no_admin(adm, _rev(a.fatura))
+    assert (linha["commission_cents"], linha["commission_status"], linha["payout_id"], linha["affiliate_deleted"]) == (
+        10_000, "pending", saque, False)
+
+
+# ── N5: o script vê a fatura de afiliado excluído ──
+
+@pytest.mark.parametrize("caso", ["paga", "orfao"])
+def test_script_ve_fatura_de_afiliado_excluido(adm, script, capsys, caso):
+    """Stripe com a fatura 100% devolvida e o webhook perdido: o `--aplicar` tem de chegar à linha que ficou."""
+    c = _afiliado()
+    if caso == "paga":
+        com, saque = _paga_e_saca(c)
+    else:
+        com, _ = _paga(c), _paga(c, 70)
+        saque = _saque_com_pix(c)
+    _excluir(c)
+    script.stripe.cobrancas[com.fatura] = {"amount": 100_000, "amount_refunded": 100_000, "disputed": False}
+    capsys.readouterr()
+    script.rodar(aplicar=False)
+    simulacao = capsys.readouterr().out
+    assert _rev(com.fatura)["status"] == "resolved"  # simulação não grava
+    script.rodar(aplicar=True)
+    saida = capsys.readouterr().out
+    rev = _rev(com.fatura)
+    if caso == "paga":
+        assert (rev["status"], rev["recovery_cents"]) == ("recovery", 10_000)
+    else:
+        assert rev["status"] == "open" and _pagar(adm, saque).status_code == 409
+    assert f"segue_revisao: pendência {rev['id']} " in simulacao and f"segue_revisao: pendência {rev['id']} " in saida
+    assert [p for p in (com.fatura, com.indicado.email, c.email) if p in simulacao + saida] == []
+
+
+def test_script_ignora_orfao_rejeitado(adm, script, capsys):
+    """Positivo: a comissão do saque rejeitado nunca foi paga; o script não abre nada."""
+    c = _afiliado()
+    com, _ = _paga(c), _paga(c, 70)
+    saque = _saque_com_pix(c)
+    _excluir(c)
+    assert _rejeitar(adm, saque).status_code == 200
+    script.stripe.cobrancas[com.fatura] = {"amount": 100_000, "amount_refunded": 100_000, "disputed": False}
+    capsys.readouterr()
+    script.rodar(aplicar=False)
+    script.rodar(aplicar=True)
+    assert _rev(com.fatura)["status"] == "resolved" and f"pendência {_rev(com.fatura)['id']} " not in capsys.readouterr().out

@@ -2732,7 +2732,7 @@ function renderRefundBlocks(data) {
         <td data-label="Comissão"><strong>${fmtCents(r.commission_cents)}</strong></td>
         <td data-label="Reembolso">${r.tipo === 'total' ? 'total' : 'parcial'}</td>
         <td data-label="Devolvido">${fmtCents(r.refunded_cents)}</td>
-        <td data-label="Onde está">${esc(onde)}</td>
+        <td data-label="Onde está"><span>${esc(onde)}${r.affiliate_deleted ? ' · <span class="aff-selo">conta excluída</span>' : ''}</span></td>
         <td data-label="Aviso">${r.notified_at ? 'entregue' : 'pendente'}</td>
         <td data-actions>${acao}</td>
       </tr>`;

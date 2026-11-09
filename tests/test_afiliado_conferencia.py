@@ -340,3 +340,18 @@ def test_script_trata_disputa_pela_regra_da_conferencia(script, capsys, disputa,
     assert (status, rev and rev["status"]) == esperado
     if disputa == "needs_response":
         assert f"sem_confirmacao: comissão {com.id} · disputa_aberta" in saida and n["sem_confirmacao"] >= 1
+
+
+def test_lista_diz_em_conferencia_pelo_banco(fonte):
+    """Mutação 16: `checking` vem da marca no banco; conferida, volta a falso."""
+    import stripe
+    from test_afiliado_area import _me
+    c = _afiliado()
+    ind, fatura = _nova(c)
+    fonte.cobra(fatura)
+    fonte.falha = stripe.APIConnectionError("fora")
+    _invoice_paid(ind, fatura)
+    assert [x["checking"] for x in _me(c)["commissions"]] == [True]
+    fonte.falha = None
+    servico.conferir_pendentes()
+    assert [x["checking"] for x in _me(c)["commissions"]] == [False]
