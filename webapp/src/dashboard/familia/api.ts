@@ -80,11 +80,16 @@ const DD_MM = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, day: "2-digit",
 export const validade = (iso: string) => DD_MM.format(instante(iso));
 
 export type Falha = { texto: string; plano?: true };
+/** O card de "a família é do Pro" (FalhaFamilia): quem pode assinar (titular, ou quem ainda não tem família) × o membro, que só espera o titular. */
+export const AVISO_PRO = {
+  titular: { titulo: "A família é do plano Pro", texto: "Junte até 3 pessoas num plano só. Cada um ganha o Plus, escolhe o que compartilhar, e a casa tem metas e orçamentos em conjunto." },
+  membro: { titulo: "A família está pausada", texto: "Quem criou a família precisa do plano Pro para ela continuar ativa. Suas metas e permissões ficam guardadas." },
+};
 /** O erro de uma escrita em texto da tela. O texto do servidor (inglês, genérico) nunca vai para a tela. */
 export function falhaFamilia(e: unknown): Falha {
   const s = e instanceof ErroApi ? e.status : 0;
   const c = e instanceof ErroApi ? e.code : "";
-  if (s === 402) return { texto: "Seu plano não inclui família.", plano: true };
+  if (s === 402) return { texto: "A família faz parte do plano Pro.", plano: true };
   if (s === 429) return { texto: "Muitas tentativas. Tente de novo mais tarde." };
   if (c === "aggregates_required") return { texto: "Libere o resumo primeiro." };
   if (c === "full") return { texto: "Todos os lugares estão ocupados." };

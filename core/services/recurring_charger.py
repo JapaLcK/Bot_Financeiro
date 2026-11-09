@@ -26,9 +26,10 @@ import asyncio
 import calendar
 import os
 import sys
-import traceback
 from datetime import date, datetime, timedelta
 
+from core.observability import falha_de_tarefa
+from core.pg_text import causa_segura
 from utils_date import now_tz
 
 
@@ -44,8 +45,7 @@ async def run_recurring_charger_loop():
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            print(f"[bills] erro: {exc}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
+            falha_de_tarefa("[bills]", exc)
         # Uma leitura do relógio pros dois passos: a volta que cruza a meia-noite
         # grava e envia no mesmo dia lógico (senão o aviso de D some ou sai em D+1).
         agora = now_tz()
@@ -54,8 +54,7 @@ async def run_recurring_charger_loop():
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            print(f"[autopay_notice] erro: {exc}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
+            falha_de_tarefa("[autopay_notice]", exc)
         try:
             await asyncio.to_thread(notify_autopay_notices_whatsapp_once, agora)
         except asyncio.CancelledError:
@@ -158,7 +157,7 @@ def sync_manual_bills_once(today: date | None = None, user_id: int | None = None
             ensure_bill_instance(int(rec["id"]), int(rec["user_id"]), due, float(rec["amount"]))
             n += 1
         except Exception as exc:
-            print(f"[bills] falhou gerar instancia rec={rec.get('id')}: {exc}", file=sys.stderr)
+            print(f"[bills] falhou gerar instancia rec={rec.get('id')}: {causa_segura(exc)}", file=sys.stderr)
     return n
 
 
@@ -194,7 +193,7 @@ def sync_autopay_notices_once(today: date | None = None) -> int:
         try:
             n += ensure_autopay_notice(int(rec["id"]), int(rec["user_id"]), float(rec["amount"]), key, today)
         except Exception as exc:
-            print(f"[autopay_notice] falhou rec={rec.get('id')}: {exc}", file=sys.stderr)
+            print(f"[autopay_notice] falhou rec={rec.get('id')}: {causa_segura(exc)}", file=sys.stderr)
     return n
 
 

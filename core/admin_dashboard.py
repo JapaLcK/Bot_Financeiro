@@ -29,7 +29,7 @@ from core.crypto import (
     encrypt_pii_optional,
     pii_audit_batch,
 )
-from core.pg_text import detalhe_seguro, limpa_para_pg, quadros_da_cadeia, redigir_failing_row
+from core.pg_text import causa_segura, detalhe_seguro, limpa_para_pg, quadros_da_cadeia, redigir_failing_row
 from core.secure_compare import constant_time_eq
 from core.system_event_log import statement_timeout_options
 
@@ -200,7 +200,7 @@ async def log_auth_login_event(
             except Exception:
                 pass
     except Exception as exc:
-        print(f"[admin] failed to record auth login event: {exc}", file=sys.stderr)
+        print(f"[admin] failed to record auth login event: {causa_segura(exc)}", file=sys.stderr)
 
 
 async def log_system_event(
@@ -249,7 +249,7 @@ async def log_system_event(
                 )
             await conn.commit()
     except Exception as exc:
-        print(f"[admin] failed to record system event: {exc}", file=sys.stderr)
+        print(f"[admin] failed to record system event: {causa_segura(exc)}", file=sys.stderr)
 
 
 def admin_enabled() -> bool:
@@ -1649,7 +1649,7 @@ async def log_admin_startup_warnings() -> None:
                 )
             await conn.commit()
     except Exception as exc:
-        print(f"[admin] failed to record startup warnings: {exc}", file=sys.stderr)
+        print(f"[admin] failed to record startup warnings: {causa_segura(exc)}", file=sys.stderr)
 
 
 def status_do_erro(exc: Exception) -> tuple[int, str]:

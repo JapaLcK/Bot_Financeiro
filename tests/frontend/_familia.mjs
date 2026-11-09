@@ -168,8 +168,8 @@ export async function abrirVer({ membro = MARIA, ...opts } = {}) {
 }
 
 /** A tela da casa (#/casa). `casa`: o corpo do GET (null = sem família). */
-export async function abrirCasa({ width = 1280, height = 800, plano = "plus", casa = F.casa, esperar = true, ...opts } = {}) {
-  const s = servidor();
+export async function abrirCasa({ width = 1280, height = 800, plano = "plus", casa = F.casa, visao = null, esperar = true, ...opts } = {}) {
+  const s = servidor({ visao });
   s.casa = casa === null ? null : structuredClone(casa);
   const p = await abrir({ guia: "concluido", width, height, plano, rota: "/casa", antes: async (ctx) => { await opts.antes?.(ctx, s); await s.antes(ctx); } });
   const { page } = p;

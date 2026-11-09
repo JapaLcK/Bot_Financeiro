@@ -3,6 +3,7 @@ db/schema.py — DDL e inicialização do banco de dados.
 """
 import logging
 
+from core.pg_text import causa_segura
 from core.services.demo.dados import CODIGO_PADRAO
 
 from .connection import get_conn
@@ -3602,7 +3603,7 @@ def _run_ddl(conn, ddl_statements) -> None:
                 try:
                     cur.execute(stmt)
                 except Exception as e:
-                    print(f"[init_db] erro no statement #{i}: {e}")
+                    print(f"[init_db] erro no statement #{i}: {causa_segura(e)}")
                     print(stmt)
                     raise
 
@@ -3619,7 +3620,7 @@ def _run_ddl(conn, ddl_statements) -> None:
                     print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
                 ensure_lower_name_unique(cur)
             except Exception as e:
-                print(f"[init_db] schema_repairs falhou: {e}")
+                print(f"[init_db] schema_repairs falhou: {causa_segura(e)}")
                 raise
 
             _backfill_afiliado_pagamentos(cur)

@@ -18,7 +18,7 @@ from typing import Any
 # — ele é o módulo sem `logging`, justamente para não reentrar no handler).
 # `load_app_env()` sai junto: quem o chama agora é o módulo importado abaixo,
 # então o efeito colateral de import continua acontecendo.
-from core.pg_text import redigir_failing_row
+from core.pg_text import causa_segura, quadros_da_cadeia, redigir_failing_row
 from core.system_event_log import log_system_event_sync, recent_event_exists
 
 # ── Logger centralizado ───────────────────────────────────────────────────────
@@ -186,6 +186,11 @@ def _log_falha(op: str, user_id: int, e: Exception, *,
         exc_info=e if com_traceback else None,
         extra={"user_id": user_id},
     )
+
+
+def falha_de_tarefa(tag: str, exc: BaseException) -> None:
+    """Topo de tarefa de fundo (P3 b da #657): tipo, sqlstate e status, e os quadros da pilha sem a linha final."""
+    print(f"{tag} erro: {causa_segura(exc)}\n{quadros_da_cadeia(exc)[0]}", file=sys.stderr, end="")
 
 
 def _sem_ratelimit_no_banco(record: logging.LogRecord) -> bool:

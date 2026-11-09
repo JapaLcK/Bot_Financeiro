@@ -25,6 +25,7 @@ def test_excecao_crua():
     _confere([
         ('print(f"x {exc}")', "PRINT_CRU", 'print(f"x {causa_segura(exc)}")'),
         ('print(f"x {detalhe_seguro(exc)}")', "PRINT_CRU", 'print(f"x {_falha_da_pluggy(exc)}")'),
+        ('print(f"x {_rotulo(exc)}")', "PRINT_CRU", 'print(f"x {_desfecho(exc)}")'),
         ('print(f"x {exc!r}")', "PRINT_CRU", 'print(f"x {type(exc).__name__}")'),
         ("traceback.print_exc()", "PRINT_CRU", "print(quadros_da_cadeia(exc)[0])"),
         ("sys.stderr.write(str(exc))", "PRINT_CRU", 'sys.stderr.write("x")'),

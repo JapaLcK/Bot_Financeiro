@@ -103,7 +103,7 @@ _N_MSG = {"_log_event": 2}      # scripts/account_deletion_job.py: (level, messa
 _EXC_SEGURA = {"sqlstate", "constraint_name", "status_code", "__class__", "motivo", "codigo"}
 _MASCARAS = {"mask_phone", "mascarar_email", "_mask_email", "mask_wamid"}
 # Valem pelo NOME: o que está dentro deles não conta como exceção crua.
-_SANEADORES = {"causa_segura", "causa_do_provedor", "_falha_da_pluggy", "quadros_da_cadeia"}
+_SANEADORES = {"causa_segura", "causa_do_provedor", "_falha_da_pluggy", "quadros_da_cadeia", "_desfecho"}
 
 # Fora do ratchet, com o motivo. Cada entrada cobre UMA ocorrência da chave: uma
 # segunda na mesma função volta ao ratchet (`_atual`). Chave que nenhum código

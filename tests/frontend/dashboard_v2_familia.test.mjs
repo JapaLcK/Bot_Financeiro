@@ -60,19 +60,19 @@ test("criar família: um POST, com CSRF e content-type json; clique duplo = 1 pe
   });
 });
 
-test("criar sem plano que cubra: uma linha com o link para a Cobrança", async () => {
+test("criar sem plano que cubra: card de upgrade com o CTA para /precos", async () => {
   await com({}, async ({ s, bt, secao }) => {
     s.criar = ERRO(402, "family_coverage_required");
     await bt("Criar família").click();
-    await secao.getByText("Seu plano não inclui família.").waitFor();
-    const l = secao.getByRole("link", { name: "Ver cobrança" });
-    assert.equal(await l.getAttribute("href"), "#/conta/cobranca");
+    await secao.getByText("A família é do plano Pro").waitFor();
+    const l = secao.getByRole("link", { name: "Ver o Pro" });
+    assert.equal(await l.getAttribute("href"), "/precos");
     await bt("Criar família").waitFor(); // o botão volta
   });
   await com({}, async ({ s, bt, secao }) => { // o 402 do gate de plano (free) tem outro código e o mesmo texto
     s.criar = ERRO(402, "plan_selection_required");
     await bt("Criar família").click();
-    await secao.getByText("Seu plano não inclui família.").waitFor();
+    await secao.getByText("A família é do plano Pro").waitFor();
   });
 });
 
@@ -146,7 +146,7 @@ test("convite: família cheia desabilita o botão; os erros do servidor viram te
     assert.equal(await bt("Gerar link de convite").isDisabled(), true);
     assert.equal(escritas().length, 0);
   });
-  for (const [status, code, esperado] of [[409, "full", "Todos os lugares estão ocupados."], [429, "rate_limited", "Muitas tentativas. Tente de novo mais tarde."], [402, "family_coverage_required", "Seu plano não inclui família."]]) {
+  for (const [status, code, esperado] of [[409, "full", "Todos os lugares estão ocupados."], [429, "rate_limited", "Muitas tentativas. Tente de novo mais tarde."], [402, "family_coverage_required", "A família é do plano Pro"]]) {
     await com({ visao: titular({ membros: [] }) }, async ({ s, bt, secao }) => {
       s.convidar = ERRO(status, code);
       await bt("Gerar link de convite").click();
@@ -278,5 +278,32 @@ test("toda escrita leva x-csrf-token e content-type json", async () => {
     const e = escritas();
     assert.equal(e.length, 5);
     for (const q of e) assert.deepEqual([q.csrf, q.tipo], ["tok-123", "application/json"], `${q.metodo} ${q.caminho}`);
+  });
+});
+
+// mutação: tirar `!membro` do CTA (escrita.tsx) -> o membro ganha o botão de compra; tirar `!noApp` -> o app iOS ganha (3.1.1); inverter o `membro` da Casa/Familia -> o titular vê "pausada".
+test("card de upgrade: titular com CTA, membro sem CTA, app sem CTA", async () => {
+  const MEMBRO = "A família está pausada", TITULAR = "A família é do plano Pro";
+  await com({}, async ({ s, bt, secao }) => { // sem família: pode assinar
+    s.criar = ERRO(402, "family_coverage_required");
+    await bt("Criar família").click();
+    await secao.getByText(TITULAR).waitFor();
+    assert.equal(await secao.getByRole("link", { name: "Ver o Pro" }).count(), 1);
+    assert.equal(await secao.getByText(MEMBRO).count(), 0);
+  });
+  await com({ visao: F.membro }, async ({ page, s, secao }) => { // membro: texto de pausa, sem compra
+    s.liberar = ERRO(402, "family_coverage_required");
+    await page.getByRole("switch").first().click();
+    await secao.getByText(MEMBRO).waitFor();
+    assert.match(await secao.innerText(), /Suas metas e permissões ficam guardadas\./);
+    assert.equal(await secao.getByRole("link", { name: "Ver o Pro" }).count(), 0);
+    assert.equal(await secao.getByText(TITULAR).count(), 0);
+  });
+  await com({ antes: (ctx) => ctx.addInitScript(() => { window.PB_IN_APP = true; }) }, async ({ s, bt, secao }) => { // app iOS: texto sem botão
+    s.criar = ERRO(402, "family_coverage_required");
+    await bt("Criar família").click();
+    await secao.getByText(TITULAR).waitFor();
+    assert.match(await secao.innerText(), /Junte até 3 pessoas/);
+    assert.equal(await secao.getByRole("link", { name: "Ver o Pro" }).count(), 0);
   });
 });

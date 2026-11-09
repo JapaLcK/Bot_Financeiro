@@ -244,7 +244,7 @@ def test_i6_dissolvido_tambem_e_invite_invalid(w):
 
 
 def test_i7_sair_derruba_o_tier_na_hora_e_segundo_sair_404(w):
-    assert w.chamar(w.ma1, "GET", "/me").json()["plan_tier"] == "pro"
+    assert w.chamar(w.ma1, "GET", "/me").json()["plan_tier"] == "plus"
     assert w.chamar(w.ma1, "GET", "/me").json()["familia"] == {"papel": "membro"}
     r = w.chamar(w.ma1, "POST", "/familia/sair")
     assert r.status_code == 204 and r.content == b""

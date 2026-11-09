@@ -45,6 +45,7 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.v2.sessao import usuario_atual
+from core.pg_text import causa_segura
 
 router = APIRouter()
 
@@ -243,10 +244,10 @@ async def escutar_banco() -> None:
             agora = time.monotonic()
             if not espera:
                 caiu_em = logado_em = agora
-                print(f"[eventos] LISTEN pb_escrita caiu: {exc!r}", file=sys.stderr, flush=True)
+                print(f"[eventos] LISTEN pb_escrita caiu: {causa_segura(exc)}", file=sys.stderr, flush=True)
             elif agora - logado_em >= RELOG_CAIDO_S:
                 logado_em = agora
-                print(f"[eventos] LISTEN pb_escrita segue caído há {agora - caiu_em:.0f} s: {exc!r}",
+                print(f"[eventos] LISTEN pb_escrita segue caído há {agora - caiu_em:.0f} s: {causa_segura(exc)}",
                       file=sys.stderr, flush=True)
             espera = min(espera * 2 or 1.0, 60.0)
             await asyncio.sleep(espera)

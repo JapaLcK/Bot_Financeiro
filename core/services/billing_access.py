@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from core.pg_text import causa_segura
 from db.connection import get_conn
 from db.plan_grants import list_grants, users_com_grant_na_janela, users_family_revogados_recentes
 
@@ -509,7 +510,7 @@ def _observar(user_id: int, evento: str, mensagem: str, alerta: str) -> None:
             log_system_event_sync("info", f"{evento}_alertado", "Alerta enviado.",
                                   source="billing", user_id=int(user_id))
     except Exception as exc:                                  # pragma: no cover
-        print(f"[billing_access] observabilidade falhou user={user_id}: {exc}")
+        print(f"[billing_access] observabilidade falhou user={user_id}: {causa_segura(exc)}")
 
 
 def _alertar_sem_grants(user_id: int, plano: str, expira) -> None:
@@ -538,7 +539,7 @@ def _alertar_sem_grants(user_id: int, plano: str, expira) -> None:
                 source="billing", user_id=int(user_id),
             )
     except Exception as exc:                                  # pragma: no cover
-        print(f"[billing_access] alerta projecao_sem_grants falhou user={user_id}: {exc}")
+        print(f"[billing_access] alerta projecao_sem_grants falhou user={user_id}: {causa_segura(exc)}")
 
 
 def reprojetar_grants_recentes(desde: datetime | None) -> int:
@@ -569,5 +570,5 @@ def reprojetar_grants_recentes(desde: datetime | None) -> int:
             if uid in revogados and (not vereditos or vereditos[-1] in _VEREDITOS_DE_ESCRITA):
                 recompute_entitlement(uid, origem="evento")
         except Exception as exc:                              # pragma: no cover
-            print(f"[billing_access] reprojecao falhou user={uid}: {exc}")
+            print(f"[billing_access] reprojecao falhou user={uid}: {causa_segura(exc)}")
     return len(uids)

@@ -278,7 +278,7 @@ def _record_access(ctx: PiiAccessContext) -> None:
             )
             conn.commit()
     except Exception as exc:
-        print(f"[crypto] failed to record pii access: {exc}", file=sys.stderr)
+        print(f"[crypto] failed to record pii access: motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)}", file=sys.stderr)
 
 
 def _ctx_to_row(ctx: PiiAccessContext) -> tuple:
@@ -338,7 +338,7 @@ class pii_audit_batch:
                 )
                 conn.commit()
         except Exception as exc:
-            print(f"[crypto] failed to batch record pii access: {exc}", file=sys.stderr)
+            print(f"[crypto] failed to batch record pii access: motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)}", file=sys.stderr)
         return False  # nunca suprime exceção do bloco
 
 

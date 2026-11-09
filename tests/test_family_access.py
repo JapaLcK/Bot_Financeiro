@@ -82,6 +82,7 @@ def _sql(q, args=()):
 def wh(monkeypatch):
     garantir_system_event_logs()
     monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PROMAX_MENSAL", "price_promax")  # titular Pro: o invoice.paid o mantém Pro
     fake = _FakeStripe()
     monkeypatch.setitem(sys.modules, "stripe", fake)
     return TestClient(dashboard.app), fake
@@ -93,7 +94,7 @@ def _evt(tipo, owner, sub="sub_f", **obj):
 
 
 def _sub_stripe(status="active", cancel=False):
-    s = _fake_sub(status)
+    s = _fake_sub(status, "price_promax")
     s["cancel_at_period_end"] = cancel
     return s
 
@@ -103,7 +104,7 @@ def _sub_stripe(status="active", cancel=False):
 def test_membro_sem_plano_recebe_o_tier_do_titular_e_volta_a_free_ao_sair():
     owner = _titular("pro_max")
     m = _entra(owner)
-    assert _plano(m) == "pro_max"
+    assert _plano(m) == "pro"
     g = _fam(m)[0]
     assert g["external_ref"].startswith("family_member:")
     assert abs((g["ends_at"] - ler(owner)["plan_expires_at"]).total_seconds()) < 2
@@ -113,19 +114,19 @@ def test_membro_sem_plano_recebe_o_tier_do_titular_e_volta_a_free_ao_sair():
 
 
 def test_membro_com_individual_maior_fica_com_o_maior_e_ao_sair_volta_para_a_individual():
-    owner = _titular("pro")  # Plus
+    owner = _titular("pro_max")
     m = _u("pro_max", 100, "active")
     upsert_grant(m, "stripe", f"sub_ind_{m}", "pro_max", _agora() - timedelta(days=1),
                  _agora() + timedelta(days=100), _v())
     _entra(owner, m)
-    assert _plano(m) == "pro_max"          # o individual maior vence o familiar
+    assert _plano(m) == "pro_max"      # o Pro próprio do membro vence o Plus familiar
 
     owner2 = _titular("pro_max")
     m2 = _u("essencial", 100, "active")
     upsert_grant(m2, "stripe", f"sub_ind_{m2}", "essencial", _agora() - timedelta(days=1),
                  _agora() + timedelta(days=100), _v())
     _entra(owner2, m2)
-    assert _plano(m2) == "pro_max"         # o familiar maior vence o individual
+    assert _plano(m2) == "pro"         # o Plus familiar vence o Essencial individual
     fam.remove_member(owner2, m2)
     r = ler(m2)
     assert r["plan"] == "essencial"        # volta para a individual, que nunca foi tocada
@@ -156,7 +157,7 @@ def test_cancel_at_period_end_tira_dos_membros_na_hora_e_o_titular_segue(wh):
     client, fake = wh
     owner = _titular("pro_max", sub="sub_f")
     m1, m2 = _entra(owner), _entra(owner)
-    assert _plano(m1) == _plano(m2) == "pro_max"
+    assert _plano(m1) == _plano(m2) == "pro"
     r = _post(client, fake, _evt("customer.subscription.updated", owner),
               subs={"sub_f": _sub_stripe("active", cancel=True)})
     assert r.status_code == 200, r.text
@@ -176,7 +177,7 @@ def test_reativacao_recria_os_grants_sem_duplicar(wh):
         r = _post(client, fake, _evt("customer.subscription.updated", owner),
                   subs={"sub_f": _sub_stripe("active", cancel=False)})
         assert r.status_code == 200, r.text
-    assert _plano(m) == "pro_max"
+    assert _plano(m) == "pro"
     todos = [g for g in list_grants(m) if g["source"] == "family"]
     assert len(todos) == 1 and todos[0]["status"] == "active"
 
@@ -193,8 +194,7 @@ def test_payment_failed_tira_dos_membros_e_invoice_paga_devolve(wh):
     r = _post(client, fake, _evt("invoice.paid", owner, subscription="sub_f", amount_paid=1990),
               subs={"sub_f": _sub_stripe("active")})
     assert r.status_code == 200, r.text
-    # o invoice.paid reescreve o tier do titular (price desconhecido = Plus); o membro o acompanha
-    assert _plano(m) == _plano(owner) == "pro" and len(_fam(m)) == 1
+    assert _plano(owner) == "pro_max" and _plano(m) == "pro" and len(_fam(m)) == 1  # titular Pro; membro Plus
 
 
 def test_subscription_deleted_tira_dos_membros(wh):
@@ -214,7 +214,7 @@ def test_deleted_de_assinatura_antiga_com_outra_cobrindo_mantem_os_membros(wh):
     m = _entra(owner)
     r = _post(client, fake, _evt("customer.subscription.deleted", owner, sub="sub_velha"))
     assert r.status_code == 200, r.text
-    assert _plano(owner) == "pro_max" and _plano(m) == "pro_max"
+    assert _plano(owner) == "pro_max" and _plano(m) == "pro"
 
 
 def test_estorno_pix_tira_dos_membros(user_id, monkeypatch):
@@ -227,9 +227,9 @@ def test_estorno_pix_tira_dos_membros(user_id, monkeypatch):
     entregar("PAYMENT_RECEIVED", cobranca)
     assert _plano(owner) == "pro_max"
     m = _entra(owner)
-    assert _plano(m) == "pro_max"
+    assert _plano(m) == "pro"
     entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)          # positivo: parcial não revoga
-    assert _plano(m) == "pro_max" and _plano(owner) == "pro_max"
+    assert _plano(m) == "pro" and _plano(owner) == "pro_max"
     entregar("PAYMENT_REFUNDED", cobranca)
     assert _plano(owner) == "free" and _plano(m) == "free" and not _fam(m)
 
@@ -261,18 +261,18 @@ def _grupo_cheio():
 
 def test_vaga_estornada_com_grupo_cheio_corta_exatamente_o_mais_recente():
     owner, m1, m2, m3 = _grupo_cheio()
-    assert {_plano(m) for m in (m1, m2, m3)} == {"pro_max"}
+    assert {_plano(m) for m in (m1, m2, m3)} == {"pro"}
     assert fg.set_seat_status("pix", "vaga-1", "refunded", 11) is True
     assert [x["user_id"] for x in fam.list_members(owner) if x["role"] == "member"] == [m1, m2]
     assert _plano(m3) == "free" and not _fam(m3)
-    assert _plano(m1) == _plano(m2) == "pro_max" and _plano(owner) == "pro_max"
+    assert _plano(m1) == _plano(m2) == "pro" and _plano(owner) == "pro_max"
     assert _sql("select left_reason from family_members where user_id=%s", (m3,))[0]["left_reason"] == "seat_lost"
 
 
 def test_vaga_estornada_sem_excesso_ou_evento_velho_nao_corta():
     owner, m1, m2, m3 = _grupo_cheio()
     assert fg.set_seat_status("pix", "vaga-1", "refunded", 5) is False   # versão velha: não se aplica
-    assert len(fam.list_members(owner)) == 4 and _plano(m3) == "pro_max"
+    assert len(fam.list_members(owner)) == 4 and _plano(m3) == "pro"
     fam.remove_member(owner, m3)                                          # grupo já cabe sem a vaga
     assert fg.set_seat_status("pix", "vaga-1", "refunded", 12) is True
     assert [x["user_id"] for x in fam.list_members(owner) if x["role"] == "member"] == [m1, m2]
@@ -342,7 +342,7 @@ def test_admin_set_plan_preserva_o_grant_family():
     assert len(_fam(m)) == 1
     from core.services.billing_access import recompute_entitlement
     recompute_entitlement(m)
-    assert _plano(m) == "pro_max"
+    assert _plano(m) == "pro"
 
 
 # ── isolamento ───────────────────────────────────────────────────────────────
@@ -351,13 +351,13 @@ def test_operar_o_titular_a_nao_toca_membros_de_b():
     a, b = _titular("pro_max"), _titular("pro_max")
     ma, mb = _entra(a), _entra(b)
     assert fa.revoke_members(a, "teste") == 1
-    assert _plano(ma) == "free" and _plano(mb) == "pro_max" and len(_fam(mb)) == 1
+    assert _plano(ma) == "free" and _plano(mb) == "pro" and len(_fam(mb)) == 1
     with pytest.raises(fam.FamilyError):
         fam.remove_member(a, mb)
     assert fa.sync_from_owner(a) == 0 and fa.retomar(a) == 1 and fa.enforce_capacity(a) == []
-    assert len(_fam(mb)) == 1 and _plano(mb) == "pro_max"
+    assert len(_fam(mb)) == 1 and _plano(mb) == "pro"
     fam.dissolve_group(a)                                        # dissolver A revoga só os de A
-    assert _plano(ma) == "free" and _plano(mb) == "pro_max"
+    assert _plano(ma) == "free" and _plano(mb) == "pro"
 
 
 # ── PR 2, rodada do Tester: a classe "o entitlement do titular mudou e os membros não souberam" ──────
@@ -365,8 +365,10 @@ def test_operar_o_titular_a_nao_toca_membros_de_b():
 def test_admin_set_plan_free_no_titular_derruba_os_membros():
     from core.admin_dashboard import set_account_plan
     owner, m = _membro()
-    set_account_plan("essencial", 1, user_id=owner)               # positivo: rebaixar mantém, no tier novo
-    assert _plano(m) == "essencial" and len(_fam(m)) == 1
+    set_account_plan("essencial", 1, user_id=owner)               # downgrade: a família é só do Pro, o membro perde
+    assert _plano(m) == "free" and not _fam(m)
+    set_account_plan("pro_max", 1, user_id=owner)                 # positivo: voltou ao Pro, o membro volta (Plus)
+    assert _plano(m) == "pro" and len(_fam(m)) == 1
     set_account_plan("free", 1, user_id=owner)
     assert _plano(owner) == "free" and _plano(m) == "free" and not _fam(m)
 
@@ -383,7 +385,7 @@ def test_exclusao_de_um_membro_nao_toca_o_titular_nem_os_outros():
     owner, m = _membro()
     m2 = _entra(owner)
     delete_user_data(m)
-    assert _plano(owner) == "pro_max" and _plano(m2) == "pro_max" and len(_fam(m2)) == 1
+    assert _plano(owner) == "pro_max" and _plano(m2) == "pro" and len(_fam(m2)) == 1
 
 
 def test_merge_de_titular_ou_membro_com_acesso_vigente_e_recusado():
@@ -408,7 +410,7 @@ def test_estorno_de_pix_antigo_com_stripe_cobrindo_mantem_os_membros(user_id, mo
     recompute_entitlement(user_id)
     m = _entra(user_id)
     entregar("PAYMENT_REFUNDED", c)
-    assert _plano(user_id) == "pro_max" and _plano(m) == "pro_max"
+    assert _plano(user_id) == "pro_max" and _plano(m) == "pro"
 
 
 def test_updated_de_assinatura_antiga_cancelando_com_outra_cobrindo_mantem_os_membros(wh):
@@ -419,7 +421,7 @@ def test_updated_de_assinatura_antiga_cancelando_com_outra_cobrindo_mantem_os_me
     m = _entra(owner)
     r = _post(client, fake, _evt("customer.subscription.updated", owner, sub="sub_velha"),
               subs={"sub_velha": _sub_stripe("active", cancel=True)})
-    assert r.status_code == 200 and _plano(m) == "pro_max"
+    assert r.status_code == 200 and _plano(m) == "pro"
 
 
 def test_updated_com_cancelamento_agendado_da_unica_assinatura_tira_os_membros(wh):
@@ -452,7 +454,7 @@ def test_updated_com_assinatura_inexistente_nao_vira_5xx_mas_falha_transitoria_s
 
     fake.Subscription.retrieve = staticmethod(falha("resource_missing"))
     assert _post(client, fake, _evt("customer.subscription.updated", owner)).status_code == 200
-    assert _plano(m) == "pro_max"
+    assert _plano(m) == "pro"
     fake.Subscription.retrieve = staticmethod(falha(None))        # positivo: o transitório continua propagando
     try:
         r = _post(client, fake, _evt("customer.subscription.updated", owner))
@@ -487,7 +489,7 @@ def test_cancelamento_agendado_persiste_apos_recompute_do_titular_e_reativacao_d
         fam.accept_invite(fam.create_invite(owner), _u())
     _post(client, fake, _evt("customer.subscription.updated", owner),
           subs={"sub_f": _sub_stripe("active", cancel=False)})
-    assert _plano(m) == "pro_max"
+    assert _plano(m) == "pro"
 
 
 def test_payment_failed_persiste_apos_recompute_e_invoice_paga_devolve(wh):
@@ -501,7 +503,7 @@ def test_payment_failed_persiste_apos_recompute_e_invoice_paga_devolve(wh):
     assert _plano(m) == "free" and not _fam(m)
     _post(client, fake, _evt("invoice.paid", owner, subscription="sub_f", amount_paid=1990),
           subs={"sub_f": _sub_stripe("active")})
-    assert _plano(m) == _plano(owner) and len(_fam(m)) == 1
+    assert _plano(owner) == "pro_max" and _plano(m) == "pro" and len(_fam(m)) == 1
 
 
 def _limpa_past_due(owner):
@@ -538,7 +540,7 @@ def test_invoice_paid_antigo_reentregue_nao_devolve_os_membros_mas_o_novo_sim(wh
     novo = _evt("invoice.paid", owner, subscription="sub_f", amount_paid=1990)
     novo["created"] = T + 200
     _post(client, fake, novo, subs={"sub_f": _sub_stripe("active")})
-    assert not fg.is_suspended(owner) and _plano(m) == _plano(owner) and len(_fam(m)) == 1
+    assert not fg.is_suspended(owner) and _plano(owner) == "pro_max" and _plano(m) == "pro" and len(_fam(m)) == 1
 
 
 def test_payment_failed_mantem_membros_se_outro_grant_cobre_e_suspende_se_nao(wh):
@@ -551,7 +553,7 @@ def test_payment_failed_mantem_membros_se_outro_grant_cobre_e_suspende_se_nao(wh
           subs={"sub_f": _sub_stripe("past_due")})
     _post(client, fake, _evt("invoice.payment_failed", sem, sub="sub_g", subscription="sub_g", attempt_count=1),
           subs={"sub_g": _sub_stripe("past_due")})
-    assert _plano(m1) == "pro_max" and fg.is_suspended(com_pix)  # marcador: o Stripe encerra, o Pix cobre
+    assert _plano(m1) == "pro" and fg.is_suspended(com_pix)  # marcador: o Stripe encerra, o Pix cobre
     assert _plano(m2) == "free" and fg.is_suspended(sem)
 
 
@@ -568,7 +570,7 @@ def test_payment_failed_com_grant_legacy_suspende_e_com_admin_vigente_mantem(wh)
     _post(client, fake, _evt("invoice.payment_failed", adm, sub="sub_g", subscription="sub_g", attempt_count=1),
           subs={"sub_g": _sub_stripe("past_due")})
     assert _plano(m1) == "free" and fg.is_suspended(leg)
-    assert _plano(m2) == "pro_max" and fg.is_suspended(adm)
+    assert _plano(m2) == "pro" and fg.is_suspended(adm)
 
 
 def test_membro_que_lanca_no_recompute_nao_derruba_titular_nem_os_outros(monkeypatch):
@@ -582,7 +584,7 @@ def test_membro_que_lanca_no_recompute_nao_derruba_titular_nem_os_outros(monkeyp
         return real(uid, **kw)
     monkeypatch.setattr(fa, "recompute_entitlement", quebra)                  # concessão (grant_member)
     monkeypatch.setattr(billing_access, "recompute_entitlement", quebra)      # revogação (recompute_users)
-    assert fa.sync_from_owner(owner) == 1 and _plano(m2) == "pro_max"
+    assert fa.sync_from_owner(owner) == 1 and _plano(m2) == "pro"
     assert fa.revoke_members(owner, "t") == 2 and _plano(m2) == "free"       # revogação
 
 
@@ -630,7 +632,7 @@ def test_fatura_avulsa_falhando_nao_tira_os_membros_de_titular_com_assinatura_sa
     owner = _titular("pro_max", sub="sub_f")
     m = _entra(owner)
     r = _post(client, fake, _evt("invoice.payment_failed", owner, attempt_count=1))   # sem `subscription`
-    assert r.status_code == 200 and not fg.is_suspended(owner) and _plano(m) == "pro_max" and len(_fam(m)) == 1
+    assert r.status_code == 200 and not fg.is_suspended(owner) and _plano(m) == "pro" and len(_fam(m)) == 1
 
 
 def test_updated_em_grupo_sem_membros_suspende_e_a_reativacao_libera_os_convidados_futuros(wh):
@@ -645,7 +647,7 @@ def test_updated_em_grupo_sem_membros_suspende_e_a_reativacao_libera_os_convidad
     _post(client, fake, _evt("customer.subscription.updated", owner),
           subs={"sub_f": _sub_stripe("active", cancel=False)})
     fam.accept_invite(token, m)                                  # o mesmo convite vale de novo
-    assert not fg.is_suspended(owner) and _plano(m) == "pro_max"
+    assert not fg.is_suspended(owner) and _plano(m) == "pro"
 
 
 def _espera_bloqueio_de_lock(timeout=10):
@@ -688,7 +690,7 @@ def test_admin_baixando_o_plano_individual_do_membro_nao_tira_a_familia():
     owner = _titular("pro_max")
     m = _entra(owner)
     set_account_plan("essencial", 1, user_id=m)
-    assert _plano(m) == "pro_max"                                # positivo: o maior tier (família) segue
+    assert _plano(m) == "pro"                                # positivo: o maior tier (família) segue
     outro = _u("essencial", 30, "active")
     set_account_plan("free", 1, user_id=outro)
     assert _plano(outro) == "free"                               # positivo: quem não é membro rebaixa normal
@@ -716,7 +718,7 @@ def test_recompute_do_membro_que_falhou_na_revogacao_e_corrigido_pela_varredura(
     real = billing_access.recompute_entitlement
     monkeypatch.setattr(billing_access, "recompute_entitlement", lambda uid, **k: (_ for _ in ()).throw(RuntimeError("boom")))
     fa.revoke_members(owner, "teste")                            # revogou o grant, o recompute caiu
-    assert _plano(m) == "pro_max"
+    assert _plano(m) == "pro"
     monkeypatch.setattr(billing_access, "recompute_entitlement", real)
     reprojetar_grants_recentes(None)                             # varredura diária
     assert _plano(m) == "free"
@@ -730,7 +732,7 @@ def test_cancelamento_agendado_com_pix_curto_cobrindo_mantem_e_ao_vencer_o_pix_o
     upsert_grant(owner, "pix", f"pix-{owner}", "pro_max", _agora() - timedelta(days=1), _agora() + timedelta(days=3), _v())
     _post(client, fake, _evt("customer.subscription.updated", owner),
           subs={"sub_f": _sub_stripe("active", cancel=True)})
-    assert _plano(m) == "pro_max"  # positivo: o Pix vigente segue cobrindo
+    assert _plano(m) == "pro"  # positivo: o Pix vigente segue cobrindo
     _sql("update plan_grants set ends_at = now() - interval '1 minute' where user_id = %s and source = 'pix'", (owner,))
     recompute_entitlement(owner)
     assert _plano(owner) == "pro_max" and _plano(m) == "free"  # Stripe pago não volta a cobrir os membros
@@ -738,7 +740,7 @@ def test_cancelamento_agendado_com_pix_curto_cobrindo_mantem_e_ao_vencer_o_pix_o
     assert _plano(m) == "free" and not _fam(m)
     _post(client, fake, _evt("customer.subscription.updated", owner),
           subs={"sub_f": _sub_stripe("active", cancel=False)})
-    assert _plano(m) == "pro_max"  # reativação devolve
+    assert _plano(m) == "pro"  # reativação devolve
 
 
 # ── revisão independente do PR 2: varredura como evento, ex_ref, ordem de lock, conexão fora do lock ─────────
@@ -752,14 +754,15 @@ def test_membro_com_stripe_proprio_mais_curto_que_sai_volta_ao_dele_pela_varredu
     fim = _agora() + timedelta(days=10)
     upsert_grant(m, "stripe", f"sub_m{m}", "pro", _agora() - timedelta(days=20), fim, _v())
     fam.accept_invite(fam.create_invite(owner), m)
-    assert _plano(m) == "pro_max"
+    assert _plano(m) == "pro"
     real = billing_access.recompute_entitlement
     if recompute_cai:
         monkeypatch.setattr(billing_access, "recompute_entitlement",
                             lambda uid, **k: (_ for _ in ()).throw(RuntimeError("boom")))
     fam.remove_member(owner, m)                                  # o recompute imediato cai (ou não)
     monkeypatch.setattr(billing_access, "recompute_entitlement", real)
-    assert _plano(m) == ("pro_max" if recompute_cai else "pro")
+    assert _plano(m) == "pro"  # Plus familiar = Plus próprio: quem distingue é a data (família 30d × próprio 10d)
+    assert (ler(m)["plan_expires_at"] > fim + timedelta(days=5)) == recompute_cai
     viva = {"id": f"sub_m{m}", "status": "active", "current_period_end": int(fim.timestamp()),
             "items": {"data": [{"current_period_end": int(fim.timestamp())}]}}
     monkeypatch.setitem(sys.modules, "stripe", FakeStripeSubs(ativa=viva))
@@ -818,11 +821,11 @@ def test_dissolver_ou_suspender_a_nao_revoga_o_grant_do_ex_membro_que_esta_em_b(
     m = _entra(a)
     fam.remove_member(a, m)
     _entra(b, m)
-    assert _plano(m) == "pro_max" and len(_fam(m)) == 1
+    assert _plano(m) == "pro" and len(_fam(m)) == 1
     fa.revoke_members(a, "x")                                    # suspensão/revogação de A
-    assert _plano(m) == "pro_max" and len(_fam(m)) == 1
+    assert _plano(m) == "pro" and len(_fam(m)) == 1
     fam.dissolve_group(a)
-    assert _plano(m) == "pro_max" and len(_fam(m)) == 1
+    assert _plano(m) == "pro" and len(_fam(m)) == 1
     fam.dissolve_group(b)                                        # positivo: o grupo certo derruba
     assert _plano(m) == "free" and not _fam(m)
 

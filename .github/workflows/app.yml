@@ -6,6 +6,7 @@
 #
 # `paths` restringe a execução: PR que não toca `app/` (nem um arquivo que os testes do app
 # leem) não dispara nada aqui.
+# Inclui o `.github/dependabot.yml`: o jest confere que o bloco `/app` ignora o que o SDK do Expo fixa.
 # `frontend/finance_bot_websocket_custom.py` é lido pelos testes do app (SETUP_EXPIRADO) e ficou
 # fora de `paths:` DE PROPÓSITO (decisão D1=b do dono): PR que só toca o monólito não dispara o App.
 name: App
@@ -58,6 +59,7 @@ on:
       - "db/patrimonio.py"
       - "webapp/src/dashboard/lib/milhao.ts"
       - "webapp/src/dashboard/widgets/Agentes.tsx"
+      - ".github/dependabot.yml"
   pull_request:
     paths:
       - "app/**"
@@ -104,6 +106,7 @@ on:
       - "db/patrimonio.py"
       - "webapp/src/dashboard/lib/milhao.ts"
       - "webapp/src/dashboard/widgets/Agentes.tsx"
+      - ".github/dependabot.yml"
 
 # A MESMA regra do `tests.yml`, e pelo mesmo motivo medido lá: na main o
 # `github.ref` de todo push é `refs/heads/main`, então dois merges próximos
