@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import sys
 
+from core.pg_text import causa_segura
 from core.services import plan_service
 
 
@@ -51,6 +52,6 @@ def send_trial_downsell_emails() -> dict:
                 mark_trial_downsell_sent(user_id)
                 sent += 1
         except Exception as exc:
-            print(f"[trial_downsell] user={user_id}: {exc}", file=sys.stderr)
+            print(f"[trial_downsell] user={user_id}: {causa_segura(exc)}", file=sys.stderr)
 
     return {"ok": True, "disabled": False, "checked": checked, "sent": sent}

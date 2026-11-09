@@ -23,7 +23,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from config.env import load_app_env
-from core.pg_text import limpa_para_pg, redigir_failing_row
+from core.pg_text import causa_segura, limpa_para_pg, redigir_failing_row
 
 
 load_app_env()
@@ -150,7 +150,7 @@ def _desfecho(exc: Exception) -> str:
     `lc_messages` do servidor; o sqlstate não.
     """
     rotulo = "teto" if isinstance(exc, psycopg.errors.QueryCanceled) else "defeito"
-    return f"{rotulo} {type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)}: {exc}"
+    return f"{rotulo} {causa_segura(exc)}"
 
 
 def _database_url() -> str:
