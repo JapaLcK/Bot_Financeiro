@@ -30,9 +30,13 @@ _WEBHOOK_URL_ENV = "ADMIN_NOTIFY_WEBHOOK_URL"
 _REQUEST_TIMEOUT_SECONDS = 5.0
 
 
+def _url() -> str:
+    return (os.getenv(_WEBHOOK_URL_ENV) or "").strip()
+
+
 def canal_configurado() -> bool:
     """Há para onde mandar? Quem tem pendência para reenviar olha isto antes de reivindicar."""
-    return bool((os.getenv(_WEBHOOK_URL_ENV) or "").strip())
+    return bool(_url())
 
 
 def _detect_provider(url: str) -> str:
@@ -55,7 +59,7 @@ def _build_payload(provider: str, message: str) -> dict[str, Any]:
 
 def _send(message: str) -> bool:
     """Envia mensagem pro webhook. Retorna True se 2xx. Falha silenciosa."""
-    url = (os.getenv(_WEBHOOK_URL_ENV) or "").strip()
+    url = _url()
     if not url:
         return False
     try:
