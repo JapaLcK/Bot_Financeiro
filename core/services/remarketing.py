@@ -10,9 +10,10 @@ from datetime import datetime, timezone
 _log = logging.getLogger(__name__)
 
 
-def ligado() -> datetime | None:
-    """O instante de `REMARKETING_DESDE` (ISO 8601 COM fuso) ou None: vazia, inválida ou sem fuso = desligado."""
-    bruto = (os.getenv("REMARKETING_DESDE") or "").strip()
+def ligado(var: str = "REMARKETING_DESDE") -> datetime | None:
+    """O instante de `var` (ISO 8601 COM fuso) ou None: vazia, inválida ou sem fuso = desligado.
+    `core/services/reconquista.py` reusa com `RECONQUISTA_DESDE`."""
+    bruto = (os.getenv(var) or "").strip()
     if not bruto:
         return None
     try:

@@ -596,8 +596,13 @@
         const isReconnect = plano.ids.indexOf(String(selected.id)) !== -1;
         if (!isReconnect) {
           const n = plano.banksMax;
-          conf("notify")("Seu plano conecta até " + n + " banco" + (n > 1 ? "s" : "") +
-                         ". Faça upgrade pra conectar mais: /precos", "error");
+          let msg = "Seu plano conecta até " + n + " banco" + (n > 1 ? "s" : "") +
+                    ". Faça upgrade pra conectar mais: /precos";
+          // O texto do servidor sabe quando o teto vem do Plano Família; se o /limite falhar, vale o de cima.
+          try { const l = await get("/open-finance/" + cfg.userId + "/limite"); if (l && l.message) msg = l.message; } catch (_e) { /* fica o texto local */ }
+          // O /limite é outra espera: Esc/troca de seleção nela não pode deixar o alerta solto.
+          if (!root || !root.classList.contains("open") || selected !== escolhido) return;
+          conf("notify")(msg, "error");
           return;
         }
       }
