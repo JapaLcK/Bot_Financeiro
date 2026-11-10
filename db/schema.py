@@ -2260,6 +2260,10 @@ def init_db():
         create index if not exists idx_affiliate_commissions_affiliate
           on affiliate_commissions (affiliate_id, status, available_at)
         """,
+        # Aviso de reembolso ao admin (core/services/afiliado_reembolso.py): sent_at null = pendente.
+        """alter table affiliate_commissions add column if not exists refund_alert text
+             check (refund_alert in ('partial', 'total'))""",
+        """alter table affiliate_commissions add column if not exists refund_alert_sent_at timestamptz""",
         # Pagamento confirmado de indicado (db/affiliate_payments.py). 1 linha por pagamento,
         # sem `user_id` de propósito: o vínculo com a pessoa é o da referral.
         """

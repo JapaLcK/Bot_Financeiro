@@ -2186,6 +2186,22 @@ async def lifespan(app: FastAPI):
                 print(f"[stripe_email] erro: {exc}", file=sys.stderr)
             await asyncio.sleep(300)
 
+    async def _afiliado_avisos_worker():
+        """Reenvia ao admin os avisos de reembolso de afiliado que ficaram pendentes por falta de
+        canal, a cada 5 min, a 1ª volta sem delay. Inerte sem `ADMIN_NOTIFY_WEBHOOK_URL`. Ver
+        `core/services/afiliado_reembolso.py`."""
+        from core.services.afiliado_reembolso import reenviar_avisos_pendentes  # noqa: PLC0415
+        while True:
+            try:
+                n = await asyncio.to_thread(reenviar_avisos_pendentes)
+                if n:
+                    print(f"[afiliado_avisos] {n} aviso(s) entregue(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[afiliado_avisos] erro: {type(exc).__name__}", file=sys.stderr)
+            await asyncio.sleep(300)
+
     async def _remarketing_worker():
         """Régua de remarketing do checkout abandonado, a cada 5 min. Inerte sem
         `REMARKETING_DESDE` (nem consulta o banco). Ver `core/services/remarketing.py`."""
@@ -2310,6 +2326,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
+                asyncio.create_task(_afiliado_avisos_worker(), name="afiliado_avisos"),
                 asyncio.create_task(_remarketing_worker(), name="remarketing_worker"),
                 asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
                 asyncio.create_task(_tarefa_finito_checks(), name="finito_checks"),
@@ -6362,22 +6379,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         value = (float(unit) / 100.0) if unit is not None else 0.0
         return (value, str(cur).upper())
 
-    def _extras_liquido_cents(linhas, precos: set[str]) -> int:
-        """Centavos LÍQUIDOS das `linhas` da fatura (`linhas_da_fatura`) dos
-        produtos extras. Os extras são os preços da foto da metadata da assinatura
-        (`da_metadata`), não os da env do momento. Medido: `amount` da linha é
-        BRUTO; o cupom vem só em `discount_amounts`. `price` vem string ou
-        expandido (`.id`)."""
-        if not precos:
-            return 0
-        total = 0
-        for line in linhas:
-            price = _g(_g(_g(line, "pricing", {}), "price_details", {}), "price")
-            if (price if isinstance(price, str) else _g(price, "id")) not in precos:
-                continue
-            desconto = sum(_g(d, "amount", 0) for d in _g(line, "discount_amounts", []) or [])
-            total += (_g(line, "amount", 0) or 0) - desconto
-        return total
+    from core.services.extras_assinar import extras_liquido_cents as _extras_liquido_cents
 
     def _ga_plano_publico(*objetos) -> str | None:
         """Nome PÚBLICO do plano ('essencial'/'plus'/'pro') pro item do GA4.
@@ -6418,34 +6420,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 return fbp, fbc
         return None, None
 
-    def _invoice_subscription_id(objeto) -> str | None:
-        """Id da assinatura, seja `subscription` string ou objeto EXPANDIDO.
-
-        Serve `invoice.paid` E `checkout.session.completed`: o ramo do checkout
-        lia `_g(session, "subscription")` cru, então um payload com o objeto
-        expandido virava uma `external_ref` diferente da que o `invoice.paid`
-        grava, e o mesmo assinante ficava com DOIS grants da mesma assinatura.
-        Depois que a revogação passou a mirar `external_ref` exato, os dois
-        lados precisam produzir a mesma chave (§0.1: reusar, não repetir).
-        O fallback de `parent.subscription_details` simplesmente não casa num
-        objeto de sessão, então serve os dois sem ramificar por tipo.
-        """
-        sub_id = _g(objeto, "subscription")
-        if sub_id:
-            return sub_id if isinstance(sub_id, str) else _g(sub_id, "id")
-        # API >= 2025-09 movido pra invoice.parent.subscription_details.subscription.
-        # `objeto`, NÃO `invoice`: quando esta função passou a servir também o
-        # `checkout.session.completed`, esta linha ficou lendo uma variável
-        # LIVRE, só ligada no ramo `invoice.paid`. Sessão sem `subscription`
-        # (checkout de pagamento avulso) chegava aqui e estourava
-        # UnboundLocalError → 500 → a Stripe reentregando por 3 dias, e o ramo
-        # "Checkout do Stripe concluido (sem subscription)" inalcançável.
-        parent = _g(objeto, "parent", {})
-        details = _g(parent, "subscription_details", {})
-        ref = _g(details, "subscription")
-        if ref is None:
-            return None
-        return ref if isinstance(ref, str) else _g(ref, "id")
+    from core.services.extras_assinar import assinatura_da_fatura as _invoice_subscription_id
 
     async def _user_email(uid: int) -> str:
         try:
@@ -7519,6 +7494,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 )
             except Exception as exc:
                 print(f"[billing] admin notify canceled falhou user={user_id}: {exc}")
+
+    elif event["type"] in ("charge.refunded", "charge.dispute.closed"):
+        # Reembolso de indicado de afiliado. Sem try: nada aqui segura grant nem comissão de
+        # outro evento, tudo é idempotente, e a falha vira 5xx e reentrega, como o `retrieve`.
+        from core.services.afiliado_reembolso import tratar_evento
+        await asyncio.to_thread(tratar_evento, event)
 
     return {"received": True}
 

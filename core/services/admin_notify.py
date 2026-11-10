@@ -48,9 +48,17 @@ def _build_payload(provider: str, message: str) -> dict[str, Any]:
     return {"content": message[:2000]}  # Discord limita content em 2000 chars
 
 
+def _url() -> str:
+    return (os.getenv(_WEBHOOK_URL_ENV) or "").strip()
+
+
+def canal_configurado() -> bool:
+    return bool(_url())
+
+
 def _send(message: str) -> bool:
     """Envia mensagem pro webhook. Retorna True se 2xx. Falha silenciosa."""
-    url = (os.getenv(_WEBHOOK_URL_ENV) or "").strip()
+    url = _url()
     if not url:
         return False
     try:
@@ -145,6 +153,12 @@ def notify_security_alert(message: str) -> bool:
     pelo chamador. No-op silencioso sem ADMIN_NOTIFY_WEBHOOK_URL, como os demais."""
     return _send(message)
 
+
+def notify_afiliado_alerta(message: str) -> bool:
+    """Reembolso de indicado que a comissão não acompanhou sozinha. Mensagem já formatada,
+    sem dado do indicado. Quem chama usa o retorno: False é aviso não entregue, e a pendência é
+    dele (`core/services/afiliado_reembolso.py`)."""
+    return _send(message)
 
 def notify_pix_alerta(message: str) -> bool:
     """Alerta do fluxo Pix (§8.2/§12): estorno parcial, chargeback aberto,
