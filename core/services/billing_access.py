@@ -94,6 +94,33 @@ def projetar_grants(grants: list[dict], agora: datetime) -> tuple[str, datetime 
     return plano, cobertura
 
 
+def teto_bancos_plus(user_id: int) -> tuple[int, str | None]:
+    """Teto de bancos do Open Finance de quem tem acesso Plus, e o motivo: `(teto, "familia"|None)`.
+
+    Fonte única do teto do membro da família (usada por `get_user_limits` e pela mensagem do 402).
+    Só vale 1 banco (`OF_BANKS_MAX_FAMILIA`, motivo "familia") quando há grant 'family' vigente E
+    nenhum plano pago próprio vigente. Com plano pago próprio vale o teto do PRÓPRIO tier (Essencial 1).
+    Conta grandfathered ou paga vitalícia (`plan_expires_at` nulo), ou sem grant family: teto do Plus."""
+    from core.services.plan_limits import OF_BANKS_MAX_FAMILIA, limits_for_tier
+    from core.services.plan_service import _STORED_PLAN_TO_TIER
+
+    plus = limits_for_tier("plus")["of_banks_max"]
+    conta = _ler_conta(user_id)
+    if not conta or conta["last_payment_status"] == "grandfathered":
+        return plus, None
+    if conta["plan_expires_at"] is None and _tier_do_stored(conta["plan"]) > 0:
+        return plus, None
+    grants = list_grants(user_id)
+    agora = datetime.now(timezone.utc)
+    if not grant_vigente(grants, agora, sources=("family",)):
+        return plus, None
+    proprio, _ = projetar_grants([g for g in grants if g["source"] != "family"], agora)
+    tier = _STORED_PLAN_TO_TIER.get((proprio or "").lower(), "free")
+    if tier == "free":
+        return OF_BANKS_MAX_FAMILIA, "familia"
+    return limits_for_tier(tier)["of_banks_max"], None
+
+
 def _ler_conta(user_id: int) -> dict | None:
     """SELECT enxuto de propósito — NÃO passa por `get_auth_user`.
 
