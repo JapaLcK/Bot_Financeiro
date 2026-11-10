@@ -7,14 +7,16 @@ não vão ao banco, mas vão ao log de plataforma, e o destino final é o mesmo 
 Classes, por (arquivo, função, classe):
   PRINT_CRU  `print`, `warnings.warn`, `sys.stdout.write`, `sys.stderr.write`, com `sys.__stdout__`,
              `sys.__stderr__` e `.buffer`, com a exceção crua; e `print_exc`, `print_exception`,
-             `print_stack` soltos
+             `print_stack` soltos. A tag de `falha_de_tarefa` conta como `print` nas três PRINT_*
   PRINT_PII  telefone ou e-mail nos argumentos, por nome, chave ou marcador
   PRINT_TXT  texto do usuário ou segredo nos argumentos (`_TXT`), por nome, chave ou marcador
   BAIXO_CRU  logger INFO/DEBUG com a exceção crua ou `exc_info` ligado
   BAIXO_PII  logger INFO/DEBUG, como PRINT_PII, com ou sem `extra=`
   BAIXO_TXT  logger INFO/DEBUG, como PRINT_TXT, com ou sem `extra=`
-  LOG_WAMID  wamid ou id de mensagem em `print`, logger de qualquer nível ou `log_system_event*`,
-             sem `mask_wamid`: o base64 do wamid traz o telefone inteiro
+  LOG_WAMID  wamid ou id de mensagem em `print`, tag de `falha_de_tarefa`, logger de qualquer nível
+             ou `log_system_event*`, sem `mask_wamid`: o base64 do wamid traz o telefone inteiro
+  TAG_VIVA   tag de `falha_de_tarefa` que não é string literal: cada tag distinta é uma entrada no
+             estado da P11, que nunca é podado, e a tag sai no log como veio
 Nome de categoria conta como texto do usuário: `create_user_category` aceita nome livre.
 
 Use `causa_segura(exc)` (ou `causa_do_provedor(exc)`, com o `code`; core/pg_text.py) para a exceção,
@@ -192,7 +194,7 @@ def _loga(f: ast.AST) -> bool:
 
 def _classes_d4(c: ast.Call, excs: set[str], evt=frozenset()) -> list[str]:
     """O wamid vale em qualquer nível e em `details`: nele o telefone vai inteiro (D4)."""
-    saida = _imprime(c.func) or _loga(c.func) or _nome(c.func) in evt
+    saida = _imprime(c.func) or _loga(c.func) or _nome(c.func) in evt or _nome(c.func) == "falha_de_tarefa"
     nos = [*c.args, *(k.value for k in c.keywords)]
     mascara = any(isinstance(x, ast.Call) and _nome(x.func) == "mask_wamid"
                   for n in nos for x in ast.walk(n))
@@ -204,9 +206,13 @@ def _classes_print_e_baixo(c: ast.Call, excs: set[str]) -> list[str]:
     f = c.func
     if _nome(f) in _PILHA_SOLTA:
         return ["PRINT_CRU"]
-    if _imprime(f):
-        return [k for k, sim in (("PRINT_CRU", _cru(c.args, excs)), ("PRINT_PII", _pii(c.args)),
-                                 ("PRINT_TXT", _txt(c.args))) if sim]
+    if _imprime(f) or _nome(f) == "falha_de_tarefa":
+        # `falha_de_tarefa` imprime a tag como veio; o `exc` do 2º argumento ela mesma redige.
+        args = c.args if _imprime(f) else [*c.args[:1], *(k.value for k in c.keywords if k.arg == "tag")]
+        viva = not _imprime(f) and not (len(args) == 1 and isinstance(args[0], ast.Constant)
+                                        and isinstance(args[0].value, str))
+        return [k for k, sim in (("PRINT_CRU", _cru(args, excs)), ("PRINT_PII", _pii(args)),
+                                 ("PRINT_TXT", _txt(args)), ("TAG_VIVA", viva)) if sim]
     if not _loga(f):
         return []
     nivel = f.attr
