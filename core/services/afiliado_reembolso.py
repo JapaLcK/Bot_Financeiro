@@ -72,21 +72,25 @@ def _texto(r: dict) -> str:
     return cabeca.format(onde) + f"R$ {(valor or 0) / 100:.2f}{saque} · a comissão NÃO foi alterada, confira."
 
 
-def _registrar_tentativa(r: dict, entregue: bool) -> None:
+def _registrar_tentativa(r: dict, entregue: bool, event_id: str | None = None) -> None:
+    """`error` quando o aviso não sai: a pendência segura o dinheiro, mas o admin ainda não sabe.
+    `event_id` só do webhook; o worker não tem evento."""
+    detalhes = {"commission_id": r["commission_id"], "payout_id": r.get("payout_id"), "tipo": r["tipo"],
+                "alerta_entregue": entregue}
+    if event_id is not None:
+        detalhes["event_id"] = event_id
     log_system_event_sync(
-        "warning", "affiliate_refund_commission_kept",
-        "Reembolso de indicado sem estorno automatico da comissao.", source="affiliates",
-        details={"commission_id": r["commission_id"], "payout_id": r.get("payout_id"), "tipo": r["tipo"],
-                 "alerta_entregue": entregue},
+        "warning" if entregue else "error", "affiliate_refund_commission_kept",
+        "Reembolso de indicado sem estorno automatico da comissao.", source="affiliates", details=detalhes,
     )
 
 
-def _enviar(r: dict) -> bool:
+def _enviar(r: dict, event_id: str | None = None) -> bool:
     """`r` já reivindicada. `notified_at` só com entrega confirmada."""
     entregue = admin_notify.notify_afiliado_alerta(_texto(r)) is True
     if entregue:
         marcar_avisada(r["id"], r["refunded_cents"], r["status"])
-    _registrar_tentativa(r, entregue)
+    _registrar_tentativa(r, entregue, event_id)
     return entregue
 
 
@@ -163,11 +167,11 @@ def tratar_evento(event) -> None:
     if not linha or linha["status"] not in ("open", "recovery") or linha["notified_at"]:
         return
     if not admin_notify.canal_configurado():
-        _registrar_tentativa(linha, False)
+        _registrar_tentativa(linha, False, event["id"])
         return
     r = reivindicar(linha["id"])
     if r:
-        _enviar(r)
+        _enviar(r, event["id"])
 
 
 class SemConfirmacao(Exception):

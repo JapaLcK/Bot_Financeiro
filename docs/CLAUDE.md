@@ -2706,7 +2706,7 @@ e referência) ou `waived` (sem elas), e repetir dá 409, sem novo evento.
 falha. `marcar_avisada` só marca se `refunded_cents` e `status` seguem os do envio: fato novo ou
 "Pagamento já realizado" durante o HTTP deixam o aviso novo pendente. Concorrência por claim com prazo (`reivindicar`, 2 minutos, HTTP fora da transação): processo
 que morre deixa a linha voltar; repetição é possível, perda não. Falha de aviso responde 200; 5xx só
-por banco ou API da Stripe. Log `affiliate_refund_commission_kept` com `alerta_entregue`.
+por banco ou API da Stripe. Log `affiliate_refund_commission_kept` com `alerta_entregue`, nível `error` quando o aviso não sai, e `event_id` quando vem do webhook.
 
 Limites do reembolso: (1) reembolso antes do `invoice.paid` fica coberto por `no_commission` enquanto
 a linha existe; depois da limpeza de 30 dias, quem o pega é a conferência na Stripe (abaixo). (2) Reembolso só do caderno rotula `partial`, sem
