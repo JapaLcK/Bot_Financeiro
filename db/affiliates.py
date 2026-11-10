@@ -22,10 +22,11 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
-from .affiliate_payments import origem_da_chave, resumo_conversao
+from .affiliate_payments import PAGAMENTO_DA_COMISSAO_SQL, origem_da_chave, resumo_conversao
 from .affiliate_reviews import (
     PENDENCIA_ABERTA_SQL,
     SAQUE_BLOQUEADO_SQL,
+    _comissao_que_saiu,
     abertas_do_saque,
     promover,
     registrar_evento,
@@ -318,6 +319,33 @@ def record_commission_for_invoice(referred_user_id: int, stripe_invoice_id: str,
                                  paid_months, paid_at or _now(), conferir=True)
 
 
+def record_commission_for_pix(cobranca: dict, meses: int) -> dict | None:
+    """Comissão da cobrança Pix paga (o efeito `afiliado` do dreno), pela mesma regra da primeira cobrança.
+
+    Chave `pix:<id>` (`external_reference`), base `amount_cents` (o pago, já com campanha e crédito,
+    sem os cadernos) e `meses` (`MESES_DO_PIX`: o Pix só vende o anual). Sem conferência A5: a
+    cobrança já está paga e o estorno chega pelo dreno. Falha levanta, e o dreno tenta de novo."""
+    if not cobranca["user_id"] or int(cobranca["amount_cents"]) <= 0:
+        return None
+    return _comissao_da_primeira(cobranca["user_id"], cobranca["external_reference"], int(cobranca["amount_cents"]),
+                                 meses, cobranca["paid_at"] or _now(), conferir=False)
+
+
+def precisa_do_acumulado(chave: str) -> bool:
+    """O devolvido de um reembolso parcial muda algo? Só com comissão não estornada da chave, ou com a que
+    saiu com o afiliado e `_aplicar` ainda refaz (`_comissao_que_saiu`: paga, N1, ou num saque órfão aberto).
+    Sem elas `_aplicar` ignora o valor."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select status from affiliate_commissions where stripe_invoice_id = %s", (chave,))
+        c = cur.fetchone()
+        if c:
+            return c["status"] != "reversed"
+        cur.execute("select paid_cents, orphan_payout_id, commission_cents from affiliate_refund_reviews"
+                    " where stripe_invoice_id = %s", (chave,))
+        a = cur.fetchone()
+        return a is not None and _comissao_que_saiu(cur, a) is not None
+
+
 def get_affiliate_stats(affiliate_id: int) -> dict:
     """Saldos em centavos por bucket + cadastros, pagantes e reembolsos."""
     with get_conn() as conn:
@@ -379,8 +407,8 @@ def list_affiliate_commissions(affiliate_id: int, limit: int = 50) -> list[dict]
                        coalesce((select p.refund_status
                                    from affiliate_referral_payments p
                                    join affiliate_referrals r on r.id = p.referral_id
-                                  where r.affiliate_id = c.affiliate_id and p.source = 'stripe'
-                                    and p.payment_ref = c.stripe_invoice_id), 'none') as payment_refund,
+                                  where r.affiliate_id = c.affiliate_id
+                                    and {PAGAMENTO_DA_COMISSAO_SQL.format(c="c", p="p")}), 'none') as payment_refund,
                        c.status = 'pending' and c.payout_id is null
                          and {PENDENCIA_ABERTA_SQL.format(c="c")} as in_review,
                        c.status = 'pending' and c.payment_check_pending as checking,
@@ -628,7 +656,7 @@ def reject_payout(payout_id: int, note: str | None = None, revisor: str = "admin
             )
             abertas = abertas_do_saque(cur, payout_id)
             cur.execute(
-                """
+                f"""
                 update affiliate_commissions c
                    set payout_id = null,
                        status = case when c.status = 'pending' and (exists (
@@ -636,7 +664,7 @@ def reject_payout(payout_id: int, note: str | None = None, revisor: str = "admin
                            from affiliate_referral_payments p
                            join affiliate_referrals r on r.id = p.referral_id
                           where r.affiliate_id = c.affiliate_id
-                            and p.source = 'stripe' and p.payment_ref = c.stripe_invoice_id
+                            and {PAGAMENTO_DA_COMISSAO_SQL.format(c="c", p="p")}
                             and p.refund_status = 'total'
                        ) or exists (
                          select 1 from affiliate_refund_reviews v

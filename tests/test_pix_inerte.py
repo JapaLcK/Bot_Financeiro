@@ -111,6 +111,7 @@ CHAMADORES_PERMITIDOS: frozenset[str] = frozenset({
     # O caminho que RECEBE o pagamento.
     "core/services/pix_drain.py",          # reserva, roteia, transiciona
     "core/services/pix_drain_effects.py",  # grant, ga4, capi, e-mail, revoke
+    "core/services/afiliado_pix.py",       # efeito do afiliado: só LÊ os estornos (`buscar_pagamento`)
     # O caminho que EMITE a cobrança — entrou no MESMO PR, que é o corte do dono.
     "core/services/pix_checkout.py",       # a saga, a flag, o preço, o 409/503
     "core/services/pix_sweeps.py",         # reconciliação da saga (§10.1)
@@ -336,6 +337,9 @@ def test_pix_pricing_so_e_importado_pelo_checkout_e_pela_rota():
         # a retomada (remarketing 6b) lê só `PRECOS_ANUAIS_CENTS` para mostrar o preço
         # com desconto; não emite cobrança. É o 2º leitor: o gatilho acima vale (issue própria).
         "frontend/routes/retomada.py",
+        # o efeito `afiliado` do próprio dreno do Pix lê `MESES_DO_PIX`, o divisor da comissão;
+        # não emite cobrança
+        "core/services/afiliado_pix.py",
     }
     achados = set(_quem_importa(("core.services.pix_pricing",), raiz=""))
     assert achados == esperado, (

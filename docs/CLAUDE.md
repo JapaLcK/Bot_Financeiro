@@ -1715,7 +1715,13 @@ e-mail, GA4 ou CAPI; um alerta por lado por pagamento (efeito `valor_alertado` p
 `valor_concedido_alertado` para o excesso e para o retido depois completado — baixa manual desfeita
 e refeita: alerta "antes RETIDO foi completado", NÃO devolver) e evento fechado
 (log `pix_pagamento_parcial_retido`, com `pago_cents`, `devido_cents` e `payment_id`). Excesso
-concede, alerta e deixa o log `pix_excesso_recebido`; retido e depois completado deixa o log
+concede, alerta e deixa o log `pix_excesso_recebido` (devolver a diferença de um Pix de indicado com
+comissão abre pendência parcial de afiliado e bloqueia o saque dela: o acumulado de `refunds` não separa
+excesso de estorno do plano, e o valor pago não fica na cobrança. O admin acha a pendência em /admin,
+"Reembolsos para revisar", pelo código do afiliado e pelo "devolvido ao cliente" igual ao excesso (o
+`pago_cents − devido_cents` do log `pix_excesso_recebido`), e fecha aprovando a comissão inteira, com a
+justificativa "devolução do excesso". Limite: o pagamento continua rotulado como reembolso parcial, e o
+`/me` do afiliado mostra `payment_refund = "partial"` nessa comissão para sempre); retido e depois completado deixa o log
 `pix_retido_completado` (o alerta desse lado não é retentado depois de `paid`), mas só quando o
 alerta de retido foi entregue; senão, só a coluna `completado_pelo_mesmo_pagamento` do runbook
 mostra. Segundo pagamento com `payment.id` novo numa cobrança já paga ou estornada (#1257): nenhum
@@ -1799,14 +1805,66 @@ Asaas.
 
 **Afiliado no dreno do Pix.** `afiliado` é o último efeito de compra (a falha dele vira
 retentativa sem segurar `grant` nem e-mail) e grava o pagamento do indicado pelo
-`amount_cents`, nunca os cadernos. `afiliado_estorno` roda no `PAYMENT_REFUNDED` e, com a
-cobrança em `refunded`, grava o pagamento antes de rotular: se o `afiliado` ficou pendente, a
-guarda D3 fecha a retentativa da compra e ele não roda mais. Em outro status ele só rotula a
-linha que já existe (`chargeback` não transiciona). `afiliado_estorno_parcial` roda no parcial,
-só com a cobrança em `refunded_partial` e com id: são
+`amount_cents`, nunca os cadernos. Depois, a comissão (`record_commission_for_pix`), pela mesma regra
+da primeira cobrança do cartão: chave `pix:<id>` (`external_reference`) em `stripe_invoice_id`, base
+`amount_cents` (o pago: campanha e crédito de upgrade já saíram), `paid_months` = `MESES_DO_PIX` (12,
+em `core/services/pix_pricing.py` ao lado de `DURACAO_DIAS`), sem conferência A5. Falha levanta e
+vira retentativa; o marcador e o `unique` seguram o reprocessamento. Pix e cartão do mesmo cliente
+se serializam por `trava_indicado`: o primeiro pago decide.
+Reembolso do Pix passa pela máquina do cartão: `marcar` chama `registrar_reembolso` com a chave
+`pix:<id>` (rótulo, pendência e estorno numa transação) e `avisar_pendencia`. Devolvido no total: o
+cobrado (plano + cadernos, `total_cents`), sem rede. No parcial, só quando o valor decide algo
+(`precisa_do_acumulado`: comissão não estornada da chave, ou a que saiu com o afiliado e `_aplicar` ainda
+refaz pela linha da pendência, `_comissao_que_saiu`: a paga, N1, ou a de um saque órfão ainda aberto): a soma de `refunds[].value` do `buscar_pagamento` (`estornado_cents`; item com
+`status` conta só se `DONE`, sem diferenciar maiúscula; sem `status` conta; cada `value` pela regra do
+`value` do webhook, `centavos_do_valor`). Asaas fora, forma inesperada ou soma zero (estorno ainda não
+concluído) levantam e o efeito tenta de novo, até `TENTATIVAS_ATE_TRAVAR` (`pix_drain.py`, o mesmo limiar
+do "evento travado"): cerca de 5 minutos com o dreno passando a cada 60 s. Na passada seguinte segue com 0:
+pendência `open/0`, saque bloqueado, aviso ao admin, e o evento fecha (sem o teto ele retentaria até a
+purga de 7 dias, que fecha calada e deixa a comissão sacável). Estorno do Asaas que leve mais que isso
+para ficar `DONE` acaba em `open/0`, e o admin decide pelo Asaas; o teto se revê com a medição no sandbox.
+A retentativa da compra (o rótulo final do `registrar`, quando a comissão nasce depois do parcial) não
+conta para o teto: ela retenta sozinha até o valor sair. A forma de `refunds` ainda não foi conferida no sandbox.
+Fora disso o Asaas não é consultado: devolvido 0, só o rótulo, e o parcial de quem não tem afiliado
+(ou tem comissão estornada) fecha na primeira como antes. Comissão que nasce entre essa checagem e a
+trava fica em revisão com devolvido 0 (do lado seguro). O alerta do parcial (e o do chargeback) sai uma
+vez por evento, depois dos efeitos, na passada que conclui: a retentativa não o repete. No parcial com
+comissão não há sinal nenhum durante as retentativas (cerca de 5 minutos); depois sai `open/0` com o aviso
+ao admin e o alerta do parcial, sem "evento travado". O texto dele ("devolvido: R$ X") soma todo `value`, de qualquer
+`status`, como antes; só o valor da pendência usa a regra estrita.
+
+Parcial × comissão, por estado (o 1º parcial; a reentrega e o acumulado menor não mudam nada; o maior
+atualiza ou reabre; depois do total o efeito não roda):
+
+| Comissão da chave | Consulta o Asaas | Resultado |
+|---|---|---|
+| nenhuma (sem afiliado, a 0%, antes da compra) | não | rótulo e `no_commission/0`; se a comissão nascer depois, `promover` a põe em revisão e o rótulo final do `registrar` acerta o valor |
+| `pending` (solta, em revisão, em saque) ou `paid` | sim | `open` com o acumulado; solta e em saque bloqueiam o saque, paga não |
+| `reversed` | não | só o rótulo |
+| excluída com o afiliado, já paga (N1, `paid_cents`) | sim | `open` com o acumulado, como a Stripe |
+| excluída com o afiliado, em saque órfão aberto | sim | `open` com o acumulado, bloqueia o saque órfão |
+| qualquer uma que consulte, com o Asaas fora, lixo ou soma 0 | sim | retentativa até o teto (cerca de 5 min, dreno a cada 60 s); depois `open/0` e aviso |
+
+**Pendência `open/0` do Pix (runbook).** Nasce quando o Asaas não deu o acumulado em cerca de 5 minutos
+(teto acima). A tela "Reembolsos para revisar" não mostra a cobrança. Para ligar: o aviso ao admin mostra
+"comissão `<id>`", e a pendência dela tem `stripe_invoice_id = 'pix:<id>'` (`select stripe_invoice_id from
+affiliate_refund_reviews where commission_id = <id do aviso>`), em que o `<id>` é `pix_charges.id`; o log `affiliate_commission_created` traz `affiliate_id` e `charge_id`, e o alerta do
+dreno traz o id da cobrança. Com a cobrança: conferir no painel do Asaas quanto foi devolvido de fato e,
+em /admin, aprovar o valor da comissão que cabe (revisão parcial, com a justificativa) ou estornar.
+
+`afiliado_estorno` roda no `PAYMENT_REFUNDED` e, com a
+cobrança em `refunded`, grava o pagamento antes de rotular, sem comissão: se o `afiliado` ficou
+pendente, a guarda D3 fecha a retentativa da compra e ele não roda mais; o pagamento fica no
+histórico e encerra a elegibilidade. Em outro status (`chargeback`, que só reparo manual grava, ou o
+estorno fora de ordem em `pending`) ele roda a mesma máquina sobre o que existir: rótulo da linha e
+estorno ou pendência da comissão. Os eventos de chargeback/MED não transicionam e não mexem na
+comissão: o admin usa "Estornar". `afiliado_estorno_parcial` roda no parcial,
+só com a cobrança em `refunded_partial` e com id, A CADA evento (`_REPETEM` em `pix_drain.py`): o
+acumulado cresce, e `registrar_reembolso` só age com fato novo, então o 2º parcial atualiza ou
+reabre a pendência e a reentrega não muda nada. São
 dois nomes porque o dreno deduplica por `(pagamento, efeito)`, e com um só o total depois do
 parcial seria pulado. O parcial sem id fecha sem retentativa, como antes. Titular excluído
-(`_orfao`) não roda efeito: `rotular_reembolso` marca o reembolso direto, por ser idempotente.
+(`_orfao`) não roda efeito: `rotular_reembolso` passa pela mesma máquina direto, por ser idempotente.
 Estorno que chega com a cobrança ainda `pending` não vira pagante, nem no boot: ela nunca foi
 `paid`.
 Limite: em `chargeback` o estorno não grava pagante; nenhum código grava esse status, só reparo manual, e o boot repara.
@@ -2646,7 +2704,13 @@ versão de API do endpoint, e o caminho inverso não foi conferido contra a Stri
 ligar. `total` se o devolvido (ou a disputa) cobre a cobrança, senão `partial`.
 
 Quem protege o dinheiro é a **pendência no banco** (`db/affiliate_reviews.py`), não o aviso.
-`affiliate_refund_reviews` tem uma linha por fatura reembolsada, sem `user_id` nem dado do indicado;
+`affiliate_refund_reviews` tem uma linha por fatura reembolsada, sem `user_id` nem dado do indicado. A
+"fatura" é a chave da comissão: `stripe_invoice_id` guarda o id da Stripe (`in_...`) ou `pix:<id>` da
+cobrança Pix, nas duas tabelas; `origem_da_chave` e `PAGAMENTO_DA_COMISSAO_SQL` (`db/affiliate_payments.py`,
+um teste compara os dois) traduzem para o pagamento de `affiliate_referral_payments`. O backfill do boot,
+`scripts/backfill_afiliado_pagamentos.py` e a conferência do saque na Stripe (`faturas_do_saque`, nos dois
+ramos) pulam as `pix:`, que não são fatura da Stripe; saque só com comissão Pix não consulta a Stripe (QR e
+"Marcar pago" saem sem chave: o atalho mora em `conferir_saque`, antes da checagem dela);
 `affiliate_refund_review_events` guarda ajuste, rejeição, pagamento registrado e recuperação, com
 autor e horário, só por inserção. `registrar_reembolso` grava rótulo e pendência numa transação, sob
 a trava da fatura e da comissão, e decide com o estado de agora:
@@ -2886,7 +2950,8 @@ comissão" (`POST /admin/api/affiliates/{id}/commission`, corpo `{"commission_bp
 comissão já registrada não muda. Base é o valor pago na primeira cobrança confirmada (o plano já com cupom,
 sem os extras), gravada em `invoice_amount_cents`, com `commission_bps` e `paid_months` na linha:
 `amount = base × bps / 10000 / paid_months`, numa conta só, meio centavo para cima (`valor_da_comissao`).
-`paid_months` é 12 no plano anual: no cartão, `_meses_do_plano` lê o intervalo de cada linha de plano da PRÓPRIA fatura
+`paid_months` é 12 no plano anual: no Pix, sempre (`MESES_DO_PIX`, base `amount_cents`, ver "Afiliado no
+dreno do Pix"); no cartão, `_meses_do_plano` lê o intervalo de cada linha de plano da PRÓPRIA fatura
 (fora os extras): no formato antigo, `price.recurring`/`plan` da linha; no `dahlia`, que só traz o id, o
 `recurring` do item 0 da assinatura se o id for o mesmo, senão `stripe.Price.retrieve`. Só sem linha legível
 usa a assinatura. Mensal só se todas forem mensais; intervalo desconhecido ou falha do `retrieve` cai em 12,

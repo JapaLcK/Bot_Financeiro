@@ -104,6 +104,7 @@ def alertar_stripe_desistido(cobranca) -> None:
 
 
 def _acumulado_estornado(payment_id: str) -> str:
+    """Texto do alerta, mais frouxo que `afiliado_pix.estornado_cents` (que decide dinheiro): soma todo `value`."""
     from core.services.asaas import buscar_pagamento
 
     try:
@@ -112,8 +113,10 @@ def _acumulado_estornado(payment_id: str) -> str:
         return "acumulado indisponível"
     if not isinstance(estornos, list):
         return "acumulado indisponível"
-    total = sum(float(e.get("value") or 0) for e in estornos if isinstance(e, dict))
-    return f"R$ {total:.2f}"
+    try:  # lixo no `value` não pode derrubar o evento por causa de um texto
+        return f"R$ {sum(float(e.get('value') or 0) for e in estornos if isinstance(e, dict)):.2f}"
+    except (TypeError, ValueError):
+        return "acumulado indisponível"
 
 
 # ── os efeitos ───────────────────────────────────────────────────────────────
@@ -325,4 +328,4 @@ def _email_do_titular(user_id: int) -> str | None:
 EXECUTORES = {"stripe_cancel": _stripe_cancel, "grant": _grant, "ebook": _ebook, "ga4": _ga4,
                "capi": _capi, "email": _email, "afiliado": afiliado_pix.registrar, "revoke": _revoke,
                "afiliado_estorno": afiliado_pix.estornar,
-               "afiliado_estorno_parcial": lambda c, _: afiliado_pix.marcar(c, "partial")}
+               "afiliado_estorno_parcial": lambda c, evt: afiliado_pix.marcar(c, "partial", int(evt["attempts"] or 0))}

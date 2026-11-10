@@ -12,7 +12,7 @@ Ordem de travas: nas ações do admin, saque, comissões, pendência; no webhook
 comissão, pendência, sem saque. Sem ciclo. Nada aqui guarda dado do indicado; referência do comprovante e
 justificativa moram só em `affiliate_refund_review_events`, nunca em log, aviso ou nota do saque.
 """
-from .affiliate_payments import _rotular
+from .affiliate_payments import _rotular, origem_da_chave
 from .connection import get_conn
 
 # Comissão em revisão e saque bloqueado são a MESMA pendência, vista de dois lados. Fonte única
@@ -134,7 +134,7 @@ def registrar_reembolso(fatura: str, tipo: str, devolvido_cents: int, quando, at
         cur.execute("select id, status, payout_id, amount_cents from affiliate_commissions"
                     " where stripe_invoice_id = %s for update", (fatura,))
         c = cur.fetchone()
-        _rotular(cur, "stripe", fatura, tipo, quando)
+        _rotular(cur, *origem_da_chave(fatura), tipo, quando)
         cur.execute("select * from affiliate_refund_reviews where stripe_invoice_id = %s for update", (fatura,))
         a = cur.fetchone()
         if a is None or (a["tipo"] != "total" and devolvido_cents > a["refunded_cents"]):
@@ -172,14 +172,16 @@ def abertas_do_saque(cur, payout_id: int) -> list[dict]:
 
 def faturas_do_saque(payout_id: int) -> list[dict]:
     """As faturas a conferir antes de pagar: as das comissões do saque e, no saque órfão, as que ficaram nas
-    linhas gravadas na exclusão. Sem trava: o conjunto só encolhe, e quem decide é a trava de quem paga."""
+    linhas gravadas na exclusão. Sem trava: o conjunto só encolhe, e quem decide é a trava de quem paga.
+    A comissão do Pix (`pix:<id>`) fica fora: não é fatura da Stripe, e o estorno dela chega pelo dreno."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select c.id as commission_id, c.stripe_invoice_id as fatura from affiliate_commissions c where c.payout_id = %s
+            select c.id as commission_id, c.stripe_invoice_id as fatura from affiliate_commissions c
+             where c.payout_id = %s and left(c.stripe_invoice_id, 4) <> 'pix:'
             union all
             select null, r.stripe_invoice_id from affiliate_refund_reviews r
-             where r.orphan_payout_id = %s and r.commission_id is null
+             where r.orphan_payout_id = %s and r.commission_id is null and left(r.stripe_invoice_id, 4) <> 'pix:'
             """,
             (int(payout_id), int(payout_id)),
         )

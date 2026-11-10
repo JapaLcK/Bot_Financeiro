@@ -119,6 +119,10 @@ ROTEAMENTO: dict[str, tuple[tuple[str, ...], str | None, tuple[str, ...]]] = {
 
 _ALERTAM = ("PAYMENT_PARTIALLY_REFUNDED", "PAYMENT_CHARGEBACK_REQUESTED",
             "PAYMENT_CHARGEBACK_DISPUTE")
+# Roda a cada evento, mesmo já registrado: o 2º parcial traz acumulado maior. Idempotente por conta
+# própria (`registrar_reembolso` só age com fato novo); o `lock_efeito` segue serializando.
+_REPETEM = ("afiliado_estorno_parcial",)
+TENTATIVAS_ATE_TRAVAR = 5  # §8.2: na 6ª passada o `stripe_cancel` desiste e o parcial do afiliado para de esperar o Asaas
 
 
 def drenar_evento(event_id: str) -> None:
@@ -144,7 +148,7 @@ def drenar_evento(event_id: str) -> None:
         marcar_processado(event_id)
         return
     tentativas = registrar_falha(event_id, *falha)
-    if tentativas > 5:
+    if tentativas > TENTATIVAS_ATE_TRAVAR:
         admin_notify.notify_pix_alerta(
             f"⚠️ **Pix: evento travado** `{event_id}` — {tentativas} tentativas, "
             f"último erro `{falha[0]}`."
@@ -203,7 +207,7 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
     # B) GUARDA DE ÓRFÃO, antes do laço: titular excluído (§13.4). Nenhum efeito
     # de compra — não há a quem conceder —, e o `CHECK` da janela não se aplica.
     if cobranca["user_id"] is None:
-        return _orfao(event_id, cobranca, destino, origens, payment_id)
+        return _orfao(event_id, cobranca, destino, origens, payment_id, int(evt["attempts"] or 0))
 
     # D3 — dinheiro devolvido não é reconcedido. Vale só para efeito de COMPRA:
     # o `revoke` de um estorno que chegue depois continua rodando.
@@ -235,12 +239,9 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
             avisar_pago_sem_qr(cobranca)  # ponytail: perdido se morrer aqui; é só aviso
         cobranca = nova or buscar_por_asaas_payment_id(payment_id) or cobranca
 
-    if evt["event_type"] in _ALERTAM:
-        alertar(evt["event_type"], cobranca, payment_id)
-
     for efeito in efeitos_do_laco(efeitos, cobranca, payment_id):
         with lock_efeito(payment_id, "grant" if efeito == "revoke" else efeito):  # estorno espera o grant em voo
-            if efeito_registrado(payment_id, efeito):
+            if efeito not in _REPETEM and efeito_registrado(payment_id, efeito):
                 continue
             if efeito == "grant" and (veto := veto_grant(payment_id))[0]:
                 return veto[1]  # #1267: UNDONE/estorno ganhou a corrida (relido sob o lock)
@@ -251,11 +252,15 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
                 # PRIMEIRO efeito: Stripe fora do ar barrava o `grant` em TODA
                 # retentativa. `continue` sem `registrar_efeito` — o efeito não
                 # rodou, e é o alerta que vira trabalho manual.
-                if efeito == "stripe_cancel" and int(evt["attempts"] or 0) >= 5:
+                if efeito == "stripe_cancel" and int(evt["attempts"] or 0) >= TENTATIVAS_ATE_TRAVAR:
                     alertar_stripe_desistido(cobranca)
                     continue
                 return (type(exc).__name__, getattr(exc, "code", None))
             registrar_efeito(payment_id, efeito, event_id)
+    # Depois do laço: um alerta por evento, na passada que conclui. Antes dele, cada retentativa (o
+    # parcial com o Asaas fora) repetia o alerta; só na 1ª tentativa, a que morresse antes perdia o dela.
+    if evt["event_type"] in _ALERTAM:
+        alertar(evt["event_type"], cobranca, payment_id)
     return None
 
 
@@ -300,7 +305,7 @@ def _sem_cobranca(referencia, pagamento: dict) -> None:
     )
 
 
-def _orfao(event_id, cobranca, destino, origens, payment_id):
+def _orfao(event_id, cobranca, destino, origens, payment_id, tentativas=0):
     """Titular excluído: a transição acontece, os efeitos de compra NÃO.
 
     O destino de pagamento vira `paid_orphan`, e é o `user_id is null` que
@@ -312,7 +317,7 @@ def _orfao(event_id, cobranca, destino, origens, payment_id):
         transicionar(cobranca["id"], de=origens, para=alvo,
                      asaas_payment_id=payment_id,
                      apagar_qr=alvo in _APAGAM_O_QR)
-    rotular_reembolso(cobranca, destino)
+    rotular_reembolso(cobranca, destino, tentativas)
     with lock_efeito(payment_id, "orphan_notified"):
         if destino == "paid" and not efeito_registrado(payment_id, "orphan_notified"):
             registrar_efeito(payment_id, "orphan_notified", event_id)
