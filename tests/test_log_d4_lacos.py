@@ -218,6 +218,7 @@ def test_tick_dos_agentes_imprime_a_causa_e_dorme(monkeypatch, capsys):
 def test_topo_do_cobrador_imprime_causa_e_quadros_sem_a_linha_final(monkeypatch, capsys):
     """`falha_de_tarefa` (P3 b): a causa e os quadros da pilha, sem a linha final do psycopg."""
     import core.services.declaracao_lembrete as declaracao
+    monkeypatch.setattr(observability, "_ultima_pilha", {})  # P11: a pilha da tag sai só na 1ª falha
     # Um erro para cada passo: o mesmo objeto relançado acumula os quadros da 1ª volta.
     monkeypatch.setattr(rc, "sync_manual_bills_once", _levanta(_erro_real()))
     monkeypatch.setattr(rc, "sync_autopay_notices_once", _levanta(_erro_real()))

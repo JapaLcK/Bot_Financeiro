@@ -150,3 +150,20 @@ def test_assunto_de_send_email():
                 'await asyncio.to_thread(send_email, to, nome, "h", log_subject="Rótulo")'):
         assert abertos(bom) == 0, bom
     assert len(_assuntos_abertos("from e import send_email as se\nse('a', b, 'h')\n", "x.py")) == 1
+
+
+def test_tag_de_falha_de_tarefa():
+    """A tag sai no log como veio, e cada uma é uma entrada no estado da P11: só string literal passa.
+    O que a tag carrega soma a classe do conteúdo à `TAG_VIVA`."""
+    for ruim, classes in [
+        ('falha_de_tarefa(f"[x] uid={n}", exc)', ["TAG_VIVA"]),
+        ('falha_de_tarefa("[x] " + r, exc)', ["TAG_VIVA"]),
+        ('falha_de_tarefa(exc=exc, tag=f"[x] {n}")', ["TAG_VIVA"]),
+        ('falha_de_tarefa(f"[x] {exc}", exc)', ["PRINT_CRU", "TAG_VIVA"]),
+        ('falha_de_tarefa(f"[x] to={to}", exc)', ["PRINT_PII", "TAG_VIVA"]),
+        ('falha_de_tarefa(f"[x] {wamid}", exc)', ["TAG_VIVA", "LOG_WAMID"]),
+    ]:
+        assert _de(ruim) == classes, (ruim, _de(ruim))
+    for boa in ('falha_de_tarefa("[x]", exc)', 'falha_de_tarefa(exc=exc, tag="[x]")',
+                'observability.falha_de_tarefa("[x]", exc)'):
+        assert _de(boa) == [], (boa, _de(boa))
