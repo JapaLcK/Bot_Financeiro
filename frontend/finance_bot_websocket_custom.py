@@ -128,7 +128,7 @@ from db import reauth_codes
 from db.accounts import MENSAGEM_CAIXINHA_COM_MOVIMENTO
 from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, get_logger
-from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
+from core.pg_text import causa_segura, detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
 from core.services.pkce import VERIFIER_PATTERN as _PKCE_VERIFIER_PATTERN
@@ -2203,7 +2203,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[afiliado] erro: {exc}", file=sys.stderr)
+                print(f"[afiliado] erro: {causa_segura(exc)}", file=sys.stderr)
             await asyncio.sleep(300)
 
     async def _remarketing_worker():
