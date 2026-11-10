@@ -42,6 +42,11 @@ class PlanLimits(TypedDict):
     budgets_max: int | None             # orçamentos por categoria; None = ilimitado
 
 
+# Teto de bancos do Open Finance do integrante da família cujo acesso Plus vem SÓ do
+# grant 'family' (sem plano pago próprio). Com plano próprio vale o do plano.
+# Quem aplica: plan_service.get_user_limits (via billing_access.teto_bancos_plus).
+OF_BANKS_MAX_FAMILIA = 1
+
 # Ordem canônica da escada. Comparações de tier usam este ranking.
 TIER_ORDER: dict[str, int] = {"free": 0, "essencial": 1, "plus": 2, "pro": 3}
 

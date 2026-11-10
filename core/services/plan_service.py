@@ -569,7 +569,13 @@ def get_user_limits(user_id: int) -> PlanLimits:
     """
     if not plans_v2_enabled():
         return limits_for("pro" if is_pro(user_id) else "free")
-    return limits_for_tier(get_plan_tier(user_id))
+    tier = get_plan_tier(user_id)
+    limites = limits_for_tier(tier)
+    if tier == "plus":  # só o Plus pode ser o do grant 'family'; os outros tiers não pagam a query
+        from .billing_access import teto_bancos_plus  # lazy: billing_access importa plan_service
+
+        return {**limites, "of_banks_max": teto_bancos_plus(user_id)[0]}
+    return limites
 
 
 def history_days_cap(user_id: int) -> int | None:
