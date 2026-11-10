@@ -2199,6 +2199,14 @@ async def lifespan(app: FastAPI):
                 raise
             except Exception as exc:
                 print(f"[remarketing] erro: {exc}", file=sys.stderr)
+            try:   # reconquista de trial vencido: tick próprio, não depende do remarketing
+                from core.services.reconquista import rodar_uma_vez as _reconquistar  # noqa: PLC0415
+                if n := await asyncio.to_thread(_reconquistar):
+                    print(f"[reconquista] {n} linha(s) processada(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[reconquista] erro: {type(exc).__name__}", file=sys.stderr)
             await asyncio.sleep(300)
 
     async def _account_deletion_worker():
@@ -7467,6 +7475,19 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             from core.services.stripe_exclusao import MARCA_EXCLUSAO
             if _g(_g(obj, "cancellation_details"), "comment") in (MARCA, MARCA_EXCLUSAO):
                 return {"received": True}
+            # Reconquista: trial que acabou sem pagar (encerrado no fim do trial OU depois, ex.: cartão
+            # recusado -> past_due -> deleted dias depois; quem pagou é pulado no tick, `ja_pagou`).
+            # Cancelamento no meio do trial não entra. Falha não derruba o webhook.
+            try:
+                from core.services import reconquista  # noqa: PLC0415
+                _desde = reconquista.ligado()
+                _te, _fim = _g(obj, "trial_end"), _g(obj, "ended_at")
+                if _desde and _te and _fim and _fim >= _te - 3600 and _te >= _desde.timestamp():
+                    from db.reconquista import agendar  # noqa: PLC0415
+                    await asyncio.to_thread(
+                        agendar, int(user_id), datetime.fromtimestamp(_te, timezone.utc))
+            except Exception as exc:
+                print(f"[billing] reconquista agendar falhou user={user_id}: {type(exc).__name__}")
             # Email de confirmacao de cancelamento (item 41)
             # O plano sai do PRICE do `obj`, que é a própria Subscription do
             # evento (#351) — e não da conta, porque o `update_user_plan(...,
