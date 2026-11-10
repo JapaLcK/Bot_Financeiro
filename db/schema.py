@@ -3258,6 +3258,19 @@ def init_db():
           unique (user_id, etapa)
         )
         """,
+        # Reconquista de trial vencido sem pagamento (um e-mail, 2 dias depois). Fila de
+        # reivindicação atômica: pendente -> enviando -> enviado|pulado. Sai com a conta.
+        """
+        create table if not exists reconquista_trial (
+          user_id bigint primary key references users(id) on delete cascade,
+          trial_end timestamptz not null,
+          enviar_em timestamptz not null,
+          status text not null default 'pendente',
+          motivo text,
+          enviado_em timestamptz,
+          created_at timestamptz not null default now()
+        )
+        """,
         # E-mail novo a levar ao cliente do Stripe (funil v3, PR 4b): a PATCH
         # /settings/{uid}/security/contact grava na MESMA transação da troca, o
         # job `core/services/stripe_email_sync.py` manda o e-mail ATUAL da conta

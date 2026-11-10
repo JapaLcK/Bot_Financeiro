@@ -44,6 +44,7 @@ from core.services.pluggy import (
     get_pluggy_item,
 )
 from core.services.pluggy_catalogo import list_pluggy_connectors, logo_proprio
+from core.services.billing_access import teto_bancos_plus
 from core.services import billing_copy
 from core.services.plan_service import is_pro
 from core.services.pluggy_sync import (
@@ -1507,6 +1508,9 @@ def _msg_sem_open_finance(user_id: int) -> str:
     return _MSG_OF_SO_NOS_PLANOS_PAGOS
 
 
+_MSG_OF_TETO_FAMILIA = "Pelo Plano Família você conecta 1 banco. Assine um plano próprio para conectar mais."
+
+
 async def _veredito_do_teto(user_id: int, new_item_id: str | None = None,
                             provider: str = "pluggy") -> tuple[int | None, int | None, dict | None]:
     """Teto de conexões OF por plano, como `(teto, em_uso, recusa)`.
@@ -1525,6 +1529,7 @@ async def _veredito_do_teto(user_id: int, new_item_id: str | None = None,
     banco. Só bloqueia banco realmente novo. `provider` é o da busca desse item: a
     mock-connect passa 'mock_pluggy' (reseed da falsa), o resto fica no 'pluggy'.
     """
+    from core.services.plan_limits import OF_BANKS_MAX_FAMILIA
     from core.services.plan_service import plans_v2_enabled, get_user_limits
 
     if plans_v2_enabled():
@@ -1544,12 +1549,15 @@ async def _veredito_do_teto(user_id: int, new_item_id: str | None = None,
             }
         count = await asyncio.to_thread(count_open_finance_connections, user_id)
         if count >= limit:
-            return limit, count, {
-                "code": "OF_BANK_LIMIT",
-                "limit": limit,
-                "message": f"Seu plano conecta até {limit} banco{'s' if limit > 1 else ''}. "
-                           "Faça upgrade pra conectar mais: /precos",
-            }
+            # só a mensagem da família se o limit que cobramos É o da família (auth_accounts.plan
+            # pode estar atrasado em relação ao grant: então limit != 1 e vale a mensagem comum)
+            if (limit == OF_BANKS_MAX_FAMILIA
+                    and (await asyncio.to_thread(teto_bancos_plus, user_id))[1] == "familia"):
+                msg = _MSG_OF_TETO_FAMILIA
+            else:
+                msg = (f"Seu plano conecta até {limit} banco{'s' if limit > 1 else ''}. "
+                       "Faça upgrade pra conectar mais: /precos")
+            return limit, count, {"code": "OF_BANK_LIMIT", "limit": limit, "message": msg}
         return limit, count, None
 
     if not _bank_limit_enabled():

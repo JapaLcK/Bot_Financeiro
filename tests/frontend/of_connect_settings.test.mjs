@@ -361,6 +361,37 @@ test("fechar durante a espera cancela o confirmar", async () => {
   await page.__ctx.close();
 });
 
+test("fechar durante o /limite lento do teto atingido não solta o alerta", async () => {
+  // O /limite (texto do servidor, Plano Família) é uma segunda espera do confirmar.
+  // Controle negativo: remover o recheck depois do `await get(.../limite)` deixa este caso vermelho.
+  // O 1º cenário (sem Esc) é o controle positivo: o aviso do servidor chega ao toast.
+  for (const fechar of [false, true]) {
+    const page = await abrirSettings({
+      banksMax: 1,
+      conexoes: [{ id: 9, provider: "pluggy", institution_name: "Nubank", institution_id: "612", status: "UPDATED" }],
+    });
+    let liberar, pediu;
+    const presa = new Promise((r) => { liberar = r; });
+    const pedido = new Promise((r) => { pediu = r; });
+    await page.route("**/open-finance/1/limite", async (route) => {
+      pediu();
+      await presa;
+      route.fulfill(json({ message: "Pelo Plano Família você conecta 1 banco." }));
+    });
+    await abrirPicker(page);
+    await page.click('#bankpick-list .bank-row[data-name="Itaú"]');
+    await page.click("#bankpick-go");
+    await pedido;                         // o confirmar já espera o /limite
+    if (fechar) await page.keyboard.press("Escape");
+    await liberar();
+    await sleep(400);
+    const toast = await page.locator("#toast").textContent();
+    if (fechar) assert.ok(!toast.includes("Plano Família"), "alerta apareceu com o seletor fechado");
+    else assert.ok(toast.includes("Plano Família"), "controle positivo: o aviso do servidor não chegou");
+    await page.__ctx.close();
+  }
+});
+
 test("destroy() cancela o que está em voo e a Pluggy não abre depois", async () => {
   // Quatro rodadas de revisão bateram nesta mesma classe — "operação em voo
   // sobrevive ao destroy()" — uma fronteira assíncrona por vez. A resposta aqui
