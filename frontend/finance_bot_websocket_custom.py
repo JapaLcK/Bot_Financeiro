@@ -127,7 +127,7 @@ from db import (
 from db import reauth_codes
 from db.accounts import MENSAGEM_CAIXINHA_COM_MOVIMENTO
 from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
-from core.observability import _log_falha, get_logger
+from core.observability import _log_falha, falha_de_tarefa, get_logger
 from core.pg_text import causa_segura, detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
@@ -1889,7 +1889,7 @@ async def lifespan(app: FastAPI):
             )
             return default
         except Exception as exc:
-            print(f"WARNING: Startup ignorou '{label}': {exc}", file=sys.stderr, flush=True)
+            print(f"WARNING: Startup ignorou '{label}': {causa_segura(exc)}", file=sys.stderr, flush=True)
             return default
 
     # ── 1. DB health check ────────────────────────────────────────────────────
@@ -1902,7 +1902,7 @@ async def lifespan(app: FastAPI):
         await _startup_required("database health check", _db_health_check())
         print("OK: Database connected", flush=True)
     except Exception as exc:
-        print(f"ERROR: Database connection failed: {exc}", file=sys.stderr, flush=True)
+        print(f"ERROR: Database connection failed: {causa_segura(exc)}", file=sys.stderr, flush=True)
         raise
 
     # ── 2. Schema completo (idempotente) ─────────────────────────────────────
@@ -1971,7 +1971,7 @@ async def lifespan(app: FastAPI):
             from adapters.whatsapp.wa_app import _worker_loop  # noqa: PLC0415
             await _worker_loop()
         except Exception as exc:
-            print(f"[wa_worker] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[wa_worker]", exc)
 
     async def _wa_daily():
         try:
@@ -1979,7 +1979,7 @@ async def lifespan(app: FastAPI):
             from adapters.whatsapp.wa_app import _daily_report_loop  # noqa: PLC0415
             await _daily_report_loop()
         except Exception as exc:
-            print(f"[wa_daily] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[wa_daily]", exc)
 
     async def _wa_bill_reminders():
         try:
@@ -1987,7 +1987,7 @@ async def lifespan(app: FastAPI):
             from adapters.whatsapp.wa_app import _bill_reminder_loop  # noqa: PLC0415
             await _bill_reminder_loop()
         except Exception as exc:
-            print(f"[wa_bill_reminders] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[wa_bill_reminders]", exc)
 
     async def _wa_periodic():
         try:
@@ -1995,7 +1995,7 @@ async def lifespan(app: FastAPI):
             from adapters.whatsapp.wa_app import _periodic_report_loop  # noqa: PLC0415
             await _periodic_report_loop()
         except Exception as exc:
-            print(f"[wa_periodic] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[wa_periodic]", exc)
 
     async def _engagement():
         try:
@@ -2003,7 +2003,7 @@ async def lifespan(app: FastAPI):
             from core.services.engagement_scheduler import run_engagement_loop  # noqa: PLC0415
             await run_engagement_loop()
         except Exception as exc:
-            print(f"[engagement] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[engagement]", exc)
 
     async def _investment_accrual():
         try:
@@ -2011,7 +2011,7 @@ async def lifespan(app: FastAPI):
             from core.services.investment_scheduler import run_investment_accrual_loop  # noqa: PLC0415
             await run_investment_accrual_loop()
         except Exception as exc:
-            print(f"[investment_accrual] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[investment_accrual]", exc)
 
     async def _patrimonio_foto():
         try:
@@ -2019,7 +2019,7 @@ async def lifespan(app: FastAPI):
             from core.services.patrimonio_foto import run_patrimonio_foto_loop  # noqa: PLC0415
             await run_patrimonio_foto_loop()
         except Exception as exc:
-            print(f"[patrimonio_foto] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[patrimonio_foto]", exc)
 
     async def _recurring_charger():
         try:
@@ -2027,7 +2027,7 @@ async def lifespan(app: FastAPI):
             from core.services.recurring_charger import run_recurring_charger_loop  # noqa: PLC0415
             await run_recurring_charger_loop()
         except Exception as exc:
-            print(f"[recurring_charger] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[recurring_charger]", exc)
 
     async def _proactive_ai():
         try:
@@ -2035,7 +2035,7 @@ async def lifespan(app: FastAPI):
             from core.services.proactive_ai_scheduler import run_proactive_ai_loop  # noqa: PLC0415
             await run_proactive_ai_loop()
         except Exception as exc:
-            print(f"[proactive_ai] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[proactive_ai]", exc)
 
     async def _news_bot():
         try:
@@ -2043,7 +2043,7 @@ async def lifespan(app: FastAPI):
             from core.services.news_bot import run_news_loop  # noqa: PLC0415
             await run_news_loop()
         except Exception as exc:
-            print(f"[news_bot] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[news_bot]", exc)
 
     async def _piggy_agents():
         try:
@@ -2051,7 +2051,7 @@ async def lifespan(app: FastAPI):
             from core.services.piggy_agents import run_agents_loop  # noqa: PLC0415
             await run_agents_loop()
         except Exception as exc:
-            print(f"[agents] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[agents]", exc)
 
     async def _login_events_retention():
         try:
@@ -2059,7 +2059,7 @@ async def lifespan(app: FastAPI):
             from core.services.login_events_retention import run_login_events_retention_loop  # noqa: PLC0415
             await run_login_events_retention_loop()
         except Exception as exc:
-            print(f"[login_events_retention] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[login_events_retention]", exc)
 
     async def _table_cleanup():
         # Poda de auth_refresh_tokens/mfa_login_challenges/pending_google_signups.
@@ -2070,7 +2070,7 @@ async def lifespan(app: FastAPI):
             from core.services.table_cleanup import run_table_cleanup_loop  # noqa: PLC0415
             await run_table_cleanup_loop()
         except Exception as exc:
-            print(f"[table_cleanup] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[table_cleanup]", exc)
 
     async def _plan_grants_reprojection():
         """Reprojeta acesso de quem teve grant começando ou vencendo (§4.3).
@@ -2104,7 +2104,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[plan_grants] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[plan_grants]", exc)
             await asyncio.sleep(60)
 
     async def _pix_worker():
@@ -2150,7 +2150,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[pix] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[pix]", exc)
             await asyncio.sleep(60)
 
     async def _ebook_worker():
@@ -2166,7 +2166,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[ebook] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[ebook]", exc)
             await asyncio.sleep(300)
 
     async def _stripe_email_worker():
@@ -2183,7 +2183,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[stripe_email] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[stripe_email]", exc)
             await asyncio.sleep(300)
 
     async def _afiliado_alerta_worker():
@@ -2203,7 +2203,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[afiliado] erro: {causa_segura(exc)}", file=sys.stderr)
+                falha_de_tarefa("[afiliado]", exc)
             await asyncio.sleep(300)
 
     async def _remarketing_worker():
@@ -2218,7 +2218,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[remarketing] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[remarketing]", exc)
             try:   # reconquista de trial vencido: tick próprio, não depende do remarketing
                 from core.services.reconquista import rodar_uma_vez as _reconquistar  # noqa: PLC0415
                 if n := await asyncio.to_thread(_reconquistar):
@@ -2248,7 +2248,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[account_deletion] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[account_deletion]", exc)
 
     async def _open_finance_trial_expiry():
         # Pausa conexões OF de trial vencido que não virou assinatura (libera o slot
@@ -2277,7 +2277,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[of_trial_expiry] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[of_trial_expiry]", exc)
                 await asyncio.sleep(interval)
 
     async def _open_finance_proactive():
@@ -2296,7 +2296,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[open_finance_proactive] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[open_finance_proactive]", exc)
                 await asyncio.sleep(interval)
 
     _elapsed = _startup_time.monotonic() - _t0

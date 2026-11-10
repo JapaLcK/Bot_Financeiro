@@ -45,6 +45,14 @@ import importlib, inspect, json, time
 
 ALVOS = json.loads(ALVOS_JSON)
 estado = {rotulo: False for rotulo in ALVOS}
+FALHAS = []   # as tags que passaram por `falha_de_tarefa`, na ordem
+
+def _marca(rotulo):
+    estado[rotulo] = True
+    if LEVANTA:   # 22P02 feito à mão, sem banco: o marcador mora só na mensagem
+        import psycopg
+        raise psycopg.errors.InvalidTextRepresentation(
+            f'invalid input syntax for type integer: "x{LEVANTA}"')
 
 def _substituto(original, rotulo):
     """Marcador do MESMO tipo do original.
@@ -58,10 +66,10 @@ def _substituto(original, rotulo):
     """
     if inspect.iscoroutinefunction(original):
         async def _m(*a, **kw):
-            estado[rotulo] = True
+            _marca(rotulo)
         return _m
     def _m(*a, **kw):
-        estado[rotulo] = True
+        _marca(rotulo)
         return {}
     return _m
 
@@ -73,9 +81,20 @@ for rotulo, caminho in ALVOS.items():
 import frontend.finance_bot_websocket_custom as m
 from fastapi.testclient import TestClient
 
+if LEVANTA:
+    # Nos alvos síncronos (`to_thread`) o `estado` vira True na thread do executor, e o
+    # `except` do topo só roda num passo seguinte do loop: sair do `with` ao ver tudo True
+    # deixava o shutdown cancelar a tarefa antes do print. O embrulho chama a REAL primeiro
+    # (a saída é a de produção) e só então conta; a espera vai até a contagem.
+    _real = m.falha_de_tarefa
+    def _conta(tag, exc):
+        _real(tag, exc)
+        FALHAS.append(tag)
+    m.falha_de_tarefa = _conta
+
 with TestClient(m.app):          # lifespan de verdade, como no processo web
     for _ in range(80):          # o wrapper dorme 2s antes do import tardio
-        if all(estado.values()):
+        if all(estado.values()) and len(FALHAS) >= ESPERA_FALHAS:
             break
         time.sleep(0.25)
 
@@ -89,16 +108,25 @@ with TestClient(m.app):          # lifespan de verdade, como no processo web
 # deixando o resto do `.env` vivo.
 resultado = dict(estado)
 resultado["do_disco"] = sorted(set(os.environ) - _ENV_INICIAL - {"APP_ENV", "TZ", "PGTZ"})
+if LEVANTA:
+    resultado["falhas"] = FALHAS
 print("RESULTADO:" + json.dumps(resultado))
 '''
 
 
-def sondar(alvos: dict[str, str], timeout: int = 180) -> tuple[dict | None, str]:
+def sondar(alvos: dict[str, str], timeout: int = 180, *, levanta: str | None = None,
+           falhas: int = 0, env: dict[str, str] | None = None) -> tuple[dict | None, str]:
     """Sobe o `app` com `RUN_BACKGROUND_TASKS=1` e diz quais dos `alvos` foram
     chamados. `alvos` é `{rótulo: "pacote.modulo:atributo"}`.
 
     Devolve `(resultado, diagnóstico)`. `resultado` é `None` quando o subprocesso
     não chegou ao fim — e aí o diagnóstico traz stdout/stderr.
+
+    `levanta` (o marcador): cada alvo, além de marcar, levanta um 22P02 com o marcador
+    na mensagem, e o resultado ganha `falhas` (as tags que passaram por
+    `falha_de_tarefa`) e `stderr` (inteiro). `falhas`: quantas chamadas a
+    `falha_de_tarefa` esperar antes do shutdown. `env`: chaves somadas à env montada.
+    Sem `levanta`, nada muda para quem já chamava.
     """
     # env MONTADA, não `{**os.environ}`: com `RUN_BACKGROUND_TASKS=1` este é o
     # único caminho do repositório que sobe as tarefas de fundo todas, e herdar o
@@ -108,16 +136,18 @@ def sondar(alvos: dict[str, str], timeout: int = 180) -> tuple[dict | None, str]
     # metade (o que o processo pai NÃO repassa). É o MÍNIMO medido para o boot
     # chegar ao lifespan: sem `JWT_SECRET` o processo aborta ("Refusing to start
     # with insecure default").
-    env = {
+    ambiente = {
         "PATH": os.environ.get("PATH", ""),
         "PYTHONPATH": ".",
         "RUN_BACKGROUND_TASKS": "1",
         "DATABASE_URL": os.environ.get("DATABASE_URL", ""),
         "JWT_SECRET": os.environ.get("JWT_SECRET", ""),
+        **(env or {}),
     }
-    fonte = f"ALVOS_JSON = {json.dumps(json.dumps(alvos))}\n" + _FONTE
+    fonte = (f"ALVOS_JSON = {json.dumps(json.dumps(alvos))}\nLEVANTA = {levanta!r}\n"
+             f"ESPERA_FALHAS = {falhas}\n" + _FONTE)
     proc = subprocess.run(
-        [sys.executable, "-c", fonte], cwd=RAIZ, env=env,
+        [sys.executable, "-c", fonte], cwd=RAIZ, env=ambiente,
         capture_output=True, text=True, timeout=timeout,
     )
     linha = next((l for l in proc.stdout.splitlines()
@@ -125,4 +155,7 @@ def sondar(alvos: dict[str, str], timeout: int = 180) -> tuple[dict | None, str]
     diagnostico = f"{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}"
     if not linha:
         return None, diagnostico
-    return json.loads(linha[len("RESULTADO:"):]), diagnostico
+    resultado = json.loads(linha[len("RESULTADO:"):])
+    if levanta:
+        resultado["stderr"] = proc.stderr
+    return resultado, diagnostico
