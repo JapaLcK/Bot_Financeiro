@@ -6367,7 +6367,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         pid = _g(price, "id")
         return pid if isinstance(pid, str) else None
 
-    async def _meses_do_plano(invoice, extras, sub, user_id) -> int:
+    async def _meses_do_plano(invoice, extras, sub, user_id, linhas=None) -> int:
         """Divisor da comissão: 1 no mensal, 12 no anual, pelo intervalo de cada linha de plano da
         PRÓPRIA fatura (fora os extras): reprocessada depois de uma troca, a assinatura de agora
         mentiria. A linha traz o intervalo no formato antigo (`price.recurring`/`plan`); na API
@@ -6375,8 +6375,17 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         vale o `recurring` dela; diferente, `stripe.Price.retrieve`. Price expandido na linha é a fonte, sem
         consulta. Price sem `recurring` é avulso e não conta. Fatura sem linha legível: o item 0 da assinatura. Mensal só se TUDO for mensal; o
         resto cai em 12, o menor valor, e falha do `retrieve` ou intervalo estranho também, com log:
-        nunca paga 12× por omissão. Sem exceção: o acesso e o e-mail já saíram, e um 5xx faria a
-        Stripe reentregar."""
+        nunca paga 12× por omissão. As linhas são TODAS as da fatura (`linhas_da_fatura`, que pagina com
+        `has_more`: o objeto embute só 10, e o plano pode estar depois dos extras); `linhas` reusa as já
+        buscadas. Falha da paginação também cai em 12 com log. Sem exceção: o acesso e o e-mail já saíram,
+        e um 5xx faria a Stripe reentregar."""
+        if linhas is None:
+            from core.services.extras_assinar import linhas_da_fatura
+            try:
+                linhas = await asyncio.to_thread(linhas_da_fatura, invoice)
+            except Exception:
+                linhas = None
+
         def _id(p):
             return p if isinstance(p, str) else _g(p, "id")
 
@@ -6393,7 +6402,9 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             if ciclo(rec) not in conhecidos:
                 estranhos.append(pid if isinstance(pid, str) else None)
 
-        for linha in _g(_g(invoice, "lines", {}), "data", []) or []:
+        if linhas is None:  # a paginação falhou: sem saber o plano da fatura, o menor valor
+            anota({"interval": "linhas_indisponiveis"}, None)
+        for linha in linhas or []:
             precos = [p for p in (_g(linha, "price"), _g(_g(_g(linha, "pricing"), "price_details"), "price")) if p]
             if any(_id(p) in extras for p in precos):
                 continue
@@ -7094,7 +7105,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                             record_commission_for_invoice,
                             user_id, invoice_id, int(amount_cents),
                             datetime.fromtimestamp(event["created"], timezone.utc),
-                            await _meses_do_plano(invoice, _precos, sub, user_id),
+                            await _meses_do_plano(invoice, _precos, sub, user_id, _linhas if _precos else None),
                         )
                 except Exception as exc:
                     # 200 de qualquer jeito: a Stripe não reentrega, e a renovação não vira

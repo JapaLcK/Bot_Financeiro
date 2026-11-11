@@ -63,6 +63,8 @@ class _FakeStripe:
         self.next_event = None
         self.subs: dict = {}
         self.prices: dict = {}
+        self.linhas: dict = {}       # `Invoice.list_lines` (fatura com `has_more`); ausente = a Stripe falhou
+        self.listou: list = []
         outer = self
 
         class _Webhook:
@@ -82,9 +84,16 @@ class _FakeStripe:
             def retrieve(price_id):
                 return outer.prices[price_id]
 
+        class _Invoice:
+            @staticmethod
+            def list_lines(invoice_id, limit=None):
+                outer.listou.append(invoice_id)
+                return {"data": outer.linhas[invoice_id], "has_more": False}
+
         self.Webhook = _Webhook
         self.Subscription = _Subscription
         self.Price = _Price
+        self.Invoice = _Invoice
         self.error = SimpleNamespace(
             SignatureVerificationError=self._SigErr,
             StripeError=Exception,
