@@ -3,13 +3,15 @@
  * ainda é da conta da página antes do POST. O marcador `pb_conta` deixou de decidir: ele sumia ou aparecia sem troca de conta e o
  * saque morria numa recarga calada. A chave nunca sai da página.
  * Controles negativos: forçar a comparação a dar "igual" deixa vermelhos C3 e C4; voltar a linha do marcador
- * (`getCookie("pb_conta") !== _contaDaCarga` → reload) deixa vermelhos C1 e C2.
+ * (`getCookie("pb_conta") !== _contaDaCarga` → reload) deixa vermelhos C1 e C2; o auth-refresh.js tratar o /auth/validate como o
+ * próprio refresh (`_isRefreshEndpoint` com "/auth/" no lugar de "/auth/refresh") deixa vermelho C7.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { startServer } from "./_server.mjs";
-import { CHAVE, abrirApp, naArea, pedirApp } from "./_afiliado.mjs";
+import { CHAVE, abrirApp, ate, naArea, pedirApp } from "./_afiliado.mjs";
+import { SESSAO } from "./_conta_perfil.mjs"; // o WWW_AUTHENTICATE_401 de frontend/routes/shared.py
 
 let ORIGIN, server, browser;
 before(async () => { ({ proc: server, origin: ORIGIN } = await startServer()); browser = await chromium.launch(); });
@@ -45,6 +47,7 @@ for (const [nome, marca, mexe] of [
   test(`C: o marcador ${nome} e o servidor diz a mesma conta: o saque sai, sem recarga nem alerta`, async () => {
     const t = await confirmarCom({ marca }, ({ page }) => page.evaluate(mexe));
     try {
+      await ate(() => t.posts.length > 0);
       assert.deepEqual(t.posts, [JSON.stringify({ pix_key: CHAVE })]);
       assert.equal(t.recargas(), 0);
       await semAlerta(t.page);
@@ -118,4 +121,24 @@ test("C: o POST volta 401 e o refresh diz sessão divergente: 1 POST só, sem re
     assert.equal(url.searchParams.get("aviso"), "acao-nao-enviada");
     assert.equal(posts.length, 1, "sem retry");
   } finally { await a.ctx.close(); }
+});
+
+// C7: o caminho comum — o access expirou com a confirmação aberta. O validate volta 401 de autenticação, o auth-refresh.js renova
+// (a mesma conta) e refaz o validate, que diz 42: o saque sai uma vez, sem alerta. Cabeçalho e corpo do refresh são os do servidor.
+test("C: o validate volta 401, o refresh renova a mesma conta e o validate refeito diz 42: 1 POST, sem alerta", async () => {
+  let validates = 0, refreshes = 0;
+  const t = await confirmarCom({ marca: "42" }, async ({ ctx }) => {
+    await ctx.route("**/auth/validate", (r) => (++validates === 1
+      ? r.fulfill({ status: 401, headers: SESSAO, json: { detail: "Token inválido ou expirado." } })
+      : r.fulfill({ headers: { "X-PB-Conta": "42" }, json: { ok: true, user_id: 42 } })));
+    await ctx.route("**/auth/refresh", (r) => { refreshes += 1; return r.fulfill({ headers: { "X-PB-Conta": "42" }, json: { ok: true, user_id: 42, confirmada: true } }); });
+  });
+  try {
+    await ate(() => t.posts.length > 0);
+    await t.page.waitForTimeout(200); // e nenhum 2º
+    assert.deepEqual(t.posts, [JSON.stringify({ pix_key: CHAVE })]);
+    assert.deepEqual([validates, refreshes], [2, 1], "validate, refresh, validate");
+    await semAlerta(t.page);
+    assert.equal(t.recargas(), 0);
+  } finally { await t.ctx.close(); }
 });

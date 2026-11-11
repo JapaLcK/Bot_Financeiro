@@ -7,6 +7,7 @@
  * tirar a janela do teclado (`cedo`) deixa vermelhos o Enter-Enter e o Espaço-Espaço; tirar o `clearTimeout(_genericModalTrava)` deixa vermelho
  * o "fechado por Esc"; tirar o `preventDefault` do mousedown na janela deixa vermelhos os seis duplos cliques com chave (o foco cai no body);
  * torná-lo incondicional deixa vermelho o "arrastar seleciona o texto do saque".
+ * O `alinhar` 150 px aquém deixa vermelhos os três "alinhado" e os toques (o `SOB`); antes do `SOB` eles passavam sem tocar o OK.
  * O mesmo defeito no frontend/modals.js: confirma_duplo_clique_settings.test.mjs.
  */
 import { test, before, after } from "node:test";
@@ -14,7 +15,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { startServer } from "./_server.mjs";
-import { CHAVE, abrirApp, naArea } from "./_afiliado.mjs";
+import { CHAVE, abrirApp, ate, naArea } from "./_afiliado.mjs";
 
 let ORIGIN, server, browser;
 before(async () => { ({ proc: server, origin: ORIGIN } = await startServer()); browser = await chromium.launch(); });
@@ -24,12 +25,28 @@ const TAMANHOS = [[1280, 800], [390, 844], [320, 568]];
 const ABERTO = "#generic-confirm-overlay.open";
 const JANELA = 450; // acima da constante (400 ms)
 
+/** O 2º toque/aperto vale pelo intervalo que a PÁGINA viu entre os dois `tipo` (`performance.now()`, o relógio da janela): com a
+ *  máquina carregada o runner atrasa o 2º além dos 400 ms, e aí confirmar é o certo. Fora da janela o caso é pulado, nunca dado por bom. */
+const valeram = {};
+async function dentroDaJanela(t, page, tipo, grupo, aperta) {
+  await page.evaluate((tp) => { window.__em = []; addEventListener(tp, () => window.__em.push(performance.now()), true); }, tipo);
+  await aperta();
+  const em = await page.evaluate(() => window.__em);
+  assert.equal(em.length, 2, `${tipo}: ${JSON.stringify(em)}`);
+  const ms = em[1] - em[0];
+  if (ms >= 400) { t.skip(`o 2º ${tipo} chegou ${Math.round(ms)} ms depois do 1º, fora da janela`); return false; }
+  valeram[grupo] = (valeram[grupo] || 0) + 1;
+  return true;
+}
+
 /** Na área do afiliado com a chave digitada, anotando os POSTs do saque. */
 async function naTela(opts) {
   const a = await abrirApp(browser, ORIGIN, opts);
   const posts = [];
   await a.ctx.route("**/api/affiliate/payout", (r) => { posts.push(r.request().postData()); return r.fulfill({ json: { ok: true, payout: { id: 9 } } }); });
   await naArea(a.page);
+  // O dashboard.css rola suave: com a animação, o `alinhar` e o `sobOSacar` mediam a tela no meio da rolagem.
+  await a.page.addStyleTag({ content: "html { scroll-behavior: auto !important; }" });
   await a.page.locator("#affiliate-pix-input").fill(CHAVE);
   return { ...a, posts };
 }
@@ -64,13 +81,15 @@ async function alinhar(page) {
   return sobOSacar(page);
 }
 
-const caminhos = {};
+// O que fica sob o centro do Sacar com a confirmação aberta: o OK, o Cancelar e o fundo são os caminhos do defeito. Em 1280 a página
+// não rola o bastante (cai na caixa) e em 320 o Sacar, mais à esquerda, cai no Cancelar. Se a medida mudar, o caso não mede mais o que diz.
+const SOB = { 1280: ["modal", "generic-confirm-overlay"], 390: ["generic-confirm-ok", "generic-confirm-overlay"], 320: ["generic-confirm-cancel", "generic-confirm-body"] };
 for (const [w, h] of TAMANHOS) {
   test(`${w}x${h}: duplo clique no Sacar alinhado ao "Confirmar saque" deixa a confirmação aberta, sem POST`, async () => {
     const { ctx, page, posts } = await naTela({ width: w, height: h });
     try {
       const { x, y, sob } = await alinhar(page);
-      caminhos[`${w} alinhado`] = sob;
+      assert.equal(sob, SOB[w][0], "o que fica sob o Sacar alinhado");
       await page.mouse.dblclick(x, y);
       await page.waitForTimeout(500);
       assert.deepEqual(posts, [], `sob o Sacar: ${sob}`);
@@ -84,7 +103,7 @@ for (const [w, h] of TAMANHOS) {
     try {
       await page.locator("#affiliate-payout-btn").scrollIntoViewIfNeeded();
       const { x, y, sob } = await sobOSacar(page);
-      caminhos[`${w} sem alinhar`] = sob;
+      assert.equal(sob, SOB[w][1], "o que fica sob o Sacar");
       await page.mouse.dblclick(x, y);
       await page.waitForTimeout(500);
       assert.deepEqual(posts, [], `sob o Sacar: ${sob}`);
@@ -105,22 +124,19 @@ for (const [w, h] of TAMANHOS) {
   });
 }
 
-// Os dois caminhos do defeito estão cobertos: num caso o 2º clique cai no OK, noutro no fundo (o registro sai na mensagem).
-test("os tamanhos exercitam o caminho do botão e o do fundo", () => {
-  const sob = Object.values(caminhos);
-  assert.ok(sob.includes("generic-confirm-ok"), JSON.stringify(caminhos));
-  assert.ok(sob.includes("generic-confirm-overlay"), JSON.stringify(caminhos));
-});
-
 for (const ms of [0, 120, 250]) {
-  test(`390x844 toque: dois toques no Sacar com ${ms} ms deixam a confirmação aberta, sem POST`, async () => {
+  test(`390x844 toque: dois toques no Sacar com ${ms} ms deixam a confirmação aberta, sem POST`, async (t) => {
     const { ctx, page, posts } = await naTela({ width: 390, height: 844, contexto: { isMobile: true, hasTouch: true, deviceScaleFactor: 3 } });
     try {
-      const { x, y } = await alinhar(page);
-      await page.touchscreen.tap(x, y);
-      if (ms) await page.waitForTimeout(ms);
-      await page.touchscreen.tap(x, y);
-      await page.waitForTimeout(500);
+      const { x, y, sob } = await alinhar(page);
+      assert.equal(sob, "generic-confirm-ok", "o 2º toque cai no OK");
+      // o clique é o que a trava do ponteiro (o `setTimeout` da janela) decide
+      if (!await dentroDaJanela(t, page, "click", "toque", async () => {
+        await page.touchscreen.tap(x, y);
+        if (ms) await page.waitForTimeout(ms);
+        await page.touchscreen.tap(x, y);
+        await page.waitForTimeout(500);
+      })) return;
       assert.deepEqual(posts, []);
       assert.equal(await page.locator(ABERTO).count(), 1);
     } finally { await ctx.close(); }
@@ -136,7 +152,8 @@ for (const [w, h] of TAMANHOS) {
       await page.waitForTimeout(JANELA);
       await page.locator("#generic-confirm-ok").click();
       await page.waitForFunction(() => !document.querySelector("#generic-confirm-overlay.open"));
-      await page.waitForTimeout(200);
+      await ate(() => posts.length > 0); // o validate e o POST, sem prazo fixo
+      await page.waitForTimeout(200); // e nenhum 2º
       assert.deepEqual(posts, [JSON.stringify({ pix_key: CHAVE })]);
     } finally { await ctx.close(); }
   });
@@ -174,7 +191,8 @@ test("Enter no 'Confirmar saque' passada a janela confirma", async () => {
     assert.equal(await page.evaluate(() => document.activeElement?.id), "generic-confirm-ok");
     await page.waitForTimeout(JANELA);
     await page.keyboard.press("Enter");
-    await page.waitForTimeout(300);
+    await ate(() => posts.length > 0);
+    await page.waitForTimeout(200);
     assert.deepEqual(posts, [JSON.stringify({ pix_key: CHAVE })]);
   } finally { await ctx.close(); }
 });
@@ -195,20 +213,24 @@ test("passada a janela, arrastar seleciona o texto do saque", async () => {
 });
 
 // O OK nasce focado: o 2º aperto de um Enter-Enter (ou Espaço-Espaço) rápido no Sacar o confirmaria sem leitura.
-for (const tecla of ["Enter", "Space"]) {
-  test(`${tecla}, ${tecla} (120 ms) no Sacar abre a confirmação e o 2º aperto não confirma`, async () => {
+for (const tecla of ["Enter", "Space"]) for (const ms of [0, 120]) {
+  test(`${tecla}, ${tecla} (${ms} ms) no Sacar abre a confirmação e o 2º aperto não confirma`, async (t) => {
     const { ctx, page, posts } = await naTela({});
     try {
       await page.locator("#affiliate-payout-btn").focus();
-      await page.keyboard.press(tecla);
-      await page.waitForTimeout(120);
-      await page.keyboard.press(tecla);
-      await page.waitForTimeout(400);
+      if (!await dentroDaJanela(t, page, "keydown", tecla, async () => {
+        await page.keyboard.press(tecla);
+        if (ms) await page.waitForTimeout(ms);
+        await page.keyboard.press(tecla);
+        await page.waitForTimeout(400);
+      })) return;
       assert.equal(await page.locator(ABERTO).count(), 1);
       assert.deepEqual(posts, []);
     } finally { await ctx.close(); }
   });
 }
+
+test("o toque, o Enter e o Espaço tiveram cada um um caso dentro da janela", () => assert.deepEqual(Object.keys(valeram).sort(), ["Enter", "Space", "toque"]));
 
 // A trava de um modal fechado (Esc) antes da janela não pode soltar os botões do seguinte antes da janela DELE: o OK do 2º, aos 250 ms
 // dele, já passou dos 400 ms do 1º.
