@@ -324,7 +324,7 @@ def test_payout_note_venenoso_nao_da_500(monkeypatch, veneno, acao, funcao):
 @pytest.mark.parametrize("caminho,corpo", [
     (f"payouts/{INEXISTENTE}/payment-recorded", {"paid_on": "2026-01-01", "receipt_ref": "E1234567"}),
     (f"refund-reviews/{INEXISTENTE}/approve", {"approved_cents": 1, "refunded_cents": 1}),
-    (f"refund-reviews/{INEXISTENTE}/close-recovery", {"result": "waived"}),
+    (f"refund-reviews/{INEXISTENTE}/close-recovery", {"result": "waived", "recovery_cents": 1}),
 ], ids=["realizado", "aprovar", "encerrar"])
 def test_pendencia_justificativa_venenosa_nao_da_500(veneno, caminho, corpo):
     """Saneada, a justificativa passa e o id inexistente responde 404."""
@@ -336,9 +336,10 @@ def test_pendencia_justificativa_venenosa_nao_da_500(veneno, caminho, corpo):
 @pytest.mark.parametrize("veneno", VENENOS, ids=VENENO_IDS)
 def test_referencia_venenosa_da_422_sem_500(veneno):
     r = _post_bruto(_admin_client(), f"/admin/api/affiliates/refund-reviews/{INEXISTENTE}/close-recovery",
-                    {"result": "recovered", "justification": "justificativa ok", "recovered_on": "2026-01-01",
-                     "receipt_ref": _veneno(veneno)})
+                    {"result": "recovered", "recovery_cents": 1, "justification": "justificativa ok",
+                     "recovered_on": "2026-01-01", "receipt_ref": _veneno(veneno)})
     assert r.status_code == 422, r.text
+    assert r.json()["detail"].startswith("Referência inválida"), r.text  # a causa que o nome do teste diz
 
 
 @pytest.mark.parametrize("acao,funcao", ACOES_PAYOUT, ids=["paid", "reject"])

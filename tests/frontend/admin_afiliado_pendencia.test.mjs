@@ -16,7 +16,7 @@ const pendencia = (id, extra) => ({ id, code: "ANA2026", tipo: "partial", status
 const VISAO = {
   affiliates: [],
   payouts: [saque(7, { blocked: true }), saque(8)],
-  refund_reviews: [pendencia(1), pendencia(2, { tipo: "total" })],
+  refund_reviews: [pendencia(1, { payout_id: null, payout_status: null }), pendencia(2, { tipo: "total" })],
   refund_recoveries: [pendencia(3, { status: "recovery", recovery_cents: 4000, origem: "paid_before_refund", referencia: "E1234567" })],
   refund_history: [{ id: 9, review_id: 4, action: "recovery_waived", actor: "lucas", before_cents: 4000, after_cents: null, payout_id: null, event_on: null, receipt_ref: null, justification: "<b>sem</b> retorno", created_at: "2026-11-05T12:00:00+00:00", tipo: "total", commission_id: 54, code: "BIA2026" }],
 };
@@ -114,6 +114,42 @@ test("revisão: valor acima da comissão nem sai do navegador", async () => {
   } finally { await page.close(); }
 });
 
+// mutação: tirar o `min` de `openReviewForm`: valor menor que o cheio sai para o servidor com a comissão em saque aberto (D11)
+for (const [nome, width, height] of TAMANHOS) {
+  test(`revisão em saque aberto só aceita o valor cheio, e a paga aceita qualquer um (${nome})`, async () => {
+    const visao = { ...VISAO, refund_reviews: [pendencia(1), pendencia(4, { commission_status: "paid", payout_id: 5, payout_status: "paid" })] };
+    const { page, posts } = await abrir({ width, height, visao });
+    try {
+      const [aberta, paga] = await page.locator("#aff-reviews tr").all();
+      await aberta.getByRole("button", { name: "Revisar valor" }).click();
+      const campo = page.locator("#aff-f-value");
+      assert.deepEqual([await campo.inputValue(), await campo.getAttribute("min"), await campo.getAttribute("max")], ["100.00", "100.00", "100.00"]);
+      const dica = await page.locator("#aff-form-hint").innerText();
+      assert.match(dica, /saque 7, ainda aberto: só o valor cheio libera/);
+      assert.match(dica, /rejeite o saque[\s\S]*Pagamento já realizado/);
+      const caixa = await page.locator("#aff-form").boundingBox();
+      assert.ok(caixa.x >= 0 && caixa.x + caixa.width <= width && caixa.height <= height, JSON.stringify(caixa));
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+      await campo.fill("60");
+      await page.locator("#aff-f-just").fill("Ajuste pelo valor devolvido");
+      await page.locator("#aff-form-send").click();
+      await page.waitForTimeout(150);
+      assert.deepEqual(posts, []);  // o navegador segura o menor
+      await campo.fill("100");
+      await page.locator("#aff-form-send").click();
+      await page.waitForFunction(() => !document.getElementById("aff-form").open);
+      assert.equal(posts[0].corpo.approved_cents, 10000);
+      await paga.getByRole("button", { name: "Revisar valor" }).click();  // positivo: fora de saque aberto, o mínimo volta a 0
+      assert.deepEqual([await campo.inputValue(), await campo.getAttribute("min")], ["", "0"]);
+      await campo.fill("60.10");
+      await page.locator("#aff-f-just").fill("Ajuste pelo valor devolvido");
+      await page.locator("#aff-form-send").click();
+      await page.waitForFunction(() => !document.getElementById("aff-form").open);
+      assert.equal(posts[1].corpo.approved_cents, 6010);
+    } finally { await page.close(); }
+  });
+}
+
 // mutação: tirar um dos três campos de `openRecordedForm`
 for (const [linha, id] of [[0, 7], [1, 8]]) test(`'Pagamento já realizado' pede os três campos e manda para a rota certa (saque ${id === 7 ? "bloqueado" : "livre"})`, async () => {
   const { page, posts } = await abrir();
@@ -143,9 +179,31 @@ test("encerrar recuperação: dispensada esconde data e referência, e não as m
     await page.locator("#aff-f-just").fill("Valor pequeno, sem cobrança");
     await page.locator("#aff-form-send").click();
     await page.waitForFunction(() => !document.getElementById("aff-form").open);
-    assert.deepEqual(posts, [{ url: "/admin/api/affiliates/refund-reviews/3/close-recovery", corpo: { result: "waived", justification: "Valor pequeno, sem cobrança" } }]);
+    assert.deepEqual(posts, [{ url: "/admin/api/affiliates/refund-reviews/3/close-recovery", corpo: { result: "waived", recovery_cents: 4000, justification: "Valor pequeno, sem cobrança" } }]);
   } finally { await page.close(); }
 });
+
+// mutação: ler `affPendencias.get(id)` no envio: sai o valor da lista recarregada (10.000) e a rota não acha a diferença
+for (const [nome, width, height] of TAMANHOS.slice(0, 2)) for (const resultado of ["recovered", "waived"]) {
+  test(`encerrar manda o valor da abertura, não o da lista recarregada (${resultado}, ${nome})`, async () => {
+    const visao = structuredClone(VISAO);
+    const { page, posts } = await abrir({ width, height, visao });
+    try {
+      await page.getByRole("button", { name: "Encerrar" }).click();
+      visao.refund_recoveries[0].recovery_cents = 10000;  // um total chega com o formulário aberto
+      await page.evaluate(() => window.loadAffiliates());
+      await page.locator("#aff-recoveries").filter({ hasText: "100,00" }).waitFor();
+      assert.equal(await page.locator("#aff-form").evaluate((d) => d.open), true);
+      await page.locator("#aff-f-result").selectOption(resultado);
+      if (resultado === "recovered") await page.locator("#aff-f-ref").fill("E7654321");
+      await page.locator("#aff-f-just").fill("Afiliado devolveu por Pix");
+      await page.locator("#aff-form-send").click();
+      await page.waitForFunction(() => !document.getElementById("aff-form").open);
+      assert.equal(posts.length, 1);
+      assert.equal(posts[0].corpo.recovery_cents, 4000);
+    } finally { await page.close(); }
+  });
+}
 
 // mutação: fechar o formulário sem olhar `res.ok`: o admin acha que salvou
 test("409 fica no formulário, com a mensagem do servidor", async () => {
@@ -255,7 +313,7 @@ test("comissões aguardando conferência aparecem com a mais antiga; sem nenhuma
 const EXCLUIDO = {
   ...VISAO,
   refund_reviews: [
-    pendencia(4, { code: "EVA2026", commission_id: null, commission_cents: 8000, commission_status: "paid", payout_id: 5, affiliate_deleted: true, refunded_cents: 24000 }),
+    pendencia(4, { code: "EVA2026", commission_id: null, commission_cents: 8000, commission_status: "paid", payout_id: 5, payout_status: "paid", affiliate_deleted: true, refunded_cents: 24000 }),
     pendencia(5, { code: "EVA2026", commission_id: null, commission_status: "pending", payout_id: 9, affiliate_deleted: true }),
     pendencia(6),
   ],
@@ -276,6 +334,10 @@ for (const [nome, width, height] of TAMANHOS) {
       assert.match(dica, /já paga/i);
       assert.match(dica, /diferença vira recuperação/);
       assert.doesNotMatch(dica, /volta ao saldo/);
+      await page.locator("#aff-form").evaluate((d) => d.close());
+      await orfa.getByRole("button", { name: "Revisar valor" }).click();  // o órfão no saque aberto: só o cheio, como o vivo
+      assert.equal(await page.locator("#aff-f-value").getAttribute("min"), "100.00");
+      assert.match(await page.locator("#aff-form-hint").innerText(), /saque 9, ainda aberto/);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
     } finally { await page.close(); }
   });

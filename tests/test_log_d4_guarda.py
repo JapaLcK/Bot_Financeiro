@@ -20,8 +20,10 @@ Classes, por (arquivo, função, classe):
 Nome de categoria conta como texto do usuário: `create_user_category` aceita nome livre.
 
 Use `causa_segura(exc)` (ou `causa_do_provedor(exc)`, com o `code`; core/pg_text.py) para a exceção,
-`mask_phone` para o telefone, `mask_wamid` para o id de mensagem e `len(...)` para o texto. A dívida mora em `tests/_log_d4_baseline.py`, num RATCHET como o da guarda do dono:
-acima reprova, abaixo também, até alguém diminuir a entrada. Consertou um ponto? Da raiz:
+`mask_phone` para o telefone, `mask_wamid` para o id de mensagem e `len(...)` para o texto. A baseline
+(`tests/_log_d4_baseline.py`) está vazia desde o PR-9c: qualquer ocorrência fora de `JUSTIFICADAS` reprova.
+O ratchet continua, como o da guarda do dono, e recusa subir: ponto novo se conserta no código. Para
+confirmar que ela segue vazia, da raiz:
 
     PYTHONPATH=. .venv/bin/python tests/test_log_d4_guarda.py --regenera
 
@@ -286,8 +288,8 @@ def test_ratchet_do_print_e_do_log_baixo():
         erros.append(
             "`print` ou log novo com dado que não pode sair (D4 da #657). Troque a exceção por "
             "`causa_segura(exc)` ou `causa_do_provedor(exc)`, o telefone por `mask_phone(...)`, o "
-            "wamid por `mask_wamid(...)` e o texto por `len(...)`. Chave nova (base 0) junto de uma entrada que DIMINUIU, com a MESMA "
-            "classe, pode ser só RENAME: edite a chave à mão em tests/_log_d4_baseline.py. "
+            "wamid por `mask_wamid(...)` e o texto por `len(...)`. A baseline está vazia desde o PR-9c: conserte o "
+            "ponto no código, não acrescente a chave em tests/_log_d4_baseline.py. "
             "(arquivo, função, classe), base -> agora: "
             + "; ".join(f"{k} {b} -> {n}" for k, b, n in acima))
     if abaixo:

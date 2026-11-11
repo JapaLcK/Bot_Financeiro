@@ -107,7 +107,7 @@ def run(limit: int, *, dry_run: bool = False) -> int:
 
     level = "error" if errors or email_failed else "info"
     # `errors` NÃO é persistido, só contado: cada item carrega o `user_id` e o
-    # texto do erro o interpola de novo (`db/privacy.py`, a `RuntimeError` da
+    # texto do erro o interpola de novo (`db/privacy.py`, a `ExclusaoIncompleta` da
     # verificação pós-commit) — e tudo depois do `conn.commit()` de
     # `delete_user_data` roda com a conta JÁ APAGADA. Como `system_event_logs`
     # não tem coluna `user_id` nessa linha, cascata nenhuma a leva: o
