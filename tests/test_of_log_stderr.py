@@ -6,9 +6,12 @@ sem texto cru de exceção, e o rastro do teto estourado diz QUAL item.
    ocupado, infra) dizia o item.
 2. Os três avisos locais (`of_reconnect_lock_retry`, `of_reconnect_lock_timeout`,
    `of_item_registry_failed`) eram `logging.warning`, que o `_DashboardHandler`
-   espelha com INSERT SÍNCRONO no event loop: com `system_event_logs` travada o
+   espelhava com INSERT SÍNCRONO no event loop: com `system_event_logs` travada o
    prazo dobrava. Molde: `test_of_log_teto_e_status.py::
-   test_teto_vale_com_o_espelho_do_logging_lento`.
+   test_teto_vale_com_o_espelho_do_logging_lento`. Desde o PR-10a a produção
+   grava pela fila (`core/log_fila.py`); o controle "voltar para
+   `logging.warning`" vale na suíte, onde o espelho grava na thread de quem loga
+   (`tests/conftest.py`).
 3. O `print` do tick de refresh não leva o `claimed` (uid dos donos), e os
    prints de falha do `pluggy_sync` e do tick não levam `str(exc)`. O
    `db/connection.py` já redige o DETAIL das violações de constraint (classe 23),
