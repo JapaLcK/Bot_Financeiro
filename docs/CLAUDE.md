@@ -2790,7 +2790,9 @@ cobrança paga ou falta de `STRIPE_SECRET_KEY` deixam a marca, e o `_afiliado_al
 tentadas, por id, e depois a da tentativa mais antiga (`payment_check_tried_at`). Fatura que ainda não
 permite concluir (disputa aberta, `payment_record`, sem cobrança paga) grava a tentativa e o motivo
 (`payment_check_reason`: `disputa_aberta`, `forma_inesperada`, `sem_cobranca`) e só volta depois de 1 h
-(`ESPERA_CONFERENCIA_S`), sem segurar as seguintes. A queda da Stripe para a passada sem gravar nada. Só o
+(`ESPERA_CONFERENCIA_S`), sem segurar as seguintes. Erro 4xx da própria fatura (400, 403 e 404, como
+"No such invoice") vale o mesmo, com o motivo `stripe_<status>`, e a marca fica. A queda da Stripe
+(conexão, prazo, 401, 429, 5xx) para a passada sem gravar nada. Só o
 worker espera e grava: webhook, QR, "Marcar pago" e "Pagamento já realizado" conferem na hora. Liberar
 zera a tentativa e o motivo (#1497). Toda adiada deixa o log
 `affiliate_commission_check_pending` com o motivo, sem a fatura. Na lista do afiliado, a marcada

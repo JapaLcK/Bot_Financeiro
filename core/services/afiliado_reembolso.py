@@ -219,18 +219,23 @@ def conferir_comissao(commission_id: int, fatura: str, *, adiar: bool = False) -
 
     Fora de transação. Reembolso vira pendência pela mesma máquina do webhook; sem reembolso a
     comissão segue o fluxo normal. A marca fica, e o worker tenta de novo, em dois casos:
-    False quando a fatura ainda não permite concluir (`SemConfirmacao`), e None quando a Stripe
-    falhou ou não há chave, o que vale para todas. Erro de banco sobe para quem chamou.
+    False quando a fatura ainda não permite concluir (`SemConfirmacao`, ou 4xx da própria fatura: 400,
+    403, 404), e None quando a Stripe falhou para todas (conexão, prazo, chave, limite, 5xx) ou não há
+    chave. Erro de banco sobe para quem chamou.
     `adiar`, só do worker: o False grava a hora e o motivo, e a comissão espera 1 h (#1497)."""
+    import stripe  # noqa: PLC0415
+
     chave = os.getenv("STRIPE_SECRET_KEY")
     if not chave:
         return None
     try:
         tipo, devolvido, _ = devolvido_na_stripe(fatura, chave)
-    except SemConfirmacao as exc:
-        _adiada(commission_id, str(exc))
+    except (SemConfirmacao, stripe.InvalidRequestError, stripe.PermissionError) as exc:
+        # O texto da Stripe pode trazer a fatura: no motivo vai só o status.
+        motivo = str(exc) if isinstance(exc, SemConfirmacao) else f"stripe_{exc.http_status}"
+        _adiada(commission_id, motivo)
         if adiar:
-            adiar_conferencia(commission_id, str(exc))
+            adiar_conferencia(commission_id, motivo)
         return False
     except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer a fatura
         _adiada(commission_id, type(exc).__name__)

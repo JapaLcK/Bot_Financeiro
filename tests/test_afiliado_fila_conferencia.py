@@ -294,3 +294,73 @@ def test_migracao_com_tabela_ocupada():
         assert [x["attname"] for x in colunas] == ["payment_check_pending"]
     finally:
         db.init_db()
+
+
+# ── Rodada do Tester: erro da própria fatura e escrita atrasada ─────────────
+
+def _erro_da_stripe(nome):
+    import stripe
+
+    return {"404": stripe.InvalidRequestError("No such invoice", "invoice", code="resource_missing", http_status=404),
+            "403": stripe.PermissionError("sem acesso", http_status=403),
+            "400": stripe.InvalidRequestError("parâmetro inválido", "invoice", http_status=400),
+            "conexao": stripe.APIConnectionError("fora"),
+            "401": stripe.AuthenticationError("chave", http_status=401),
+            "429": stripe.RateLimitError("limite", http_status=429),
+            "500": stripe.APIError("erro interno", http_status=500)}[nome]
+
+
+def _quebra_a_fatura(monkeypatch, com, erro):
+    real = servico.devolvido_na_stripe
+
+    def devolvido(fatura, chave):
+        if fatura == com.fatura:
+            raise erro
+        return real(fatura, chave)
+
+    monkeypatch.setattr(servico, "devolvido_na_stripe", devolvido)
+
+
+@pytest.mark.parametrize("erro", ["404", "403", "400"])
+def test_erro_da_propria_fatura_adia_e_a_passada_segue(fonte, monkeypatch, erro):
+    """4xx que é da fatura (id que a conta não conhece, sem acesso, parâmetro dela) não é queda da Stripe:
+    a comissão espera 1 h com o motivo, segue marcada, e a válida atrás dela sai na mesma volta."""
+    c = _afiliado()
+    ruim, boa = _marcada(c, 10), _marcada(c)
+    fonte.cobra(boa.fatura)
+    _quebra_a_fatura(monkeypatch, ruim, _erro_da_stripe(erro))
+    servico.conferir_pendentes()
+    assert _linha(boa)["payment_check_pending"] is False
+    linha = _linha(ruim)
+    assert (linha["payment_check_pending"], linha["payment_check_reason"]) == (True, f"stripe_{erro}")
+    assert linha["payment_check_tried_at"] is not None
+
+
+@pytest.mark.parametrize("erro", ["conexao", "401", "429", "500"])
+def test_queda_geral_segue_parando_a_passada(fonte, monkeypatch, espiao, erro):
+    """Positivo do de cima: conexão, prazo, chave, limite e 5xx valem para todas. Para e não grava nada."""
+    c = _afiliado()
+    ruim, boa = _marcada(c, 10), _marcada(c)
+    fonte.cobra(boa.fatura)
+    _quebra_a_fatura(monkeypatch, ruim, _erro_da_stripe(erro))
+    assert servico.conferir_pendentes() == 0
+    assert espiao == [ruim.id]
+    assert [(_linha(x)["payment_check_pending"], _linha(x)["payment_check_tried_at"]) for x in (ruim, boa)] == [
+        (True, None), (True, None)]
+
+
+def test_adiamento_atrasado_nao_regrava_comissao_ja_liberada(fonte, monkeypatch):
+    """Dois workers, intercalação forçada: A lê disputa aberta; B confere a mesma comissão (a disputa foi
+    ganha) e libera; só então A grava o adiamento. A liberada fica com hora e motivo nulos."""
+    c = _afiliado()
+    com = _marcada(c)
+
+    def devolvido(fatura, chave):
+        manutencao.liberar_conferencia(com.id)  # B termina no meio da consulta de A
+        raise servico.SemConfirmacao("disputa_aberta")
+
+    monkeypatch.setattr(servico, "devolvido_na_stripe", devolvido)
+    assert servico.conferir_comissao(com.id, com.fatura, adiar=True) is False
+    linha = _linha(com)
+    assert (linha["payment_check_pending"], linha["payment_check_tried_at"], linha["payment_check_reason"]) == (
+        False, None, None)
