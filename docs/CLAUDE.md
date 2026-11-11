@@ -2504,7 +2504,7 @@ agente, mudança de plano), com link de descadastro (`make_unsub_url` + `unsub_h
 
 Falha de e-mail é silenciosa por contrato: loga e não quebra o fluxo principal.
 
-**Aviso de insight por e-mail (PL-06 B6, adesão no PR 1; o envio é o PR 2).** Só recebe quem aderiu no interruptor "Avisos do
+**Aviso de insight por e-mail (PL-06 B6: adesão no PR 1, envio no PR 2).** Só recebe quem aderiu no interruptor "Avisos do
 Piggy por e-mail" (`/settings` e `/painel`): `auth_accounts.insight_aviso_aderiu_em`, nula = não aderiu, sem default nem backfill, então
 `insight_email_opt_out = false` não é adesão (P4 (c)). `GET /settings/{uid}/notifications` manda `insight_alert_email_enabled` (a adesão gravada, leitura
 direta), `insight_alert_email_available` (`plan_gate_ok(uid, "insights")`), `insight_alert_email_notice` (`texto_adesao()` de
@@ -2518,7 +2518,7 @@ Sem plano, o 402 `subscription_required` do `GET` traz `insight_alert_email_enab
 `/settings` mostra "Desligar agora", sem interruptor, com o texto da margem (cópia de `AVISO_SEM_PLANO` no HTML, comparada por teste). O `/painel` não tem esse caminho: conta cortada é mandada para `/precos` pelo gate
 da página. O link "Cancelar inscrição" do e-mail continua desligando tudo.
 `INSIGHT_EMAIL_USERS` (`liberado`, lida a cada chamada): vazia ou ausente = ninguém, ids por vírgula comparados como texto; `*` não libera ninguém enquanto
-`AVISO_ABERTO_A_TODOS` for falsa (trava do app nativo, que ainda retira a adesão em silêncio; virar a constante exige o laço do PR 2 e o PR 3, e um teste cobra).
+`AVISO_ABERTO_A_TODOS` for falsa (trava do app nativo, que ainda retira a adesão em silêncio; virar a constante exige o PR 3, e um teste cobra).
 Cancelar retira a adesão e nada a devolve sem o interruptor (P7 (b)): `set_engagement_opt_out(uid, True)` (chat "parar emails", `PATCH engagement_email_enabled`,
 `/unsubscribe`) e `set_insight_email_opt_out(uid, True)` apagam a coluna na mesma transação; "reativar emails" e religar os interruptores não a tocam. Chat e página do
 `/unsubscribe` dizem que os avisos só voltam ligando de novo, para quem pode religar (`orientacao_aviso`). **Perder o direito (D1, §12 a §15 do plano B6):** o gatilho `trg_insight_aviso_direito`
@@ -2544,8 +2544,28 @@ comissão de afiliado (#1418): reembolso no Stripe sem cancelar a assinatura nã
 `plan_gate_ok`, mas o gatilho segue por tier, então ligar responde 409 "Ligue Insights financeiros primeiro." (mensagem errada; nada é gravado e o e-mail segue bloqueado);
 issue #1481.
 "Recomeçar do zero" limpa a adesão (P6 (a)); no merge ela anda com a linha de `auth_accounts`; o export leva a adesão VIVA e a cobertura em `conta_login`. `db.insight_email_permitido(uid)`
-é o portão do envio: adesão, flags, fora de exclusão, marca em dia e `plan_gate_ok`; conta ausente False, erro sobe. Testes: `tests/test_insights_adesao*.py`,
-`tests/frontend/notificacoes_aviso_insight.test.mjs`.
+é o portão do envio: adesão, flags, fora de exclusão, marca em dia e `plan_gate_ok`; conta ausente False, erro sobe. A parte SQL dele é `db.reports.PERMITIDO_SQL`, a mesma
+dos enumeradores do envio (um dialeto). Testes: `tests/test_insights_adesao*.py`, `tests/frontend/notificacoes_aviso_insight.test.mjs`.
+**O envio (PR 2, §17 do plano B6)** é `core/services/insights_notificacao.run_insight_emails_once`, a cada 15 min no fuso do app (`utils_date._tz`): das 10h às 10h59
+(`HORA_ENVIO`) a rodada diária enumera quem passa no `PERMITIDO_SQL`, tem e-mail e não tem claim no dia (`db.insight_estado.list_users_for_insight_email`); por usuário,
+`liberado` → `filtrar_por_acesso` → `insight_email_permitido` → claim atômico do dia (`daily_report_prefs.last_insight_email_date`) →
+`generate_ai_insights(force=True, estrito=True, sem_corte=True)` (a lista inteira, sem o corte de 6 do feed; detector em falha levanta `GeracaoIncompleta`) →
+dedupe → até `LIMITE` novos no e-mail (os de fora não são marcados e saem num dia seguinte) → portão de novo → e-mail. Das 11h às 20h59, só no 1º quarto de cada hora, só quem tem pendência (`insight_email_pendente`: as chaves de um e-mail montado que o
+Resend recusou) e só aquelas chaves: novidade depois do corte das 10h e quem aderiu depois dele ficam para amanhã. Env vazia: o laço nem consulta o banco. **Dedupe** em
+`insight_estado.notificado_em`/`notificado_severidade`: só warning e critical, com linha no estado; dispensado só volta se `piorou` (a régua do painel, com valor); já avisado
+só volta se a GRAVIDADE subiu (valor não conta). **`bill_due` coberto por outro canal** é marcado como avisado ANTES de tentar o e-mail, em todo caminho (envio, recusa, bloqueio, detector em falha), sem e-mail: WhatsApp pela evidência
+(`bill_instances.reminder_last_sent_on = hoje`, `db.bills.contas_lembradas_em`: o lembrete foi aceito pela Meta), Carteiro por **cobertura presumida pela previsão**, não por
+entrega confirmada (`carteiro_manda_email`: agente ativo, e-mail ligado, agentes liberados; só D-3 e D-0): se o e-mail do Carteiro falhar, o item fica marcado e o da B6 não
+sai. **Falhas:** falha antes de montar, inclusive detector em falha, devolve o dia (ou a pendência) e a hora das 10h tenta de novo; envio recusado guarda as chaves dos
+novos e não os marca (os cobertos já foram marcados antes); falha entre o envio e a marca repete o e-mail no dia seguinte (aceito).
+**Limites do envio (§19–§20 do plano B6), aceitos:** o dedupe entre canais NÃO é garantia absoluta. A conta pode chegar pelos dois canais quando o usuário não é processado
+no dia em que o outro canal fala: app fora das 10h00 às 10h59, detector de contas caído a hora inteira, portão fechado só naquele dia; issue #1530 (lembrete registrado por
+ocorrência). A evidência do WhatsApp só conta se o lembrete sair antes da rodada: `WA_BILL_REMINDER_HOUR` ≥ `HORA_ENVIO` duplica (o padrão 9 e a produção sem a env ficam
+antes; um teste amarra o padrão). Com a #1434 aberta, o lembrete sai e vale como evidência mesmo para quem desligou as atualizações do WhatsApp. O e-mail deduplica a
+lista inteira antes do corte de 6, então pode citar um aviso que está fora dos 6 do painel; ele leva o `title` e a `message` do feed, sem depender do painel. O e-mail usa `send_agent_report_email` com assunto e `log_subject` fixos (`ASSUNTO`), `title`/`message` do feed escapados (nunca
+`impacto`/`acoes`), "Gerenciar estes avisos" para `/settings?view=notifications`, a linha `ALCANCE_CANCELAR` (a mesma do `texto_adesao()`) e o rodapé `RODAPE_CANCELAR`
+(parâmetro `rotulo_cancelar` de `_piggy_html`; os e-mails dos agentes seguem com o rodapé antigo). Log: WARNING com `user_id` na coluna e só `causa_segura`; fim da volta
+em `insight_email_run`, só contagens. Testes: `tests/test_insights_envio*.py`.
 
 ### Push (app iOS)
 
@@ -3359,7 +3379,9 @@ chave), o aviso ao admin das pendências de reembolso de afiliado (`_afiliado_al
 patrimônio (`_patrimonio_foto` → `core/services/patrimonio_foto.py`, a cada hora, a partir
 das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos`; atrás de
 `PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não
-consulta nada), e os índices das FKs (`_tarefa_fk_indexes` →
+consulta nada), o aviso de insight por e-mail (`_insight_email` →
+`core/services/insights_notificacao.run_insight_email_loop`, a cada 15 min, das 10h às 20h59 do
+fuso do app; `INSIGHT_EMAIL_USERS` vazia = não consulta nada; ver "Aviso de insight por e-mail"), e os índices das FKs (`_tarefa_fk_indexes` →
 `db/schema_repairs.ensure_fk_indexes_once`: uma vez por boot, 1 conexão do pool, sem
 retry em processo; falha vira WARNING e o próximo boot repara), e o CHECK de valor
 finito em toda coluna numérica (`_tarefa_finito_checks` →

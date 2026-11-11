@@ -2022,6 +2022,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             falha_de_tarefa("[patrimonio_foto]", exc)
 
+    async def _insight_email():
+        try:
+            await asyncio.sleep(1)
+            from core.services.insights_notificacao import run_insight_email_loop  # noqa: PLC0415
+            await run_insight_email_loop()
+        except Exception as exc:
+            falha_de_tarefa("[insight_email]", exc)
+
     async def _recurring_charger():
         try:
             await asyncio.sleep(5)
@@ -2320,6 +2328,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_engagement(), name="engagement"),
                 asyncio.create_task(_investment_accrual(), name="investment_accrual"),
                 asyncio.create_task(_patrimonio_foto(), name="patrimonio_foto"),
+                asyncio.create_task(_insight_email(), name="insight_email"),
                 asyncio.create_task(_account_deletion_worker(), name="account_deletion"),
                 asyncio.create_task(_recurring_charger(), name="recurring_charger"),
                 asyncio.create_task(_proactive_ai(), name="proactive_ai"),

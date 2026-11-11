@@ -48,7 +48,9 @@ logger = logging.getLogger(__name__)
 #   (adapters/whatsapp/wa_app.py) comparam `now.hour` com uma hora
 #   configurada, exatamente como este — e NÃO têm o problema porque leem o
 #   relógio por `now_tz()`, a fonte única. São eles o padrão a copiar aqui,
-#   não os loops de intervalo.
+#   não os loops de intervalo. O aviso de insight por e-mail
+#   (`core/services/insights_notificacao.run_insight_emails_once`, PL-06 B6) é
+#   o mesmo padrão: hora local pelo fuso do app (`utils_date._tz`).
 #
 #   Os outros 11 `create_task` não têm hora de parede nenhuma: `_wa_worker` é
 #   fila, e `_open_finance_refresh`, `_open_finance_proactive`,
