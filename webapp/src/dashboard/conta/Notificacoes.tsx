@@ -7,7 +7,7 @@ import { HORAS, falhaDe, notificacoesQuery, salvarNotificacoes, telefoneBR, uidV
 type Campo = Exclude<keyof CorpoNotificacoes, "daily_report_hour" | "daily_report_minute">;
 const hhmm = (h: number, m: number) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 
-// Preferências de notificação (dentro de /conta/configuracoes): as mesmas 7 da /settings, cada uma salva sozinha ao mudar. Só rotas antigas
+// Preferências de notificação (dentro de /conta/configuracoes): as mesmas da /settings, cada uma salva sozinha ao mudar. Só rotas antigas
 // (/settings/{uid}/notifications); o `uid` vem só do /auth/dashboard-profile. Cada dado é um ícone, o rótulo e o interruptor (como o Perfil).
 export function ContaNotificacoes() {
   const uid = useQuery(contaQuery).data?.user_id;
@@ -27,6 +27,7 @@ function Preferencias({ uid }: { uid: number }) {
   const [ocupado, setOcupado] = useState(false); // travado do clique ao fim do salvamento, releitura da falha incluída (`previa` já volta antes, para o valor)
   const [aviso, setAviso] = useState("");
   const [falha, setFalha] = useState<Falha | null>(null);
+  const [desligou, setDesligou] = useState(""); // D5: desligar "Insights financeiros" levou a adesão junto; nota VISÍVEL
 
   const erro = q.error instanceof ErroApi ? q.error : null;
   const sessao = erro?.status === 401; // sessão acabada esconde o que ficou em cache
@@ -42,9 +43,13 @@ function Preferencias({ uid }: { uid: number }) {
     setOcupado(true);
     setPrevia(pedido);
     setFalha(null);
+    setDesligou("");
     setAviso("Salvando…");
     try {
-      qc.setQueryData(chave, await salvarNotificacoes(uid, corpo));
+      const antes = dados?.insight_alert_email_enabled === true;
+      const r = await salvarNotificacoes(uid, corpo);
+      qc.setQueryData(chave, r);
+      if (antes && !r.insight_alert_email_enabled && !("insight_alert_email_enabled" in corpo)) setDesligou("Avisos do Piggy por e-mail desligados.");
       setAviso("Preferências salvas");
       qc.invalidateQueries({ queryKey: chave });
     } catch (e) {
@@ -55,12 +60,14 @@ function Preferencias({ uid }: { uid: number }) {
     } finally { voando.current = false; setOcupado(false); setPrevia(null); }
   };
 
-  const interruptor = (campo: Campo, rotulo: string, ligado: boolean, travado: boolean, selo?: string, espelho?: keyof Notificacoes) => (
+  const interruptor = (campo: Campo, rotulo: string, ligado: boolean, travado: boolean, selo?: string, espelho?: keyof Notificacoes, nota?: string, estado?: string) => (
     <li key={campo}>
       <label htmlFor={`${id}-${campo}`}>{rotulo}{selo && <> <span className="selo">{selo}</span></>}</label>
       {/* aria-disabled (não disabled) em voo: o foco do teclado não cai no <body>; a trava é o `voando`; `ocupado` a espelha */}
-      <input id={`${id}-${campo}`} className="notif-switch" type="checkbox" role="switch" checked={ligado} disabled={travado} aria-disabled={ocupado ? true : undefined}
+      <input id={`${id}-${campo}`} className="notif-switch" type="checkbox" role="switch" checked={ligado} disabled={travado} aria-disabled={ocupado ? true : undefined} aria-describedby={[nota && `${id}-${campo}-nota`, estado && `${id}-${campo}-estado`].filter(Boolean).join(" ") || undefined}
         onChange={(e) => salvar({ [campo]: e.target.checked }, { [campo]: e.target.checked, ...(espelho && { [espelho]: e.target.checked }) })} />
+      {nota && <p id={`${id}-${campo}-nota`} className="notif-nota">{nota}</p>}
+      {estado && <p id={`${id}-${campo}-estado`} className="notif-nota">{estado}</p>}
     </li>
   );
   const vazio = <><span aria-hidden="true">—</span><span className="sr-only">Não vinculado</span></>;
@@ -75,6 +82,7 @@ function Preferencias({ uid }: { uid: number }) {
 
   let corpo: ReactNode;
   if (q.isPending) corpo = <p role="status" className="faint">Carregando…</p>;
+  // Sem plano, desligar o aviso é só no /settings (decisão do dono, §11 do plano B6): conta cortada nem chega ao /painel.
   else if (semPlano) corpo = (
     <div className="empty"><i className="ph ph-lock" aria-hidden="true" /><p>Indisponível sem plano ativo</p><a className="btn btn-ghost" href="/precos">Ver planos</a></div>
   );
@@ -87,11 +95,16 @@ function Preferencias({ uid }: { uid: number }) {
   );
   else {
     const semanal = d.weekly_report_available ? d.weekly_report_enabled : d.weekly_report_stored_enabled; // fora do plano, o gravado (para poder desligar)
+    const aderiu = d.insight_alert_email_enabled, noPlano = d.insight_alert_email_available; // ligar pede tudo em ordem; desligar nunca trava
     const hora = d.daily_report_hour, fora = !HORAS.includes(hora) || d.daily_report_minute !== 0;
     corpo = <>
       {grupo("E-mail", "ph-envelope", d.email, "Adicionar e-mail", <>
         {interruptor("tip_email_enabled", "Dicas de uso", d.tip_email_enabled, !d.email_notifications_available)}
-        {interruptor("insight_email_enabled", "Insights financeiros", d.insight_email_enabled, !d.email_notifications_available)}
+        {interruptor("insight_email_enabled", "Insights financeiros", d.insight_email_enabled, !d.email_notifications_available, undefined, undefined, d.insight_email_off_notice ?? undefined)}
+        {d.insight_alert_email_notice && interruptor("insight_alert_email_enabled", "Avisos do Piggy por e-mail", aderiu,
+          !aderiu && (!d.email_notifications_available || !noPlano || !d.insight_email_enabled),
+          !noPlano ? (aderiu ? undefined : "Plus e Pro") : d.email_notifications_available && !d.insight_email_enabled ? "Ligue Insights financeiros" : undefined,
+          undefined, d.insight_alert_email_notice, d.insight_alert_email_paused_notice ?? undefined)}
       </>)}
       {grupo("WhatsApp", "ph-whatsapp-logo", d.whatsapp_destination && telefoneBR(d.whatsapp_destination), "Conectar WhatsApp", <>
         {interruptor("whatsapp_updates_enabled", "Atualizações do Piggy", d.whatsapp_updates_enabled, !d.whatsapp_updates_available)}
@@ -110,6 +123,7 @@ function Preferencias({ uid }: { uid: number }) {
           </select>
         </li>
       </>)}
+      {desligou && <p role="status" className="notif-desligou">{desligou}</p>}
       {falha && <div role="alert" className="sess-falha"><span className="warn">{falha.texto}</span>
         {falha.acao === "recarregar" && <button type="button" className="btn btn-ghost" onClick={() => location.reload()}>Recarregar</button>}</div>}
     </>;

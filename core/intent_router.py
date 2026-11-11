@@ -1459,12 +1459,18 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
     if intent == "emails.resubscribe":
         import db as _db
         _db.set_engagement_opt_out(user_id, False)
-        return "✅ Pronto! Você voltará a receber as dicas e insights do Piggy por email."
+        from core.services.insights_notificacao import orientacao_aviso
+        orientacao = orientacao_aviso(user_id)
+        return ("✅ Pronto! Você voltará a receber as dicas e as curiosidades do Piggy por email."
+                + (f"\n{orientacao}" if orientacao else ""))
 
     if intent == "emails.unsubscribe":
         import db as _db
         _db.set_engagement_opt_out(user_id, True)
-        return "👍 Ok! Você não vai mais receber os emails de dicas do Piggy.\nSeus emails de segurança (código de verificação etc.) continuam normais.\nQuer voltar a receber? É só mandar *reativar emails*."
+        from core.services.insights_notificacao import orientacao_aviso
+        orientacao = orientacao_aviso(user_id)
+        return ("👍 Ok! Você não vai mais receber os e-mails opcionais do Piggy, inclusive os dos agentes.\nSeus emails de segurança (código de verificação etc.) continuam normais.\nQuer voltar a receber? É só mandar *reativar emails*."
+                + (f"\n{orientacao}" if orientacao else ""))
 
     # --- dashboard ---
     if intent == "dashboard.open":

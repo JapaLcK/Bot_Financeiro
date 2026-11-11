@@ -275,6 +275,8 @@ a.tool:focus-visible, button.tool:focus-visible { outline: none; box-shadow: var
 .notif-grupo li.notif-hora { grid-template-columns: auto minmax(0, 1fr) auto; padding-left: 0; }
 .notif-grupo label { padding: 10px 0; }
 .notif-grupo label .selo { margin-left: 6px; vertical-align: middle; }
+.notif-nota { grid-column: 1 / -1; margin: -6px 0 10px; font-size: 13px; line-height: 1.5; color: var(--ink-3); }
+.notif-desligou { margin: 8px 0 0; font-size: 14px; color: var(--ink-2); }
 .notif-hora select.field { height: 44px; min-width: 96px; font-size: 15px; background-position: calc(100% - 15px) 20px, calc(100% - 10px) 20px; }
 .notif-hora select.field:disabled, .notif-switch:disabled { opacity: .45; }
 .notif-switch { -webkit-appearance: none; appearance: none; position: relative; width: 44px; height: 44px; margin: 0; border: 0; background: none; cursor: pointer; }

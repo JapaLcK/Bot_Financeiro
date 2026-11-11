@@ -30,11 +30,20 @@ export const notifPadrao = () => ({ ok: true, email: "ana.teste@exemplo.com", wh
   weekly_report_enabled: true, weekly_report_stored_enabled: true, weekly_report_available: true, monthly_report_enabled: false });
 // O PATCH do servidor de mentira IMITA o backend (frontend/routes/settings.py): `daily_report_hour` LIGA o diário (set_daily_report_hour) ANTES de o
 // `daily_report_enabled` do mesmo corpo ser aplicado; `weekly_report_enabled: true` sem o plano é 403 pro_required; e-mail/WhatsApp ausentes são 400.
-function aplicaNotif(n, c) {
+export const AVISO_D5 = "Nota do servidor: desligar Insights também desliga os avisos.";
+export function aplicaNotif(n, c) {
   if (c.weekly_report_enabled === true && !n.weekly_report_available) return { status: 403, json: { detail: { error: "pro_required" } } };
   if (("tip_email_enabled" in c || "insight_email_enabled" in c) && !n.email) return { status: 400, json: { detail: "Vincule um e-mail para configurar notificações por e-mail." } };
   if ("whatsapp_updates_enabled" in c && !n.whatsapp_destination) return { status: 400, json: { detail: "Vincule um WhatsApp para receber atualizações." } };
-  for (const k of ["tip_email_enabled", "insight_email_enabled", "whatsapp_updates_enabled", "monthly_report_enabled"]) if (k in c) n[k] = c[k];
+  if (c.insight_alert_email_enabled === true) { // a ordem da rota: env, plano, e-mail, opt-out
+    if (!n.insight_alert_email_notice) return { status: 403, json: { detail: "Este aviso ainda não está disponível para a sua conta." } };
+    if (!n.insight_alert_email_available) return { status: 403, json: { detail: { error: "pro_required" } } };
+    if (!n.email) return { status: 400, json: { detail: "Vincule um e-mail para configurar notificações por e-mail." } };
+    if (!n.insight_email_enabled) return { status: 409, json: { detail: "Ligue Insights financeiros primeiro." } };
+  }
+  for (const k of ["tip_email_enabled", "insight_email_enabled", "insight_alert_email_enabled", "whatsapp_updates_enabled", "monthly_report_enabled"]) if (k in c) n[k] = c[k];
+  if (c.insight_email_enabled === false) n.insight_alert_email_enabled = false; // desligar Insights retira a adesão (set_insight_email_opt_out)
+  n.insight_email_off_notice = n.insight_alert_email_enabled ? AVISO_D5 : null; // a nota de D5 só existe com adesão
   if ("daily_report_hour" in c || "daily_report_minute" in c) { n.daily_report_hour = c.daily_report_hour ?? n.daily_report_hour; n.daily_report_minute = c.daily_report_minute ?? n.daily_report_minute; n.daily_report_enabled = true; }
   if ("daily_report_enabled" in c) n.daily_report_enabled = c.daily_report_enabled;
   if ("weekly_report_enabled" in c) n.weekly_report_stored_enabled = c.weekly_report_enabled;
