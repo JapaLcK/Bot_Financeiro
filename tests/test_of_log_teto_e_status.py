@@ -1,10 +1,14 @@
 """Issue #541, rodada 3: o teto do `_log_com_teto` vale mesmo com o espelho do
 logging lento, e o `status_code` da Pluggy sobrevive à lista branca.
 
-O `_DashboardHandler` (`core/observability.py`) espelha todo WARNING com INSERT
-SÍNCRONO dentro do event loop. Um `logging.warning` "local" antes do
-`_log_com_teto` dobrava o prazo com `system_event_logs` travada e parava o event
-loop. O rastro de teto estourado é um `print` em stderr, sem banco.
+Até o PR-10a (#657, fatia E) o `_DashboardHandler` (`core/observability.py`)
+espelhava todo WARNING com INSERT SÍNCRONO dentro do event loop: um
+`logging.warning` "local" antes do `_log_com_teto` dobrava o prazo com
+`system_event_logs` travada e parava o event loop. Em produção o espelho agora
+grava pela fila (`core/log_fila.py`, provado em `tests/test_log_fila_painel.py`);
+na suíte ele ainda grava na thread de quem loga (`tests/conftest.py`), e é aí que
+o controle negativo abaixo vale. O rastro de teto estourado é um `print` em
+stderr, sem banco.
 
 CONTROLES (CLAUDE.md §3), cada um num caso verde:
   • recolocar um `logging.warning` antes do `_log_com_teto` do connect-token →

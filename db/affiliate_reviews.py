@@ -12,7 +12,7 @@ Ordem de travas: nas ações do admin, saque, comissões, pendência; no webhook
 comissão, pendência, sem saque. Sem ciclo. Nada aqui guarda dado do indicado; referência do comprovante e
 justificativa moram só em `affiliate_refund_review_events`, nunca em log, aviso ou nota do saque.
 """
-from .affiliate_payments import _rotular
+from .affiliate_payments import _rotular, origem_da_chave
 from .connection import get_conn
 
 # Comissão em revisão e saque bloqueado são a MESMA pendência, vista de dois lados. Fonte única
@@ -130,18 +130,29 @@ def _comissao_que_saiu(cur, a: dict) -> dict | None:
     return None
 
 
-def registrar_reembolso(fatura: str, tipo: str, devolvido_cents: int, quando, ator: str = "sistema") -> dict | None:
+def registrar_reembolso(fatura: str, tipo: str, devolvido_cents: int, quando, ator: str = "sistema",
+                        desconhecido: bool = False, rotular: bool = True) -> dict | None:
     """Rótulo e pendência numa transação só. Decide sob as travas, com o estado de agora: quem chama
-    (webhook ou script) não classifica nada. Reentrega e repetição sem fato novo não mudam nada."""
+    (webhook ou script) não classifica nada. Reentrega e repetição sem fato novo não mudam nada.
+    `desconhecido`: o valor devolvido não se sabe (Asaas fora, baixa desfeita). O fato novo é o próprio
+    desconhecimento: reabre a revisão parcial `resolved` cuja comissão ainda não saiu (a que um saque
+    liberaria), sem apagar o valor já registrado. `recovery` e comissão paga ficam como estão.
+    `rotular=False`: só segura a comissão, sem marcar o pagamento como reembolsado (baixa desfeita)."""
     with get_conn() as conn, conn.cursor() as cur:
         trava_fatura(cur, fatura)
         cur.execute("select id, status, payout_id, amount_cents from affiliate_commissions"
                     " where stripe_invoice_id = %s for update", (fatura,))
         c = cur.fetchone()
-        _rotular(cur, "stripe", fatura, tipo, quando)
+        if rotular:
+            _rotular(cur, *origem_da_chave(fatura), tipo, quando)
         cur.execute("select * from affiliate_refund_reviews where stripe_invoice_id = %s for update", (fatura,))
         a = cur.fetchone()
-        if a is None or (a["tipo"] != "total" and devolvido_cents > a["refunded_cents"]):
+        if a is None or (a["tipo"] != "total" and (devolvido_cents > a["refunded_cents"]
+                                                    or (desconhecido and a["status"] == "resolved"
+                                                     and ((c or _comissao_que_saiu(cur, a)) or {}).get("status")
+                                                     not in (None, "paid", "reversed")))):
+            if a is not None:
+                devolvido_cents = max(devolvido_cents, a["refunded_cents"])
             a = _aplicar(cur, fatura, a, c, tipo, devolvido_cents, quando, ator)
         conn.commit()
     return a
@@ -176,14 +187,16 @@ def abertas_do_saque(cur, payout_id: int) -> list[dict]:
 
 def faturas_do_saque(payout_id: int) -> list[dict]:
     """As faturas a conferir antes de pagar: as das comissões do saque e, no saque órfão, as que ficaram nas
-    linhas gravadas na exclusão. Sem trava: o conjunto só encolhe, e quem decide é a trava de quem paga."""
+    linhas gravadas na exclusão. Sem trava: o conjunto só encolhe, e quem decide é a trava de quem paga.
+    A comissão do Pix (`pix:<id>`) fica fora: não é fatura da Stripe, e o estorno dela chega pelo dreno."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select c.id as commission_id, c.stripe_invoice_id as fatura from affiliate_commissions c where c.payout_id = %s
+            select c.id as commission_id, c.stripe_invoice_id as fatura from affiliate_commissions c
+             where c.payout_id = %s and left(c.stripe_invoice_id, 4) <> 'pix:'
             union all
             select null, r.stripe_invoice_id from affiliate_refund_reviews r
-             where r.orphan_payout_id = %s and r.commission_id is null
+             where r.orphan_payout_id = %s and r.commission_id is null and left(r.stripe_invoice_id, 4) <> 'pix:'
             """,
             (int(payout_id), int(payout_id)),
         )

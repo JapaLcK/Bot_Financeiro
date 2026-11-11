@@ -15,8 +15,16 @@ from .connection import get_conn
 
 def origem_da_chave(chave: str) -> tuple[str, str]:
     """A chave da comissão (`stripe_invoice_id`) como pagamento: `"pix:7"` é a cobrança Pix 7,
-    o resto é fatura Stripe."""
+    o resto é fatura Stripe. Par SQL: `PAGAMENTO_DA_COMISSAO_SQL` (um teste compara os dois)."""
     return ("pix", chave[4:]) if chave.startswith("pix:") else ("stripe", chave)
+
+
+# O mesmo, em SQL: `{p}` (pagamento) casa com a chave da comissão `{c}`. Sem `%`, para servir em
+# consulta com parâmetro.
+PAGAMENTO_DA_COMISSAO_SQL = """({p}.source, {p}.payment_ref) = (
+    case when left({c}.stripe_invoice_id, 4) = 'pix:' then 'pix' else 'stripe' end,
+    case when left({c}.stripe_invoice_id, 4) = 'pix:' then substr({c}.stripe_invoice_id, 5)
+         else {c}.stripe_invoice_id end)"""
 
 
 def registrar_pagamento(referred_user_id: int, source: str, payment_ref: str,

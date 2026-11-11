@@ -129,6 +129,7 @@ from db import reauth_codes
 from db.accounts import MENSAGEM_CAIXINHA_COM_MOVIMENTO
 from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, falha_de_tarefa, get_logger
+from core import log_fila
 from core.pg_text import causa_segura, detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
@@ -2361,6 +2362,8 @@ async def lifespan(app: FastAPI):
     for t in tasks:
         if not t.done():
             print(f"[lifespan] task '{t.get_name()}' não encerrou a tempo.", file=sys.stderr)
+    # Por último: o uvicorn re-levanta o SIGTERM e o processo morre sem `atexit` (core/log_fila.py).
+    log_fila.esvazia_na_saida()
 
 app = FastAPI(
     title="Finance Dashboard",
