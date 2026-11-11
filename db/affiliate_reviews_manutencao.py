@@ -84,11 +84,34 @@ def limpar_sem_comissao(dias: int = 30, limite: int = 500) -> int:
     return apagadas
 
 
+ESPERA_CONFERENCIA_S = 3600  # a adiada (fatura que ainda não confirma) volta à fila do worker depois disto
+
+
 def comissoes_a_conferir(limite: int = 20) -> list[dict]:
+    """Primeiro as nunca tentadas, por id; depois a tentativa mais antiga, passada a espera (#1497). Assim
+    as que nunca confirmam não seguram as seguintes. A espera é medida pelo `now()` do banco."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select id, stripe_invoice_id from affiliate_commissions where payment_check_pending"
-                    " order by id limit %s", (int(limite),))
+        cur.execute(
+            """
+            select id, stripe_invoice_id from affiliate_commissions
+             where payment_check_pending
+               and (payment_check_tried_at is null
+                    or payment_check_tried_at < now() - make_interval(secs => %(espera)s))
+             order by payment_check_tried_at nulls first, id
+             limit %(limite)s
+            """,
+            {"espera": ESPERA_CONFERENCIA_S, "limite": int(limite)},
+        )
         return cur.fetchall()
+
+
+def adiar_conferencia(commission_id: int, motivo: str) -> None:
+    """Só o worker: a fatura ainda não confirma. Grava a hora e o motivo, depois do HTTP e numa transação
+    curta; a marca, e com ela o bloqueio financeiro, fica."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update affiliate_commissions set payment_check_tried_at = now(), payment_check_reason = %s"
+                    " where id = %s and payment_check_pending", (motivo, int(commission_id)))
+        conn.commit()
 
 
 def marcar_conferencia(commission_ids: list[int]) -> None:
@@ -103,7 +126,8 @@ def marcar_conferencia(commission_ids: list[int]) -> None:
 
 def liberar_conferencia(commission_id: int) -> None:
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("update affiliate_commissions set payment_check_pending = false where id = %s", (int(commission_id),))
+        cur.execute("update affiliate_commissions set payment_check_pending = false, payment_check_tried_at = null,"
+                    " payment_check_reason = null where id = %s", (int(commission_id),))
         conn.commit()
 
 
