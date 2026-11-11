@@ -6375,9 +6375,9 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         vale o `recurring` dela; diferente, `stripe.Price.retrieve`. Price expandido na linha é a fonte, sem
         consulta. Price sem `recurring` é avulso e não conta. Fatura sem linha legível: o item 0 da assinatura. Mensal só se TUDO for mensal; o
         resto cai em 12, o menor valor, e falha do `retrieve` ou intervalo estranho também, com log:
-        nunca paga 12× por omissão. As linhas são TODAS as da fatura (`linhas_da_fatura`, que pagina com
-        `has_more`: o objeto embute só 10, e o plano pode estar depois dos extras); `linhas` reusa as já
-        buscadas. Falha da paginação também cai em 12 com log. Sem exceção: o acesso e o e-mail já saíram,
+        nunca paga 12× por omissão. As linhas são TODAS as da fatura (`linhas_da_fatura`, que com `has_more`
+        busca uma página de 100: o objeto embute só 10, e o plano pode estar depois dos extras); `linhas`
+        reusa as já buscadas. Falha da busca também cai em 12 com log. Sem exceção: o acesso e o e-mail já saíram,
         e um 5xx faria a Stripe reentregar."""
         if linhas is None:
             from core.services.extras_assinar import linhas_da_fatura
