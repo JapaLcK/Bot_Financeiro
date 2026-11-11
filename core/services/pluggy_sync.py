@@ -87,10 +87,10 @@ def item_missing(exc: Exception) -> bool:
 
 
 def _falha_da_pluggy(exc: BaseException) -> str:
-    """Rastro de stdout de uma leitura da Pluggy que falhou: tipo, `sqlstate`, HTTP e
-    `code`, nunca `str(exc)` (#657, D4). Só o texto de `PluggyApiError` entra: ele é
-    todo nosso (`_raise_for_pluggy_response` não põe o corpo da resposta) e é o que
-    diz qual regra do leitor recusou a resposta (`pluggy_bills.py`)."""
+    """Rastro de uma chamada à Pluggy que falhou, no stdout e em `details` de `system_event_logs`
+    (`failures` do refresh): tipo, `sqlstate`, HTTP e `code`, nunca `str(exc)` (#657, D4). Só o
+    texto de `PluggyApiError` entra: ele é todo nosso (`_raise_for_pluggy_response` não põe o corpo
+    da resposta) e é o que diz qual regra do leitor recusou a resposta (`pluggy_bills.py`)."""
     texto = f" texto={exc}" if isinstance(exc, PluggyApiError) else ""
     return f"{causa_segura(exc)} code={getattr(exc, 'code', None)}{texto}"
 
@@ -733,7 +733,7 @@ def request_pluggy_refresh(*, origin: str, user_id: int | None = None, limit: in
             triggered += 1
         except Exception as exc:
             motivo = "item_missing" if item_missing(exc) else type(exc).__name__
-            failures.append({"item_id": item_id, "reason": motivo, "error": str(exc)[:200]})
+            failures.append({"item_id": item_id, "reason": motivo, "error": _falha_da_pluggy(exc)})
             print(f"[pluggy_sync] pluggy_refresh_patch_failed item={item_id} motivo={motivo}",
                   flush=True)
     return {"triggered": triggered, "total": len(claimed), "origin": origin,

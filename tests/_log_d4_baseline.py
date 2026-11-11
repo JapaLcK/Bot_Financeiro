@@ -5,14 +5,9 @@ reescrever a lista a partir da árvore, da raiz do repositório:
 
     PYTHONPATH=. .venv/bin/python tests/test_log_d4_guarda.py --regenera
 
-O comando recusa chave nova e contagem maior. Base: a árvore de 64647d1a (2026-11-09) com o PR-9c1.
+O comando recusa chave nova e contagem maior. Vazia desde o PR-9c (303b110b + 9c2): ponto novo reprova e
+se conserta no código; o `--regenera` só confirma que ela segue vazia.
 """
 
 DIVIDA: dict[tuple[str, str, str], int] = {
-    ('frontend/finance_bot_websocket_custom.py', '_apply_prospect_attribution', 'PRINT_CRU'): 1,
-    ('frontend/finance_bot_websocket_custom.py', '_apply_referral_attribution', 'PRINT_CRU'): 1,
-    ('frontend/finance_bot_websocket_custom.py', '_fire_email', 'PRINT_CRU'): 2,
-    ('frontend/finance_bot_websocket_custom.py', 'billing_change_plan', 'PRINT_CRU'): 1,
-    ('frontend/finance_bot_websocket_custom.py', 'billing_webhook', 'PRINT_CRU'): 12,
-    ('frontend/finance_bot_websocket_custom.py', 'websocket_endpoint', 'PRINT_CRU'): 1,
 }
