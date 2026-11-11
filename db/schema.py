@@ -1,6 +1,9 @@
 """
 db/schema.py — DDL e inicialização do banco de dados.
 """
+import logging
+
+from core.pg_text import causa_segura
 from core.services.demo.dados import CODIGO_PADRAO
 
 from .connection import get_conn
@@ -120,6 +123,29 @@ on conflict (source, external_ref) do nothing
 RESYNC_LEGACY_GRANTS_SQL = _RESYNC_LEGACY_GRANTS_SQL.format(filtro="")
 # Mesma SQL para UM usuário (%s = user_id): o Plano Família materializa o legado antes do 1º grant family.
 RESYNC_LEGACY_GRANT_USER_SQL = _RESYNC_LEGACY_GRANTS_SQL.format(filtro="and a.user_id = %s")
+
+# Pagamentos de indicado anteriores a `affiliate_referral_payments`: a 1ª fatura de quem
+# gerou comissão (também a estornada: a fatura foi paga) e o Pix pago. Fatura Stripe sem
+# comissão não tem histórico aqui. Roda em todo boot, e `do nothing` não mexe no que
+# o webhook e o dreno já gravaram. Fora de `ddl_statements`: ver `_run_ddl`.
+BACKFILL_AFILIADO_PAGAMENTOS_SQL = """
+insert into affiliate_referral_payments (referral_id, source, payment_ref, amount_cents,
+                                         paid_at, refund_status, refunded_at)
+select r.id, 'stripe', c.stripe_invoice_id, c.invoice_amount_cents, c.created_at, 'none', null
+  from affiliate_commissions c
+  join affiliate_referrals r on r.referred_user_id = c.referred_user_id
+                            and r.affiliate_id = c.affiliate_id
+ where c.invoice_amount_cents > 0
+union all
+select r.id, 'pix', p.id::text, p.amount_cents, coalesce(p.paid_at, p.created_at),
+       case p.status when 'paid' then 'none' when 'refunded_partial' then 'partial' else 'total' end,
+       case when p.status = 'paid' then null else p.refunded_at end
+  from pix_charges p
+  join affiliate_referrals r on r.referred_user_id = p.user_id
+ where p.status in ('paid', 'refunded_partial', 'refunded', 'chargeback')
+   and p.amount_cents > 0
+on conflict (source, payment_ref) do nothing
+"""
 
 
 def init_db():
@@ -2171,10 +2197,23 @@ def init_db():
         create table if not exists affiliate_referrals (
           id bigserial primary key,
           affiliate_id bigint not null references affiliates(id) on delete cascade,
-          referred_user_id bigint not null unique references users(id) on delete cascade,
+          -- Nulo = o indicado excluiu a conta: o cadastro segue contando, sem a pessoa.
+          referred_user_id bigint unique references users(id) on delete set null,
           code_used text,
           created_at timestamptz not null default now()
         )
+        """,
+        # Antes do `repair_user_fk_cascades`: a FK `set null` aceita coluna `not null`, e quem
+        # quebra depois é a exclusão de conta, com `NotNullViolation`. Só quando ainda é `not
+        # null`: o `alter` pede lock exclusivo, e no boot ele faria fila atrás de leitura.
+        """
+        do $$ begin
+          if exists (select 1 from pg_attribute
+                      where attrelid = 'affiliate_referrals'::regclass
+                        and attname = 'referred_user_id' and attnotnull) then
+            alter table affiliate_referrals alter column referred_user_id drop not null;
+          end if;
+        end $$
         """,
         """
         create index if not exists idx_affiliate_referrals_affiliate
@@ -2220,6 +2259,31 @@ def init_db():
         """
         create index if not exists idx_affiliate_commissions_affiliate
           on affiliate_commissions (affiliate_id, status, available_at)
+        """,
+        # Aviso de reembolso ao admin (core/services/afiliado_reembolso.py): sent_at null = pendente.
+        """alter table affiliate_commissions add column if not exists refund_alert text
+             check (refund_alert in ('partial', 'total'))""",
+        """alter table affiliate_commissions add column if not exists refund_alert_sent_at timestamptz""",
+        # Pagamento confirmado de indicado (db/affiliate_payments.py). 1 linha por pagamento,
+        # sem `user_id` de propósito: o vínculo com a pessoa é o da referral.
+        """
+        create table if not exists affiliate_referral_payments (
+          id bigserial primary key,
+          referral_id bigint not null references affiliate_referrals(id) on delete cascade,
+          source text not null check (source in ('stripe', 'pix')),
+          payment_ref text not null,               -- id da fatura Stripe | id da cobrança Pix
+          amount_cents bigint not null check (amount_cents > 0),
+          paid_at timestamptz not null,
+          refund_status text not null default 'none'
+            check (refund_status in ('none', 'partial', 'total')),
+          refunded_at timestamptz,
+          created_at timestamptz not null default now(),
+          unique (source, payment_ref)
+        )
+        """,
+        """
+        create index if not exists idx_affiliate_referral_payments_referral
+          on affiliate_referral_payments (referral_id)
         """,
 
         # ─── Prospecção (lead engine do Instagram) ───────────────────────────────
@@ -3094,6 +3158,19 @@ def init_db():
           unique (user_id, etapa)
         )
         """,
+        # Reconquista de trial vencido sem pagamento (um e-mail, 2 dias depois). Fila de
+        # reivindicação atômica: pendente -> enviando -> enviado|pulado. Sai com a conta.
+        """
+        create table if not exists reconquista_trial (
+          user_id bigint primary key references users(id) on delete cascade,
+          trial_end timestamptz not null,
+          enviar_em timestamptz not null,
+          status text not null default 'pendente',
+          motivo text,
+          enviado_em timestamptz,
+          created_at timestamptz not null default now()
+        )
+        """,
         # E-mail novo a levar ao cliente do Stripe (funil v3, PR 4b): a PATCH
         # /settings/{uid}/security/contact grava na MESMA transação da troca, o
         # job `core/services/stripe_email_sync.py` manda o e-mail ATUAL da conta
@@ -3398,6 +3475,20 @@ def init_db():
     print("[init_db] OK")
 
 
+def _backfill_afiliado_pagamentos(cur) -> None:
+    """Número de afiliado não pode impedir nem prender a subida: com prazo de lock, e
+    qualquer falha fica no log, sem o texto da exceção. O próximo boot repete."""
+    cur.execute("set lock_timeout = '1s'")
+    try:
+        cur.execute(BACKFILL_AFILIADO_PAGAMENTOS_SQL)
+    except Exception as e:
+        logging.getLogger(__name__).error(
+            "[init_db] backfill de pagamentos de afiliado falhou: %s sqlstate=%s",
+            type(e).__name__, getattr(e, "sqlstate", None))
+    finally:
+        cur.execute("reset lock_timeout")
+
+
 def _run_ddl(conn, ddl_statements) -> None:
     with conn.cursor() as cur:
         # O init INTEIRO sob advisory lock, e não só os reparos do fim.
@@ -3425,7 +3516,7 @@ def _run_ddl(conn, ddl_statements) -> None:
                 try:
                     cur.execute(stmt)
                 except Exception as e:
-                    print(f"[init_db] erro no statement #{i}: {e}")
+                    print(f"[init_db] erro no statement #{i}: {causa_segura(e)}")
                     print(stmt)
                     raise
 
@@ -3442,7 +3533,9 @@ def _run_ddl(conn, ddl_statements) -> None:
                     print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
                 ensure_lower_name_unique(cur)
             except Exception as e:
-                print(f"[init_db] schema_repairs falhou: {e}")
+                print(f"[init_db] schema_repairs falhou: {causa_segura(e)}")
                 raise
+
+            _backfill_afiliado_pagamentos(cur)
         finally:
             cur.execute("select pg_advisory_unlock(%s)", (SCHEMA_INIT_LOCK,))

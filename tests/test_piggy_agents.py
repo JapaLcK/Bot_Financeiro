@@ -842,8 +842,9 @@ def test_email_do_barao_segura_evento_recem_mudado(monkeypatch):
     assert len(sent) == 1 and claimed == [7]
 
 
-def _arm_agg_email(monkeypatch, *, kind, fired_at, sync_recente, now):
-    """Arma run_agent_emails_once pra um agente whole-portfolio."""
+def _arm_agg_email(monkeypatch, *, kind, fired_at, sync_recente, now, synced=None):
+    """Arma run_agent_emails_once pra um agente whole-portfolio. `synced` troca o
+    `user_synced_within` inteiro (ex.: um que levanta)."""
     import db
     import core.services.piggy_agents as pa
     import core.services.email_service as es
@@ -853,7 +854,7 @@ def _arm_agg_email(monkeypatch, *, kind, fired_at, sync_recente, now):
         {"agent_id": 9, "user_id": usuario_pagante(), "kind": kind, "config": {}, "last_emailed_at": None}])
     monkeypatch.setattr(db, "list_unemailed_events", lambda aid: [
         {"id": 7, "payload": {"titulo": "T", "mensagem": "M"}, "fired_at": fired_at}])
-    monkeypatch.setattr(db, "user_synced_within", lambda uid, mins: sync_recente)
+    monkeypatch.setattr(db, "user_synced_within", synced or (lambda uid, mins: sync_recente))
     monkeypatch.setattr(db, "claim_agent_events_for_email",
                         lambda evs: claimed.extend(e["id"] for e in evs) or [e["id"] for e in evs])
     monkeypatch.setattr(db, "unclaim_agent_events", lambda ids: len(ids))
@@ -898,19 +899,21 @@ def test_sync_quiet_nao_afeta_agentes_de_delta(monkeypatch):
 
 
 def test_falha_do_sinal_de_sync_nao_bloqueia_email(monkeypatch):
-    """O sinal é otimização: se a query explodir, o e-mail segue pela carência."""
+    """O sinal é otimização: se a query explodir, o e-mail segue pela carência.
+    O `_boom` vai pelo `synced=`: dublado antes ou depois do `_arm_agg_email`, o
+    `_arm` o sobrescrevia e a falha nunca acontecia (achado do PR-9b da #657)."""
     from datetime import datetime, timedelta, timezone
-    import db
     now = datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc)
+    chamadas = []
 
     def _boom(uid, mins):
+        chamadas.append(uid)
         raise RuntimeError("db fora do ar")
 
-    monkeypatch.setattr(db, "user_synced_within", _boom)
     sent, claimed = _arm_agg_email(monkeypatch, kind="barao",
                                    fired_at=now - timedelta(hours=6),
-                                   sync_recente=False, now=now)
-    monkeypatch.setattr(db, "user_synced_within", _boom)   # _arm sobrescreve
+                                   sync_recente=False, now=now, synced=_boom)
+    assert len(chamadas) == 1, "o sinal tem de ser consultado e falhar"
     assert len(sent) == 1
 
 

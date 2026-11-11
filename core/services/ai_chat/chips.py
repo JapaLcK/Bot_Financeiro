@@ -14,6 +14,7 @@ import logging
 import os
 import unicodedata
 
+from core.pg_text import causa_do_provedor
 from core.services.modelo_openai import CHAT_MODEL, completion_options
 
 from .confirmations import is_cancel, is_confirm
@@ -78,5 +79,5 @@ def sugerir(pergunta: str, resposta: str | None, cards: list[str]) -> list[str]:
             response_format=_FORMATO)
         return validar(json.loads(r.choices[0].message.content)["chips"])
     except Exception as e:
-        logger.info("chips indisponíveis: %s", e)
+        logger.info("chips indisponíveis: %s", causa_do_provedor(e))
         return []

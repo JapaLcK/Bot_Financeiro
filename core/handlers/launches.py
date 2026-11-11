@@ -1079,8 +1079,8 @@ def resolver_categoria_da_ia(user_id: int, categoria: str, nota_clean: str) -> t
     local = infer_category(user_id, nota_clean, None, allow_ai=False)
     if local.reason in MOTIVOS_CONFIANTES and local.category != categoria_ai:
         logger.info(
-            "categoria da IA (%s) sobreposta por regra local (%s via %s) — nota=%r",
-            categoria_ai, local.category, local.reason, nota_clean,
+            "categoria da IA sobreposta por regra local (via %s) — chars=%d",
+            local.reason, len(nota_clean),
         )
         return local.category, local.reason
     return categoria_ai, "ai"

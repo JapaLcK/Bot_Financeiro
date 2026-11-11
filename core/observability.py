@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
+import time
 import traceback
 from typing import Any
 
@@ -18,7 +20,7 @@ from typing import Any
 # — ele é o módulo sem `logging`, justamente para não reentrar no handler).
 # `load_app_env()` sai junto: quem o chama agora é o módulo importado abaixo,
 # então o efeito colateral de import continua acontecendo.
-from core.pg_text import redigir_failing_row
+from core.pg_text import causa_segura, quadros_da_cadeia, redigir_failing_row
 from core.system_event_log import log_system_event_sync, recent_event_exists
 
 # ── Logger centralizado ───────────────────────────────────────────────────────
@@ -186,6 +188,59 @@ def _log_falha(op: str, user_id: int, e: Exception, *,
         exc_info=e if com_traceback else None,
         extra={"user_id": user_id},
     )
+
+
+_PILHA_A_CADA = 3600.0  # s: a mesma assinatura volta a trazer a pilha depois disso
+_ultima_pilha: dict[str, tuple[tuple, float]] = {}  # tag -> (assinatura, monotonic da última pilha)
+_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep  # o quadro "nosso" mora aqui
+_DE_FORA = ("site-packages", "dist-packages")  # ...salvo o `.venv` dentro da raiz
+
+
+def _origem(exc: BaseException) -> tuple | None:
+    """Os quadros NOSSOS (arquivo, linha), na ordem, de toda a cadeia `__cause__`/`__context__`, a
+    mesma que `quadros_da_cadeia` imprime. Sem quadro nosso, o mais interno de `exc`; sem traceback,
+    `None`. Nunca levanta (roda no `except` de um topo): na dúvida, `None`."""
+    nossos, ultimo, vistos, e = [], None, set(), exc
+    try:
+        while e is not None and id(e) not in vistos:
+            vistos.add(id(e))
+            tb = e.__traceback__
+            while tb is not None:
+                quadro = (tb.tb_frame.f_code.co_filename, tb.tb_lineno)
+                if e is exc:
+                    ultimo = quadro
+                if quadro[0].startswith(_RAIZ) and not any(p in quadro[0] for p in _DE_FORA):
+                    nossos.append(quadro)
+                tb = tb.tb_next
+            e = e.__cause__ if e.__cause__ is not None else (None if e.__suppress_context__ else e.__context__)
+    except Exception:  # noqa: BLE001
+        return None
+    return tuple(dict.fromkeys(nossos)) or ultimo  # sem repetição: relançar o mesmo objeto acrescenta quadros
+
+
+def falha_de_tarefa(tag: str, exc: BaseException) -> None:
+    """Topo de tarefa de fundo (P3 b da #657): tipo, sqlstate e status, e os quadros da pilha sem a linha final.
+
+    Pilha só na 1ª falha seguida (P11, P12): a linha `motivo=` sai sempre; os quadros, só quando a
+    assinatura da tag muda ou passou `_PILHA_A_CADA` desde a última pilha dela. A assinatura é a causa
+    (`causa_segura`: tipo, sqlstate e status) e a `_origem`: TODOS os quadros nossos (sob a raiz do
+    repositório e fora de `site-packages`/`dist-packages`), na ordem, com a cadeia de causas. A pilha
+    só é omitida quando sairia idêntica no que é nosso: o psycopg é o mais interno num erro de banco,
+    e um helper nosso comum é a linha nossa mais interna de dois caminhos, e nos dois casos o dreno e a
+    purga do `[pix]` dividiriam a pilha. Com o banco fora, o worker de exclusão falha a cada ~10 s, e
+    a pilha em toda volta inundava o log. Os laços não avisam quando voltam a funcionar, então
+    "voltou ao normal" é aproximado por assinatura nova ou tempo.
+
+    Só a ÚLTIMA assinatura da tag conta: falhas alternando (A, B, A, B) mostram a pilha toda vez. A
+    `tag` tem de ser literal (a guarda D4 reprova outra coisa, `TAG_VIVA`): cada tag distinta é uma
+    entrada no estado, que nunca é podado. Todo chamador roda na thread do loop, por isso não há trava."""
+    causa, agora = causa_segura(exc), time.monotonic()
+    assinatura = (causa, _origem(exc))
+    anterior = _ultima_pilha.get(tag)
+    com_pilha = anterior is None or anterior[0] != assinatura or agora - anterior[1] >= _PILHA_A_CADA
+    if com_pilha:
+        _ultima_pilha[tag] = (assinatura, agora)
+    print(f"{tag} erro: {causa}\n{quadros_da_cadeia(exc)[0] if com_pilha else ''}", file=sys.stderr, end="")
 
 
 def _sem_ratelimit_no_banco(record: logging.LogRecord) -> bool:

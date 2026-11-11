@@ -61,3 +61,12 @@
 .casa-lista .faint { font-size: 14px; }
 .casa-nome b { font-size: 16px; font-weight: 500; unicode-bidi: isolate; }
 .casa-nome .selo { display: inline-block; max-width: 14ch; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; line-height: 22px; vertical-align: middle; } /* o .selo é nowrap: um primeiro nome longo cortaria o cartão */
+
+/* Card de upgrade (FalhaFamilia, 402 de plano): inline, no tom do aviso do legado (#trial-banner). O rosa só no ícone e no CTA. */
+.fam-upgrade { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 14px; width: 100%; padding: 16px; border: 1px solid var(--rule-strong); border-radius: 12px; background: var(--plane-2); }
+.fam-up-ico { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; background: var(--pink-wash); color: var(--pink-ink); font-size: 24px; }
+.fam-up-corpo { display: grid; row-gap: 6px; justify-items: start; min-width: 0; }
+.conta-familia .fam-up-tit { font-size: 16px; font-weight: 600; color: var(--ink); overflow-wrap: break-word; }
+.conta-familia .fam-up-txt { font-size: 14px; line-height: 1.5; color: var(--ink-2); max-width: 52ch; }
+.fam-up-corpo .btn { margin-top: 8px; gap: 8px; }
+@media (max-width: 480px) { .fam-up-corpo .btn { width: 100%; } }

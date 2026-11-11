@@ -62,6 +62,7 @@ import os
 import sys
 
 from core.observability import get_logger
+from core.pg_text import causa_segura
 
 logger = get_logger(__name__)
 
@@ -133,8 +134,8 @@ def run_table_cleanup(*, dry_run: bool = False) -> dict:
             n = int(fn() or 0)  # type: ignore[operator]
         except Exception as exc:
             # Uma tabela que falha não pode impedir a poda das outras.
-            errors.append({"table": table, "error": repr(exc)})
-            print(f"[cleanup_job] {table}: FALHOU — {exc}", file=sys.stderr, flush=True)
+            errors.append({"table": table, "error": causa_segura(exc)})
+            print(f"[cleanup_job] {table}: FALHOU — {causa_segura(exc)}", file=sys.stderr, flush=True)
             continue
         removed[table] = n
         print(f"[cleanup_job] {table}: {n} linha(s) removida(s)", flush=True)

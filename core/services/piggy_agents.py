@@ -24,6 +24,7 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from core.pg_text import causa_segura
 from db.connection import TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, get_conn
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -149,7 +150,7 @@ def run_xerife_once(today: date | None = None, user_id: int | None = None) -> di
             fired += f
             suprimidos += s
         except Exception as exc:
-            print(f"[agents] xerife user={agent['user_id']}: {exc}", file=sys.stderr)
+            print(f"[agents] xerife user={agent['user_id']}: {causa_segura(exc)}", file=sys.stderr)
     return {"ok": True, "agents": len(agents), "fired": fired, "suprimidos_amostra": suprimidos}
 
 
@@ -273,7 +274,7 @@ def run_reporter_once(today: date | None = None) -> dict:
         try:
             sent += 1 if _reporter_run_for_user(agent, today) else 0
         except Exception as exc:
-            print(f"[agents] reporter user={agent['user_id']}: {exc}", file=sys.stderr)
+            print(f"[agents] reporter user={agent['user_id']}: {causa_segura(exc)}", file=sys.stderr)
     return {"ok": True, "agents": len(agents), "published": sent}
 
 
@@ -343,7 +344,7 @@ def run_carteiro_once(today: date | None = None, user_id: int | None = None) -> 
         try:
             fired += _carteiro_detect_for_user(agent, today)
         except Exception as exc:
-            print(f"[agents] carteiro user={agent['user_id']}: {exc}", file=sys.stderr)
+            print(f"[agents] carteiro user={agent['user_id']}: {causa_segura(exc)}", file=sys.stderr)
     return {"ok": True, "agents": len(agents), "fired": fired}
 
 
@@ -620,7 +621,7 @@ def run_detetive_once(today: date | None = None, user_id: int | None = None) -> 
             fired += _detetive_detect_for_user(agent, today)
             fired += _detetive_duplicate_detect_for_user(agent, today)
         except Exception as exc:
-            print(f"[agents] detetive user={agent['user_id']}: {exc}", file=sys.stderr)
+            print(f"[agents] detetive user={agent['user_id']}: {causa_segura(exc)}", file=sys.stderr)
     return {"ok": True, "agents": len(agents), "fired": fired}
 
 
@@ -785,7 +786,7 @@ def run_cofre_once(today: date | None = None, user_id: int | None = None) -> dic
         try:
             fired += _cofre_detect_for_user(agent, today)
         except Exception as exc:
-            print(f"[agents] cofre user={agent['user_id']}: {exc}", file=sys.stderr)
+            print(f"[agents] cofre user={agent['user_id']}: {causa_segura(exc)}", file=sys.stderr)
     return {"ok": True, "agents": len(agents), "fired": fired}
 
 
@@ -884,7 +885,7 @@ def run_barao_once(today: date | None = None, user_id: int | None = None) -> dic
         try:
             fired += _barao_detect_for_user(agent, today)
         except Exception as exc:
-            print(f"[agents] barao user={agent['user_id']}: {exc}", file=sys.stderr)
+            print(f"[agents] barao user={agent['user_id']}: {causa_segura(exc)}", file=sys.stderr)
     return {"ok": True, "agents": len(agents), "fired": fired}
 
 
@@ -1099,7 +1100,7 @@ def run_faria_limer_once(today: date | None = None, user_id: int | None = None) 
         try:
             fired += _faria_limer_detect_for_user(agent, today)
         except Exception as exc:
-            print(f"[agents] faria_limer user={agent['user_id']}: {exc}", file=sys.stderr)
+            print(f"[agents] faria_limer user={agent['user_id']}: {causa_segura(exc)}", file=sys.stderr)
     return {"ok": True, "agents": len(agents), "fired": fired}
 
 
@@ -1210,7 +1211,7 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
             if user_synced_within(user_id, _SYNC_QUIET_MIN):
                 return []
         except Exception as exc:      # sinal é otimização; nunca derruba o e-mail
-            print(f"[agents] sync-quiet check {kind} user={user_id}: {exc}", file=sys.stderr)
+            print(f"[agents] sync-quiet check {kind} user={user_id}: {causa_segura(exc)}", file=sys.stderr)
         cutoff = now - timedelta(minutes=min_age)
         return [
             e for e in events
@@ -1277,6 +1278,7 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
                 ok = send_agent_report_email(
                     email, user_id, _agent_email_subject(kind, events),
                     _compose_agent_email(kind, events), kind=kind,
+                    log_subject=_AGENT_EMAIL_LABEL.get(kind, "PigBank"),
                 )
             except Exception:
                 unclaim_agent_events(claimed_ids)  # nada saiu → devolve pra fila
@@ -1290,7 +1292,7 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
             touch_agent_emailed(agent_id)
             sent += 1
         except Exception as exc:
-            print(f"[agents] email {kind} user={user_id}: {exc}", file=sys.stderr)
+            print(f"[agents] email {kind} user={user_id}: {causa_segura(exc)}", file=sys.stderr)
     return {"ok": True, "sent": sent}
 
 
@@ -1339,8 +1341,8 @@ def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
         try:
             out[kind] = fn(user_id=user_id)
         except Exception as exc:
-            print(f"[agents] run_for_user({user_id}, {trigger}) {kind}: {exc}", file=sys.stderr)
-            out[kind] = {"ok": False, "error": str(exc)}
+            print(f"[agents] run_for_user({user_id}, {trigger}) {kind}: {causa_segura(exc)}", file=sys.stderr)
+            out[kind] = {"ok": False, "error": causa_segura(exc)}
     return out
 
 
@@ -1362,5 +1364,5 @@ async def run_agents_loop() -> None:
             if total:
                 print(f"[agents] tick: {total} disparo(s) — {result}")
         except Exception as exc:
-            print(f"[agents] tick falhou: {exc}", file=sys.stderr)
+            print(f"[agents] tick falhou: {causa_segura(exc)}", file=sys.stderr)
         await asyncio.sleep(AGENTS_INTERVAL_SEC)

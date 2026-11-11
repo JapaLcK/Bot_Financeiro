@@ -172,7 +172,7 @@ def test_received_depois_de_estorno_total_nao_concede(user_id, externo):
 
     entregar("PAYMENT_RECEIVED", cobranca)
     assert _grants_ativos(user_id) == [], "concedeu acesso sobre dinheiro devolvido"
-    assert efeitos(cobranca["asaas_payment_id"]) == {"revoke"}
+    assert efeitos(cobranca["asaas_payment_id"]) == {"revoke", "afiliado_estorno"}
     assert externo["ga4"] == 0 and externo["capi"] == 0 and externo["email"] == 0
     assert len(externo["alerta"]) == 1
 
@@ -187,7 +187,7 @@ def test_received_sem_estorno_anterior_concede(user_id, externo):
     entregar("PAYMENT_RECEIVED", cobranca)
     assert len(_grants_ativos(user_id)) == 1
     assert efeitos(cobranca["asaas_payment_id"]) == {
-        "stripe_cancel", "grant", "ebook", "ga4", "capi", "email"}
+        "stripe_cancel", "grant", "ebook", "ga4", "capi", "email", "afiliado"}
     assert externo["ga4"] == 1 and externo["capi"] == 1 and externo["email"] == 1
 
 

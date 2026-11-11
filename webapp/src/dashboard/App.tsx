@@ -13,9 +13,9 @@ import { Tip } from "./parts/Tip";
 import { PAGES } from "./pages";
 import { AvisosDoTopo } from "./parts/AvisosDoTopo";
 import { ReceitasProvider } from "./widgets/ReceitasDoBanco";
-import { NO_MONTH, RAIL, TABBAR, href, route, useRoute, type Path } from "./router";
+import { NO_MONTH, RAIL, TABBAR, href, noMenu, route, useRoute, type Path } from "./router";
 import { ICON } from "./lib/brand";
-import { DEMO, MESES, contasQuery } from "./lib/v2";
+import { DEMO, MESES, contasQuery, useAfiliado } from "./lib/v2";
 
 // Quantos bancos têm conta não pausada na /api/v2/contas. Zero esconde a linha: a rota só
 // traz conta BANK, e quem conectou só cartão ou investimento chega com `contas: []`.
@@ -64,6 +64,7 @@ function Topbar({ s, path }: { s: DashState; path: Path }) {
 export function App() {
   const s = useDash() as DashState;
   const path = useRoute();
+  const afiliado = useAfiliado();
   const Page = PAGES[path];
   const first = useRef(true);
   const anterior = useRef(path);
@@ -92,7 +93,7 @@ export function App() {
             <span>PigBank</span>
           </a>
           <ul className="rail-list">
-            {RAIL.map(route).map((r) => (
+            {RAIL.filter((p) => noMenu(p, afiliado)).map(route).map((r) => (
               <li key={r.path}>
                 <a href={href(r.path)} aria-current={path === r.path ? "page" : undefined} title={r.label} data-guia={navGuia(r.path)}>
                   <i className={`ph ${r.icon}`} aria-hidden="true" /><span className="rail-label">{r.label}</span>

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-import { DEMO, sair } from "../lib/v2";
-import { CONTA, RAIL, href, route, useRoute } from "../router";
+import { DEMO, sair, useAfiliado } from "../lib/v2";
+import { CONTA, RAIL, href, noMenu, route, useRoute } from "../router";
 import { NATIVE, hide, isOpen, show } from "./dialog";
 
 // O "Menu" da barra de baixo (celular): uma folha com todas as telas e a Ajuda. Abre pelo evento
@@ -8,6 +8,7 @@ import { NATIVE, hide, isOpen, show } from "./dialog";
 export function MenuTelas() {
   const dlg = useRef<HTMLDialogElement>(null);
   const path = useRoute();
+  const afiliado = useAfiliado();
   // Só fecha o que está aberto: o `hide` do fallback mexe na trava de foco, que é uma só (dialog.ts).
   const fechar = () => { if (isOpen(dlg.current)) hide(dlg.current); };
 
@@ -37,7 +38,7 @@ export function MenuTelas() {
           </li>
         </ul>}
         <ul>
-          {RAIL.map(route).map((r) => (
+          {RAIL.filter((p) => noMenu(p, afiliado)).map(route).map((r) => (
             <li key={r.path}>
               <a href={href(r.path)} aria-current={path === r.path ? "page" : undefined} onClick={fechar}>
                 <i className={`ph ${r.icon}`} aria-hidden="true" /><span>{r.label}</span>

@@ -18,6 +18,8 @@ export const ROUTES = [
   { path: "/lancamentos", label: "Lançamentos", short: "Extrato", icon: "ph-receipt", title: "Lançamentos" },
   // A casa do grupo (familia/CasaPagina.tsx): metas e orçamentos que a família divide. Item próprio do menu (fora da Conta); sem família a tela mostra o caminho para criar uma. O protótipo (DEMO) não tem conta nem família: ver ATIVAS.
   { path: "/casa", label: "Casa", short: "Casa", icon: "ph-heart", title: "Casa" },
+  // A área do afiliado (afiliado/Afiliado.tsx). O item só aparece para quem é afiliado (`noMenu`); o hash existe para todos porque a rota nasce antes do /me, e quem decide a tela é a página. O protótipo (DEMO) não tem conta: ver ATIVAS.
+  { path: "/afiliado", label: "Afiliado", short: "Afiliado", icon: "ph-handshake", title: "Afiliado" },
   // Fora do RAIL (menu lateral e Menu do celular): abre pelo card de Ferramentas e pelo ⌘K.
   { path: "/orcamento", label: "Orçamento doméstico", short: "Orçamento", icon: "ph-house", title: "Orçamento doméstico" },
   // Idem: fora do RAIL, abre pelo card de Ferramentas e pelo ⌘K.
@@ -44,15 +46,17 @@ export type Path = (typeof ROUTES)[number]["path"];
 export const TABBAR: Path[] = ["/", "/gastos", "/piggy", "/lancamentos"];
 // O Piggy não entra no menu lateral: no desktop o acesso é a barra de conversa. O Orçamento doméstico, os Orçamentos por categoria e o Progresso ao milhão também não (só Ferramentas e ⌘K).
 export const CONTA: Path[] = ["/conta/perfil", "/conta/cobranca", "/conta/configuracoes", "/conta/bancos", "/conta/familia"];
-// O protótipo (DEMO) não tem conta nem família: as rotas da Conta e a Casa não existem nele (nem hash, nem menu, nem ⌘K).
-export const ATIVAS = ROUTES.filter((r) => !(DEMO && (CONTA.includes(r.path) || r.path === "/simulador/compra" || r.path === "/casa" || r.path === "/ajuda")));
+// O protótipo (DEMO) não tem conta nem família: as rotas da Conta, a Casa, a Ajuda e o Afiliado não existem nele (nem hash, nem menu, nem ⌘K).
+export const ATIVAS = ROUTES.filter((r) => !(DEMO && (CONTA.includes(r.path) || r.path === "/simulador/compra" || r.path === "/casa" || r.path === "/ajuda" || r.path === "/afiliado")));
 export const RAIL: Path[] = ATIVAS.map((r) => r.path).filter((p) => p !== "/piggy" && p !== "/ajuda" && p !== "/simulador/compra" && p !== "/orcamento" && p !== "/orcamentos-categoria" && p !== "/milhao" && p !== "/agentes" && !CONTA.includes(p));
+// O único filtro dos três menus (lateral, Menu do celular e ⌘K): o item "Afiliado" só para quem é (`useAfiliado`). Só esconde: quem protege é o 404 do backend.
+export const noMenu = (p: Path, afiliado: boolean) => afiliado || p !== "/afiliado";
 // Telas que o card de Ferramentas abre (pages.tsx, TOOLS): abrir uma delas é o passo "Ferramentas" do guia.
 // `as const`: o `to` de cada ferramenta em TOOLS é desse tipo, então ferramenta fora da lista não compila.
 export const FERRAMENTAS = ["/simulador", "/orcamento", "/orcamentos-categoria", "/simulador/compra", "/milhao", "/agentes"] as const satisfies readonly Path[];
 // Páginas que mostram só o presente (ignoram o mês escolhido): o topbar esconde o seletor.
 // A previsão real é de hoje em diante; a do protótipo segue o mês escolhido.
-export const NO_MONTH: Path[] = ["/assinaturas", "/simulador", "/simulador/compra", "/metas", "/patrimonio", "/casa", "/orcamentos-categoria", "/milhao", "/agentes", "/ferramentas", "/piggy", "/ajuda", ...CONTA, ...(DEMO ? [] : ["/previsao" as const])];
+export const NO_MONTH: Path[] = ["/assinaturas", "/simulador", "/simulador/compra", "/metas", "/patrimonio", "/casa", "/afiliado", "/orcamentos-categoria", "/milhao", "/agentes", "/ferramentas", "/piggy", "/ajuda", ...CONTA, ...(DEMO ? [] : ["/previsao" as const])];
 
 // Hash desconhecido (#/xyz) abre o Resumo e troca o endereço para "#/" sem criar entrada
 // no histórico; hash vazio continua valendo como Resumo.

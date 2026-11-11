@@ -127,8 +127,8 @@ from db import (
 from db import reauth_codes
 from db.accounts import MENSAGEM_CAIXINHA_COM_MOVIMENTO
 from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
-from core.observability import _log_falha, get_logger
-from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
+from core.observability import _log_falha, falha_de_tarefa, get_logger
+from core.pg_text import causa_segura, detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
 from core.services.pkce import VERIFIER_PATTERN as _PKCE_VERIFIER_PATTERN
@@ -187,6 +187,7 @@ from frontend.routes.shared import (
     make_jwt as _make_jwt,
     marcar_conta,
     months_pt as _months_pt,
+    destino_sem_plano,
     painel_como_destino,
     parse_date_param as _parse_date_param,
     raise_if_account_scheduled_for_deletion as _raise_if_account_scheduled_for_deletion,
@@ -1888,7 +1889,7 @@ async def lifespan(app: FastAPI):
             )
             return default
         except Exception as exc:
-            print(f"WARNING: Startup ignorou '{label}': {exc}", file=sys.stderr, flush=True)
+            print(f"WARNING: Startup ignorou '{label}': {causa_segura(exc)}", file=sys.stderr, flush=True)
             return default
 
     # ── 1. DB health check ────────────────────────────────────────────────────
@@ -1901,7 +1902,7 @@ async def lifespan(app: FastAPI):
         await _startup_required("database health check", _db_health_check())
         print("OK: Database connected", flush=True)
     except Exception as exc:
-        print(f"ERROR: Database connection failed: {exc}", file=sys.stderr, flush=True)
+        print(f"ERROR: Database connection failed: {causa_segura(exc)}", file=sys.stderr, flush=True)
         raise
 
     # ── 2. Schema completo (idempotente) ─────────────────────────────────────
@@ -1970,7 +1971,7 @@ async def lifespan(app: FastAPI):
             from adapters.whatsapp.wa_app import _worker_loop  # noqa: PLC0415
             await _worker_loop()
         except Exception as exc:
-            print(f"[wa_worker] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[wa_worker]", exc)
 
     async def _wa_daily():
         try:
@@ -1978,7 +1979,7 @@ async def lifespan(app: FastAPI):
             from adapters.whatsapp.wa_app import _daily_report_loop  # noqa: PLC0415
             await _daily_report_loop()
         except Exception as exc:
-            print(f"[wa_daily] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[wa_daily]", exc)
 
     async def _wa_bill_reminders():
         try:
@@ -1986,7 +1987,7 @@ async def lifespan(app: FastAPI):
             from adapters.whatsapp.wa_app import _bill_reminder_loop  # noqa: PLC0415
             await _bill_reminder_loop()
         except Exception as exc:
-            print(f"[wa_bill_reminders] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[wa_bill_reminders]", exc)
 
     async def _wa_periodic():
         try:
@@ -1994,7 +1995,7 @@ async def lifespan(app: FastAPI):
             from adapters.whatsapp.wa_app import _periodic_report_loop  # noqa: PLC0415
             await _periodic_report_loop()
         except Exception as exc:
-            print(f"[wa_periodic] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[wa_periodic]", exc)
 
     async def _engagement():
         try:
@@ -2002,7 +2003,7 @@ async def lifespan(app: FastAPI):
             from core.services.engagement_scheduler import run_engagement_loop  # noqa: PLC0415
             await run_engagement_loop()
         except Exception as exc:
-            print(f"[engagement] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[engagement]", exc)
 
     async def _investment_accrual():
         try:
@@ -2010,7 +2011,7 @@ async def lifespan(app: FastAPI):
             from core.services.investment_scheduler import run_investment_accrual_loop  # noqa: PLC0415
             await run_investment_accrual_loop()
         except Exception as exc:
-            print(f"[investment_accrual] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[investment_accrual]", exc)
 
     async def _patrimonio_foto():
         try:
@@ -2018,7 +2019,7 @@ async def lifespan(app: FastAPI):
             from core.services.patrimonio_foto import run_patrimonio_foto_loop  # noqa: PLC0415
             await run_patrimonio_foto_loop()
         except Exception as exc:
-            print(f"[patrimonio_foto] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[patrimonio_foto]", exc)
 
     async def _recurring_charger():
         try:
@@ -2026,7 +2027,7 @@ async def lifespan(app: FastAPI):
             from core.services.recurring_charger import run_recurring_charger_loop  # noqa: PLC0415
             await run_recurring_charger_loop()
         except Exception as exc:
-            print(f"[recurring_charger] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[recurring_charger]", exc)
 
     async def _proactive_ai():
         try:
@@ -2034,7 +2035,7 @@ async def lifespan(app: FastAPI):
             from core.services.proactive_ai_scheduler import run_proactive_ai_loop  # noqa: PLC0415
             await run_proactive_ai_loop()
         except Exception as exc:
-            print(f"[proactive_ai] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[proactive_ai]", exc)
 
     async def _news_bot():
         try:
@@ -2042,7 +2043,7 @@ async def lifespan(app: FastAPI):
             from core.services.news_bot import run_news_loop  # noqa: PLC0415
             await run_news_loop()
         except Exception as exc:
-            print(f"[news_bot] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[news_bot]", exc)
 
     async def _piggy_agents():
         try:
@@ -2050,7 +2051,7 @@ async def lifespan(app: FastAPI):
             from core.services.piggy_agents import run_agents_loop  # noqa: PLC0415
             await run_agents_loop()
         except Exception as exc:
-            print(f"[agents] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[agents]", exc)
 
     async def _login_events_retention():
         try:
@@ -2058,7 +2059,7 @@ async def lifespan(app: FastAPI):
             from core.services.login_events_retention import run_login_events_retention_loop  # noqa: PLC0415
             await run_login_events_retention_loop()
         except Exception as exc:
-            print(f"[login_events_retention] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[login_events_retention]", exc)
 
     async def _table_cleanup():
         # Poda de auth_refresh_tokens/mfa_login_challenges/pending_google_signups.
@@ -2069,7 +2070,7 @@ async def lifespan(app: FastAPI):
             from core.services.table_cleanup import run_table_cleanup_loop  # noqa: PLC0415
             await run_table_cleanup_loop()
         except Exception as exc:
-            print(f"[table_cleanup] erro: {exc}", file=sys.stderr)
+            falha_de_tarefa("[table_cleanup]", exc)
 
     async def _plan_grants_reprojection():
         """Reprojeta acesso de quem teve grant começando ou vencendo (§4.3).
@@ -2103,7 +2104,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[plan_grants] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[plan_grants]", exc)
             await asyncio.sleep(60)
 
     async def _pix_worker():
@@ -2149,7 +2150,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[pix] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[pix]", exc)
             await asyncio.sleep(60)
 
     async def _ebook_worker():
@@ -2165,7 +2166,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[ebook] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[ebook]", exc)
             await asyncio.sleep(300)
 
     async def _stripe_email_worker():
@@ -2182,7 +2183,23 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[stripe_email] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[stripe_email]", exc)
+            await asyncio.sleep(300)
+
+    async def _afiliado_avisos_worker():
+        """Reenvia ao admin os avisos de reembolso de afiliado que ficaram pendentes por falta de
+        canal, a cada 5 min, a 1ª volta sem delay. Inerte sem `ADMIN_NOTIFY_WEBHOOK_URL`. Ver
+        `core/services/afiliado_reembolso.py`."""
+        from core.services.afiliado_reembolso import reenviar_avisos_pendentes  # noqa: PLC0415
+        while True:
+            try:
+                n = await asyncio.to_thread(reenviar_avisos_pendentes)
+                if n:
+                    print(f"[afiliado_avisos] {n} aviso(s) entregue(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                falha_de_tarefa("[afiliado_avisos]", exc)
             await asyncio.sleep(300)
 
     async def _remarketing_worker():
@@ -2197,7 +2214,15 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[remarketing] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[remarketing]", exc)
+            try:   # reconquista de trial vencido: tick próprio, não depende do remarketing
+                from core.services.reconquista import rodar_uma_vez as _reconquistar  # noqa: PLC0415
+                if n := await asyncio.to_thread(_reconquistar):
+                    print(f"[reconquista] {n} linha(s) processada(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[reconquista] erro: {type(exc).__name__}", file=sys.stderr)
             await asyncio.sleep(300)
 
     async def _account_deletion_worker():
@@ -2219,7 +2244,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[account_deletion] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[account_deletion]", exc)
 
     async def _open_finance_trial_expiry():
         # Pausa conexões OF de trial vencido que não virou assinatura (libera o slot
@@ -2248,7 +2273,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[of_trial_expiry] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[of_trial_expiry]", exc)
                 await asyncio.sleep(interval)
 
     async def _open_finance_proactive():
@@ -2267,7 +2292,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[open_finance_proactive] erro: {exc}", file=sys.stderr)
+                falha_de_tarefa("[open_finance_proactive]", exc)
                 await asyncio.sleep(interval)
 
     _elapsed = _startup_time.monotonic() - _t0
@@ -2301,6 +2326,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
+                asyncio.create_task(_afiliado_avisos_worker(), name="afiliado_avisos"),
                 asyncio.create_task(_remarketing_worker(), name="remarketing_worker"),
                 asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
                 asyncio.create_task(_tarefa_finito_checks(), name="finito_checks"),
@@ -3091,17 +3117,17 @@ def _post_login_url(user_id: int | None = None, request: Request | None = None) 
     Cadastro novo (ou quem ainda não escolheu plano) vai DIRETO pra /precos —
     só entra no dashboard depois de escolher um plano — que hoje é sempre pago,
     o Grátis saiu da /precos — e concluir o pagamento. Sem assinatura ativa
-    (paywall ligado), idem. Fora disso: /painel no navegador com a chave do v2
-    (`painel_como_destino`), senão /home."""
+    (paywall ligado), idem; o afiliado vai à área dele (`destino_sem_plano`). Fora disso:
+    /painel no navegador com a chave do v2 (`painel_como_destino`), senão /home."""
     if user_id is not None:
         from core.services.plan_service import has_app_access, needs_plan_selection
         if needs_plan_selection(int(user_id)):
-            return f"{DASHBOARD_URL}/precos?escolha=1"
+            return f"{DASHBOARD_URL}{destino_sem_plano(int(user_id))}"
         if not has_app_access(int(user_id)):
             # Mesmo destino da perna de cima: depois do corte do Grátis as duas
             # pernas pedem a MESMA coisa (assinar), e `escolha=1` é o marcador
             # que o `nav-auth.js` reconhece para calar os CTAs de marketing.
-            return f"{DASHBOARD_URL}/precos?escolha=1"
+            return f"{DASHBOARD_URL}{destino_sem_plano(int(user_id))}"
         if request is not None and painel_como_destino(request, int(user_id)):
             return _dashboard_url("/painel")
     return _dashboard_url("/home")
@@ -6353,22 +6379,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         value = (float(unit) / 100.0) if unit is not None else 0.0
         return (value, str(cur).upper())
 
-    def _extras_liquido_cents(linhas, precos: set[str]) -> int:
-        """Centavos LÍQUIDOS das `linhas` da fatura (`linhas_da_fatura`) dos
-        produtos extras. Os extras são os preços da foto da metadata da assinatura
-        (`da_metadata`), não os da env do momento. Medido: `amount` da linha é
-        BRUTO; o cupom vem só em `discount_amounts`. `price` vem string ou
-        expandido (`.id`)."""
-        if not precos:
-            return 0
-        total = 0
-        for line in linhas:
-            price = _g(_g(_g(line, "pricing", {}), "price_details", {}), "price")
-            if (price if isinstance(price, str) else _g(price, "id")) not in precos:
-                continue
-            desconto = sum(_g(d, "amount", 0) for d in _g(line, "discount_amounts", []) or [])
-            total += (_g(line, "amount", 0) or 0) - desconto
-        return total
+    from core.services.extras_assinar import extras_liquido_cents as _extras_liquido_cents
 
     def _ga_plano_publico(*objetos) -> str | None:
         """Nome PÚBLICO do plano ('essencial'/'plus'/'pro') pro item do GA4.
@@ -6409,34 +6420,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 return fbp, fbc
         return None, None
 
-    def _invoice_subscription_id(objeto) -> str | None:
-        """Id da assinatura, seja `subscription` string ou objeto EXPANDIDO.
-
-        Serve `invoice.paid` E `checkout.session.completed`: o ramo do checkout
-        lia `_g(session, "subscription")` cru, então um payload com o objeto
-        expandido virava uma `external_ref` diferente da que o `invoice.paid`
-        grava, e o mesmo assinante ficava com DOIS grants da mesma assinatura.
-        Depois que a revogação passou a mirar `external_ref` exato, os dois
-        lados precisam produzir a mesma chave (§0.1: reusar, não repetir).
-        O fallback de `parent.subscription_details` simplesmente não casa num
-        objeto de sessão, então serve os dois sem ramificar por tipo.
-        """
-        sub_id = _g(objeto, "subscription")
-        if sub_id:
-            return sub_id if isinstance(sub_id, str) else _g(sub_id, "id")
-        # API >= 2025-09 movido pra invoice.parent.subscription_details.subscription.
-        # `objeto`, NÃO `invoice`: quando esta função passou a servir também o
-        # `checkout.session.completed`, esta linha ficou lendo uma variável
-        # LIVRE, só ligada no ramo `invoice.paid`. Sessão sem `subscription`
-        # (checkout de pagamento avulso) chegava aqui e estourava
-        # UnboundLocalError → 500 → a Stripe reentregando por 3 dias, e o ramo
-        # "Checkout do Stripe concluido (sem subscription)" inalcançável.
-        parent = _g(objeto, "parent", {})
-        details = _g(parent, "subscription_details", {})
-        ref = _g(details, "subscription")
-        if ref is None:
-            return None
-        return ref if isinstance(ref, str) else _g(ref, "id")
+    from core.services.extras_assinar import assinatura_da_fatura as _invoice_subscription_id
 
     async def _user_email(uid: int) -> str:
         try:
@@ -7017,6 +7001,22 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 await _fire_email(user_id, send_pro_charged_email,
                                   plan_value, amount_brl, expires_dt)
 
+                # Pagamento do indicado, antes e fora da comissão: "cliente que pagou"
+                # não depende dela. Idempotente por fatura; falha não derruba o webhook.
+                try:
+                    from db.affiliate_payments import registrar_pagamento
+                    await asyncio.to_thread(
+                        registrar_pagamento, user_id, "stripe", _g(invoice, "id"),
+                        int(amount_cents),
+                        datetime.fromtimestamp(event["created"], timezone.utc),
+                    )
+                except Exception as exc:
+                    await log_system_event(
+                        "error", "affiliate_payment_record_failed",
+                        "Pagamento de indicado nao registrado.", source="affiliates",
+                        user_id=user_id, details={"erro": type(exc).__name__},
+                    )
+
                 # Comissão de afiliado: se o pagante foi indicado por um afiliado
                 # ativo, credita a % da fatura. Idempotente por invoice id (retry
                 # de webhook não duplica). Nunca pode derrubar o webhook.
@@ -7450,6 +7450,19 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             from core.services.stripe_exclusao import MARCA_EXCLUSAO
             if _g(_g(obj, "cancellation_details"), "comment") in (MARCA, MARCA_EXCLUSAO):
                 return {"received": True}
+            # Reconquista: trial que acabou sem pagar (encerrado no fim do trial OU depois, ex.: cartão
+            # recusado -> past_due -> deleted dias depois; quem pagou é pulado no tick, `ja_pagou`).
+            # Cancelamento no meio do trial não entra. Falha não derruba o webhook.
+            try:
+                from core.services import reconquista  # noqa: PLC0415
+                _desde = reconquista.ligado()
+                _te, _fim = _g(obj, "trial_end"), _g(obj, "ended_at")
+                if _desde and _te and _fim and _fim >= _te - 3600 and _te >= _desde.timestamp():
+                    from db.reconquista import agendar  # noqa: PLC0415
+                    await asyncio.to_thread(
+                        agendar, int(user_id), datetime.fromtimestamp(_te, timezone.utc))
+            except Exception as exc:
+                print(f"[billing] reconquista agendar falhou user={user_id}: {type(exc).__name__}")
             # Email de confirmacao de cancelamento (item 41)
             # O plano sai do PRICE do `obj`, que é a própria Subscription do
             # evento (#351) — e não da conta, porque o `update_user_plan(...,
@@ -7481,6 +7494,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 )
             except Exception as exc:
                 print(f"[billing] admin notify canceled falhou user={user_id}: {exc}")
+
+    elif event["type"] in ("charge.refunded", "charge.dispute.closed"):
+        # Reembolso de indicado de afiliado. Sem try: nada aqui segura grant nem comissão de
+        # outro evento, tudo é idempotente, e a falha vira 5xx e reentrega, como o `retrieve`.
+        from core.services.afiliado_reembolso import tratar_evento
+        await asyncio.to_thread(tratar_evento, event)
 
     return {"received": True}
 
@@ -7746,7 +7765,7 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
         return HTMLResponse(content=_stamp_asset_versions(expired_html), status_code=401)
 
     # next: rotas internas permitidas pra evitar open-redirect. Tem prioridade sobre view.
-    _ALLOWED_NEXT_PREFIXES = ("/precos", "/conta", "/app", "/home", "/settings")
+    _ALLOWED_NEXT_PREFIXES = ("/precos", "/conta", "/app", "/afiliado", "/home", "/settings")
     if next and next.startswith("/") and any(next.startswith(p) for p in _ALLOWED_NEXT_PREFIXES):
         redirect_url = next
     else:

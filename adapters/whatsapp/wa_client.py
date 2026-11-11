@@ -5,7 +5,7 @@ import httpx
 import requests
 
 from core.observability import log_system_event_sync
-from utils_phone import mask_phone
+from utils_phone import mask_phone, mask_wamid
 
 WA_TOKEN = (os.getenv("WA_TOKEN") or "").strip()
 WA_PHONE_NUMBER_ID = (os.getenv("WA_PHONE_NUMBER_ID") or "").strip()
@@ -81,7 +81,6 @@ def send_text(
 
     if r.status_code == 401:
         print("SEND_ERROR: token inválido/expirado")
-        print(r.text)
         log_system_event_sync(
             "error",
             "whatsapp_token_invalid",
@@ -109,7 +108,7 @@ def send_text(
         source="wa_client",
         details={
             "kind": "text",
-            "message_ids": [m.get("id") for m in response.get("messages", []) if m.get("id")],
+            "message_ids": [mask_wamid(m.get("id")) for m in response.get("messages", []) if m.get("id")],
         },
     )
     return response
@@ -214,7 +213,6 @@ def send_template(
 
     if r.status_code == 401:
         print("SEND_ERROR: token inválido/expirado")
-        print(r.text)
         log_system_event_sync(
             "error",
             "whatsapp_token_invalid",
@@ -257,7 +255,7 @@ def send_template(
             "kind": "template",
             "template_name": template_name,
             "language_code": language_code,
-            "message_ids": [m.get("id") for m in response.get("messages", []) if m.get("id")],
+            "message_ids": [mask_wamid(m.get("id")) for m in response.get("messages", []) if m.get("id")],
         },
     )
     return response
@@ -295,19 +293,18 @@ def send_typing_indicator(
             "whatsapp_typing_indicator_exception",
             f"Excecao ao enviar typing indicator do WhatsApp: {exc}",
             source="wa_client",
-            details={"message_id": message_id},
+            details={"message_id": mask_wamid(message_id)},
         )
         raise
 
     if r.status_code == 401:
         print("SEND_ERROR: token inválido/expirado")
-        print(r.text)
         log_system_event_sync(
             "error",
             "whatsapp_token_invalid",
             "Token do WhatsApp invalido ou expirado durante envio de typing indicator.",
             source="wa_client",
-            details={"message_id": message_id, "kind": "typing_indicator", "response": r.text[:500]},
+            details={"message_id": mask_wamid(message_id), "kind": "typing_indicator", "response": r.text[:500]},
         )
         return None
 
@@ -317,7 +314,7 @@ def send_typing_indicator(
             "whatsapp_typing_indicator_failed",
             f"Falha ao enviar typing indicator do WhatsApp ({r.status_code}).",
             source="wa_client",
-            details={"message_id": message_id, "status_code": r.status_code, "response": r.text[:500]},
+            details={"message_id": mask_wamid(message_id), "status_code": r.status_code, "response": r.text[:500]},
         )
         raise RuntimeError(f"WA send_typing_indicator failed {r.status_code}: {r.text}")
 
@@ -327,7 +324,7 @@ def send_typing_indicator(
         "whatsapp_typing_indicator_success",
         "Typing indicator do WhatsApp enviado.",
         source="wa_client",
-        details={"message_id": message_id},
+        details={"message_id": mask_wamid(message_id)},
     )
     return response
 
@@ -392,7 +389,6 @@ def send_interactive_buttons(
         raise
     if r.status_code == 401:
         print("SEND_ERROR: token inválido/expirado")
-        print(r.text)
         log_system_event_sync(
             "error",
             "whatsapp_token_invalid",
@@ -482,7 +478,6 @@ def send_interactive_list(
         raise
     if r.status_code == 401:
         print("SEND_ERROR: token inválido/expirado")
-        print(r.text)
         log_system_event_sync(
             "error",
             "whatsapp_token_invalid",

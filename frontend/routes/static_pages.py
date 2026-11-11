@@ -19,6 +19,8 @@ from pydantic import BaseModel, model_validator
 from core.dashboard_links import link_whatsapp
 from core.pg_text import recusa_veneno
 from core.secure_compare import constant_time_eq
+from db import conta_sem_credencial
+from db.affiliates import get_affiliate_by_user
 from frontend.routes.shared import (
     CONTA_COOKIE_NAME,
     FRONTEND_DIR,
@@ -135,6 +137,37 @@ def serve_painel(request: Request):
     gate = gate_onboarding(request)
     if gate is not None:
         return gate
+    return _html_do_painel(request)
+
+
+@router.get("/afiliado")
+def serve_afiliado(request: Request):
+    """A área do afiliado para quem está sem plano: quem saiu do programa e cancelou a
+    assinatura ainda vê e saca o saldo. Com plano, a área é a do painel, com o menu. O bundle do /painel monta só essa tela
+    (`webapp/src/dashboard/main.tsx`), que fala com /api/affiliate e /auth, sem a /api/v2
+    (daria 402). Nada de dado financeiro pessoal: é a mesma casca do /painel.
+
+    Sem a chave do v2 também entra, e o WebView do app chega aqui (`destino_sem_plano`):
+    os insets de área segura são da própria tela (`styles/afiliado.css`). O gate aqui só
+    distingue quem tem plano; é o mesmo do /painel, então os dois não se devolvem em laço."""
+    uid = _resolve_page_user_id(request)
+    if uid is None:
+        return RedirectResponse(url="/login?next=/afiliado", status_code=302)
+    try:
+        afiliado, sem_credencial = get_affiliate_by_user(uid), conta_sem_credencial(uid)
+    except Exception:
+        logging.getLogger(__name__).warning("serve_afiliado falhou", exc_info=True)
+        return RedirectResponse(url="/painel", status_code=302)  # destino seguro: sem saber, é como quem não é afiliado
+    if afiliado is None:
+        return RedirectResponse(url="/painel", status_code=302)
+    if sem_credencial:
+        return RedirectResponse(url="/app", status_code=302)  # o "Crie sua senha" mora lá; a API daria 403
+    if gate_plan_selection(request) is None:
+        return RedirectResponse(url="/painel#/afiliado", status_code=302)
+    return _html_do_painel(request)
+
+
+def _html_do_painel(request: Request):
     resp = html_file(FRONTEND_DIR / "painel.html", pixel=False)  # no-store: o Set-Cookie não fica em cache compartilhado
     # O marcador é a conta que a /api/v2 vai responder (o dashboard_token), não a do `uid` acima, que prefere o
     # auth_token: os dois podem ser de contas diferentes (o /d/{code} de conta sem e-mail grava só o dashboard_token).
@@ -671,6 +704,7 @@ async def serve_robots_txt():
         "Allow: /",
         "Disallow: /app",
         "Disallow: /painel",
+        "Disallow: /afiliado",
         "Disallow: /home",
         "Disallow: /settings",
         "Disallow: /onboarding",
@@ -1449,6 +1483,7 @@ async def contact_submit(request: Request, body: ContactBody):
         html_body,
         text_body=text_body,
         headers={"Reply-To": email},
+        log_subject="Contato site",
     )
     if not ok:
         raise HTTPException(

@@ -29,7 +29,7 @@ from core.crypto import (
     encrypt_pii_optional,
     pii_audit_batch,
 )
-from core.pg_text import detalhe_seguro, limpa_para_pg, quadros_da_cadeia, redigir_failing_row
+from core.pg_text import causa_segura, detalhe_seguro, limpa_para_pg, quadros_da_cadeia, redigir_failing_row
 from core.secure_compare import constant_time_eq
 from core.system_event_log import statement_timeout_options
 
@@ -200,7 +200,7 @@ async def log_auth_login_event(
             except Exception:
                 pass
     except Exception as exc:
-        print(f"[admin] failed to record auth login event: {exc}", file=sys.stderr)
+        print(f"[admin] failed to record auth login event: {causa_segura(exc)}", file=sys.stderr)
 
 
 async def log_system_event(
@@ -249,7 +249,7 @@ async def log_system_event(
                 )
             await conn.commit()
     except Exception as exc:
-        print(f"[admin] failed to record system event: {exc}", file=sys.stderr)
+        print(f"[admin] failed to record system event: {causa_segura(exc)}", file=sys.stderr)
 
 
 def admin_enabled() -> bool:
@@ -1649,7 +1649,7 @@ async def log_admin_startup_warnings() -> None:
                 )
             await conn.commit()
     except Exception as exc:
-        print(f"[admin] failed to record startup warnings: {exc}", file=sys.stderr)
+        print(f"[admin] failed to record startup warnings: {causa_segura(exc)}", file=sys.stderr)
 
 
 def status_do_erro(exc: Exception) -> tuple[int, str]:
@@ -2245,9 +2245,19 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         # sobre valor vindo de json.loads, e o try abaixo só embrulha o
         # create_affiliate e só pega ValueError. Mesmo tratamento do `months`.
         try:
-            bps = int(payload.get("commission_bps") or DEFAULT_COMMISSION_BPS)
+            bruto = payload.get("commission_bps")
+            # `or` aqui transformava 0 em 10%: ausente vira padrão, e 0 fica 0. `int()` sozinho
+            # aceita `true`, "1_000", "+5", " 5 " e dígito não ASCII.
+            if bruto in (None, "") or bruto is False:
+                bps = DEFAULT_COMMISSION_BPS
+            elif bruto is True or (isinstance(bruto, str) and not (bruto.isascii() and bruto.isdigit())):
+                raise ValueError("commission_bps inválido")
+            else:
+                bps = int(bruto)
         except (TypeError, ValueError, OverflowError):
             raise HTTPException(status_code=422, detail="commission_bps inválido.")
+        if isinstance(bruto, float) and bps != bruto:  # `int(0.5)` gravaria 0% em silêncio
+            raise HTTPException(status_code=400, detail="commission_bps deve ser inteiro.")
         try:
             affiliate = await asyncio.to_thread(create_affiliate, int(user_id), code, bps)
         except ValueError as exc:

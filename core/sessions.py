@@ -22,6 +22,7 @@ import re
 import sys
 import uuid
 
+from core.pg_text import causa_segura
 from db.connection import get_conn
 
 
@@ -72,7 +73,7 @@ def get_active_session(jti: str | None) -> dict | None:
                 )
                 return cur.fetchone()
     except Exception as exc:
-        print(f"[sessions] get_active_session failed: {exc}", file=sys.stderr)
+        print(f"[sessions] get_active_session failed: {causa_segura(exc)}", file=sys.stderr)
         return None
 
 
@@ -95,7 +96,7 @@ def touch_session(jti: str | None) -> None:
                 )
             conn.commit()
     except Exception as exc:
-        print(f"[sessions] touch_session failed: {exc}", file=sys.stderr)
+        print(f"[sessions] touch_session failed: {causa_segura(exc)}", file=sys.stderr)
 
 
 def list_user_sessions(user_id: int) -> list[dict]:
@@ -114,7 +115,7 @@ def list_user_sessions(user_id: int) -> list[dict]:
                 )
                 return list(cur.fetchall())
     except Exception as exc:
-        print(f"[sessions] list_user_sessions failed: {exc}", file=sys.stderr)
+        print(f"[sessions] list_user_sessions failed: {causa_segura(exc)}", file=sys.stderr)
         return []
 
 
@@ -142,7 +143,7 @@ def revoke_session(user_id: int, jti: str) -> bool:
             conn.commit()
         return bool(changed)
     except Exception as exc:
-        print(f"[sessions] revoke_session failed: {exc}", file=sys.stderr)
+        print(f"[sessions] revoke_session failed: {causa_segura(exc)}", file=sys.stderr)
         return False
 
 
@@ -177,7 +178,7 @@ def revoke_other_sessions(user_id: int, current_jti: str | None) -> int:
             conn.commit()
         return int(changed or 0)
     except Exception as exc:
-        print(f"[sessions] revoke_other_sessions failed: {exc}", file=sys.stderr)
+        print(f"[sessions] revoke_other_sessions failed: {causa_segura(exc)}", file=sys.stderr)
         return 0
 
 

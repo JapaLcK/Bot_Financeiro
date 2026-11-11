@@ -20,6 +20,7 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime
 
+from core.pg_text import causa_segura
 from db.connection import get_conn, cat_key_sql, CAT_CANON_ORDER
 from utils_date import day_tz
 from utils_text import fmt_brl
@@ -179,7 +180,7 @@ def evaluate_after_expense(
                     )
             conn.commit()
     except Exception as exc:
-        print(f"[budget_alerts] eval failed for user {user_id} cat {cat}: {exc}", file=sys.stderr)
+        print(f"[budget_alerts] eval failed for user {user_id}: {causa_segura(exc)}", file=sys.stderr)
         return None
 
     return BudgetAlert(threshold=top, categoria=cat_canon, spent=spent_after, budget=budget)

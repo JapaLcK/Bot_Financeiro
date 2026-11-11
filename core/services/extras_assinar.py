@@ -27,6 +27,32 @@ def _ler(meta, chave: str):
         return None
 
 
+def assinatura_da_fatura(objeto) -> str | None:
+    """Id da assinatura, seja `subscription` string ou objeto EXPANDIDO, da fatura ou da
+    sessão de checkout. Os dois lados precisam da mesma chave: com o objeto expandido lido
+    cru, o mesmo assinante ficava com DOIS grants da mesma assinatura. Na API >= 2025-09 ela
+    mora em `parent.subscription_details`, que não casa em objeto de sessão."""
+    ref = _ler(objeto, "subscription") or _ler(_ler(_ler(objeto, "parent"), "subscription_details"), "subscription")
+    return ref if ref is None or isinstance(ref, str) else _ler(ref, "id")
+
+
+def extras_liquido_cents(linhas, precos: set[str]) -> int:
+    """Centavos LÍQUIDOS das `linhas` da fatura (`linhas_da_fatura`) dos produtos extras.
+    Os extras são os preços da foto da metadata da assinatura (`da_metadata`), não os da env
+    do momento. Medido: `amount` da linha é BRUTO; o cupom vem só em `discount_amounts`.
+    `price` vem string ou expandido (`.id`)."""
+    if not precos:
+        return 0
+    total = 0
+    for line in linhas:
+        price = _ler(_ler(_ler(line, "pricing"), "price_details"), "price")
+        if (price if isinstance(price, str) else _ler(price, "id")) not in precos:
+            continue
+        desconto = sum(_ler(d, "amount") or 0 for d in _ler(line, "discount_amounts") or [])
+        total += (_ler(line, "amount") or 0) - desconto
+    return total
+
+
 def linhas_da_fatura(invoice) -> list:
     """Todas as linhas da fatura. O objeto embute no máximo 10 (plano + 10
     extras = 11); com `has_more`, busca pela API. Sem try: no webhook, falha

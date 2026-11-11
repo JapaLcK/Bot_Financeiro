@@ -19,6 +19,7 @@ from dateutil import parser as _dateutil_parser
 from utils_date import _tz
 from utils_text import VALOR_MAX
 
+from core.pg_text import causa_segura
 from core.services.pluggy import (
     PluggyApiError,
     create_pluggy_api_key,
@@ -91,8 +92,7 @@ def _falha_da_pluggy(exc: BaseException) -> str:
     todo nosso (`_raise_for_pluggy_response` não põe o corpo da resposta) e é o que
     diz qual regra do leitor recusou a resposta (`pluggy_bills.py`)."""
     texto = f" texto={exc}" if isinstance(exc, PluggyApiError) else ""
-    return (f"motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)} "
-            f"status={getattr(exc, 'status_code', None)} code={getattr(exc, 'code', None)}{texto}")
+    return f"{causa_segura(exc)} code={getattr(exc, 'code', None)}{texto}"
 
 
 def _to_decimal(value: Any, default: str = "0") -> Decimal:

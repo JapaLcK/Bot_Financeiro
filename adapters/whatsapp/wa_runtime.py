@@ -57,7 +57,7 @@ from db import (
     set_whatsapp_updates_opt_out,
     update_launch_category,
 )
-from utils_phone import mask_phone
+from utils_phone import mask_phone, mask_wamid
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +168,7 @@ def _send_reply(to_wa_id: str, body: str) -> None:
                     "WA send_text accepted: to=%s canonical_contacts=%s message_ids=%s",
                     mask_phone(to_wa_id),
                     [mask_phone(c) for c in contacts],
-                    message_ids,
+                    [mask_wamid(m) for m in message_ids],
                 )
             except Exception:
                 logger.info("WA send_text accepted but unable to summarize response")
@@ -835,7 +835,7 @@ def process_message(message: InboundMessage) -> None:
         if plano is not None:
             msg_id = _message_id(message)
             if _seen_recent(msg_id):
-                logger.info("WA demo duplicate ignored message_id=%s", msg_id)
+                logger.info("WA demo duplicate ignored message_id=%s", mask_wamid(msg_id))
                 return
             wa_demo.executar(plano, message, msg_id)
             return
@@ -1044,7 +1044,7 @@ def process_message(message: InboundMessage) -> None:
                     launch_id = int(lid_str)
                 except ValueError:
                     launch_id = 0
-                logger.info("WA recategorize pick wa_id=%s launch=%s cat=%s", mask_phone(reply_to), launch_id, cat)
+                logger.info("WA recategorize pick wa_id=%s launch=%s", mask_phone(reply_to), launch_id)
                 if launch_id and cat:
                     _send_reply(reply_to, _apply_recategorize(uid, launch_id, cat))
                 return
@@ -1456,14 +1456,14 @@ def process_message(message: InboundMessage) -> None:
         msg_id = _message_id(message)
 
         if _seen_recent(msg_id):
-            logger.info("WA duplicate ignored message_id=%s", msg_id)
+            logger.info("WA duplicate ignored message_id=%s", mask_wamid(msg_id))
             mantem_pergunta = True
             return
 
         try:
             send_typing_indicator(msg_id)
         except Exception as exc:
-            logger.warning("WA typing indicator failed message_id=%s error=%s", msg_id, exc)
+            logger.warning("WA typing indicator failed message_id=%s error=%s", mask_wamid(msg_id), exc)
 
         att_refs = message.attachments or []
         if att_refs:

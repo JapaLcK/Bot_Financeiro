@@ -8,7 +8,7 @@ Dois mundos atrás do flag PLANS_V2_ENABLED (lido dinâmico, sem redeploy):
     paywall obrigatório (PAYWALL_ENABLED) — o mundo de antes da escada.
   • ON (default desde 2026-08-06, produção; ver `plans_v2_enabled`): 4 tiers free < essencial < plus < pro. O valor 'pro' no
     banco é ALIAS LEGADO do tier plus (R$ 19,90 — antigo "Pro", hoje "Plus");
-    o tier pro novo (R$ 39,90) usa o valor 'pro_max'. Desde o CORTE DO GRÁTIS
+    o tier pro (R$ 49,90) usa o valor 'pro_max'. Desde o CORTE DO GRÁTIS
     (#274/#354) o tier free NÃO entra no app: has_app_access consulta
     tem_direito_hoje, e o Grátis sobrevive só como ESTADO (fallback após falha
     de cobrança), não como direito de uso. Freio: ACCESS_GATE_ENABLED=0.
@@ -49,7 +49,7 @@ _STORED_PLAN_TO_TIER = {
     "essencial": "essencial",
     "pro": "plus",       # legado: assinante de R$ 19,90 (rebatizado Plus)
     "plus": "plus",
-    "pro_max": "pro",    # tier novo de R$ 39,90 (ainda não vendido)
+    "pro_max": "pro",    # tier Pro de R$ 49,90 (vendido)
 }
 
 # O INVERSO do de cima, restrito ao que se VENDE: tier público que o cliente
@@ -569,7 +569,13 @@ def get_user_limits(user_id: int) -> PlanLimits:
     """
     if not plans_v2_enabled():
         return limits_for("pro" if is_pro(user_id) else "free")
-    return limits_for_tier(get_plan_tier(user_id))
+    tier = get_plan_tier(user_id)
+    limites = limits_for_tier(tier)
+    if tier == "plus":  # só o Plus pode ser o do grant 'family'; os outros tiers não pagam a query
+        from .billing_access import teto_bancos_plus  # lazy: billing_access importa plan_service
+
+        return {**limites, "of_banks_max": teto_bancos_plus(user_id)[0]}
+    return limites
 
 
 def history_days_cap(user_id: int) -> int | None:
@@ -680,6 +686,8 @@ FEATURE_MIN_TIER_V2 = {
     # Progresso ao milhão: pago apenas, como household_budget (não usar "essencial").
     "million_progress": "plus",
     "subscriptions": "plus",
+    # Plano Família: só o titular Pro cria família e repassa acesso (family_access._decidir_cobertura).
+    "family": "pro",
     "generic": "essencial",
 }
 

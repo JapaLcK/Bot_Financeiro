@@ -30,16 +30,39 @@ log = logging.getLogger(__name__)
 _COBERTURA_INDEPENDENTE = ("pix", "admin")
 
 
+def _plano_pro(conta) -> str | None:
+    """Plano armazenado do titular se ele é Pro vigente (nem free, nem vencido, nem Plus), senão None. Atraso e suspensão
+    ficam de fora de propósito: a casa e a leitura do membro só fecham por tier (suspenso segue como antes)."""
+    if not conta:
+        return None
+    plano = (conta.get("plan") or "free").lower()
+    fim = conta.get("plan_expires_at")
+    if plano == "free" or fim is None or fim <= datetime.now(timezone.utc):
+        return None
+    from core.services.plan_limits import tier_at_least  # lazy: plan_service importa billing_*
+    from core.services.plan_service import FEATURE_MIN_TIER_V2, tier_publico
+    if not tier_at_least(tier_publico(plano), FEATURE_MIN_TIER_V2["family"]):
+        return None  # só o titular Pro (valor 'pro_max'; 'pro' armazenado é o Plus) cria e cobre família
+    return plano
+
+
+def titular_pro(owner_id: int) -> bool:
+    return _plano_pro(_ler_conta(owner_id)) is not None
+
+
+def titular_pro_no_lock(cur, owner_id: int) -> bool:
+    cur.execute("select plan, plan_expires_at from auth_accounts where user_id = %s", (owner_id,))
+    return _plano_pro(cur.fetchone()) is not None
+
+
 def _decidir_cobertura(conta, suspenso: bool, grants):
     """Regra única da cobertura (função pura): (plan_stored, ends_at) ou None. `conta` = linha de auth_accounts,
     `grants` = função que devolve os grants do titular (só chamada se a regra precisa deles). Usada fora (`_cobertura`) e dentro da transação do grant_member."""
-    if not conta:
+    plano = _plano_pro(conta)
+    if plano is None:
         return None
     agora = datetime.now(timezone.utc)
-    plano = (conta.get("plan") or "free").lower()
     fim = conta.get("plan_expires_at")
-    if plano == "free" or fim is None or fim <= agora:
-        return None
     if (conta.get("last_payment_status") or "").lower() in PAST_DUE_PAYMENT_STATUSES or suspenso:
         # atraso ou encerramento é do Stripe (a suspensão é o marcador, persistido mesmo com outro grant
         # cobrindo): só um grant não-Stripe vigente (Pix/admin) segue cobrindo
@@ -71,6 +94,7 @@ def cobertura_no_lock(cur, owner_id: int, group_id: int):
 
 def grant_member(owner_id: int, member_user_id: int) -> bool:
     """Concede (ou renova, idempotente pela unique source+external_ref) o grant do membro."""
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # lazy: plan_service importa billing_*
     cob = _cobertura(owner_id)
     if not cob:
         return False
@@ -92,7 +116,8 @@ def grant_member(owner_id: int, member_user_id: int) -> bool:
         # Plano pago legado sem nenhum grant: sem materializá-lo, o 1º grant family faria `recompute` tratá-lo
         # como "tem grants" e, ao sair, rebaixá-lo. A SQL é a do backfill (só age se não há grant algum).
         cur.execute(RESYNC_LEGACY_GRANT_USER_SQL, (member_user_id,))
-        upsert_grant_cur(cur, member_user_id, "family", f"family_member:{membro['id']}", cob[0],
+        upsert_grant_cur(cur, member_user_id, "family", f"family_member:{membro['id']}",
+                         TIER_TO_STORED_PLAN["plus"],  # o membro recebe Plus, não o tier do titular
                          datetime.now(timezone.utc), cob[1], fg.event_version_now())
         conn.commit()
     recompute_entitlement(member_user_id)

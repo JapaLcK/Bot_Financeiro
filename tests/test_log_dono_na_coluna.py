@@ -67,7 +67,7 @@ O universo é o `git ls-files` (`_varre_repo`): arquivo não rastreado não entr
 nem qualquer diretório chamado `tests` (`_IGNORADOS`), em qualquer nível.
 O `.venv/bin/python` dos comandos é o do checkout principal: num worktree sem
 `.venv`, use o interpretador de lá.
-`print` fica fora: a guarda dele é outra fatia da #657.
+`print` e log INFO/DEBUG (texto, telefone, exceção crua) são de `tests/test_log_d4_guarda.py`.
 """
 from __future__ import annotations
 
@@ -101,6 +101,9 @@ _N_MSG = {"_log_event": 2}      # scripts/account_deletion_job.py: (level, messa
 # `_codigo_seguro`). `code` fica FORA: é nome genérico de terceiros
 # (`SystemExit("texto").code` é texto livre).
 _EXC_SEGURA = {"sqlstate", "constraint_name", "status_code", "__class__", "motivo", "codigo"}
+_MASCARAS = {"mask_phone", "mascarar_email", "_mask_email", "mask_wamid"}
+# Valem pelo NOME: o que está dentro deles não conta como exceção crua.
+_SANEADORES = {"causa_segura", "causa_do_provedor", "_falha_da_pluggy", "quadros_da_cadeia", "_desfecho"}
 
 # Fora do ratchet, com o motivo. Cada entrada cobre UMA ocorrência da chave: uma
 # segunda na mesma função volta ao ratchet (`_atual`). Chave que nenhum código
@@ -143,7 +146,7 @@ def _texto(n: ast.AST) -> str | None:
 
 
 def _mascara(n: ast.AST) -> bool:
-    return isinstance(n, ast.Call) and _nome(n.func) == "mask_phone"
+    return isinstance(n, ast.Call) and _nome(n.func) in _MASCARAS
 
 
 def _cita(nos: list, nome: re.Pattern, texto: re.Pattern | None) -> bool:
@@ -199,11 +202,13 @@ def _coluna(extra: ast.AST | None) -> bool:
 
 def _cru(nos: list, excs: set[str]) -> bool:
     """A variável do `except` usada como VALOR, ou um `format_exc()`. Só
-    `type(e)`, `isinstance(e, …)` e os atributos de `_EXC_SEGURA` (direto ou por
-    `getattr` com nome literal) não expõem o texto."""
+    `type(e)`, `isinstance(e, …)`, os `_SANEADORES` e os atributos de `_EXC_SEGURA`
+    (direto ou por `getattr` com nome literal) não expõem o texto."""
     for topo in nos:
         seguros = set()
         for n in ast.walk(topo):
+            if isinstance(n, ast.Call) and _nome(n.func) in _SANEADORES:
+                seguros |= {id(x) for x in ast.walk(n)}
             if isinstance(n, ast.Call) and n.args and (
                     _nome(n.func) in {"type", "isinstance"} or _nome(n.func) == "getattr"
                     and len(n.args) > 1 and isinstance(n.args[1], ast.Constant)
@@ -265,7 +270,7 @@ def _classes(c: ast.Call, excs: set[str], evt: set[str] = _EVT) -> list[str]:
     return ["EVT_COL_RAW"] if _cru(msg + det, excs) else []
 
 
-def _achados(fonte: str | bytes, rel: str) -> list[tuple[str, str, str]]:
+def _achados(fonte: str | bytes, rel: str, classes=_classes) -> list[tuple[str, str, str]]:
     """Extrator para `_varre_repo`: (arquivo, função mais interna, classe)."""
     arvore = ast.parse(fonte)
     evt = _apelidos(arvore, _EVT)                 # `import … as lse`, `lse = …`
@@ -279,7 +284,7 @@ def _achados(fonte: str | bytes, rel: str) -> list[tuple[str, str, str]]:
             for filho in ast.walk(no):
                 excs.setdefault(filho, set()).add(no.name)
     return [(rel, func.get(no, "<módulo>"), classe) for no in ast.walk(arvore)
-            if isinstance(no, ast.Call) for classe in _classes(no, excs.get(no, set()), evt)]
+            if isinstance(no, ast.Call) for classe in classes(no, excs.get(no, set()), evt)]
 
 
 def _compara(atual: Counter, base: dict) -> tuple[list, list]:
@@ -289,9 +294,10 @@ def _compara(atual: Counter, base: dict) -> tuple[list, list]:
     return acima, abaixo
 
 
-def _atual(achados: list) -> Counter:
+def _atual(achados: list, justificadas: dict | None = None) -> Counter:
     atual = Counter(achados)
-    for k in JUSTIFICADAS:    # uma ocorrência por entrada, não a chave inteira
+    # uma ocorrência por entrada, não a chave inteira
+    for k in JUSTIFICADAS if justificadas is None else justificadas:
         atual[k] -= 1
     return +atual
 
@@ -386,20 +392,23 @@ def test_varredura_ponta_a_ponta_pelo_git(tmp_path, monkeypatch):
         _tlft._varre_repo(_achados)
 
 
-def _regenera() -> None:
-    """Reescreve só o dict `DIVIDA` de `_log_dono_baseline.py`. Recusa subir."""
-    atual = _atual(_tlft._varre_repo(_achados))
-    acima, _ = _compara(atual, DIVIDA)
+def _regrava_baseline(arquivo: str, atual: Counter, divida: dict) -> None:
+    """Reescreve só o dict `DIVIDA` de `arquivo`, ao lado deste teste. Recusa subir."""
+    acima, _ = _compara(atual, divida)
     if acima:
         sys.exit("recusado, dívida nova não entra por aqui (rename? edite a chave à "
                  "mão; LOG_MSG_NULL -> LOG_EXTRA_RAW NÃO é rename, tire o texto cru): "
                  + "; ".join(f"{k} {b} -> {n}" for k, b, n in acima))
-    base = Path(__file__).with_name("_log_dono_baseline.py")
+    base = Path(__file__).with_name(arquivo)
     cabeca = base.read_text(encoding="utf-8").partition("\nDIVIDA: ")[0]
     corpo = "".join(f"    {k!r}: {n},\n" for k, n in sorted(atual.items()))
     base.write_text(f"{cabeca}\nDIVIDA: dict[tuple[str, str, str], int] = {{\n{corpo}}}\n",
                     encoding="utf-8")
     print(f"{base}: {len(atual)} chaves, {sum(atual.values())} ocorrências")
+
+
+def _regenera() -> None:
+    _regrava_baseline("_log_dono_baseline.py", _atual(_tlft._varre_repo(_achados)), DIVIDA)
 
 
 if __name__ == "__main__":
