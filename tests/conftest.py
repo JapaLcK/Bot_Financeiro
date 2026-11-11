@@ -215,6 +215,11 @@ def pytest_unconfigure(config):
     numa fixture, um erro antes do `yield` pularia a limpeza e deixaria um
     database `pytest_*` órfão a cada tentativa falha.
     """
+    # PRIMEIRO: a fila do espelho (`core/log_fila.py`) grava pela `DATABASE_URL` da hora da
+    # gravação; o que ela drenasse depois da troca abaixo (inclusive no `atexit`) iria ao banco base.
+    from core import log_fila
+    log_fila.para()
+
     base_url = _ISOLATION.pop("base_url", None)
     name = _ISOLATION.pop("name", None)
     if not base_url or not name:
@@ -251,6 +256,34 @@ def _init_schema():
     from db.finito_checks import ensure_finito_checks_once
     r = ensure_finito_checks_once()
     assert r is not None and r["sujas"] == [] and r["falhas"] == [], r
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _espelho_na_thread_de_quem_loga():
+    """Na suíte o espelho grava na thread de quem loga, pelo MESMO `prepare` da fila (PR-10a, P1 = B).
+
+    Com a fila de verdade, todo teste que lê `system_event_logs` logo depois do log teria de drenar
+    antes, e o que afirma AUSÊNCIA (PII, pilha) passaria verde lendo a tabela ainda vazia. A fila de
+    verdade é provada por `tests/test_log_fila_painel.py` e pelos subprocessos, que rodam a
+    configuração de produção. Subclasse do `_DashboardHandler`: os `isinstance` dos testes valem."""
+    import logging
+    import core.observability as O
+    from core import log_fila
+
+    O._configure_root_logger()
+    root = logging.getLogger()
+    fila = next(h for h in root.handlers if isinstance(h, log_fila.FilaDoPainel))
+
+    class _EspelhoNaThread(O._DashboardHandler):
+        def emit(self, record):
+            super().emit(fila.prepare(record))
+
+    espelho = _EspelhoNaThread(fila.level)
+    for f in fila.filters:
+        espelho.addFilter(f)
+    root.removeHandler(fila)
+    root.addHandler(espelho)
+    yield
 
 
 @pytest.fixture(autouse=True)

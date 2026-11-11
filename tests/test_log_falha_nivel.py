@@ -167,6 +167,8 @@ with TestClient(m.app):          # lifespan de verdade, como no processo web
     pass
 
 obs._log_falha("delete_card", 1, RuntimeError("falha tecnica"), card_id=7)
+from core import log_fila
+log_fila.esvazia(10)  # o espelho grava na thread do ouvinte (PR-10a)
 print("RESULTADO:" + json.dumps({"gravou": len(gravados)}))
 '''
 

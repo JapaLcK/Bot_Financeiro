@@ -22,6 +22,7 @@ from typing import Any
 # então o efeito colateral de import continua acontecendo.
 from core.pg_text import causa_segura, quadros_da_cadeia, redigir_failing_row
 from core.system_event_log import log_system_event_sync, recent_event_exists
+from core import log_fila
 
 # ── Logger centralizado ───────────────────────────────────────────────────────
 
@@ -36,37 +37,19 @@ class _DashboardHandler(logging.Handler):
     Só grava se DATABASE_URL estiver configurado.
 
     ponytail: `emit` chama `log_system_event_sync` direto — um psycopg.connect()
-    + INSERT bloqueante POR REGISTRO, sem pool e sem fila. Teto: como este handler
-    fica no ROOT logger, qualquer `warning()`/`error()` de qualquer módulo paga a
-    conta, e no processo web (uvicorn) ela é paga DENTRO do event loop, travando
-    todas as conexões enquanto dura. Medido em localhost: 11,3 ms na 1ª chamada e
-    2,1–3,7 ms por chamada em série, contra 0,02 ms sem o handler; com banco remoto
-    cada connect ainda paga o RTT (não medido daqui — produção inacessível). Foi
-    barato até aqui porque warning em produção é raro; o que assusta é o caso em
-    que ele deixa de ser — um laço quente logando por requisição. Já obrigou
-    contorno em pelo menos um ponto: `frontend/routes/shared.py` loga a queda da
-    página de erro uma vez por TRANSIÇÃO (flag `_error_degraded`) em vez de por
-    requisição, senão um bot varrendo URL vira um INSERT por 404.
-    Contido em três pontos, não resolvido: (1) `connect_timeout=2` nas DUAS
-    funções que abrem conexão (`log_system_event_sync` e `recent_event_exists`,
-    hoje em `core/system_event_log.py`), limitando o travamento a 2s com banco
-    inalcançável (era >30s, medido); (1b) `statement_timeout` nas mesmas duas —
-    e, desde a issue #429, também no gravador async `log_system_event` de
-    `core/admin_dashboard.py`, que passou a abrir conexão própria com o MESMO
-    helper (`statement_timeout_options`) em vez de ir pelo `db_connect` do
-    painel. É o que limita a ESPERA DE LOCK e a execução: sem ele a tabela
-    travada pendurava o caller pelo lock inteiro (medido: 3,00s para um lock de
-    3s). O `db_connect` do painel continua sem teto, de propósito — é
-    compartilhado com DDL de boot, agregações e a retenção diária;
-    (2) os 5 call sites das 4 rotas destrutivas `async`
-    (`frontend/routes/cards.py`, `frontend/finance_bot_websocket_custom.py` —
-    incluindo o ramo WARNING da `/launches`) chamam o `_log_falha` por
-    `asyncio.to_thread`, tirando o INSERT do event loop NAQUELE call site. Todo
-    o resto do processo web ainda paga dentro do loop.
-    Upgrade: `logging.handlers.QueueHandler` + `QueueListener` (stdlib) tira o
-    INSERT do caller em TODOS os call sites de uma vez, e aposenta os dois
-    contornos acima. Transversal (mexe no logger de todo o processo) — não é o
-    PR da página de erro nem o do delete.
+    + INSERT POR REGISTRO, sem pool. Não fica no root: lá está a `FilaDoPainel`
+    de `core/log_fila.py`, e este `emit` roda na thread do ouvinte dela. Quem
+    loga paga só o `prepare` da fila (o grupo 1 de `tests/test_log_fila_painel.py`
+    mede o loop com a tabela travada; com este handler no root ele parava). Teto:
+    um connect por registro, em série, no ouvinte (2,1–3,7 ms em localhost; com
+    banco remoto, mais o RTT, não medido daqui); um laço quente logando enche a
+    fila e o excedente é descartado com aviso no stderr. Por isso os contornos de
+    VOLUME ficam: `frontend/routes/shared.py` loga a queda da página de erro uma
+    vez por TRANSIÇÃO (`_error_degraded`), e `_sem_ratelimit_no_banco` tira o
+    slowapi. `connect_timeout=2` e `statement_timeout` (`core/system_event_log.py`;
+    o gravador async `log_system_event` de `core/admin_dashboard.py` usa o mesmo
+    helper, #429) limitam quanto o ouvinte espera por registro com o banco
+    inalcançável ou a tabela travada.
     """
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -90,7 +73,7 @@ class _DashboardHandler(logging.Handler):
         elif record.exc_text:  # o filtro `_sem_failing_row` já redigiu e zerou o exc_info
             details["traceback"] = record.exc_text[-2000:]
 
-        # chama de forma síncrona — handler roda em thread do bot
+        # roda na thread do ouvinte de `core/log_fila.py`, não na de quem logou
         log_system_event_sync(
             level,
             event_type=f"logger.{level}",
@@ -267,7 +250,7 @@ def _sem_failing_row(record: logging.LogRecord) -> bool:
     `str(exc)` e no traceback.
 
     COBRE: records que passam por todo handler do root (os dois que `_configure_root_logger` instala e os que já existiam)
-    (stderr, se o root estava sem handler, e `_DashboardHandler`), com `logger.*(..., exc)` ou `exc_info`. A pilha fica: o traceback vira `exc_text` já
+    (stderr, se o root estava sem handler, e a `FilaDoPainel`), com `logger.*(..., exc)` ou `exc_info`. A pilha fica: o traceback vira `exc_text` já
     redigido (o Formatter imprime `exc_text`; o `exc_info` é zerado para ninguém reformatá-lo).
     2ª linha de defesa: a 1ª é `psycopg.Error.__str__` redigido em `db/connection.py`, que já tira
     a linha de `print(exc)`, f-string, log e traceback de qualquer conexão. Este filtro cobre texto
@@ -302,12 +285,15 @@ def _configure_root_logger() -> None:
         root.setLevel(logging.INFO)
         root.addHandler(stderr_handler)
 
-    # adiciona handler do dashboard se ainda não estiver presente
-    if not any(isinstance(h, _DashboardHandler) for h in root.handlers):
+    # espelho do dashboard atrás da fila do processo: grava fora da thread de quem loga
+    if not any(isinstance(h, log_fila.FilaDoPainel) for h in root.handlers):
         dash_handler = _DashboardHandler()
         dash_handler.setLevel(logging.WARNING)
-        dash_handler.addFilter(_sem_ratelimit_no_banco)
-        root.addHandler(dash_handler)
+        fila = log_fila.instala(dash_handler)
+        fila.setLevel(logging.WARNING)
+        if _sem_ratelimit_no_banco not in fila.filters:
+            fila.addFilter(_sem_ratelimit_no_banco)
+        root.addHandler(fila)
 
     # todo handler do root, inclusive os que o processo instalou antes deste módulo
     for h in root.handlers:
