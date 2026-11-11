@@ -2934,6 +2934,28 @@ e `/admin/api/overview`, 21 ms (antes, 100 s). Remedir antes de reusar.
 contra evento atrasado, que é coberto pela conferência. Pendência ligada a comissão ou a afiliado que
 excluiu a conta segue as regras acima e não é limpa.
 
+**Reconciliação de comissão paga (#1501).** O `charge.refunded` ou o `charge.dispute.closed` de comissão
+já paga pode se perder, e a conferência só olha comissão marcada. Na mesma volta do worker, entre
+`conferir_pendentes` e `reenviar_pendentes` (o aviso da recuperação achada sai na mesma volta),
+`reconciliar_pagas` (`core/services/afiliado_reconciliacao.py`) reconfere na Stripe as faturas de comissão
+paga, e as da linha de afiliado que excluiu a conta (`paid_cents`), por `devolvido_na_stripe`. Janela de
+540 dias desde o pagamento (`JANELA_DIAS`, D1; na órfã, desde a exclusão), uma vez por dia por fatura
+(`CADENCIA_S`, D2), 20 por volta (`LOTE`): a nunca conferida primeiro, depois a mais antiga. Pix fica fora;
+`total` já registrado não consulta (nunca reabre); parcial registrada segue (um total depois é fato novo).
+Com reembolso, `registrar_reembolso` com ator `sistema` e a data da descoberta: total vira recuperação,
+parcial vai para revisão (D6). Uma vez só por construção: `registrar_reembolso` só age com fato novo e
+atribui a recuperação, então repetir, reiniciar ou duas instâncias não duplicam valor, evento nem aviso.
+A última consulta por fatura mora em `affiliate_paid_refund_checks` (fatura e data, sem FK, para não travar
+`affiliate_commissions` no deploy e alcançar a órfã), só para custo e cadência; `limpar_conferidas` apaga a
+linha 541 dias depois da última consulta (a fatura que saiu da janela não é mais consultada). Disputa aberta e `payment_record` contam como consultadas (log `info`
+`affiliate_paid_check_pending`) e voltam no dia seguinte. Erro 4xx da fatura (`InvalidRequestError`,
+`PermissionError`) também conta como consultada, com log `warning` `affiliate_paid_check_failed`
+(`da_fatura`, sem a fatura): sem isso, uma fatura apagada travaria a fila. Qualquer outro erro (conexão,
+prazo de 8 s, chave, limite, 5xx) para a passada sem gravar, e a mesma fatura abre a volta seguinte. Nunca
+marca `payment_check_pending` nem mexe em saldo; a recuperação segue manual. Teto: 288 voltas × 20 = 5.760
+consultas por dia, de 2 a 3 chamadas cada; com mais de 5.760 pagas na janela, a cadência cai para N/5.760
+dias, sem perda. Fora da janela, só o script abaixo.
+
 `scripts/backfill_afiliado_pagamentos.py` repara o que os webhooks não viram. **`--aplicar` pode
 alterar saldos: estorna comissão solta com reembolso total confirmado.** Sem ele é simulação. Rodar
 com `DATABASE_URL` e `STRIPE_SECRET_KEY` de produção:
@@ -2974,6 +2996,7 @@ desvinculado do usuário, dados financeiros retidos:
 | Retido | `affiliate_referrals` | id, afiliado, `code_used`, `first_charge_ref`, `created_at` |
 | Retido | `affiliate_referral_payments` | origem, `payment_ref`, valor, datas, rótulo |
 | Retido | `affiliate_refund_reviews` e `affiliate_refund_review_events` | Fatura, valores, status, referência, justificativa, autor |
+| Retido | `affiliate_paid_refund_checks` | Fatura e data da última reconciliação, sem pessoa; sai 541 dias depois da última consulta (#1501) |
 
 `stripe_invoice_id` segue ligado ao cliente dentro da Stripe, e nada no repositório apaga o cliente
 lá. A justificativa é texto livre: a tela orienta a não escrever nome ou documento. O `init_db` faz o
