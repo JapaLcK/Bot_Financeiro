@@ -182,9 +182,7 @@ class SemConfirmacao(Exception):
 def devolvido_na_stripe(fatura: str, chave: str) -> tuple[str | None, int, list]:
     """O tipo, o devolvido e as cobranças da fatura. Regra única da conferência e do script (A6):
     disputa perdida conta como devolvida, ganha não conta, aberta não confirma nada."""
-    import stripe  # noqa: PLC0415
-
-    from core.services.ebook_entrega import cobrancas_da_fatura  # noqa: PLC0415
+    from core.services.ebook_entrega import cliente_stripe, cobrancas_da_fatura  # noqa: PLC0415
 
     try:
         cobrancas = list(cobrancas_da_fatura(fatura, chave))
@@ -196,7 +194,7 @@ def devolvido_na_stripe(fatura: str, chave: str) -> tuple[str | None, int, list]
     for c in cobrancas:
         perdida = 0
         if c["disputed"]:
-            disputas = stripe.Dispute.list(charge=c["id"], limit=10, api_key=chave)["data"]
+            disputas = cliente_stripe(chave).v1.disputes.list(params={"charge": c["id"], "limit": 10})["data"]
             if any(d["status"] not in ("won", "lost", "warning_closed") for d in disputas):
                 raise SemConfirmacao("disputa_aberta")
             perdida = sum(d["amount"] for d in disputas if d["status"] == "lost")

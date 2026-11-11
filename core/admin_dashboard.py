@@ -51,9 +51,10 @@ ADMIN_DASHBOARD_PASSWORD = os.getenv("ADMIN_DASHBOARD_PASSWORD", "")
 ADMIN_DASHBOARD_PASSWORD_HASH = os.getenv("ADMIN_DASHBOARD_PASSWORD_HASH", "")
 ADMIN_DASHBOARD_SESSION_HOURS = float(os.getenv("ADMIN_DASHBOARD_SESSION_HOURS", "12"))
 # Prazo total da conferência na Stripe antes de pagar um saque de afiliado: estouro é 503, e o admin tenta
-# de novo. O SDK sozinho espera até 80 s por chamada, e a thread que estourou segue presa até lá: por isso
-# a conferência tem executor próprio, com VAGAS_CONFERENCIA threads, e nunca o padrão do asyncio, que todas
-# as rotas usam via `to_thread`. Vagas cheias = 503 na hora, sem consultar.
+# de novo. Cada chamada à Stripe da conferência tem prazo próprio (`ebook_entrega.PRAZO_STRIPE_S`, sem
+# retentativa), então uma Stripe pendurada solta a vaga em cerca de 8 s por fatura, e não nos 80 s × 3 do SDK.
+# O executor próprio continua: a thread que estourou o prazo total segue com a vaga até a última chamada
+# vencer. Vagas cheias = 503 na hora, sem consultar.
 PRAZO_CONFERENCIA_S = 20
 VAGAS_CONFERENCIA = 4
 _VAGAS_CONFERENCIA = threading.BoundedSemaphore(VAGAS_CONFERENCIA)
