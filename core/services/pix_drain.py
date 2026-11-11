@@ -59,7 +59,7 @@ from core.observability import log_system_event_sync
 from core.services import admin_notify
 from core.services.afiliado_pix import efeitos_do_laco, rotular_reembolso
 from core.services.pix_drain_effects import EXECUTORES, alertar, alertar_stripe_desistido, janela_de_acesso
-from core.services.pix_baixa_desfeita import desfazer_baixa, pagamento_confirmado, reconciliar_grant, veto_grant
+from core.services.pix_baixa_desfeita import desfazer_baixa, pagamento_confirmado, reconciliar_grant, veto_afiliado, veto_grant
 from core.services.pix_pago_sem_qr import avisar as avisar_pago_sem_qr
 from core.services.pix_valor import conferir_valor
 from db.pix_charges import (
@@ -243,7 +243,7 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
         with lock_efeito(payment_id, "grant" if efeito == "revoke" else efeito):  # estorno espera o grant em voo
             if efeito not in _REPETEM and efeito_registrado(payment_id, efeito):
                 continue
-            if efeito == "grant" and (veto := veto_grant(payment_id))[0]:
+            if efeito in ("grant", "afiliado") and (veto := (veto_grant if efeito == "grant" else veto_afiliado)(payment_id))[0]:
                 return veto[1]  # #1267: UNDONE/estorno ganhou a corrida (relido sob o lock)
             try:
                 EXECUTORES[efeito](cobranca, evt)

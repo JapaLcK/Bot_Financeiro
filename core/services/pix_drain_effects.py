@@ -330,7 +330,14 @@ def _email_do_titular(user_id: int) -> str | None:
     return conta.get("email")
 
 
+def _afiliado(cobranca, evt):
+    # relê sob a trava `afiliado`: a `cobranca` do dreno é anterior a ela (estorno pode ter entrado no meio)
+    from db.pix_charges import buscar_por_asaas_payment_id
+
+    afiliado_pix.registrar(buscar_por_asaas_payment_id(cobranca["asaas_payment_id"]) or cobranca, evt)
+
+
 EXECUTORES = {"stripe_cancel": _stripe_cancel, "grant": _grant, "ebook": _ebook, "ga4": _ga4,
-               "capi": _capi, "email": _email, "afiliado": afiliado_pix.registrar, "revoke": _revoke,
+               "capi": _capi, "email": _email, "afiliado": _afiliado, "revoke": _revoke,
                "afiliado_estorno": afiliado_pix.estornar,
                "afiliado_estorno_parcial": lambda c, evt: afiliado_pix.marcar(c, "partial", int(evt["attempts"] or 0))}

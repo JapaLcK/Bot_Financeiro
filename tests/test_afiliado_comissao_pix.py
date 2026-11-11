@@ -35,7 +35,7 @@ import pytest
 
 import db
 import db.affiliates as afiliados
-from _dreno_pix_helpers import efeitos, entregar, evento, mundo_externo, nova_cobranca
+from _dreno_pix_helpers import efeitos, entregar, evento, ler, mundo_externo, nova_cobranca
 from core.services.pix_drain import drenar_evento
 from core.services.pix_pricing import DURACAO_DIAS, MESES_DO_PIX
 from db.affiliate_payments import PAGAMENTO_DA_COMISSAO_SQL, origem_da_chave, registrar_pagamento
@@ -1261,3 +1261,94 @@ def test_p24b_baixa_desfeita_de_novo_depois_do_pix_real_reabre_a_resolvida_e_blo
     assert _revisao(chave)["status"] == "open" and len(avisos) == 2
     with pytest.raises(SaqueComPendencia):
         mark_payout_paid(saque["id"])
+
+
+# ── P25: RECEIVED e UNDONE do mesmo pagamento em paralelo (trava `afiliado`) ────────────────
+
+def _undone_entre_grant_e_afiliado(monkeypatch, cobranca, tipo=UNDONE):
+    """O UNDONE (ou `tipo`) completo roda no meio do RECEIVED: depois do `grant`, antes do `afiliado` (via o `email`)."""
+    from core.services.pix_drain_effects import EXECUTORES
+
+    real, uma_vez = EXECUTORES["email"], []
+
+    def email_e_undone(c, evt):
+        real(c, evt)
+        if not uma_vez:
+            uma_vez.append(entregar(tipo, cobranca))
+
+    monkeypatch.setitem(EXECUTORES, "email", email_e_undone)
+    return uma_vez
+
+
+def test_p25_undone_completo_entre_grant_e_afiliado_nao_cria_comissao_sacavel(externo, monkeypatch):
+    ind = _indicado(_afiliado())
+    cobranca = _anual(ind)
+    uma_vez = _undone_entre_grant_e_afiliado(monkeypatch, cobranca)
+    eid = entregar("PAYMENT_RECEIVED", cobranca)
+    assert uma_vez and ler(cobranca["id"])["status"] == "pending"  # o UNDONE reabriu
+    assert _comissoes_completas(ind.uid) == []
+    assert evento(eid)["processed_at"] is None and evento(eid)["last_error"] == "CobrancaReaberta"
+    drenar_evento(eid)  # retentativa: guarda da baixa desfeita fecha sem efeito
+    assert evento(eid)["processed_at"] is not None and _comissoes_completas(ind.uid) == []
+    assert "afiliado" not in efeitos(cobranca["asaas_payment_id"])
+
+
+def test_p25_undone_espera_o_registrar_da_comissao_do_received(externo, monkeypatch):
+    """A trava `afiliado` aninhada em `desfazer_baixa`: o UNDONE entregue com o `registrar` do RECEIVED em
+    andamento (já passou pelo veto) não termina antes dele; sem a trava ele "segura" uma comissão que
+    ainda não existe e ela nasce sacável depois."""
+    ind = _indicado(_afiliado())
+    cobranca = _anual(ind)
+    from core.services import afiliado_pix
+
+    real = afiliado_pix.registrar
+    dentro, undone_fim, durante = threading.Event(), threading.Event(), []
+
+    def registrar_lento(*a, **kw):
+        dentro.set()
+        durante.append(undone_fim.wait(1.0))  # com a trava o UNDONE não termina aqui: estoura o 1s
+        return real(*a, **kw)
+
+    monkeypatch.setattr(afiliado_pix, "registrar", registrar_lento)
+
+    def undone():
+        assert dentro.wait(10)
+        entregar(UNDONE, cobranca)
+        undone_fim.set()
+
+    with ThreadPoolExecutor(1) as pool:
+        f = pool.submit(undone)
+        entregar("PAYMENT_RECEIVED", cobranca)
+        f.result(timeout=20)
+    assert durante == [False]
+    chave = cobranca["external_reference"]
+    assert len(_comissoes_completas(ind.uid)) == 1 and _revisao(chave)["status"] == "open"
+
+
+def test_p25_undone_depois_da_comissao_abre_revisao_sem_valor(externo):
+    # intercalação 2: a comissão já nasceu; o UNDONE a segura. (A ordem das travas em si não é
+    # determinística sem hook no lock: sem cobertura de corrida real, só do resultado sequencial.)
+    ind, cobranca = _cara(_afiliado())
+    entregar(UNDONE, cobranca)
+    rev = _revisao(cobranca["external_reference"])
+    assert (rev["status"], rev["refunded_cents"]) == ("open", 0) and len(_comissoes_completas(ind.uid)) == 1
+
+
+def test_p25_positivo_received_comum_comissiona_uma_vez(externo):
+    ind = _indicado(_afiliado())
+    cobranca = _anual(ind)
+    eid = entregar("PAYMENT_RECEIVED", cobranca)
+    drenar_evento(eid)
+    assert evento(eid)["processed_at"] is not None and len(_comissoes_completas(ind.uid)) == 1
+
+
+def test_p25_positivo_estorno_total_entre_grant_e_afiliado_registra_pagamento_sem_comissao(externo, monkeypatch):
+    ind = _indicado(_afiliado())
+    cobranca = _anual(ind)
+    uma_vez = _undone_entre_grant_e_afiliado(monkeypatch, cobranca, "PAYMENT_REFUNDED")
+    eid = entregar("PAYMENT_RECEIVED", cobranca)
+    assert uma_vez and ler(cobranca["id"])["status"] == "refunded"
+    assert evento(eid)["processed_at"] is not None and _comissoes_completas(ind.uid) == []
+    with get_conn() as conn:
+        assert conn.execute("select count(*) n from affiliate_referral_payments where source = 'pix' and payment_ref = %s",
+                            (str(cobranca["id"]),)).fetchone()["n"] == 1

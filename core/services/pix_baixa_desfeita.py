@@ -138,19 +138,22 @@ def desfazer_baixa(cobranca, evt, payment_id: str) -> None:
             EXECUTORES["revoke"](cobranca, evt)
         # O efeito no afiliado vai ANTES da transição de estado: é ela que o retry reconhece, e
         # `registrar_reembolso` é idempotente. Falha aqui deixa tudo como estava, e o retry refaz.
-        if status == "refunded_partial":
-            afiliado_pix.marcar(cobranca, "total")
-            transicionar(cobranca["id"], de="refunded_partial", para="refunded",
-                         asaas_payment_id=payment_id)
-            registrar_efeito(payment_id, "revoke", evt["event_id"])
-        elif status in ("paid", "paid_orphan"):
-            _segurar_comissao(cobranca)
-            try:
-                # órfã (sem titular) não vai a pending: o índice/leitores de ativa esperam titular
-                reaberta = reabrir_baixa(cobranca["id"], payment_id,
-                                         "pending" if cobranca["user_id"] is not None else "expired")
-            except errors.UniqueViolation:
-                reaberta = reabrir_baixa(cobranca["id"], payment_id, "expired")
+        # grant→afiliado, sempre nesta ordem: o efeito `afiliado` do RECEIVED (pix_drain) já roda sob o
+        # lock `afiliado` e nunca pede o `grant` dentro dele. Segura+reabre não intercala com a comissão.
+        with lock_efeito(payment_id, "afiliado"):
+            if status == "refunded_partial":
+                afiliado_pix.marcar(cobranca, "total")
+                transicionar(cobranca["id"], de="refunded_partial", para="refunded",
+                             asaas_payment_id=payment_id)
+                registrar_efeito(payment_id, "revoke", evt["event_id"])
+            elif status in ("paid", "paid_orphan"):
+                _segurar_comissao(cobranca)
+                try:
+                    # órfã (sem titular) não vai a pending: o índice/leitores de ativa esperam titular
+                    reaberta = reabrir_baixa(cobranca["id"], payment_id,
+                                             "pending" if cobranca["user_id"] is not None else "expired")
+                except errors.UniqueViolation:
+                    reaberta = reabrir_baixa(cobranca["id"], payment_id, "expired")
     if status in ("paid", "paid_orphan"):
         texto = ("acesso revogado, cobrança reaberta." if reaberta
                  else "acesso revogado, mas a cobrança já não estava paga: NÃO foi reaberta; conferir.")
@@ -180,3 +183,13 @@ def veto_grant(payment_id: str) -> tuple[bool, tuple | None]:
             _alertar(atual, "RECEIVED ignorado: baixa desfeita e o Asaas não mostra pago; acesso NÃO concedido." + _aviso_stripe(atual, payment_id))
         return (True, None)
     return (not pago, None if pago else ("CobrancaReaberta", None))
+
+
+def veto_afiliado(payment_id: str) -> tuple[bool, tuple | None]:
+    """Sob o lock `afiliado` do RECEIVED: o UNDONE completo pode ter reaberto a cobrança depois que o
+    dreno leu o estado (a comissão nasceria sacável sobre dinheiro não recebido). Relê; reaberta é falha
+    retentável, e a retentativa fecha pela guarda da baixa desfeita."""
+    atual = buscar_por_asaas_payment_id(payment_id)
+    if atual is not None and atual["status"] not in ("paid", "paid_orphan", "refunded_partial", "refunded"):
+        return (True, ("CobrancaReaberta", None))
+    return (False, None)
