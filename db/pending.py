@@ -319,6 +319,11 @@ _REGISTRO: dict[str, _Pendencia] = {
     "delete_launch_bulk":        _Pendencia(   False,   False,     False),
     "delete_pocket":             _Pendencia(   False,   False,     False),
     "delete_investment":         _Pendencia(   False,   False,     False),
+    # A confirmação da declaração pelo banco (#1315): como o recibo, perder num
+    # áudio é fail-safe (nada grava). O "sim"/"não" e o botão chegam antes do
+    # roteador, e qualquer outra mensagem a tira antes de rodar
+    # (`core/handlers/declaracao_confirma.py`).
+    "confirm_declaracao_banco":  _Pendencia(   False,   False,     False),
 
     # ── perguntas consumidas pelo runtime do WhatsApp antes do handle_incoming
     "bill_pay_amount":           _Pendencia(   False,   False,     True),
@@ -332,6 +337,10 @@ _REGISTRO: dict[str, _Pendencia] = {
     # mas estava fora da lista de ofertas, então uma que ficasse de pé (botão
     # não tocado) bloqueava QUALQUER pergunta nova por 10 minutos.
     "delete_credit_purchase":    _Pendencia(   True,    False,     False),
+    # A confirmação da declaração pelo banco suspensa enquanto outro comando
+    # roda (#1315, R4-2): o "sim" no meio a reconhece e não grava. Oferta: o
+    # comando que precisar da linha a desaloja (e a confirmação acaba).
+    "confirm_declaracao_suspensa": _Pendencia(True,  False,     False),
 }
 
 

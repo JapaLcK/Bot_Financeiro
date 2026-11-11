@@ -14,7 +14,7 @@ import db
 from core.handlers import declaracao_banco_textos as tx
 from tests._chat_ia_apoio import (CONFIRMA, FRASE, T19, ana_ia, banco, carteira, declaracoes, ia, livro,  # noqa: F401
                                   pendencia_ia, q, t3, uid_pro, valores, wa, wamid)
-from tests._declaracao_b import fala
+from tests._declaracao_b import fala_e_confirma as fala
 from tests._ia_falsa_helpers import desliga_flag, texto
 
 
@@ -177,8 +177,10 @@ def test_t15_dois_assuntos_o_sim_nao_grava_o_mercado(ana_ia, monkeypatch):
     reg = ia(monkeypatch, banco())
     w1 = wamid()
     assert wa(ana_ia, "piggy " + FRASE, w1) == CONFIRMA
-    assert "registrada pelo banco" in wa(ana_ia, "gastei 30 na padaria no pix")
-    wa(ana_ia, "sim")
+    # #1315: a padaria arma a confirmação do roteador (e abandona a da IA, DP-13); o "sim" grava só a padaria
+    assert "Só confirmando" in wa(ana_ia, "gastei 30 na padaria no pix")
+    from tests._declaracao_b import manda_ts
+    manda_ts(ana_ia, "sim")
     assert valores(ana_ia) == [30.0] and len(reg.creates) == 1
     assert wa(ana_ia, "piggy " + FRASE, w1) == T19
 
@@ -200,11 +202,11 @@ def test_m21_reentrega_da_abandonada_com_outra_declaracao_viva_e_t19(ana_ia, mon
     reg, w1 = _arma(ana_ia, monkeypatch, banco(), banco(30, alvo="padaria"))
     import core.intent_classifier as ic  # a frase nova vai à IA (o tier 3 do classificador também é LLM)
     monkeypatch.setattr(ic, "_classify_with_ai", lambda *a, **k: ic.IntentResult(intent="out_of_scope", confidence=0.0))
-    wa(ana_ia, "na verdade foi 30 na padaria no pix")
-    viva = pendencia_ia(ana_ia)
-    assert viva["tool_args"]["_declaracao"]["alvo"] == "padaria"
+    # #1315 (R4-4, R4-5): "na verdade …" é correção, e mais que um valor: nada fica para confirmar, sem ir à IA
+    assert wa(ana_ia, "na verdade foi 30 na padaria no pix") == tx.CORRECAO_INCOMPLETA
+    assert pendencia_ia(ana_ia) is None
     assert wa(ana_ia, FRASE, w1) == T19
-    assert pendencia_ia(ana_ia)["created_at"] == viva["created_at"] and len(reg.creates) == 2
+    assert pendencia_ia(ana_ia) is None and len(reg.creates) == 1
 
 
 def test_4a_nao_reentregue_nao_cancela_a_pendencia_nova(ana_ia, monkeypatch):

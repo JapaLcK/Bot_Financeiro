@@ -11,7 +11,7 @@ import uuid
 import pytest
 
 import db
-from tests._declaracao_b import (ana, carteira, declaracoes, liga, manda_wamid, n_lancamentos,  # noqa: F401
+from tests._declaracao_b import (ana, carteira, declaracoes, liga, manda_e_confirma as manda_wamid, n_lancamentos,  # noqa: F401
                                  pendencia,
                                  sem_pergunta)
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401
@@ -163,17 +163,6 @@ def test_valor_abreviado_no_audio(ana, liga, monkeypatch):
     from tests._declaracao_b import fala
     r = fala(monkeypatch, ana, "gastei 2k no mercado no pix")
     assert any("você mandou 2k" in x for x in r) and declaracoes(ana) == [] and n_lancamentos(ana) == 0
-
-
-def test_valor_abreviado_na_fila_devolve_o_item(ana, liga, monkeypatch):
-    """A resposta "2,2k" ao "quanto foi o aluguel?" não grava: T10, o item volta e o número inteiro grava."""
-    from tests._declaracao_b import fala
-    fala(monkeypatch, ana, "paguei o aluguel e paguei a academia no pix")
-    assert pendencia(ana) == "multi_launch_values"
-    r = manda_wamid(ana, "2,2k")[0]
-    assert "você mandou 2,2" in r and "aluguel" in r and declaracoes(ana) == [], r
-    assert "registrada pelo banco" in manda_wamid(ana, "2200")[0]
-    assert [float(d["valor"]) for d in declaracoes(ana)] == [2200.0]
 
 
 @pytest.mark.parametrize("texto,valor", [

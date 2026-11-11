@@ -32,9 +32,10 @@ def test_t5_dado_alterado_vira_confirmacao_nova_e_grava_so_ela(ana_ia, monkeypat
     reg = ia(monkeypatch, banco(), banco(60))
     w1 = wamid()
     assert wa(ana_ia, FRASE, w1) == CONFIRMA
+    # #1315 (R4-5): no WhatsApp "na verdade foi 60" é a correção de valor: nova confirmação, sem ir à IA
     assert wa(ana_ia, "na verdade foi 60") == CONFIRMA.replace("50,00", "60,00")
     assert "registrada pelo banco" in wa(ana_ia, "sim")
-    assert valores(ana_ia) == [60.0] and len(reg.creates) == 2
+    assert valores(ana_ia) == [60.0] and len(reg.creates) == 1
     assert wa(ana_ia, FRASE, w1) == T19
 
 
@@ -120,7 +121,7 @@ def _arma_e_abandona(uid, monkeypatch, terceira):
     ia(monkeypatch, banco(), texto("Seu saldo é R$ 200,00."), terceira)
     assert wa(uid, "piggy " + FRASE, wamid()) == CONFIRMA
     payload = pendencia_ia(uid)["tool_args"]["_declaracao"]
-    wa(uid, "piggy qual meu saldo?")  # outro assunto: a pendência é abandonada e a ação fica `armada`
+    wa(uid, "piggy qual meu saldo?")  # outro assunto: a pendência sai e a ação fica `descartada` (#1315, R3-1)
     assert pendencia_ia(uid) is None
     return payload
 
@@ -141,7 +142,7 @@ def test_m8_barreira_2_o_escritor_so_grava_a_acao_consumida(ana_ia, monkeypatch)
     with decl.turno("web", uuid.uuid4().hex):
         assert decl.registrar_mensagem(ana_ia, "ok") is True
         assert declaracao_ia.executar(ana_ia, {"_declaracao": {**payload, "valor": 5000.0}}) == tx.ACAO_ENCERRADA
-    assert valores(ana_ia) == [] and [r["estado"] for r in livro(ana_ia) if r["papel"] == "acao"] == ["armada"]
+    assert valores(ana_ia) == [] and [r["estado"] for r in livro(ana_ia) if r["papel"] == "acao"] == ["descartada"]
 
 
 def test_m8_o_payload_do_historico_reenviado_nao_grava(ana_ia, monkeypatch):

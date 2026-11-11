@@ -209,6 +209,8 @@ def _set_budget_execute(user_id: int, args: dict[str, Any]) -> str:
             # Pendência viva de outro pedido: não armou, e perguntar "Confirma?"
             # faria o "sim" executar o outro.
             return OUTRO_PEDIDO
+        from ..runner import _vence_a_do_roteador
+        _vence_a_do_roteador(user_id)  # R2-6 (#1315): a confirmação mais recente vence
 
         # Se o user digitou diferente da canônica (typo aceito via fuzzy,
         # variação de acento/case ignorada pela normalização), avisa

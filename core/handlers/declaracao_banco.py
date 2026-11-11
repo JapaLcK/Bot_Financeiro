@@ -108,20 +108,46 @@ def proxima_chave() -> str | None:
     return chave
 
 
-def registrar_mensagem(user_id: int, texto: str) -> bool | None:
-    """Anota no livro a mensagem com forma de "sim" ou de "não" (os predicados com que o runner consome a pendência) e
-    diz se ela chegou agora pela 1ª vez. Uma vez por turno: a 2ª chamada devolve a memória (a 2ª ida ao banco diria "já
-    vista"). None = flag desligada, sem id ou não é resposta."""
+def registrar_mensagem(user_id: int, texto: str, papel: str | None = None) -> bool | None:
+    """Anota no livro a mensagem com forma de "sim" (`e_sim`) ou de "não" (`e_nao`), ou com o `papel` que quem chama
+    já decidiu (o "não" que o classificador lê, #1315), e diz se ela chegou agora pela 1ª vez. Uma vez por turno: a 2ª
+    chamada devolve a memória (a 2ª ida ao banco diria "já vista"). None = flag desligada, sem id ou não é resposta."""
     t = ACAO_DO_TURNO.get()
     if not t or not ligada(user_id):
         return None
     if t[3] is None:
-        from core.services.ai_chat.confirmations import is_cancel, is_confirm
-        if not (is_confirm(texto or "") or is_cancel(texto or "")):
+        wa = t[0] == "wa"  # M-8 A: as formas completas só no WhatsApp
+        papel = papel or ("sim" if e_sim(texto, wa) else "nao" if e_nao(texto, wa) else None)
+        if papel is None:
             return None
         from db.declaracao_livro import registra_sim
-        t[3] = registra_sim(user_id, chave_da_mensagem(), "sim" if is_confirm(texto or "") else "nao")
+        t[3] = registra_sim(user_id, chave_da_mensagem(), papel)
     return t[3]
+
+
+_SIM_COMPLETO = frozenset({"sim pode registrar", "pode registrar"})
+_NAO_COMPLETO = frozenset({"nao obrigado", "nao registra", "cancela isso", "nao nao", "nope"})  # R3-2 A
+SIM_ALONGADO = r"si+m+"  # "simm", "siiim"
+
+
+def e_nao(texto: str | None, whatsapp: bool = True) -> bool:
+    """O "não" à confirmação da declaração: o `is_cancel` da IA e, só no WhatsApp (M-8 A), as recusas completas
+    aprovadas (R3-2 A, #1315). Discord e web ficam com o `is_cancel`, como antes."""
+    from core.services.ai_chat.confirmations import _normalize, is_cancel
+    return is_cancel(texto or "") or (whatsapp and _normalize(texto or "") in _NAO_COMPLETO)
+
+
+def e_sim(texto: str | None, whatsapp: bool = True) -> bool:
+    """O "sim" à confirmação da declaração: o `is_confirm` da IA e, só no WhatsApp (M-8 A), as formas completas
+    aprovadas pelo dono (T-6 A, #1315): "Sim, pode registrar", "pode registrar", "sim sim" (e "sim" repetido), "simm" e
+    o 👍 sozinho. "sim, mas foi 60" não é (`declaracao_correcao`: correção)."""
+    import re
+    from core.services.ai_chat.confirmations import _normalize, is_confirm
+    if is_confirm(texto or ""):
+        return True
+    n = _normalize(texto or "")
+    return whatsapp and (n in _SIM_COMPLETO or re.fullmatch(rf"(?:{SIM_ALONGADO} ?)+", n) is not None
+                         or (not n and "👍" in (texto or "")))
 
 
 def mensagem_nova() -> bool:

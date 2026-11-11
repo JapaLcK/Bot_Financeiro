@@ -820,6 +820,9 @@ def _resolve_desempate(pending: dict, msg: IncomingMessage, user_id: int) -> str
     return None
 
 
+# O "não" sem pendência nenhuma para cancelar (o `handle_incoming` o lê no #1315: era o "não" à confirmação suspensa).
+NADA_A_CANCELAR = "Nada a cancelar."
+
 # O abandono da via nova (C1) descarta uma pergunta que o usuário acabou de ver
 # na tela. O comando roda; o aviso é para ele não ficar esperando a resposta da
 # pergunta que morreu.
@@ -929,7 +932,7 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     if inferred_help is not None:
         norm = normalize_text(text)
         if (
-            "Não entendi exatamente" in inferred_help
+            h_help.NAO_ENTENDI_EXATAMENTE in inferred_help
             and any(term in norm for term in ("investimento", "investimentos", "aporte", "resgate", "cdb", "tesouro", "cdi"))
         ):
             return h_investido.carteira(user_id)
@@ -1148,7 +1151,7 @@ def route(result: IntentResult, msg: IncomingMessage, *,
 
     if intent == "confirm.no":
         resp = h_pending.resolve_delete(user_id, confirmed=False)
-        return resp if resp is not None else "Nada a cancelar."
+        return resp if resp is not None else NADA_A_CANCELAR
 
     # -----------------------------------------------------------------------
     # 2. Fora do escopo

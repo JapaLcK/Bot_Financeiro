@@ -21,6 +21,10 @@ class IncomingMessage:
     message_id: Optional[str] = None
     attachments: list[Attachment] = field(default_factory=list)
     external_id: str | None = None
+    # WhatsApp: o id do botão tocado e o `timestamp` da Meta (segundos Unix, em texto). A confirmação da declaração
+    # pelo banco (#1315) decide por eles a qual pergunta a resposta pertence.
+    botao: str | None = None
+    enviado_em: str | None = None
 
     # opcional: guardar payload bruto p/ debug
     raw: Any = None
