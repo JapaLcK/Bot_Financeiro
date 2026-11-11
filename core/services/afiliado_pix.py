@@ -84,7 +84,7 @@ def marcar(cobranca, tipo: str, tentativas: int = 0) -> None:
     from core.services.pix_drain import TENTATIVAS_ATE_TRAVAR
     from db.affiliates import precisa_do_acumulado
 
-    devolvido = 0
+    devolvido, desconhecido = 0, False
     if tipo == "total":
         devolvido = total_cents(cobranca)
     elif precisa_do_acumulado(cobranca["external_reference"]):
@@ -95,9 +95,10 @@ def marcar(cobranca, tipo: str, tentativas: int = 0) -> None:
         except Exception:
             if tentativas < TENTATIVAS_ATE_TRAVAR:
                 raise
-            devolvido = 0
+            devolvido, desconhecido = 0, True
     avisar_pendencia(registrar_reembolso(cobranca["external_reference"], tipo, devolvido,
-                                         cobranca["refunded_at"] or datetime.now(timezone.utc)))
+                                         cobranca["refunded_at"] or datetime.now(timezone.utc),
+                                         desconhecido=desconhecido))
 
 
 def estornar(cobranca, evt) -> None:

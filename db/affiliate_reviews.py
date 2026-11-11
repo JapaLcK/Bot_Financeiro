@@ -130,18 +130,29 @@ def _comissao_que_saiu(cur, a: dict) -> dict | None:
     return None
 
 
-def registrar_reembolso(fatura: str, tipo: str, devolvido_cents: int, quando, ator: str = "sistema") -> dict | None:
+def registrar_reembolso(fatura: str, tipo: str, devolvido_cents: int, quando, ator: str = "sistema",
+                        desconhecido: bool = False, rotular: bool = True) -> dict | None:
     """Rótulo e pendência numa transação só. Decide sob as travas, com o estado de agora: quem chama
-    (webhook ou script) não classifica nada. Reentrega e repetição sem fato novo não mudam nada."""
+    (webhook ou script) não classifica nada. Reentrega e repetição sem fato novo não mudam nada.
+    `desconhecido`: o valor devolvido não se sabe (Asaas fora, baixa desfeita). O fato novo é o próprio
+    desconhecimento: reabre a revisão parcial `resolved` cuja comissão ainda não saiu (a que um saque
+    liberaria), sem apagar o valor já registrado. `recovery` e comissão paga ficam como estão.
+    `rotular=False`: só segura a comissão, sem marcar o pagamento como reembolsado (baixa desfeita)."""
     with get_conn() as conn, conn.cursor() as cur:
         trava_fatura(cur, fatura)
         cur.execute("select id, status, payout_id, amount_cents from affiliate_commissions"
                     " where stripe_invoice_id = %s for update", (fatura,))
         c = cur.fetchone()
-        _rotular(cur, *origem_da_chave(fatura), tipo, quando)
+        if rotular:
+            _rotular(cur, *origem_da_chave(fatura), tipo, quando)
         cur.execute("select * from affiliate_refund_reviews where stripe_invoice_id = %s for update", (fatura,))
         a = cur.fetchone()
-        if a is None or (a["tipo"] != "total" and devolvido_cents > a["refunded_cents"]):
+        if a is None or (a["tipo"] != "total" and (devolvido_cents > a["refunded_cents"]
+                                                    or (desconhecido and a["status"] == "resolved"
+                                                     and ((c or _comissao_que_saiu(cur, a)) or {}).get("status")
+                                                     not in (None, "paid", "reversed")))):
+            if a is not None:
+                devolvido_cents = max(devolvido_cents, a["refunded_cents"])
             a = _aplicar(cur, fatura, a, c, tipo, devolvido_cents, quando, ator)
         conn.commit()
     return a
