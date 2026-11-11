@@ -76,7 +76,7 @@ def _registrar_tentativa(r: dict, entregue: bool, event_id: str | None = None) -
     """`error` quando o aviso não sai: a pendência segura o dinheiro, mas o admin ainda não sabe.
     `event_id` só do webhook; o worker não tem evento."""
     detalhes = {"commission_id": r["commission_id"], "payout_id": r.get("payout_id"), "tipo": r["tipo"],
-                "alerta_entregue": entregue}
+                "alerta_entregue": entregue, "review_id": r["id"]}  # a linha, também sem comissão nem evento (Pix)
     if event_id is not None:
         detalhes["event_id"] = event_id
     log_system_event_sync(
@@ -163,15 +163,21 @@ def tratar_evento(event) -> None:
             details={"event_type": event["type"], "event_id": event["id"]},
         )
         return
-    linha = registrar_reembolso(fatura, tipo, devolvido, datetime.fromtimestamp(event["created"], timezone.utc))
+    avisar_pendencia(registrar_reembolso(fatura, tipo, devolvido, datetime.fromtimestamp(event["created"], timezone.utc)),
+                     event["id"])
+
+
+def avisar_pendencia(linha, event_id: str | None = None) -> None:
+    """Avisa o admin da pendência que o reembolso abriu (Stripe e Pix). Falha fica para `reenviar_pendentes`.
+    `event_id` só vem do webhook da Stripe; o dreno do Pix chama sem ele."""
     if not linha or linha["status"] not in ("open", "recovery") or linha["notified_at"]:
         return
     if not admin_notify.canal_configurado():
-        _registrar_tentativa(linha, False, event["id"])
+        _registrar_tentativa(linha, False, event_id)
         return
     r = reivindicar(linha["id"])
     if r:
-        _enviar(r, event["id"])
+        _enviar(r, event_id)
 
 
 class SemConfirmacao(Exception):
@@ -273,10 +279,12 @@ def conferir_saque(payout_id: int) -> dict:
     regra de bloqueio que já existe. Fatura sem confirmação (disputa aberta) marca a comissão (D10).
     Devolve `{"reembolso", "disputa"}`; sem chave ou com erro da Stripe, levanta `StripeIndisponivel`,
     depois de gravar o que achou."""
+    faturas = faturas_do_saque(payout_id)
+    if not faturas:  # só comissão Pix: nada a perguntar à Stripe, nem chave
+        return {"reembolso": False, "disputa": False}
     chave = os.getenv("STRIPE_SECRET_KEY")
     if not chave:
         raise StripeIndisponivel("sem_chave")
-    faturas = faturas_do_saque(payout_id)
     with ThreadPoolExecutor(4) as pool:
         lidas = list(zip(faturas, pool.map(lambda f: _consultar(f["fatura"], chave), faturas)))
     agora = datetime.now(timezone.utc)
