@@ -1229,6 +1229,12 @@ def authorize_account_access(request: Request, user_id: int) -> int:
     `DELETE /settings/{id}/sessions/{jti}` e `DELETE /settings/{id}/sessions`.
     Uma sexta chamada reabre o #380 para o dado que ela servir.
 
+    **A única sexta, autorizada pelo dono (D2 do PL-06 B6):** `PATCH
+    /settings/{id}/notifications` com o corpo EXATO `{"insight_alert_email_enabled":
+    false}`. Desligar o aviso de insight por e-mail não expõe dado nem ativa nada;
+    a resposta para quem foi cortado é só `{"ok": true, "insight_alert_email_enabled":
+    false}`. Qualquer outro corpo da mesma rota segue `authorize_dashboard_access`.
+
     **Por que elas, e por que só elas.** O #380 cortou quem não tem plano pago
     vigente, e a `/settings` continua servindo o HTML de propósito
     (`static_pages.serve_settings`, `gate_plan_selection(exige_direito=False)`):

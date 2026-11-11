@@ -9,11 +9,12 @@ import json
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
 
 from core.audit import AuditEvent, list_audit_events, record_audit_event
 from core.crypto import encrypt_pii_optional, hash_pii_optional
 from core.pg_text import detalhe_seguro
+from core.services.insights_notificacao import AVISO_AO_DESLIGAR_INSIGHTS, AVISO_PAUSADO, liberado, texto_adesao
 from core.sessions import (
     device_label,
     list_user_sessions,
@@ -23,12 +24,14 @@ from core.sessions import (
 from db import (
     get_auth_user,
     get_daily_report_prefs,
+    insight_aviso_aderiu,
     list_identities_by_user,
     set_daily_report_enabled,
     set_daily_report_hour,
     set_weekly_report_enabled,
     set_monthly_report_enabled,
     set_engagement_opt_out,
+    set_insight_aviso,
     set_insight_email_opt_out,
     set_tip_email_opt_out,
     set_whatsapp_updates_opt_out,
@@ -61,6 +64,7 @@ class NotificationSettingsPayload(BaseModel):
     engagement_email_enabled: bool | None = None
     tip_email_enabled: bool | None = None
     insight_email_enabled: bool | None = None
+    insight_alert_email_enabled: StrictBool | None = None  # consentimento não se converte: "false" e 0 dão 422
     whatsapp_updates_enabled: bool | None = None
     push_bank_reconnect_enabled: bool | None = None
     daily_report_enabled: bool | None = None
@@ -73,9 +77,11 @@ class NotificationSettingsPayload(BaseModel):
 async def _get_notification_settings(user_id: int) -> dict:
     from core.services.plan_service import plan_gate_ok
     weekly_available = await asyncio.to_thread(plan_gate_ok, user_id, "weekly_report")
-    auth_user, daily_prefs = await asyncio.gather(
+    auth_user, daily_prefs, aviso_aderiu, aviso_available = await asyncio.gather(
         asyncio.to_thread(get_auth_user, user_id),
         asyncio.to_thread(get_daily_report_prefs, user_id),
+        asyncio.to_thread(insight_aviso_aderiu, user_id),
+        asyncio.to_thread(plan_gate_ok, user_id, "insights"),
     )
     auth_user = auth_user or {}
     daily_prefs = daily_prefs or {}
@@ -96,6 +102,11 @@ async def _get_notification_settings(user_id: int) -> dict:
         "engagement_email_enabled": tip_email_enabled or insight_email_enabled,
         "tip_email_enabled": tip_email_enabled,
         "insight_email_enabled": insight_email_enabled,
+        "insight_alert_email_enabled": aviso_aderiu,
+        "insight_alert_email_available": aviso_available,
+        "insight_alert_email_notice": texto_adesao() if liberado(user_id) else None,  # None = a linha não aparece
+        "insight_email_off_notice": AVISO_AO_DESLIGAR_INSIGHTS if aviso_aderiu else None,
+        "insight_alert_email_paused_notice": AVISO_PAUSADO if aviso_aderiu and not aviso_available else None,
         "whatsapp_updates_enabled": whatsapp_updates_enabled,
         "push_bank_reconnect_enabled": not await asyncio.to_thread(push_bank_reconnect_bloqueado, user_id),
         "daily_report_enabled": bool(daily_prefs.get("enabled", True)),
@@ -536,8 +547,26 @@ async def security_sessions_revoke_others_route(request: Request, user_id: int):
 
 @router.get("/settings/{user_id}/notifications")
 async def notification_settings_route(request: Request, user_id: int):
-    shared.authorize_dashboard_access(request, user_id)
+    try:
+        shared.authorize_dashboard_access(request, user_id)
+    except HTTPException as exc:
+        # Sem plano, a única coisa que a tela mostra é se há um aviso a desligar (D2 do PL-06 B6).
+        # O dono e a sessão já foram conferidos antes do 402; sem adesão o 402 fica igual ao de sempre.
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        if (exc.status_code == 402 and detail.get("error") == "subscription_required"
+                and await asyncio.to_thread(insight_aviso_aderiu, user_id)):
+            raise HTTPException(status_code=402, detail={**detail, "insight_alert_email_enabled": True}) from exc
+        raise
     return await _get_notification_settings(user_id)
+
+
+async def _gravar_aviso(request: Request, user_id: int, ligado: bool) -> None:
+    mudou = await asyncio.to_thread(set_insight_aviso, user_id, ligado)
+    if ligado and not mudou and not await asyncio.to_thread(insight_aviso_aderiu, user_id):
+        raise HTTPException(status_code=409, detail="Ligue Insights financeiros primeiro.")
+    if mudou:
+        evento = AuditEvent.INSIGHT_AVISO_ADESAO if ligado else AuditEvent.INSIGHT_AVISO_RETIRADA
+        await asyncio.to_thread(record_audit_event, user_id, evento, request=request)
 
 
 @router.patch("/settings/{user_id}/notifications")
@@ -546,20 +575,55 @@ async def update_notification_settings_route(
     user_id: int,
     payload: NotificationSettingsPayload,
 ):
+    # D2 do PL-06 B6 (decisão do dono): SÓ `{"insight_alert_email_enabled": false}` passa sem a perna do
+    # DIREITO e sem a da credencial. Desligar não expõe dado; qualquer outro corpo, `true` ou corpo misto
+    # segue a regra normal. Conta em exclusão continua 403 (`authorize_account_access`).
+    if (payload.model_fields_set == {"insight_alert_email_enabled"}
+            and payload.insight_alert_email_enabled is False):
+        shared.authorize_account_access(request, user_id)
+        await _gravar_aviso(request, user_id, False)
+        try:
+            shared.authorize_dashboard_access(request, user_id)
+        except HTTPException:
+            return {"ok": True, "insight_alert_email_enabled": False}  # cortado não recebe o resto (#380)
+        return await _get_notification_settings(user_id)
+
     shared.authorize_dashboard_access(request, user_id)
-    # Verifica antes de qualquer escrita; desligar permanece disponível após downgrade.
+    # Toda checagem antes de qualquer escrita: um 4xx sai com nada gravado. Desligar permanece
+    # disponível após downgrade.
     if payload.weekly_report_enabled is True:
         await asyncio.to_thread(shared.require_plan_feature, user_id, "weekly_report")
+    aviso = payload.insight_alert_email_enabled
+    if aviso is True:
+        if not liberado(user_id):
+            raise HTTPException(status_code=403, detail="Este aviso ainda não está disponível para a sua conta.")
+        await asyncio.to_thread(shared.require_plan_feature, user_id, "insights")
 
     touches_email_prefs = (
         payload.engagement_email_enabled is not None
         or payload.tip_email_enabled is not None
         or payload.insight_email_enabled is not None
+        or aviso is True
     )
-    if touches_email_prefs:
-        auth_user = await asyncio.to_thread(get_auth_user, user_id)
-        if not auth_user or not auth_user.get("email"):
-            raise HTTPException(status_code=400, detail="Vincule um e-mail para configurar notificações por e-mail.")
+    auth_user = await asyncio.to_thread(get_auth_user, user_id) or {}
+    if touches_email_prefs and not auth_user.get("email"):
+        raise HTTPException(status_code=400, detail="Vincule um e-mail para configurar notificações por e-mail.")
+    if payload.whatsapp_updates_enabled is not None and not auth_user.get("phone_e164"):
+        raise HTTPException(status_code=400, detail="Vincule um WhatsApp para receber atualizações.")
+    hora = None
+    if payload.daily_report_hour is not None or payload.daily_report_minute is not None:
+        current = await asyncio.to_thread(get_daily_report_prefs, user_id)
+        hour = payload.daily_report_hour if payload.daily_report_hour is not None else int(current.get("hour", 9))
+        minute = payload.daily_report_minute if payload.daily_report_minute is not None else int(current.get("minute", 0))
+        if not 0 <= int(hour) <= 23:
+            raise HTTPException(status_code=400, detail="Hora inválida.")
+        if not 0 <= int(minute) <= 59:
+            raise HTTPException(status_code=400, detail="Minuto inválido.")
+        hora = (int(hour), int(minute))
+
+    # Antes das outras escritas: o 409 sai com nada gravado, e um corte no mesmo corpo vence.
+    if aviso is not None:
+        await _gravar_aviso(request, user_id, aviso)
 
     if payload.engagement_email_enabled is not None:
         await asyncio.to_thread(set_engagement_opt_out, user_id, not payload.engagement_email_enabled)
@@ -574,24 +638,14 @@ async def update_notification_settings_route(
         await asyncio.to_thread(sync_engagement_opt_out, user_id)
 
     if payload.whatsapp_updates_enabled is not None:
-        auth_user = await asyncio.to_thread(get_auth_user, user_id)
-        if not auth_user or not auth_user.get("phone_e164"):
-            raise HTTPException(status_code=400, detail="Vincule um WhatsApp para receber atualizações.")
         await asyncio.to_thread(set_whatsapp_updates_opt_out, user_id, not payload.whatsapp_updates_enabled)
 
     if payload.push_bank_reconnect_enabled is not None:
         await asyncio.to_thread(
             set_push_bank_reconnect_opt_out, user_id, not payload.push_bank_reconnect_enabled)
 
-    if payload.daily_report_hour is not None or payload.daily_report_minute is not None:
-        current = await asyncio.to_thread(get_daily_report_prefs, user_id)
-        hour = payload.daily_report_hour if payload.daily_report_hour is not None else int(current.get("hour", 9))
-        minute = payload.daily_report_minute if payload.daily_report_minute is not None else int(current.get("minute", 0))
-        if not 0 <= int(hour) <= 23:
-            raise HTTPException(status_code=400, detail="Hora inválida.")
-        if not 0 <= int(minute) <= 59:
-            raise HTTPException(status_code=400, detail="Minuto inválido.")
-        await asyncio.to_thread(set_daily_report_hour, user_id, int(hour), int(minute))
+    if hora is not None:
+        await asyncio.to_thread(set_daily_report_hour, user_id, *hora)
 
     if payload.daily_report_enabled is not None:
         await asyncio.to_thread(set_daily_report_enabled, user_id, payload.daily_report_enabled)

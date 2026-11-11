@@ -415,7 +415,12 @@ def build_user_export_zip(user_id: int) -> bytes:
                        whatsapp_verified_at, plan, plan_expires_at, created_at,
                        stripe_customer_id, engagement_opt_out, last_activity_at,
                        last_tip_sent_at, tip_email_opt_out, last_insight_sent_at,
-                       insight_email_opt_out, whatsapp_updates_opt_out,
+                       insight_email_opt_out,
+                       -- só a adesão VIVA (o critério da tela; a morta espera a próxima escrita para sair)
+                       case when pb_insight_adesao_viva(insight_aviso_aderiu_em, insight_aviso_coberto_ate)
+                            then insight_aviso_aderiu_em end as insight_aviso_aderiu_em,
+                       insight_aviso_coberto_ate,
+                       whatsapp_updates_opt_out,
                        last_reengagement_sent_at, deletion_requested_at,
                        deletion_scheduled_for, deletion_status,
                        deletion_processing_started_at, dashboard_profile, signup_quiz
@@ -935,7 +940,8 @@ def reset_user_data(
                         onboarding_completed_at = null,
                         open_finance_onboarding_completed_at = null,
                         dashboard_profile = null,
-                        signup_quiz = null
+                        signup_quiz = null,
+                        insight_aviso_aderiu_em = null
                     where user_id = %s
                     """,
                     (user_id,),

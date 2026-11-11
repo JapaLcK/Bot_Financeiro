@@ -423,7 +423,28 @@ def mark_insight_sent(user_id: int) -> None:
     _db_support.invalidate_auth_user_cache(user_id)
 
 
+def _retira_aviso(cur, user_id: int) -> bool:
+    """Apaga a adesão ao aviso de insight, na transação de quem chama. Devolve se havia."""
+    cur.execute(
+        "UPDATE auth_accounts SET insight_aviso_aderiu_em = NULL"
+        " WHERE user_id = %s AND insight_aviso_aderiu_em IS NOT NULL RETURNING 1",
+        (user_id,),
+    )
+    return cur.fetchone() is not None
+
+
+def _audita_retirada(user_id: int) -> None:
+    from core.audit import AuditEvent, record_audit_event  # core.audit importa `db`
+
+    record_audit_event(user_id, AuditEvent.INSIGHT_AVISO_RETIRADA)
+
+
 def set_engagement_opt_out(user_id: int, opt_out: bool) -> None:
+    """Liga ou corta os e-mails de engajamento: chat, PATCH e `/unsubscribe` passam aqui.
+
+    Cortar retira a adesão ao aviso de insight (P7 (b) do PL-06); reativar NÃO a
+    devolve, então o aviso só volta pelo interruptor dele.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -436,8 +457,11 @@ def set_engagement_opt_out(user_id: int, opt_out: bool) -> None:
                 """,
                 (opt_out, opt_out, opt_out, user_id),
             )
+            retirou = opt_out and _retira_aviso(cur, user_id)
         conn.commit()
     _db_support.invalidate_auth_user_cache(user_id)
+    if retirou:
+        _audita_retirada(user_id)
 
 
 def set_tip_email_opt_out(user_id: int, opt_out: bool) -> None:
@@ -452,14 +476,140 @@ def set_tip_email_opt_out(user_id: int, opt_out: bool) -> None:
 
 
 def set_insight_email_opt_out(user_id: int, opt_out: bool) -> None:
+    """O aviso de insight exige este flag falso: desligar também retira a adesão (P7 (b))."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE auth_accounts SET insight_email_opt_out = %s WHERE user_id = %s",
                 (opt_out, user_id),
             )
+            retirou = opt_out and _retira_aviso(cur, user_id)
         conn.commit()
     _db_support.invalidate_auth_user_cache(user_id)
+    if retirou:
+        _audita_retirada(user_id)
+
+
+# Retira a adesão com o audit na MESMA instrução. `{condicao}` é o que diferencia os chamadores; o resto é igual.
+_RETIRA_SQL = """
+    WITH r AS (
+      UPDATE auth_accounts SET insight_aviso_aderiu_em = NULL
+      WHERE user_id = %(uid)s AND insight_aviso_aderiu_em IS NOT NULL AND {condicao}
+      RETURNING user_id
+    )
+    INSERT INTO audit_events (user_id, event, details)
+    SELECT user_id, %(evento)s, jsonb_build_object('motivo', %(motivo)s::text) FROM r
+    RETURNING 1
+"""
+
+
+def _executa_retirada(cur, user_id: int, motivo: str, condicao: str, extra: dict | None = None) -> bool:
+    from core.audit import AuditEvent  # core.audit importa `db`
+
+    cur.execute(_RETIRA_SQL.format(condicao=condicao),
+                {"uid": int(user_id), "evento": AuditEvent.INSIGHT_AVISO_RETIRADA, "motivo": motivo, **(extra or {})})
+    return cur.fetchone() is not None
+
+
+def set_insight_aviso(user_id: int, ligado: bool) -> bool:
+    """Grava a adesão ao aviso de insight por e-mail. Devolve se o estado mudou.
+
+    Aderir só pega com os dois opt-outs falsos, na própria instrução: um cancelamento
+    que chegue entre a tela e a gravação vence. Repetir não reescreve a data. Sem direito a
+    `insights` o gatilho `trg_insight_aviso_direito` desfaz a adesão, e o RETURNING a lê depois dele.
+    Adesão MORTA (perda há mais de 1 hora, sem escrita desde então) é retirada antes, com o audit,
+    para que a pessoa possa aderir de novo.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if ligado:
+                _executa_retirada(cur, user_id, "direito",
+                                  "NOT pb_insight_adesao_viva(insight_aviso_aderiu_em, insight_aviso_coberto_ate)")
+                cur.execute(
+                    """
+                    UPDATE auth_accounts SET insight_aviso_aderiu_em = now()
+                    WHERE user_id = %s
+                      AND insight_aviso_aderiu_em IS NULL
+                      AND NOT insight_email_opt_out
+                      AND NOT engagement_opt_out
+                    RETURNING insight_aviso_aderiu_em IS NOT NULL AS aderiu
+                    """,
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                mudou = bool(row and row["aderiu"])
+            else:
+                mudou = _retira_aviso(cur, user_id)
+        conn.commit()
+    return mudou
+
+
+def insight_aviso_aderiu(user_id: int) -> bool:
+    """A adesão VIVA (`pb_insight_adesao_viva`, o critério único do gatilho, da tela e da exportação),
+    sem olhar bloqueios. Leitura direta (sem o cache de `get_auth_user`)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT pb_insight_adesao_viva(insight_aviso_aderiu_em, insight_aviso_coberto_ate) AS aderiu"
+                " FROM auth_accounts WHERE user_id = %s",
+                (int(user_id),),
+            )
+            row = cur.fetchone()
+    return bool(row and row["aderiu"])
+
+
+def retirar_adesao_sem_direito(user_id: int, motivo: str, cur=None, *, so_o_recurso: bool = False) -> bool:
+    """Retirada EXPLÍCITA (§13 a §15 do plano B6): a perda foi um ATO, e sai na hora, sem a margem de 1 hora.
+
+    O gatilho trata toda perda como expiração natural; quem chama isto declara o ato. Chame no FIM do
+    processamento, com o estado final. Usa a MESMA `pb_insight_cobertura` do gatilho, e nunca retira quem
+    segue coberto (foi para o Pix, trocou de assinatura, estorno parcial).
+
+    - padrão (cancelamento, contestação, estorno total): retira quem ficou sem COBERTURA, carência incluída;
+    - `so_o_recurso=True` (admin, troca de preço para tier sem `insights`, sair da família): retira quem ficou
+      sem o RECURSO `insights` no plano, mesmo com carência aberta (§15, 2 e 3).
+
+    O audit vai na mesma instrução. Com `cur`, usa a transação de quem chama; sem, abre e confirma a sua.
+    """
+    estado = ("NULL, NULL" if so_o_recurso else "last_payment_status, past_due_since")
+    condicao = (f"coalesce(pb_insight_cobertura(plan, plan_expires_at, {estado}), '-infinity'::timestamptz) < now()")
+    if cur is not None:
+        return _executa_retirada(cur, user_id, motivo, condicao)
+    with get_conn() as conn:
+        with conn.cursor() as c:
+            retirou = _executa_retirada(c, user_id, motivo, condicao)
+        conn.commit()
+    return retirou
+
+
+def insight_email_permitido(user_id: int) -> bool:
+    """O portão de consentimento do envio do aviso de insight (PR 2 do PL-06 B6).
+
+    True só com adesão, sem os dois opt-outs, fora de exclusão e com o DIREITO REAL a `insights`
+    agora: a marca de cobertura sem margem e `plan_gate_ok` (a margem de 1 hora do gatilho só
+    preserva a adesão, §10 do plano; em carência a adesão fica e o aviso não sai). Leitura
+    estrita: conta ausente é False e erro de banco SOBE, porque dúvida = não envia.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT insight_aviso_aderiu_em IS NOT NULL
+                       AND NOT insight_email_opt_out
+                       AND NOT engagement_opt_out
+                       AND coalesce(deletion_status, '') NOT IN ('scheduled', 'processing')
+                       AND (insight_aviso_coberto_ate IS NULL OR insight_aviso_coberto_ate >= now())
+                       AS permitido
+                FROM auth_accounts WHERE user_id = %s
+                """,
+                (int(user_id),),
+            )
+            row = cur.fetchone()
+    if not (row and row["permitido"]):
+        return False
+    from core.services.plan_service import plan_gate_ok  # plan_service importa `db`
+
+    return plan_gate_ok(int(user_id), "insights")
 
 
 def set_whatsapp_updates_opt_out(user_id: int, opt_out: bool) -> None:
