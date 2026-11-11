@@ -2198,14 +2198,16 @@ async def lifespan(app: FastAPI):
     async def _afiliado_alerta_worker():
         """Manutenção das pendências de reembolso de afiliado, a cada 5 min, a 1ª volta sem
         delay (a retomada depois de reinício): limpa `no_commission` antiga, confere na Stripe a
-        comissão marcada (inerte sem `STRIPE_SECRET_KEY`) e reenvia ao admin o aviso pendente
+        comissão marcada (inerte sem `STRIPE_SECRET_KEY`), reconcilia comissão paga com reembolso
+        perdido (#1501) e reenvia ao admin o aviso pendente, o da recuperação achada na mesma volta
         (inerte sem `ADMIN_NOTIFY_WEBHOOK_URL`). Ver `core/services/afiliado_reembolso.py`."""
-        from core.services import afiliado_reembolso  # noqa: PLC0415
+        from core.services import afiliado_reconciliacao, afiliado_reembolso  # noqa: PLC0415
         from db import affiliate_reviews_manutencao  # noqa: PLC0415
         while True:
             try:
                 await asyncio.to_thread(affiliate_reviews_manutencao.limpar_sem_comissao)
                 await asyncio.to_thread(afiliado_reembolso.conferir_pendentes)
+                await asyncio.to_thread(afiliado_reconciliacao.reconciliar_pagas)
                 n = await asyncio.to_thread(afiliado_reembolso.reenviar_pendentes)
                 if n:
                     print(f"[afiliado] {n} aviso(s) de reembolso entregue(s).", flush=True)

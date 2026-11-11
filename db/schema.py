@@ -2459,6 +2459,15 @@ def init_db():
         create index if not exists idx_affiliate_refund_review_events_review
           on affiliate_refund_review_events (review_id, id)
         """,
+        # Reconciliação de comissão paga (#1501): última consulta por fatura. Sem FK de propósito: criar
+        # uma pediria lock em `affiliate_commissions`, e a linha do afiliado que excluiu a conta não tem
+        # comissão. Sem pessoa: fatura e data. `limpar_conferidas` apaga o que saiu da janela.
+        """
+        create table if not exists affiliate_paid_refund_checks (
+          stripe_invoice_id text primary key,
+          checked_at timestamptz not null
+        )
+        """,
 
         # ─── Prospecção (lead engine do Instagram) ───────────────────────────────
         # O lead engine (repo próprio) gera o código e manda o link /i/{code};
