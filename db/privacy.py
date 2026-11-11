@@ -1333,6 +1333,8 @@ def delete_user_data(
                 _lock_user(cur, user_id)
                 # Afiliado que exclui a conta: saques, pendências e histórico ficam, desvinculados do
                 # usuário (A3, D8). Antes do laço, que apaga `affiliates` e leva as comissões.
+                # Também trava, em ordem de id, os afiliados ligados ao usuário, inclusive quando ele
+                # não é afiliado: é a ordem global entre exclusões ligadas por indicação (#1414).
                 from .affiliate_reviews_manutencao import desvincular_afiliado
                 desvincular_afiliado(cur, user_id)
                 from .family_grants import release_user

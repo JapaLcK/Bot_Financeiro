@@ -2895,7 +2895,10 @@ lá. A justificativa é texto livre: a tela orienta a não escrever nome ou docu
 seguinte não pede. Rollback: o repair volta a FK para `cascade`, e os nulos ficam.
 **Afiliado que exclui a própria conta** ("mantém, sem a pessoa", A3, D8 = B, D9 = A).
 `desvincular_afiliado` roda na transação de `delete_user_data`, depois do `_lock_user` e antes de apagar
-`affiliates`, travando na ordem afiliado, saques, comissões, pendências (a do `request_payout`). Ela
+`affiliates`, travando na ordem afiliado, saques, comissões, pendências (a do `request_payout`). Antes
+disso, e para todo usuário, ela trava em ordem de id os afiliados ligados a ele (o próprio `for update`,
+quem o indicou ou tem comissão dele `for key share`): é a ordem global entre exclusões simultâneas de
+contas ligadas por indicação, que davam deadlock nas referrals e comissões (#1414). Ela
 grava o código do afiliado nas pendências e nos saques e zera chave Pix e nota dos saques. Regra: mesmo
 comportamento de afiliado ativo. A comissão paga (N1) guarda o valor em `paid_cents`, e a de saque
 aberto guarda o vínculo ("guardar vínculo", decisão do dono): `commission_cents` e `orphan_payout_id`.

@@ -16,8 +16,31 @@ def desvincular_afiliado(cur, user_id: int) -> None:
     `open` de comissão solta fecha: nunca paga nem em saque, não há o que bloquear nem recuperar.
     Roda na transação de `delete_user_data`, antes de apagar `affiliates`, que leva as comissões.
 
-    Travas na ordem do `request_payout` (afiliado, depois comissões), com os saques no meio: afiliado,
+    Ordem global entre exclusões (#1414): roda para todo usuário, afiliado ou não. Primeiro trava, uma
+    linha por vez e em ordem de id, os afiliados ligados ao usuário: o dele FOR UPDATE, e os que o
+    indicaram ou têm comissão dele FOR KEY SHARE. Toda linha-filho que esta transação apaga (cascata) ou
+    anula (set null) pertence a um afiliado travado aqui, e as duas forças conflitam: duas exclusões
+    ligadas se encontram em `affiliates`, em ordem total, e nunca nas referrals e comissões. KEY SHARE
+    convive com o `no key update` do saque e do percentual e com a FK de comissão nova. Subir a força
+    de uma trava já pega seria o deadlock clássico; por isso uma por vez. Indicação nova entre a leitura e
+    a trava não espera nada, mas `record_referral` só roda no cadastro: exige excluir a conta no instante
+    do próprio cadastro (resíduo aceito). Comissão nova sai de afiliado já no conjunto.
+
+    Depois, na ordem do `request_payout` (afiliado, depois comissões), com os saques no meio: afiliado,
     saques, comissões, pendências. Comissões antes do afiliado fariam ciclo com o pedido de saque."""
+    cur.execute(
+        """
+        select a.id, a.user_id = %(u)s as proprio from affiliates a
+         where a.user_id = %(u)s
+            or a.id in (select affiliate_id from affiliate_referrals where referred_user_id = %(u)s
+                        union select affiliate_id from affiliate_commissions where referred_user_id = %(u)s)
+         order by a.id
+        """,
+        {"u": int(user_id)},
+    )
+    for a in cur.fetchall():
+        modo = "for update" if a["proprio"] else "for key share"
+        cur.execute(f"select id from affiliates where id = %s {modo}", (a["id"],))
     cur.execute("select id, code from affiliates where user_id = %s for update", (int(user_id),))
     afiliado = cur.fetchone()
     if afiliado is None:
