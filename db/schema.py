@@ -6,6 +6,7 @@ import logging
 from core.pg_text import causa_segura
 from core.services.demo.dados import CODIGO_PADRAO
 
+from . import insight_aviso_direito
 from .connection import get_conn
 from .schema_repairs import (
     ensure_lower_name_unique, ensure_plan_trials_user_fk, repair_user_fk_cascades,
@@ -1442,6 +1443,16 @@ def init_db():
         alter table auth_accounts add column if not exists
           insight_email_opt_out boolean not null default false
         """,
+        # Adesão ao aviso de insight por e-mail (PL-06 B6). Nula = não aderiu: nasce
+        # sem default nem backfill, porque o interruptor antigo não conta como adesão.
+        """
+        alter table auth_accounts add column if not exists insight_aviso_aderiu_em timestamptz
+        """,
+        # Até quando o direito a `insights` está garantido para quem aderiu; nula com adesão =
+        # vitalício. Quem escreve é o gatilho de `db/insight_aviso_direito.py`, no fim desta lista.
+        """
+        alter table auth_accounts add column if not exists insight_aviso_coberto_ate timestamptz
+        """,
         """
         alter table auth_accounts add column if not exists
           whatsapp_updates_opt_out boolean not null default false
@@ -1480,8 +1491,7 @@ def init_db():
         set tip_email_opt_out = true,
             insight_email_opt_out = true
         where engagement_opt_out = true
-          and tip_email_opt_out = false
-          and insight_email_opt_out = false
+          and (tip_email_opt_out = false or insight_email_opt_out = false)
         """,
         """
         alter table auth_accounts add column if not exists last_reengagement_sent_at timestamptz
@@ -3446,6 +3456,8 @@ def init_db():
                 or old.plan_expires_at is distinct from new.plan_expires_at)
           execute function pb_aviso_escrita()
         """,
+        # Perder o direito a `insights` retira a adesão ao aviso por e-mail (PL-06 B6, D1).
+        *insight_aviso_direito.ddl(),
         # "Testar o Piggy" (demo no WhatsApp): tabela ANÔNIMA — sem user_id de
         # propósito (o demo não cria usuário nem toca em nenhuma tabela de
         # usuário). Só o funil lê. wa_hash = HMAC do telefone, zerado após 30

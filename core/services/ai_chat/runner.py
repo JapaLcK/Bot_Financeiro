@@ -148,6 +148,13 @@ _ATENDIDA_FORA = "Esta mensagem foi atendida fora desta conversa."
 # Resposta final de um write com `confirmar_se` verdadeiro (sem 2ª ida ao LLM).
 _CONFIRMA = "🐷 Só confirmando: registrar *{resumo}*? Responde *sim* ou *não*."
 
+
+def _vence_a_do_roteador(user_id: int) -> None:
+    """A IA armou uma confirmação: a da declaração pelo roteador, se viva, deixa de valer (R2-6, #1315)."""
+    from core.handlers.declaracao_confirma import abandona
+    abandona(user_id)
+
+
 # Resultado de tool (sem resposta final): o turno já tem uma confirmação pendente.
 _JA_PENDENTE_NO_TURNO = (
     json.dumps({"status": "not_armed", "message":
@@ -342,7 +349,8 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
             # mentira de quem não apagou nada) servem: é o mesmo fato do "sim"
             # perdedor, e por isso a mesma frase.
             if db.ai_consume_pending_action(user_id, pending):
-                msg = "👍 Beleza, não fiz nada."
+                from core.handlers.declaracao_banco_textos import NAO_FIZ_NADA
+                msg = NAO_FIZ_NADA
                 from .tools.declaracao_ia import descartada
                 descartada(user_id, pending)  # a reentrega do pedido passa a dar T19
             else:
@@ -919,6 +927,7 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
                 _OUTRO_PEDIDO,
             )
         _PENDENCIA_DO_TURNO.set(armada)
+        _vence_a_do_roteador(user_id)
         if tool.ao_armar is not None:  # só aqui: com `_OUTRO_PEDIDO` nada foi armado
             try:  # enfeite (o card): a pendência já está armada e o resumo já diz o item, então não derruba o turno
                 tool.ao_armar(user_id, args)
@@ -960,6 +969,7 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
                            ensure_ascii=False),
                 _OUTRO_PEDIDO,
             )
+        _vence_a_do_roteador(user_id)
         return (
             json.dumps({"status": "pending_user_confirmation", "summary": summary,
                         "args": args}, ensure_ascii=False),

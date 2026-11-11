@@ -753,6 +753,7 @@ body.balance-hidden .account-balance {
 }
 .switch input:checked + .switch-slider::before { transform: translateX(20px); }
 .switch input:disabled + .switch-slider { opacity: .55; cursor: not-allowed; }
+.switch input:focus-visible + .switch-slider { outline: 2px solid var(--accent); outline-offset: 2px; }
 .quiet-select {
   width: 100%;
   min-height: 40px;
@@ -1104,6 +1105,7 @@ body.balance-hidden .account-balance {
   .accounts-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 540px) {
+  #notif-aviso-desligar { min-height: 44px; }
   .page { padding: 16px 14px 64px; }
   .stats-strip { grid-template-columns: 1fr; }
   .stat { border-right: 0; border-bottom: 1px solid var(--border); }
@@ -1595,6 +1597,17 @@ body.balance-hidden .account-balance {
                    #380). Esconder a lista em vez de trocar o innerHTML dela
                    preserva os toggles pro repaint seguinte. -->
               <div id="notif-sem-plano" hidden></div>
+              <!-- D2 do PL-06 B6: sem plano e com adesão gravada, só desligar. Botão, não interruptor:
+                   não há caminho de ativação aqui. O servidor diz se há adesão (detail do 402). -->
+              <div class="notification-row" id="notif-aviso-sem-plano" hidden>
+                <div class="notification-copy">
+                  <div class="notification-title">Avisos do Piggy por e-mail</div>
+                  <!-- Cópia de `AVISO_SEM_PLANO` (core/services/insights_notificacao.py): tests/test_insights_adesao_rota.py compara. -->
+                  <div class="notification-sub" id="notif-aviso-sem-plano-texto">Se o pagamento restabelecer seu plano em até 1 hora após a perda do acesso, os avisos continuam; depois disso, será preciso ligar de novo.</div>
+                  <p class="notification-sub" id="notif-aviso-sem-plano-resultado" role="status" tabindex="-1" hidden></p>
+                </div>
+                <button class="btn-sm" type="button" id="notif-aviso-desligar" onclick="desligarAvisoSemPlano()">Desligar agora</button>
+              </div>
               <div class="notification-list" id="notif-list">
                 <div class="email-warning" id="notif-email-warning" hidden>
                   <div>
@@ -1618,10 +1631,24 @@ body.balance-hidden .account-balance {
                 <div class="notification-row">
                   <div class="notification-copy">
                     <div class="notification-title">Insights financeiros</div>
-                    <div class="notification-sub">Receba análises e alertas quando o PigBank encontrar padrões úteis nos seus dados.</div>
+                    <div class="notification-sub">Curiosidades sobre finanças, uma vez por mês.</div>
+                    <div class="notification-sub" id="notif-insight-off-note" hidden></div>
                   </div>
                   <label class="switch" aria-label="Ativar insights financeiros por e-mail">
-                    <input type="checkbox" id="notif-insight-email" onchange="updateNotificationSettings({ insight_email_enabled: this.checked })">
+                    <input type="checkbox" id="notif-insight-email" aria-describedby="notif-insight-off-note" onchange="updateNotificationSettings({ insight_email_enabled: this.checked })">
+                    <span class="switch-slider"></span>
+                  </label>
+                </div>
+
+                <!-- Oculta até o servidor mandar o texto (`insight_alert_email_notice`), que não tem cópia aqui. -->
+                <div class="notification-row" id="notif-insight-aviso-row" hidden>
+                  <div class="notification-copy">
+                    <div class="notification-title">Avisos do Piggy por e-mail</div>
+                    <div class="notification-sub" id="notif-insight-aviso-text"></div>
+                    <div class="notification-sub" id="notif-insight-aviso-state" hidden></div>
+                  </div>
+                  <label class="switch" aria-label="Ativar avisos do Piggy por e-mail">
+                    <input type="checkbox" id="notif-insight-aviso" aria-describedby="notif-insight-aviso-text notif-insight-aviso-state" onchange="updateNotificationSettings({ insight_alert_email_enabled: this.checked })">
                     <span class="switch-slider"></span>
                   </label>
                 </div>
@@ -2639,10 +2666,14 @@ async function sendPasswordResetEmail() {
 
 let _weeklyReportAvailable = false;
 let _weeklyReportStoredEnabled = false;
+let _insightAvisoLigado = false;
+let _insightAvisoTravado = false;
 function setNotificationControlsDisabled(disabled) {
-  ["notif-tip-email", "notif-insight-email", "notif-whatsapp-updates", "notif-daily-report", "notif-weekly-report", "notif-monthly-report", "notif-daily-hour"].forEach(id => {
+  ["notif-tip-email", "notif-insight-email", "notif-insight-aviso", "notif-whatsapp-updates", "notif-daily-report", "notif-weekly-report", "notif-monthly-report", "notif-daily-hour"].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.disabled = disabled || (id === "notif-weekly-report" && !_weeklyReportAvailable && !_weeklyReportStoredEnabled);
+    if (el) el.disabled = disabled
+      || (id === "notif-weekly-report" && !_weeklyReportAvailable && !_weeklyReportStoredEnabled)
+      || (id === "notif-insight-aviso" && _insightAvisoTravado);
   });
 }
 
@@ -2670,6 +2701,21 @@ function applyNotificationSettings(data) {
   document.getElementById("notif-tip-email").disabled = !emailAvailable;
   document.getElementById("notif-insight-email").disabled = !emailAvailable;
   document.getElementById("notif-whatsapp-updates").disabled = !whatsappAvailable;
+  const avisoNoPlano = Boolean(data.insight_alert_email_available);
+  _insightAvisoLigado = Boolean(data.insight_alert_email_enabled);
+  // Ligar pede tudo em ordem; desligar nunca trava.
+  _insightAvisoTravado = !_insightAvisoLigado && (!emailAvailable || !avisoNoPlano || !insightEmail);
+  const avisoEstado = !avisoNoPlano
+    ? (_insightAvisoLigado ? (data.insight_alert_email_paused_notice || "") : "Disponível nos planos Plus e Pro.")
+    : (emailAvailable && !insightEmail ? "Ligue Insights financeiros para usar este aviso." : "");
+  document.getElementById("notif-insight-aviso-row").hidden = !data.insight_alert_email_notice;
+  document.getElementById("notif-insight-aviso-text").textContent = data.insight_alert_email_notice || "";
+  document.getElementById("notif-insight-aviso-state").textContent = avisoEstado;
+  document.getElementById("notif-insight-aviso-state").hidden = !avisoEstado;
+  document.getElementById("notif-insight-aviso").checked = _insightAvisoLigado;
+  document.getElementById("notif-insight-aviso").disabled = _insightAvisoTravado;
+  document.getElementById("notif-insight-off-note").textContent = data.insight_email_off_notice || "";
+  document.getElementById("notif-insight-off-note").hidden = !data.insight_email_off_notice;
   document.getElementById("notif-daily-report").checked = daily;
   document.getElementById("notif-weekly-report").checked = _weeklyReportStoredEnabled;
   document.getElementById("notif-weekly-report").disabled = !_weeklyReportAvailable && !_weeklyReportStoredEnabled;
@@ -2717,6 +2763,8 @@ async function loadNotificationSettings({ propagate = false } = {}) {
       if (myGen === _notifGen) {
         semPlano = true;
         pintarSemPlano("notif-sem-plano", SEM_PLANO_HTML, "notif-list");
+        const corpo402 = await resp.json().catch(() => ({}));
+        document.getElementById("notif-aviso-sem-plano").hidden = corpo402?.detail?.insight_alert_email_enabled !== true;
         document.getElementById("notif-tip").hidden = true;
         document.getElementById("notif-email-value").textContent = "—";
         document.getElementById("notif-status-value").textContent = "Indisponível sem plano ativo";
@@ -2729,6 +2777,7 @@ async function loadNotificationSettings({ propagate = false } = {}) {
       // Desfaz o estado "sem plano ativo": um PBRefresh depois de o plano voltar
       // precisa devolver os toggles, senão a seção fica escondida para sempre.
       document.getElementById("notif-sem-plano").hidden = true;
+      document.getElementById("notif-aviso-sem-plano").hidden = true;
       document.getElementById("notif-list").hidden = false;
       document.getElementById("notif-tip").hidden = false;
       applyNotificationSettings(data);
@@ -2772,6 +2821,30 @@ async function loadNotificationSettings({ propagate = false } = {}) {
 // por último e sobrescrever o save. Controles ficam disabled durante o save,
 // então há no máximo um em voo.
 let _notifSave = null;
+// D2: sem plano, só desligar. Um PATCH com o corpo exato que o servidor isenta; o botão some no sucesso.
+async function desligarAvisoSemPlano() {
+  const btn = document.getElementById("notif-aviso-desligar");
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: authHeaders({ "Content-Type":"application/json" }),
+      body: JSON.stringify({ insight_alert_email_enabled: false }),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const resultado = document.getElementById("notif-aviso-sem-plano-resultado");
+    resultado.textContent = "Avisos desligados.";
+    resultado.hidden = false;
+    document.getElementById("notif-aviso-sem-plano-texto").hidden = true;
+    btn.hidden = true;
+    resultado.focus();   // o botão some: o foco vai para o resultado, não para o <body>
+  } catch (err) {
+    showToast(err.message || "Não foi possível desligar agora", "error");
+    btn.disabled = false;
+  }
+}
+
 async function updateNotificationSettings(patch) {
   if (_notifSave) return _notifSave;
   let _doneSave;
@@ -2786,11 +2859,15 @@ async function updateNotificationSettings(patch) {
     });
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
+    const avisoAntes = _insightAvisoLigado;
     applyNotificationSettings(data);
-    showToast("Preferências salvas", "ok");
+    // D5: desligar "Insights financeiros" retira a adesão; a mensagem é visível, não só o estado.
+    showToast(avisoAntes && !data.insight_alert_email_enabled && !("insight_alert_email_enabled" in patch)
+      ? "Avisos do Piggy por e-mail desligados." : "Preferências salvas", "ok");
   } catch (err) {
     showToast(err.message || "Erro ao salvar notificações", "error");
     document.getElementById("notif-weekly-report").checked = _weeklyReportStoredEnabled;
+    document.getElementById("notif-insight-aviso").checked = _insightAvisoLigado;
     await loadNotificationSettings();
   } finally {
     const daily = document.getElementById("notif-daily-report")?.checked;

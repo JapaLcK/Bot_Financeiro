@@ -55,6 +55,11 @@ dois lugares, ambos sem gate: o "Para onde vai" da tela v2 (`GET /api/v2/gastos`
 anterior", com outra regra de cartão: data da compra) e o "Ritmo de gastos" do app nativo (`/api/app/mes-detalhes`,
 chip de %). A implementação fica para issue/PR próprio, fora do PR B.
 A newsletter de curiosidades genéricas continua separada dos insights pessoais.
+O aviso de insight por e-mail segue o recurso `insights` (Plus+) e exige adesão explícita. Na carência do pagamento a adesão fica e
+o aviso não sai. Quando o plano vence sem pagamento (inclusive um Plus que vence e deixa a pessoa no Essencial), a adesão fica por 1 hora
+sem envio: se o pagamento restabelecer o plano nesse intervalo, os avisos continuam; depois, é preciso ligar de novo. Cancelamento, contestação,
+estorno total do Pix, troca de preço para um plano sem insights, ajuste do admin (mesmo em carência) e sair da família sem plano próprio com insights vigente (mesmo em carência) retiram a
+adesão na hora. Sem plano, só é possível desligar, e só no `/settings` (ou pelo link do e-mail). Detalhes em `docs/CLAUDE.md`, "E-mail".
 
 O alerta de gasto fora do padrão do Xerife (referência, diferença, amostra e a marcação
 "era esperado", PL-04) é do agente: Plus e Pro, pelo orçamento de energia. Essencial e Grátis não

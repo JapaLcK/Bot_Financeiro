@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests._declaracao_b import ana, carteira, declaracoes, liga, manda_wamid, n_lancamentos  # noqa: F401
+from tests._declaracao_b import ana, carteira, declaracoes, liga, manda_e_confirma as manda_wamid, n_lancamentos  # noqa: F401
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401
 from tests._patrimonio_helpers import q
 

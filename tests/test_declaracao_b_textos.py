@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import db
 from core.handlers import declaracao_banco as decl
-from tests._declaracao_b import ana, liga, manda_wamid  # noqa: F401
+from tests._declaracao_b import ana, liga, manda_e_confirma as manda_wamid  # noqa: F401
 from tests._fusao_of_helpers import uid_pro  # noqa: F401
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401
 from tests._retrato_declaracao import BASE, t
@@ -185,3 +185,29 @@ def test_t17_valor_aproximado(ana, liga):
     assert manda_wamid(ana, "gastei uns 50 no mercado pelo banco") == [
         "🐷 Não registrei: pelo banco eu preciso do valor exato. Manda de novo com o valor certinho, por exemplo: "
         "*gastei 50 no mercado pelo banco*."]
+
+
+def test_textos_da_confirmacao_do_roteador_1315():
+    """Aprovados pelo dono em 2026-11-09 (DP-3, DP-5, R2-3, R2-4, R2-5); a pergunta é a da IA (DP-1), pinada em
+    `test_declaracao_b_confirma.py::PERGUNTA`."""
+    from core.handlers import declaracao_banco_textos as tx
+    assert tx.NAO_FIZ_NADA == "👍 Beleza, não fiz nada."
+    assert tx.EXPIROU == "🐷 Essa confirmação expirou. Não registrei por ela. Se quiser registrar, envie o gasto novamente."
+    assert tx.ENVIADA_ANTES == ("🐷 Essa resposta foi enviada antes da minha última pergunta, então não registrei nada "
+                                "por ela.")
+    assert tx.BOTAO_VELHO == "🐷 Esse botão é de uma confirmação que não vale mais. Não registrei nada por ele."
+
+
+def test_textos_da_correcao_e_da_suspensao_aprovados():
+    """Pino contra o texto aprovado pelo dono em 2026-11-10 (R4-2 e R4-4; as variantes com *sim* e com
+    *não* aprovadas nessa data)."""
+    from core.handlers import declaracao_banco_textos as tx
+    assert tx.CORRECAO_INCOMPLETA == ("🐷 Não registrei: não consegui interpretar toda a correção. Cancelei a "
+                                      "confirmação anterior. Me manda o gasto completo de novo, com valor, descrição, "
+                                      "data e forma de pagamento.")
+    assert tx.AINDA_TERMINANDO.format(resposta="sim") == (
+        "⏳ Ainda estou terminando sua mensagem anterior. Não registrei nada por este *sim*; se eu perguntar de novo, é "
+        "só responder.")
+    assert tx.AINDA_TERMINANDO.format(resposta="não") == (
+        "⏳ Ainda estou terminando sua mensagem anterior. Não registrei nada por este *não*; se eu perguntar de novo, é "
+        "só responder.")

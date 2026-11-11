@@ -43,18 +43,6 @@ UM_POR_MENSAGEM = ("🐷 Não registrei: pelo banco eu registro um gasto por men
                    "*gastei 20 no mercado pelo banco*.")  # T16
 APROXIMADO = ("🐷 Não registrei: pelo banco eu preciso do valor exato. Manda de novo com o valor certinho, por exemplo: "
               "*gastei 50 no mercado pelo banco*.")  # T17
-# Rodadas 10 e 11 da #1310: a fila respondida com valor + "cartão" não grava, mantém o item e repete a pergunta. Nenhum
-# afirma "foi no cartão" (a resposta pode negar). *deixa* é o descarte da fila INTEIRA (`launches._CANCEL_WORDS`). Os
-# dois primeiros só para despesa no crédito; débito com cartão, receita e o resto recebem o neutro. Aprovados pelo dono.
-FILA_CARTAO_MANUAL = ("🐷 Não registrei e mantive este item na fila. Se foi no cartão, responda *deixa* (isso descarta "
-                      "todos os itens que faltam) e envie o lançamento completo, por exemplo: *paguei o aluguel 1500 no "
-                      "cartão*. Se não foi, me manda só o valor.")
-FILA_CARTAO_OF = ("🐷 Não registrei e mantive este item na fila: compra no cartão de crédito conectado chega sozinha pelo "
-                  "Open Finance. Se foi Pix, débito ou transferência, me manda só o valor; se foi no cartão, responda "
-                  "*deixa* (isso descarta todos os itens que faltam).")
-FILA_CARTAO_NEUTRO = ("🐷 Não registrei e mantive este item na fila: não sei se foi pelo banco ou no cartão. Se foi Pix, "
-                      "débito ou transferência, me manda só o valor (ex.: *1500*); para desistir, responda *deixa* (isso "
-                      "descarta todos os itens que faltam).")
 SEM_ID = ("🐷 Não registrei: por aqui eu não consigo garantir que o mesmo pagamento pelo banco não entre duas vezes. "
           "Manda pelo WhatsApp. Se foi em dinheiro vivo, diga *em dinheiro*.")  # T18: canal sem id de mensagem
 ACAO_ENCERRADA = ("🐷 Não registrei: esse pedido já tinha sido cancelado ou ficou sem resposta. "
@@ -62,6 +50,23 @@ ACAO_ENCERRADA = ("🐷 Não registrei: esse pedido já tinha sido cancelado ou 
 # O "sim" já recebido que volta sem ter gravado nada, quando o sistema não sabe o desfecho (D-a, rodada 8, 2026-11-04)
 SIM_JA_RECEBIDO = "🐷 Essa resposta eu já tinha recebido. Confere no extrato antes de mandar de novo."
 NAO_JA_RECEBIDO = "🐷 Essa resposta eu já tinha recebido."  # o "não" visto sem declaração viva: não há o que conferir
+# A confirmação do roteador (#1315; textos aprovados pelo dono em 2026-11-09, `.time-dev/1315/decisoes-dono.md`). A
+# pergunta em si é a da IA (`runner._CONFIRMA`, DP-1).
+NAO_FIZ_NADA = "👍 Beleza, não fiz nada."  # DP-3 e R2-5: o "não" (o mesmo texto da IA)
+EXPIROU = ("🐷 Essa confirmação expirou. Não registrei por ela. Se quiser registrar, envie o gasto "
+           "novamente.")  # DP-5: o "sim" (ou o botão) de uma confirmação vencida
+ENVIADA_ANTES = ("🐷 Essa resposta foi enviada antes da minha última pergunta, então não registrei nada "
+                 "por ela.")  # R2-3: o "sim" sem prova de ter sido enviado depois da confirmação viva
+BOTAO_VELHO = ("🐷 Esse botão é de uma confirmação que não vale mais. Não registrei nada "
+               "por ele.")  # R2-4
+# R4-4 (dono, 2026-11-10): a correção que não é só um valor, ou cujo valor não se lê com certeza. Sai DEPOIS de a
+# confirmação anterior ser invalidada; nada fica para confirmar.
+CORRECAO_INCOMPLETA = ("🐷 Não registrei: não consegui interpretar toda a correção. Cancelei a confirmação anterior. "
+                       "Me manda o gasto completo de novo, com valor, descrição, data e forma de pagamento.")
+# R4-2 (dono, 2026-11-10; as variantes com *sim* e com *não* aprovadas nessa data): o "sim" (ou "não") que chega
+# com a confirmação suspensa por outro comando em andamento.
+AINDA_TERMINANDO = ("⏳ Ainda estou terminando sua mensagem anterior. Não registrei nada por este *{resposta}*; se eu "
+                    "perguntar de novo, é só responder.")
 SEM_CONTA = ("🕓 Anotei como pago pelo banco. Ainda não apareceu no seu extrato e, sem uma conta corrente "
              "conectada, eu não consigo conferir sozinho: confira em Patrimônio total → Movimentações "
              "não confirmadas.")  # T1, variante de quem não tem conta corrente ativa

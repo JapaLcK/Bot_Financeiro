@@ -204,9 +204,9 @@ export const desconectarBanco = (uid: number, id: number) => comPrazo((s) => esc
 
 // Preferências de notificação (rotas antigas /settings/{uid}/notifications). Mesma borda das sessões: booleano só `=== true`;
 // hora/minuto fora do intervalo (ou corpo que não é objeto) = ERRO de carga, nunca "09:00" inventado.
-const NOTIF_BOOL = ["email_notifications_available", "whatsapp_updates_available", "tip_email_enabled", "insight_email_enabled", "whatsapp_updates_enabled",
+const NOTIF_BOOL = ["email_notifications_available", "whatsapp_updates_available", "tip_email_enabled", "insight_email_enabled", "insight_alert_email_enabled", "insight_alert_email_available", "whatsapp_updates_enabled",
   "daily_report_enabled", "weekly_report_enabled", "weekly_report_stored_enabled", "weekly_report_available", "monthly_report_enabled"] as const;
-export type Notificacoes = Record<(typeof NOTIF_BOOL)[number], boolean> & { email: string | null; whatsapp_destination: string | null; daily_report_hour: number; daily_report_minute: number };
+export type Notificacoes = Record<(typeof NOTIF_BOOL)[number], boolean> & { email: string | null; whatsapp_destination: string | null; insight_alert_email_notice: string | null; insight_email_off_notice: string | null; insight_alert_email_paused_notice: string | null; daily_report_hour: number; daily_report_minute: number };
 export type CorpoNotificacoes = Partial<Pick<Notificacoes, (typeof NOTIF_BOOL)[number] | "daily_report_hour" | "daily_report_minute">>;
 const notificacoesDe = (r: unknown): Notificacoes => {
   const o = objeto(r) ? r : {};
@@ -214,7 +214,7 @@ const notificacoesDe = (r: unknown): Notificacoes => {
   const dentro = (v: unknown, max: number): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max;
   if (!dentro(h, 23) || !dentro(m, 59)) throw new ErroApi(200, "contrato");
   const bools = Object.fromEntries(NOTIF_BOOL.map((k) => [k, o[k] === true])) as Record<(typeof NOTIF_BOOL)[number], boolean>;
-  return { ...bools, email: txt(o.email) || null, whatsapp_destination: txt(o.whatsapp_destination) || null, daily_report_hour: h, daily_report_minute: m };
+  return { ...bools, email: txt(o.email) || null, whatsapp_destination: txt(o.whatsapp_destination) || null, insight_alert_email_notice: txt(o.insight_alert_email_notice) || null, insight_email_off_notice: txt(o.insight_email_off_notice) || null, insight_alert_email_paused_notice: txt(o.insight_alert_email_paused_notice) || null, daily_report_hour: h, daily_report_minute: m };
 };
 export const notificacoesQuery = (uid: number) => queryOptions({
   queryKey: ["conta", "notificacoes", uid],

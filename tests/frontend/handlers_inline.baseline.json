@@ -241,6 +241,7 @@
       "closeMfaSetupModal",
       "copyBackupCodes",
       "copyRegenBackupCodes",
+      "desligarAvisoSemPlano",
       "disconnectAll",
       "hideDeleteConfirm",
       "hideExportConfirm",
