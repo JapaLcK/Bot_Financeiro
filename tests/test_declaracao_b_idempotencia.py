@@ -18,7 +18,7 @@ import db
 from conftest import promote_to_pro
 from core.handlers import declaracao_banco_textos as tx
 from core.types import IncomingMessage
-from tests._declaracao_b import (ana, carteira, declaracoes, fala, liga, manda_wamid, n_lancamentos,  # noqa: F401
+from tests._declaracao_b import (ana, carteira, declaracoes, fala_e_confirma as fala, liga, manda_e_confirma as manda_wamid, n_lancamentos,  # noqa: F401
                                  pendencia, q, sem_pergunta)
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401
 from tests.test_bank_movements import _bank
@@ -65,21 +65,6 @@ def test_duas_frases_recusam_sem_consumir_chave(ana, liga):
     assert declaracoes(ana) == []
 
 
-def test_fila_reentregue_devolve_o_item_em_vez_de_perde_lo(ana, liga, monkeypatch):
-    """A reentrega da RESPOSTA de valor tentaria gastar o item seguinte da fila com a chave do anterior: vira T3 e o
-    item volta, em vez de sumir."""
-    fala(monkeypatch, ana, "paguei o aluguel e paguei a academia no pix")
-    assert pendencia(ana) == "multi_launch_values"
-    w = "wamid.fila-" + uuid.uuid4().hex
-    r = manda_wamid(ana, "1500", w)[0]
-    assert "registrada pelo banco" in r and "academia" in r
-    r = manda_wamid(ana, "1500", w)[0]
-    assert "já tinha registrado" in r and "academia" in r, r
-    assert len(declaracoes(ana)) == 1
-    assert "registrada pelo banco" in manda_wamid(ana, "200")[0]
-    assert sorted(float(d["valor"]) for d in declaracoes(ana)) == [200.0, 1500.0]
-
-
 def _com_id(uid, texto, message_id, platform="whatsapp"):
     out = hi.handle_incoming(IncomingMessage(platform=platform, user_id=uid, text=texto, message_id=message_id,
                                              attachments=[], external_id=str(uid), raw={}))
@@ -97,34 +82,15 @@ def test_sem_wamid_utilizavel_nao_declara(ana, liga, message_id, platform):
     assert declaracoes(ana) == [] and n_lancamentos(ana) == 0
 
 
-def test_sem_wamid_na_fila_o_item_volta(ana, liga, monkeypatch):
-    fala(monkeypatch, ana, "paguei o aluguel e paguei a academia no pix")
-    r = _com_id(ana, "1500", "1761500000")
-    assert tx.SEM_ID in r and "aluguel" in r, r
-    assert declaracoes(ana) == []
-    fila = db.get_pending_action(ana)["payload"]["queue"]
-    assert [i["desc"].split()[0] for i in fila] == ["aluguel", "academia"]
-    assert "registrada pelo banco" in manda_wamid(ana, "1500")[0]
-
-
-def test_consulta_do_banco_caindo_na_fila_devolve_o_item(ana, liga, monkeypatch):
-    fala(monkeypatch, ana, "paguei o aluguel e paguei a academia no pix")
-
-    def cai(_uid):
-        raise RuntimeError("DB caiu")
-    monkeypatch.setattr(db, "has_open_finance_connections", cai)
-    assert tx.SEM_GARANTIA in manda_wamid(ana, "1500")[0]
-    assert len(db.get_pending_action(ana)["payload"]["queue"]) == 2 and declaracoes(ana) == []
-
-
 def test_o_wamid_cru_nunca_vai_para_a_coluna_nem_para_o_log(ana, liga, caplog):
     caplog.set_level("DEBUG")
     w = "wamid.SEGREDO-" + uuid.uuid4().hex
     manda_wamid(ana, FRASE, w)
-    manda_wamid(ana, FRASE, w)  # a reentrega loga `declaracao_repetida`
+    # a reentrega: desde a #1315 respondida pelo livro (pela chave, nunca pelo wamid cru), antes do escritor
+    assert "já tinha registrado" in manda_wamid(ana, FRASE, w)[0]
     (d,) = declaracoes(ana)
     assert w not in d["external_id"] and "SEGREDO" not in d["external_id"]
-    assert "declaracao_repetida" in caplog.text and "SEGREDO" not in caplog.text
+    assert "SEGREDO" not in caplog.text
 
 
 def test_isolamento_a_mesma_chave_em_dois_usuarios_sao_dois_lancamentos(ana, liga):
@@ -151,15 +117,16 @@ def test_depois_de_foi_em_dinheiro_a_reentrega_nao_recria(ana, liga):
     assert n_lancamentos(ana) == 1 and carteira(ana) == 150.0
 
 
-def test_apagar_libera_a_chave_limite_declarado(ana, liga):
-    """R12/DP-7: apagar a declaração leva a chave junto; uma reentrega DEPOIS do apagar recria (a Meta só reentrega
-    sem 200, e o webhook responde 200 antes de processar). Documenta o limite aceito pelo dono."""
+def test_apagar_nao_libera_a_chave(ana, liga):
+    """R12/DP-7, fechada pela DP-9 da #1315: apagar a declaração leva o `external_id` junto, mas o livro guarda a ação;
+    a reentrega DEPOIS do apagar responde T3 e não recria (antes da #1315: recriava, limite aceito)."""
     w = "wamid.r12-" + uuid.uuid4().hex
     manda_wamid(ana, FRASE, w)
+    seq = q("select user_seq from launches where id=%s", (declaracoes(ana)[0]["id"],))["user_seq"]
     db.delete_launch_and_rollback(ana, declaracoes(ana)[0]["id"])
     assert declaracoes(ana) == []
-    assert "registrada pelo banco" in manda_wamid(ana, FRASE, w)[0]
-    assert len(declaracoes(ana)) == 1
+    assert manda_wamid(ana, FRASE, w) == [f"🐷 Esse eu já tinha registrado (ID #{seq}). Não dupliquei."]
+    assert declaracoes(ana) == [] and pendencia(ana) != "confirm_declaracao_banco"
 
 
 # ── o escritor ──────────────────────────────────────────────────────────────
@@ -249,6 +216,11 @@ def test_pelo_runtime_do_whatsapp_na_thread_do_worker(ana, liga, monkeypatch):
     msg = InboundMessage(wa_id="5511999998888", text=FRASE, timestamp="1761500000", attachments=[],
                          raw={"id": wamid, "type": "text"})
     asyncio.run(asyncio.to_thread(wr.process_message, msg))
+    import time  # o "sim" (#1315), com o `timestamp` da Meta depois da pergunta
+    sim = InboundMessage(wa_id="5511999998888", text="sim", timestamp=str(int(time.time()) + 1), attachments=[],
+                         raw={"id": "wamid.sim-" + uuid.uuid4().hex, "type": "text"})
+    asyncio.run(asyncio.to_thread(wr.process_message, sim))
     asyncio.run(asyncio.to_thread(wr.process_message, msg))
-    assert "registrada pelo banco" in respostas[0] and "já tinha registrado" in respostas[1], respostas
+    assert "Só confirmando" in respostas[0] and "registrada pelo banco" in respostas[1], respostas
+    assert "já tinha registrado" in respostas[2], respostas
     assert len(declaracoes(ana)) == 1 and wamid not in declaracoes(ana)[0]["external_id"]

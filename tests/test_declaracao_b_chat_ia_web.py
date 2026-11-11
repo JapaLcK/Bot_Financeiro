@@ -126,7 +126,7 @@ def test_na_web_so_os_textos_da_declaracao_trocam_o_negrito(web, monkeypatch):
     assert stream(c, FRASE, mid()) == CONFIRMA.removeprefix(PORCO)  # o /painel e o app desenham o *x*
     monkeypatch.setenv("WA_IA_PRIMEIRO", "1")
     openai_falso(monkeypatch, rodada(None, BANCO))
-    assert wa(uid, FRASE) == CONFIRMA
+    assert wa(uid, FRASE) == "🔕 Cancelei a pergunta anterior.\n\n" + CONFIRMA  # a da web, viva, sai (#1315, R3-1)
 
 
 def test_t4_e_t6_na_web_com_negrito_da_web(web, monkeypatch):

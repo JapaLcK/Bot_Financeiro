@@ -29,6 +29,9 @@ def _fmt_money(v: Any) -> str:
     return f"R$ {v}"
 
 
+# O extrato que não importou (o `handle_incoming` o lê: a confirmação da declaração volta, #1315).
+NAO_IMPORTOU = "❌ Não consegui importar esse {tipo}: {erro}"
+
 _PRO_REQUIRED_STATEMENT_MSG = (
     "📄 **Importar extrato é uma feature do PigBank+ (Pro).**\n\n"
     "No plano Free voce pode lançar gastos manualmente pelo chat ou pelo dashboard. "
@@ -100,5 +103,5 @@ def handle_statement_import(
         rep = import_statement_bytes(uid, attachment_bytes, filename, kind)
     except StatementParseError as e:
         kind_label = _KIND_LABEL.get(kind, "arquivo")
-        return f"❌ Não consegui importar esse {kind_label}: {e}"
+        return NAO_IMPORTOU.format(tipo=kind_label, erro=e)
     return format_statement_report(rep)

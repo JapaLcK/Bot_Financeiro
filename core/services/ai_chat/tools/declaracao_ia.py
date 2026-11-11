@@ -20,7 +20,6 @@ from core.handlers import forma_pagamento as fp
 from db import declaracao_livro as livro
 
 from .._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
-from ..confirmations import is_cancel, is_confirm
 
 
 def aplica(user_id: int, args: dict[str, Any]) -> bool:
@@ -55,10 +54,16 @@ def _cabe(valor) -> bool:
 
 
 def _viva(user_id: int) -> dict | None:
-    """A pendência viva da IA, se é uma declaração (com o payload)."""
+    """A pendência viva de declaração (com o payload): a da IA ou a confirmação do roteador (#1315), esta no formato
+    da IA (`tool_args`, `summary`), para a reentrega repetir a mesma pergunta."""
     pend = db.ai_get_pending_action(user_id)
     args = (pend or {}).get("tool_args")
-    return pend if isinstance(args, dict) and isinstance(args.get("_declaracao"), dict) else None
+    if isinstance(args, dict) and isinstance(args.get("_declaracao"), dict):
+        return pend
+    r = db.get_pending_action(user_id)
+    if r and r.get("action_type") == "confirm_declaracao_banco":
+        return {"tool_args": r["payload"], "summary": r["payload"]["summary"]}
+    return None
 
 
 def _do_widget(platform: str | None = None) -> bool:
@@ -139,10 +144,11 @@ def resumo(p: dict[str, Any]) -> str:
                                 "data": p["data"], "forma_pagamento": fp.BANCO})
 
 
-def executar(user_id: int, args: dict[str, Any]) -> str:
+def executar(user_id: int, args: dict[str, Any], platform: str | None = None) -> str:
     """O "sim": grava exatamente o payload congelado, com a ação dele e a chave deste "sim", e só no turno que a
     consumiu (a marca de `consumida`); o livro, no mesmo commit, confere a ação, o "sim" e o hash do payload. Sem flag ou
-    sem banco, não grava nada."""
+    sem banco, não grava nada. `platform`: o roteador (#1315), que não põe o `CURRENT_PLATFORM` da IA."""
+    platform = platform or CURRENT_PLATFORM.get()
     from core.handlers.launches import add_from_entities
     from .launches import _parse_iso_datetime_for_launch
     p = args["_declaracao"]
@@ -153,13 +159,13 @@ def executar(user_id: int, args: dict[str, Any]) -> str:
             return tx.ACAO_ENCERRADA
         sim = decl.chave_da_mensagem()
         if sim is None:
-            return _molde(tx.SEM_ID)
+            return _molde(tx.SEM_ID, platform)
         r = add_from_entities(
             user_id, tipo=p["tipo"], valor=p["valor"], alvo=p["alvo"], nota=p["nota"], categoria=p["categoria"],
             category_reason=p["category_reason"], criado_em=_parse_iso_datetime_for_launch(p["data"]),
-            platform=CURRENT_PLATFORM.get(), forma_pagamento=fp.BANCO, chave_acao=p["acao"], confirmacao=sim,
+            platform=platform, forma_pagamento=fp.BANCO, chave_acao=p["acao"], confirmacao=sim,
             payload_hash=hash_do_payload(p))
-        return _molde(tx.INTERNA) if r is tx.INTERNA else r  # o T6 do escritor (`decl.recusa` devolve a constante)
+        return _molde(tx.INTERNA, platform) if r is tx.INTERNA else r  # o T6 do escritor (`decl.recusa` devolve a constante)
     finally:
         # Uma tentativa só: a ação consumida que não virou `confirmada` (recusa, T9, exceção) fica encerrada (a reentrega
         # da mensagem que armou dá T19; o gasto mandado de novo é ação nova). A marca some com o turno.
@@ -213,7 +219,7 @@ def reentrega(user_id: int, texto: str, platform: str) -> str | None:
        consumir nem a pendência nova); o "não", a confirmação viva de novo sem consumi-la (4A), ou `NAO_JA_RECEBIDO` sem ela.
     Um "sim" ou "não" sem id não consome uma declaração (T18): ela fica viva para um canal com id."""
     k = decl.chave_da_mensagem()
-    resposta = is_confirm(texto or "") or is_cancel(texto or "")
+    resposta = decl.e_sim(texto, platform == "whatsapp") or decl.e_nao(texto, platform == "whatsapp")
     if k is None:
         return _molde(tx.SEM_ID, platform) if resposta and _viva(user_id) else None
     linha = livro.le(user_id, k + ":0")

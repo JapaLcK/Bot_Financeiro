@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests._declaracao_b import (ana, carteira, declaracoes, fala, liga, manda_wamid, n_lancamentos,  # noqa: F401
+from tests._declaracao_b import (ana, carteira, declaracoes, fala_e_confirma as fala, liga, manda_e_confirma as manda_wamid, n_lancamentos,  # noqa: F401
                                  pendencia)
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401
 
@@ -57,15 +57,6 @@ def test_positivo_valor_claro_grava(ana, liga, texto, valores):
 def test_positivo_audio_com_um_valor_claro_grava(ana, liga, monkeypatch):
     fala(monkeypatch, ana, "gastei 20 no mercado pelo banco")
     assert sorted(float(d["valor"]) for d in declaracoes(ana)) == [20.0]
-
-
-def test_fila_de_valores_devolve_o_item(ana, liga, monkeypatch):
-    fala(monkeypatch, ana, "paguei o aluguel e paguei a academia no pix")
-    r = manda_wamid(ana, "2 reais e 50")[0]
-    assert T11 in r and "aluguel" in r and declaracoes(ana) == [], r
-    assert pendencia(ana) == "multi_launch_values"
-    assert "registrada pelo banco" in manda_wamid(ana, "2,50")[0]
-    assert [float(d["valor"]) for d in declaracoes(ana)] == [2.5]
 
 
 def test_carteira_cartao_e_flag_desligada_nao_mudam(ana, liga):

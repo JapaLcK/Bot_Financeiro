@@ -370,7 +370,7 @@ As recusas novas são as decididas: número solto além do valor (E3/D2/D3: “1
 - frases que não chegam ao leitor pela conversa: “não”/“sem” perto de “pelo banco” fazem o `fp.detectar` perguntar a forma (“R$ 50 no mercado não 60 pelo banco”, “em 10x sem juros pelo banco”); a resposta “banco” passa pelo leitor;
 - o recibo por imagem e a tool da IA (fluxo `entities` de `forma_pagamento.resolver`) não têm o texto do usuário e não passam pelo leitor: o valor é conferido pela própria pergunta (“Esse R$ X foi…”) e, no recibo, também pelo “sim” da prévia.
 
-A #1310 (leitor estrito) está entregue. **Bloqueiam LIGAR a flag:** DP-5, DP-6, DP-7, o par no app nativo (#1244) e a [#1315](https://github.com/JapaLcK/Bot_Financeiro/issues/1315) (confirmar o valor antes de gravar a declaração), decisão do dono de 2026-10-28 para os limites acima.
+A #1310 (leitor estrito) está entregue. **Bloqueiam LIGAR a flag:** DP-5, DP-6, o par no app nativo (#1244), a DP-14 (a [#1405](https://github.com/JapaLcK/Bot_Financeiro/issues/1405), o “sim” falado à confirmação da IA, bloqueia quando a `WA_IA_PRIMEIRO` estiver ligada para os mesmos usuários), a [#1512](https://github.com/JapaLcK/Bot_Financeiro/issues/1512) (o botão velho de declaração sai com os botões Sim/Não de um “apagar #N” pendente, e um toque apaga o lançamento) e a validação final da [#1315](https://github.com/JapaLcK/Bot_Financeiro/issues/1315) em staging (seção “#1315: o roteador confirma o valor antes de gravar”); decisão do dono de 2026-10-28 para os limites acima. A confirmação em si e a DP-7 (fechada pela DP-9 da #1315) saem desta lista com o merge do PR-1 da #1315.
 
 Evidência que motivou o leitor estrito (antes dele, a coluna do meio era o que gravava, errado e travado):
 
@@ -485,18 +485,17 @@ cancelado, abandonado ou expirado. D9 = B: nada é podado do livro; ele sai só 
 **Textos novos** (`declaracao_banco_textos.py`): T18 `SEM_ID` e T19 `ACAO_ENCERRADA`, aprovados em 2026-11-02; `SIM_JA_RECEBIDO` (D-a, 2026-11-04) e `NAO_JA_RECEBIDO` (achado 4 = B, 2026-11-05).
 
 **Limites que sobram.** L-b3: pendência armada antes de a flag ligar (ou do deploy) não tem payload; o "sim" recebe T9
-e não grava (janela de 10 min). L-b4: a guarda de cartão lê só a mensagem atual. L-b5: no WhatsApp, a IA pede "sim" e o
-roteador, com a IA desligada, grava direto, até a #1315. L-b6: sem o leitor estrito na IA (D3). L-b8: a categoria é
+e não grava (janela de 10 min). L-b4: a guarda de cartão lê só a mensagem atual. L-b5 (fechado pela #1315): no WhatsApp, a IA
+pedia "sim" e o roteador, com a IA desligada, gravava direto; agora o roteador também pede. L-b6: sem o leitor estrito na IA (D3). L-b8: a categoria é
 congelada e não aparece; com o motivo "ai" o escritor refaz a conferência pelas regras locais. L-b9: um "sim" reentregue
 que atravesse um reset pareceria novo. A junção de contas está coberta: o livro da origem vai para o destino
 (`db/users._DESTINO_VENCE`), e o "sim" da origem reentregue depois dela recebe o texto neutro. L-b11: com a flag ligada, um "sim" velho reentregue (qualquer forma de
 `is_confirm`: "sim", "ok", "beleza", "s"...) recebe o texto neutro `SIM_JA_RECEBIDO` com ou sem pendência, inclusive
 quando a pendência viva da IA não é declaração (meta, apagar) e quando ele tinha respondido o roteador; o "não" velho
-recebe a confirmação viva da declaração (4A) ou, sem ela, só `NAO_JA_RECEBIDO` (não cancela uma pendência de outro tipo). L-b12: a
-declaração gravada pelo roteador não usa o livro (DP-7). Relação com a DP-7: este PR fecha o caso do id já registrado no
-livro como resposta (C11: o áudio "sim" retranscrito como gasto não grava pelo roteador); o resto da DP-7, o áudio
-retranscrito de uma mensagem que NÃO era resposta (por exemplo um gasto falado transcrito com outro valor), continua
-pendente.
+recebe a confirmação viva da declaração (4A) ou, sem ela, só `NAO_JA_RECEBIDO` (não cancela uma pendência de outro tipo). L-b12 (fechado pela #1315,
+DP-9): a declaração gravada pelo roteador não usava o livro (DP-7). O b1 fechou o caso do id já registrado no livro como
+resposta (C11); a #1315 fecha o resto: a ação do roteador entra no livro ao armar, e a reentrega do gasto (falado ou
+digitado, com a transcrição que for) é reconhecida pelo id antes da transcrição.
 L-b13: a falha no meio da gravação desfaz tudo, mas a pendência já foi consumida (e a ação fica `descartada`): um "sim"
 novo cai no "Não entendi" e a reentrega da mensagem original dá T19, texto inexato nesse caso; era igual antes do b1.
 L-b14: na corrida do mesmo "sim" em dois processos, quem perde recebe o texto neutro no WhatsApp e no Discord (o
@@ -535,7 +534,153 @@ com um texto que fala de cartão de crédito. Sem mudança de código no b1.
 Fecharam: L-b1 (reentrega tardia dá T19), L-b2 e L-b7 (o livro sobrevive ao apagar). L-b10 deixou de existir (D9 = B).
 
 **b2, pendente:** o app Expo manda `client_message_id` (um por mensagem, o mesmo no reenvio pós-401), junto do build da
-#1244; até lá, com a flag ligada, o chat do app recebe T18. Ligar a flag segue bloqueado por #1315, DP-5, DP-6, DP-7 e #1244.
+#1244; até lá, com a flag ligada, o chat do app recebe T18. Ligar a flag segue bloqueado por DP-5, DP-6, o par no
+app nativo (#1244), a DP-14 (a [#1405](https://github.com/JapaLcK/Bot_Financeiro/issues/1405), o “sim” falado à confirmação da IA, bloqueia quando a `WA_IA_PRIMEIRO` estiver ligada para os mesmos usuários), a [#1512](https://github.com/JapaLcK/Bot_Financeiro/issues/1512) (o botão velho de declaração sai com os botões Sim/Não de um “apagar #N” pendente, e um toque apaga o lançamento) e a validação final da #1315 em staging (seção seguinte), a mesma lista da seção “Leitura do valor da
+declaração (DP-10)”.
+
+## #1315: o roteador confirma o valor antes de gravar
+
+O PR-1 da [#1315](https://github.com/JapaLcK/Bot_Financeiro/issues/1315) fica atrás da mesma flag. O PR-2 ([#1404](https://github.com/JapaLcK/Bot_Financeiro/issues/1404), aceitar “1,5k”) entra
+só depois do merge deste: afrouxar o leitor antes da confirmação gravaria “anel 18k” como R$ 18.000,00 sem pergunta.
+Decisões do dono de 2026-11-09 (`.time-dev/1315/decisoes-dono.md`): DP-1, DP-3, DP-4, DP-6, DP-7 A (+ DP-7b), DP-8 A,
+DP-9 A, DP-11, DP-12 A, DP-13, DP-14 condicional; R2-1 A, R2-2 B sem margem, R2-3 A a R2-7 A; sobre o Tester, T-4 A,
+T-5 A e T-6 A; sobre o Tester r2 (2026-11-10), R3-1 A (com os dois ajustes), R3-2 A e R3-3 A; sobre o Tester r3 (2026-11-10),
+R4-1 A a R4-5 A; sobre o Manager, M-1 A, M-1b A, M-6 A, M-8 A e M2-3 A (o PR-1 sai com a flag desligada; a #1512 bloqueia ligá-la). Fora deste PR, em issues: a ordenação das demais pendências da IA pelo horário, o “não” antigo a uma
+pendência da IA sem declaração envolvida (T-5, [#1496](https://github.com/JapaLcK/Bot_Financeiro/issues/1496)); o
+“cancelar” nas outras confirmações do roteador ([#1480](https://github.com/JapaLcK/Bot_Financeiro/issues/1480)); o
+defeito da fila da Carteira achado pelo Tester ([#1495](https://github.com/JapaLcK/Bot_Financeiro/issues/1495)).
+
+**O que faz.** `add_from_entities` não grava a declaração do roteador (`confirmacao is None`): congela o payload no
+formato da IA (o dia efetivo incluído, então o “sim” depois da meia-noite grava o dia mostrado), anota a ação no
+mesmo livro da IA e arma a pendência `confirm_declaracao_banco` (10 min, DP-4) com a pergunta da IA, sem a nota (DP-1).
+O valor com mais de 2 casas recebe T4 antes de perguntar. A confirmação mais recente vence (DP-13, R2-6): armar a do
+roteador abandona a pendência viva da IA, e a IA armar qualquer confirmação abandona a do roteador. Onde mora:
+`core/handlers/declaracao_confirma.py` (armar e responder), `declaracao_correcao.py` (o que a mensagem é: correção,
+cortesia, início de resposta) e `declaracao_suspensao.py` (outro comando com a confirmação viva); o gancho roda em `core/handle_incoming.py` logo depois da reentrega da IA
+(texto, e o áudio depois da transcrição), antes do billing, da IA e do roteador.
+
+**A qual pergunta a resposta pertence.**
+- Botão (DP-11): o id é `decl_sim:<id>`/`decl_nao:<id>`, com o `id` da ação no livro, e só sai junto da pergunta
+  dela no mesmo corpo. O toque decide só sobre a ação do id, lida com o `user_id`: viva → grava ou descarta; já gravada
+  → T3; vencida → o texto da DP-5 (o “Não” vencido, R2-5); qualquer outro caso (substituída, cancelada, atropelada,
+  de outro usuário, inexistente) → “🐷 Esse botão é de uma confirmação que não vale mais. Não registrei nada por ele.”
+  (R2-4) com a confirmação viva repetida. Botão de outra confirmação (os ids fixos `confirm_yes`/`confirm_no`) também
+  nunca decide a da declaração.
+- “sim”/“não” digitado ou falado (R2-2 B, sem margem): só vale para a confirmação viva se o `timestamp` da Meta for
+  com certeza posterior à hora em que ela foi armada, comparados na precisão dele (segundos inteiros: o empate não
+  prova a ordem). Anterior, empate, ausente ou ilegível: não grava, “🐷 Essa resposta foi enviada antes da minha última
+  pergunta, então não registrei nada por ela.” (R2-3) e a pergunta repetida. **T-4 A:** a mesma regra vale para a
+  confirmação de declaração da IA no WhatsApp; no Discord e na web (sem `timestamp`) ela segue como antes.
+- **Formas aceitas (T-6 A, R3-2 A, R3-3 A, M-8 A):** “sim” = o `is_confirm` da IA mais “Sim, pode registrar”, “pode
+  registrar”, “sim sim” (e “sim” repetido), “simm” e o 👍 sozinho (`decl.e_sim`); “não” = o `is_cancel` mais “não,
+  obrigado”, “não registra”, “cancela isso”, “não não”, “nope” (`decl.e_nao`). As formas completas valem só no
+  WhatsApp, nas duas portas (roteador e a confirmação de declaração da IA), digitadas ou faladas, com o horário e a
+  reentrega (o livro as anota); no Discord e na web fica o `is_confirm`/`is_cancel` da base. O `confirm.no` do
+  classificador também vale como “não”: no gancho, para a resposta que começa por sim/não/👍 e traz outra coisa (o
+  classificador com o LLM roda só nesse caso, limiar 0,85); no fluxo, quando o roteador lê `confirm.no` sem pendência
+  (`intent_router.NADA_A_CANCELAR`, o classificador já passou do 0,55 da IA), com o horário conferido no fim do turno.
+- **Cortesia (M-1 A):** cortesia sozinha (“obrigado”, “valeu”, “por favor”, “sim, obrigado”) repete a pergunta;
+  cortesia seguida de comando (“ok, qual meu saldo?”, “isso, e meu saldo?”, “não, quero ver meu saldo”) é outro
+  comando. “ok” e “beleza” sozinhos são “sim” (`is_confirm` da IA). O início de resposta (“sim”, “não”, “isso”, “ok”…)
+  sai das formas de “sim”/“não” da IA e das completas, sem as letras soltas “s” e “n”.
+- **Alteração de valor (ajuste do dono à R3-1, R4-4, R4-5):** é correção o “sim”/“não”/👍 seguido de mudança
+  (“sim, mas foi 60”, “não, foi 60”, “👍 mas foi 60”, “sim sim, 60”) e, com a confirmação viva, a mensagem que começa
+  por “foi”, “foram”, “era”, “é”, “na verdade” ou “o valor”, ou por um valor (“foi 60”, “o valor é 60”, “60”, “60
+  ontem”). O vocabulário é uma lista só (`declaracao_correcao`), e a mensagem inteira é lida: nada dela é descartado. A
+  confirmação viva (das duas portas) é invalidada PRIMEIRO. Se a correção é só um valor, nasce outra, do roteador, com
+  ele e o mesmo tipo, alvo, nota, dia e categoria; a identidade da nova ação no livro é a mensagem da correção
+  (`<canal>:<hmac do id dela>:0`). A reentrega da mensagem original responde T19 (a ação dela foi encerrada); a da
+  correção repete a nova pergunta enquanto viva, T3 depois do “sim”, T19 depois do “não”. “Só um valor”: tirando as
+  palavras que abrem a correção e “mas”, “e”, “R$”, “reais”, sobra um número só, em dígitos
+  (“60”, “60,50”, “1.500”) ou por extenso (“sessenta e cinco”, “2 mil”), que o leitor estrito lê com certeza, com até
+  2 casas, maior que zero e abaixo do teto. Qualquer outra palavra (data, alvo, forma, “uns”, “ou”, “-60”, “1,5k”,
+  “6o”) não é: “🐷 Não registrei: não consegui interpretar toda a correção. Cancelei a confirmação anterior. Me manda o
+  gasto completo de novo, com valor, descrição, data e forma de pagamento.” (texto do dono) e nada fica para
+  confirmar. A correção que chega depois de a confirmação expirar recebe o texto de expirou dentro das 24 h, se a ação
+  ainda é a pergunta mais recente; fora disso, o fluxo de antes. Sim/não com outra coisa que não é mudança (“sim,
+  obrigado”) repete a pergunta.
+- Sem confirmação viva, a resposta pertence à última ação do livro (dentro de 24 h, R2-1) se nenhuma pendência do
+  roteador ou da IA mais nova que ela foi criada com certeza antes do envio. Responde sem consumir nada: vencida →
+  “🐷 Essa confirmação expirou. Não registrei por ela. Se quiser registrar, envie o gasto novamente.” (DP-5, também para
+  a da IA, R2-7); já gravada → T3; descartada ou atropelada → T19; o “não” → “👍 Beleza, não fiz nada.” (R2-5). Um
+  “sim” antigo nunca consome a pendência criada depois dele. Fora das 24 h, sem `timestamp` (fora do WhatsApp) ou sem
+  ação: o fluxo de antes. As 24 h limitam só esse texto; o livro e a proteção contra reentrega não têm prazo.
+- “cancelar” com a confirmação aberta é “não” (DP-12); fechada, volta a ser o comando da assinatura. O mesmo defeito nas
+  outras confirmações do roteador (apagar, recibo) é outra issue.
+- **Outra mensagem (R3-1 A e o ajuste do dono):** tudo o que não é resposta à confirmação é outro comando e segue o
+  caminho normal até a IA, como sem confirmação. A confirmação viva (das duas portas) é SUSPENSA antes de o comando
+  rodar (`declaracao_confirma.suspende`): a pendência do roteador vira `confirm_declaracao_suspensa`, com o mesmo
+  payload (a da IA sai da tabela dela e a marca leva os dados dela); no livro a ação continua `armada`. Sem coluna nem
+  estado novo no livro: “suspensa” é a marca na linha de pendências, “cancelada” é a ação `descartada`. A marca é
+  oferta de conveniência: o comando que precisar da linha a desaloja e a confirmação acaba. O “sim”/“não” (texto,
+  áudio ou botão) que chega no meio acha a marca, não grava e recebe “⏳ Ainda estou terminando sua mensagem anterior.
+  Não registrei nada por este *sim*; se eu perguntar de novo, é só responder.” (R4-2; as variantes com *sim* e com
+  *não* aprovadas pelo dono em 2026-11-10), nunca o T19. No fim do turno (`handle_incoming` → `desfecho`): o comando atendido encerra a ação
+  (`descartada`) e a resposta sai com “🔕 Cancelei a pergunta anterior.” (DP-6); o comando que não ajudou devolve a
+  MESMA ação (a mesma chave e o mesmo botão), com a resposta dele e a pergunta depois. “Não ajudou” é a resposta que
+  contém um destes textos, importados da fonte (`handle_incoming.marcas_de_nao_ajudou`, com teste): o “Não entendi
+  bem…” e o “Só consigo ajudar com finanças…” do roteador, a dica de ajuda (“Posso te ajudar com”, “Não entendi
+  exatamente”), o “Isso tá além do que consigo te dar aqui.” da IA sem ferramenta, o erro da IA, o “não entendi o que
+  registrar” do áudio, as falhas da imagem (não baixou, não analisou, sem informação financeira, recurso dos planos
+  pagos), a do anexo que não baixou ou não importou (extrato CSV/PDF, OFX e fatura) e o erro interno. Com a flag
+  desligada, o botão da confirmação encerra só a confirmação do id dele, com o texto do banco que o “sim” digitado
+  recebe, sem repetir pergunta nem botão; o botão de outra confirmação não toca outra pendência. A saudação (o intent `greeting` do classificador local) sempre
+  devolve a pergunta (R4-3). O áudio não vai à IA: o comando falado que o roteador não reconhece dá a dica de ajuda e
+  a pergunta volta. A mensagem sem texto (reação do WhatsApp, inclusive a 👍, localização, figurinha, texto vazio) não
+  mexe na confirmação (R4-1); a MENSAGEM de texto “👍” é “sim”. A pergunta aberta da IA sem pendência (a oferta “Quer ver por
+  categoria?”) conta como a pergunta mais nova na regra acima: o “sim” a ela vai à IA, não ao texto da ação do livro.
+
+**Mensagem com mais de um lançamento pelo banco (DP-7 A, DP-7b).** Dois ou mais pedaços que virariam lançamento ou
+item da fila, com valor ou sem, recebem T16 para a mensagem inteira, no texto e no áudio; a fila nunca nasce com item
+pelo banco. O ramo da fila que declarava (rodadas 10 e 11 da #1310 e os textos `FILA_CARTAO_*`) saiu.
+
+**Idempotência (DP-9, fecha a DP-7).** A ação continua sendo a mensagem que pediu o gasto (`wa:<hmac do wamid>:0`), e o
+“sim” tem a chave própria no livro. A reentrega do gasto com a confirmação viva repete a mesma pergunta; depois do
+“sim”, ou depois de apagar a declaração, responde T3 e não recria; depois do “não”, do abandono ou da expiração, T19.
+O áudio reentregue é reconhecido pelo id antes da transcrição, com qualquer texto. A Meta reentrega por até 7 dias sem
+ordem garantida e sem chave oficial de deduplicação; o livro não poda, então a proteção vale nesse prazo.
+
+**Limites.**
+- O `timestamp` da Meta é documentado como “quando o webhook foi disparado” (10 dígitos), não como a hora em que o
+  usuário enviou. A regra ordena pelo disparo do webhook, não necessariamente pelo envio: um “sim” escrito antes da
+  pergunta e entregue depois (aparelho offline, reconexão) pode chegar com `timestamp` posterior e confirmar. Que é
+  segundos é inferência dos 10 dígitos.
+- O `timestamp` vem do relógio da Meta e a hora da pergunta do Postgres (`now()`); a hora de “expirou” compara o
+  livro com o relógio do servidor da aplicação. Divergência entre esses relógios desloca a ordem na mesma medida.
+- No toque de botão a Meta manda também `context.id` (o wamid da mensagem que tinha o botão); o código não o lê, o id
+  do próprio botão basta.
+- Uma confirmação atropelada por um `set_pending_action` sem condição no mesmo turno (por exemplo o `undo_audio`) não
+  é marcada `descartada`: dentro do prazo a resposta diz T19, depois o texto de expirada.
+- Duas entregas simultâneas da mensagem que arma: as duas respondem a mesma pergunta e o “sim” grava uma (irmão do
+  L-b19; `tests/test_declaracao_b_corrida.py`).
+- A suspensão da confirmação da IA usa a linha de pendências do roteador para a marca; se ela estiver ocupada por
+  outra pergunta do roteador, a confirmação da IA sai sem a marca: o “sim” no meio recebe o T19 de sempre (nada grava)
+  e a confirmação da IA pode acabar cancelada, a mesma raiz da [#1496](https://github.com/JapaLcK/Bot_Financeiro/issues/1496).
+- Armar a confirmação do roteador derruba uma pendência viva da IA que não é declaração (por exemplo o orçamento) sem
+  o aviso “🔕”: a DP-13 (a mais recente vence) a cobre, a DP-6 (o aviso) não.
+- O “sim” mandado pelo Discord para uma confirmação do WhatsApp não grava (a recusa fica), mas responde o texto de
+  “enviada antes” da R2-3, que não é verdade nesse caso ([#1511](https://github.com/JapaLcK/Bot_Financeiro/issues/1511), M-6 A).
+- “eae”, “oi, saldo?” e a reação 👍 do WhatsApp continuam com a resposta de antes (“Não entendi…”); a confirmação fica.
+- Começa por valor (aceito pelo dono em 2026-11-10, M-1b): com a confirmação viva, a mensagem que começa por um valor
+  e traz mais que ele (descrição, data, forma) é lida como correção incompleta. Ela invalida a confirmação anterior,
+  responde `CORRECAO_INCOMPLETA`, não grava nada e não deixa confirmação. O valor sozinho (“60”, “60 reais”, “R$ 60”)
+  segue a regra do “só um valor” e arma a nova confirmação com ele. Exemplos comprovados pelo Tester: “30 padaria”,
+  “30 no uber em dinheiro” (texto e áudio: o gasto em dinheiro também não chega à Carteira), “50 reais de gasolina
+  pelo banco”, “1500 aluguel pelo pix”, “2 cafés 10”.
+- “obrigado, pode registrar” e “por favor registra” cancelam a confirmação em vez de confirmar
+  ([#1513](https://github.com/JapaLcK/Bot_Financeiro/issues/1513)).
+- O teste dos textos de “não ajudou” não cobre todos os produtores dessas respostas; o que ficar de fora é lido como
+  comando atendido e a confirmação acaba (o lado seguro: nada grava)
+  ([#1514](https://github.com/JapaLcK/Bot_Financeiro/issues/1514)).
+- Com a flag desligada, o botão de uma ação já gravada responde o texto de botão velho em vez do T3; o banco fica
+  intacto.
+- A figurinha é reconhecida pelo `image/webp` que o WhatsApp manda; a foto de cupom (`image/jpeg`) é comando.
+- Os menus e botões que o `wa_runtime` atende antes do `handle_incoming` não tiram a confirmação.
+- A hora da pergunta aberta da IA é lida pelo relógio da aplicação (a idade da última mensagem do histórico).
+
+**Validação antes de ligar a flag (staging, pendente).** Casos dirigidos com webhook real: texto, áudio e toque de
+botão, conferindo o `timestamp` recebido contra a hora da pergunta, uma resposta mandada com o aparelho offline, o
+limite de tamanho do id do botão (a documentação diz até 256 caracteres; o id daqui é curto) e o título de 20.
 
 ## O que NÃO foi validado
 

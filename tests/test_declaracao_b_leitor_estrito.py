@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from core.handlers import declaracao_banco_textos as tx
-from tests._declaracao_b import (ana, carteira, declaracoes, fala, liga, manda_wamid, n_lancamentos,  # noqa: F401
+from tests._declaracao_b import (ana, carteira, declaracoes, fala_e_confirma as fala, liga, manda_e_confirma as manda_wamid, n_lancamentos,  # noqa: F401
                                  pendencia, q, sem_pergunta)
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401
 
@@ -262,27 +262,12 @@ def test_g3_positivo_grava(ana, liga, monkeypatch, modo, texto, esperado):
     assert valores(ana) == esperado and chaves(ana) == len(esperado) and carteira(ana) == 200.0
 
 
-# --- G4: a fila confere o valor que ELA grava (`_extract_valor` da resposta, com a data dentro: "05/10 50" grava R$ 5 na
-# main). O `limpa_pontuacao_final` da fila deixa "05 /10 50", que o leitor lê como dois números vizinhos (T11). ---
-@pytest.mark.parametrize("resposta,esperado", [("2 vírgula 50", T12), ("05/10 50", T11), ("1200 e 300", T11),
-                                               ("uns 1200", T17), ("1200 conto e pouco", T17), ("R$ 1200 foi 1300", T12),
-                                               ("#99pop 30", T12),  # a fila gravaria 99: só o `valor` da fila decide
-                                               ("#99pop - 30", T12),
-                                               ("2 coxinhas 10reais", T12), ("1,200", T10),
-                                               ("1200 e pouco 22h", T17), ("1200 cada", T12),  # rodada 5
-                                               ("1200 a cada", T12)])  # rodada 6
-def test_g4_fila_recusa_e_o_item_volta(ana, liga, monkeypatch, resposta, esperado):
-    fala(monkeypatch, ana, "paguei o aluguel e paguei a academia no pix")
-    r = manda_wamid(ana, resposta)[0]
-    assert esperado in r and "aluguel" in r and declaracoes(ana) == [], r
-    assert pendencia(ana) == "multi_launch_values"
-    assert "registrada pelo banco" in manda_wamid(ana, "1200")[0] and valores(ana) == [1200.0]
-
-
-@pytest.mark.parametrize("resposta", ["1200", "R$ 1.200"])
-def test_g4_fila_valor_claro_grava(ana, liga, monkeypatch, resposta):
-    fala(monkeypatch, ana, "paguei o aluguel e paguei a academia no pix")
-    assert "registrada pelo banco" in manda_wamid(ana, resposta)[0] and valores(ana) == [1200.0]
+# --- G4: a fila não declara mais (#1315, DP-7 A e DP-7b): dois gastos sem valor pelo banco são T16, sem fila. O leitor
+# da resposta da fila (rodadas da #1310) saiu com o ramo; o mesmo texto na Carteira segue perguntando o valor. ---
+def test_g4_dois_sem_valor_pelo_banco_sao_t16_sem_fila(ana, liga, monkeypatch):
+    r = fala(monkeypatch, ana, "paguei o aluguel e paguei a academia no pix")
+    assert any("um gasto por mensagem" in x for x in r), r
+    assert pendencia(ana) is None and declaracoes(ana) == []
 
 
 # --- G5: pendência de valor e de descrição (a resposta é colada ao texto e o `add` roda de novo) ---

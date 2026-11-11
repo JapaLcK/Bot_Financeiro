@@ -14,7 +14,7 @@ import pytest
 import db
 import db.bank_conferencia as conferencia
 from db.resumo_mes import totais_do_mes
-from tests._declaracao_b import ana, carteira, liga, manda_wamid, n_lancamentos, q  # noqa: F401
+from tests._declaracao_b import ana, carteira, liga, manda_e_confirma as manda_wamid, n_lancamentos, q  # noqa: F401
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401
 from tests._retrato_declaracao import BASE, casada, decl, retrato, sombra, solta, t, tid
 from tests.test_bank_movements import _bank
