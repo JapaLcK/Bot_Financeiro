@@ -122,9 +122,11 @@ _EVENTOS = {
          "[billing] rastreio checkout: log falhou: ", "[billing] meta capi checkout (trialing) falhou user={u}: ",
          "[billing] ga4 purchase (checkout) falhou user={u}: "],
         ("pro", "trialing")),
+    # A falha da comissão não é print: vira o log `affiliate_commission_failed`, coberto pela
+    # conversa real em `test_afiliado_comissao_primeira.py` (e este usuário não tem indicação).
     "invoice.paid": (
-        ["db.affiliates.record_commission_for_invoice", _CAPI, _GA4],
-        ["[affiliates] comissao falhou user={u}: ", "[billing] rastreio invoice: log falhou: ",
+        [_CAPI, _GA4],
+        ["[billing] rastreio invoice: log falhou: ",
          "[billing] meta capi invoice purchase falhou user={u}: ", "[billing] ga4 purchase (invoice) falhou user={u}: "],
         ("pro", "active")),
     "invoice.payment_failed": (
