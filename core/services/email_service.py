@@ -293,22 +293,23 @@ def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
 
 def send_agent_report_email(
     to: str, user_id: int, subject: str, content_html: str, kind: str = "",
-    text_content: str | None = None, log_subject: str = "Relatório de agente",
+    text_content: str | None = None, log_subject: str = "Relatório de agente", rotulo_cancelar: str = "",
 ) -> bool:
     """E-mail proativo dos Agentes do Piggy (ex.: manchete mensal do Repórter).
 
     Template leve/transacional + versão em texto puro + remetente pessoal
     (oi@pigbankai.com) — tudo pra cair na Principal em vez de Promoções. O
-    porquinho do agente (`kind`) vira o banner do topo.
+    porquinho do agente (`kind`) vira o banner do topo. `rotulo_cancelar` troca
+    o rodapé de descadastro (o aviso de insight diz o alcance real do link).
     """
     try:
         unsub = make_unsub_url(user_id, to)
     except RuntimeError:
         unsub = ""
-    html = _piggy_html(subject, content_html, unsub, agent_kind=kind)
+    html = _piggy_html(subject, content_html, unsub, agent_kind=kind, rotulo_cancelar=rotulo_cancelar)
     text = text_content or _html_to_text(content_html)
     if unsub:
-        text += f"\n\n—\nCancelar inscrição: {unsub}"
+        text += f"\n\n—\n{rotulo_cancelar or 'Cancelar inscrição'}: {unsub}"
     return send_email(to, subject, html, text_body=text,
                       from_addr=EMAIL_FROM_PIGGY,
                       headers=unsub_headers(unsub) if unsub else None,
@@ -465,14 +466,15 @@ _AGENT_HERO = {"xerife": "xerife_hero", "carteiro": "carteiro_hero",
                "faria_limer": "faria_limer_hero"}
 
 
-def _piggy_html(title: str, content: str, unsub_url: str = "", agent_kind: str = "") -> str:
+def _piggy_html(title: str, content: str, unsub_url: str = "", agent_kind: str = "", rotulo_cancelar: str = "") -> str:
     """Template dos agentes — dark premium com as cores da marca (preto #111 /
     rosa #FF2D8E / neon #C6F11A / off-white). Porquinho do agente num medalhão
     off-white (contorno legível no escuro), chip do agente, CTA e texto puro
     pareado pelo caller. Container largo (600) pra dar impacto."""
     base = _public_base_url()
     unsub_line = (
-        f'Não quer mais estes avisos? <a href="{unsub_url}">Cancelar inscrição</a>.'
+        (f'<a href="{unsub_url}">{rotulo_cancelar}</a>.' if rotulo_cancelar else
+         f'Não quer mais estes avisos? <a href="{unsub_url}">Cancelar inscrição</a>.')
         if unsub_url else ""
     )
     # Banner: porquinho do agente (PNG hospedado — Gmail não renderiza SVG) num
