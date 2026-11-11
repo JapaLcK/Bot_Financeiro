@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { startServer } from "./_server.mjs";
 import { CHAVE, abrirApp, ate, naArea } from "./_afiliado.mjs";
+import { dentroDaJanela, valeram } from "./_janela.mjs";
 
 let ORIGIN, server, browser;
 before(async () => { ({ proc: server, origin: ORIGIN } = await startServer()); browser = await chromium.launch(); });
@@ -24,20 +25,6 @@ after(async () => { await browser?.close(); server?.kill(); });
 const TAMANHOS = [[1280, 800], [390, 844], [320, 568]];
 const ABERTO = "#generic-confirm-overlay.open";
 const JANELA = 450; // acima da constante (400 ms)
-
-/** O 2º toque/aperto vale pelo intervalo que a PÁGINA viu entre os dois `tipo` (`performance.now()`, o relógio da janela): com a
- *  máquina carregada o runner atrasa o 2º além dos 400 ms, e aí confirmar é o certo. Fora da janela o caso é pulado, nunca dado por bom. */
-const valeram = {};
-async function dentroDaJanela(t, page, tipo, grupo, aperta) {
-  await page.evaluate((tp) => { window.__em = []; addEventListener(tp, () => window.__em.push(performance.now()), true); }, tipo);
-  await aperta();
-  const em = await page.evaluate(() => window.__em);
-  assert.equal(em.length, 2, `${tipo}: ${JSON.stringify(em)}`);
-  const ms = em[1] - em[0];
-  if (ms >= 400) { t.skip(`o 2º ${tipo} chegou ${Math.round(ms)} ms depois do 1º, fora da janela`); return false; }
-  valeram[grupo] = (valeram[grupo] || 0) + 1;
-  return true;
-}
 
 /** Na área do afiliado com a chave digitada, anotando os POSTs do saque. */
 async function naTela(opts) {
@@ -85,39 +72,45 @@ async function alinhar(page) {
 // não rola o bastante (cai na caixa) e em 320 o Sacar, mais à esquerda, cai no Cancelar. Se a medida mudar, o caso não mede mais o que diz.
 const SOB = { 1280: ["modal", "generic-confirm-overlay"], 390: ["generic-confirm-ok", "generic-confirm-overlay"], 320: ["generic-confirm-cancel", "generic-confirm-body"] };
 for (const [w, h] of TAMANHOS) {
-  test(`${w}x${h}: duplo clique no Sacar alinhado ao "Confirmar saque" deixa a confirmação aberta, sem POST`, async () => {
+  test(`${w}x${h}: duplo clique no Sacar alinhado ao "Confirmar saque" deixa a confirmação aberta, sem POST`, async (t) => {
     const { ctx, page, posts } = await naTela({ width: w, height: h });
     try {
       const { x, y, sob } = await alinhar(page);
       assert.equal(sob, SOB[w][0], "o que fica sob o Sacar alinhado");
-      await page.mouse.dblclick(x, y);
-      await page.waitForTimeout(500);
+      if (!await dentroDaJanela(t, page, "click", "duplo clique", async () => {
+        await page.mouse.dblclick(x, y);
+        await page.waitForTimeout(500);
+      })) return;
       assert.deepEqual(posts, [], `sob o Sacar: ${sob}`);
       assert.equal(await page.locator(ABERTO).count(), 1, `sob o Sacar: ${sob}`);
       assert.ok(await page.evaluate(() => !!document.activeElement?.closest("#generic-confirm-overlay")), "o foco fica no diálogo");
     } finally { await ctx.close(); }
   });
 
-  test(`${w}x${h}: duplo clique no Sacar sem alinhar deixa a confirmação aberta, sem POST`, async () => {
+  test(`${w}x${h}: duplo clique no Sacar sem alinhar deixa a confirmação aberta, sem POST`, async (t) => {
     const { ctx, page, posts } = await naTela({ width: w, height: h });
     try {
       await page.locator("#affiliate-payout-btn").scrollIntoViewIfNeeded();
       const { x, y, sob } = await sobOSacar(page);
       assert.equal(sob, SOB[w][1], "o que fica sob o Sacar");
-      await page.mouse.dblclick(x, y);
-      await page.waitForTimeout(500);
+      if (!await dentroDaJanela(t, page, "click", "duplo clique", async () => {
+        await page.mouse.dblclick(x, y);
+        await page.waitForTimeout(500);
+      })) return;
       assert.deepEqual(posts, [], `sob o Sacar: ${sob}`);
       assert.equal(await page.locator(ABERTO).count(), 1);
       assert.ok(await page.evaluate(() => !!document.activeElement?.closest("#generic-confirm-overlay")), "o foco fica no diálogo");
     } finally { await ctx.close(); }
   });
 
-  test(`${w}x${h}: duplo clique no Sacar sem chave deixa o alerta aberto`, async () => {
+  test(`${w}x${h}: duplo clique no Sacar sem chave deixa o alerta aberto`, async (t) => {
     const { ctx, page } = await naTela({ width: w, height: h });
     try {
       await page.locator("#affiliate-pix-input").fill("");
-      await page.locator("#affiliate-payout-btn").dblclick();
-      await page.waitForTimeout(500);
+      if (!await dentroDaJanela(t, page, "click", "duplo clique", async () => {
+        await page.locator("#affiliate-payout-btn").dblclick();
+        await page.waitForTimeout(500);
+      })) return;
       assert.equal(await page.locator(ABERTO).count(), 1);
       assert.match(await page.locator("#generic-confirm-body").innerText(), /Informe sua chave Pix/);
     } finally { await ctx.close(); }
@@ -230,11 +223,11 @@ for (const tecla of ["Enter", "Space"]) for (const ms of [0, 120]) {
   });
 }
 
-test("o toque, o Enter e o Espaço tiveram cada um um caso dentro da janela", () => assert.deepEqual(Object.keys(valeram).sort(), ["Enter", "Space", "toque"]));
+test("o duplo clique, o toque, o Enter e o Espaço tiveram cada um um caso dentro da janela", () => assert.deepEqual(Object.keys(valeram).sort(), ["Enter", "Space", "duplo clique", "toque"]));
 
 // A trava de um modal fechado (Esc) antes da janela não pode soltar os botões do seguinte antes da janela DELE: o OK do 2º, aos 250 ms
 // dele, já passou dos 400 ms do 1º.
-test("modal fechado por Esc dentro da janela e outro aberto: o OK do novo não recebe clique antes da janela dele", async () => {
+test("modal fechado por Esc dentro da janela e outro aberto: o OK do novo não recebe clique antes da janela dele", async (t) => {
   const { ctx, page } = await abrirApp(browser, ORIGIN, {});
   try {
     const { x, y } = await page.evaluate(async () => {
@@ -244,6 +237,8 @@ test("modal fechado por Esc dentro da janela e outro aberto: o OK do novo não r
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       await dorme(150);
       window.__res = "pendente";
+      window.__abriu = performance.now();
+      addEventListener("click", () => { window.__clicou ??= performance.now(); }, true);
       confirmModal("Segundo").then((v) => { window.__res = v; });
       await dorme(250);
       const b = document.getElementById("generic-confirm-ok").getBoundingClientRect();
@@ -251,6 +246,8 @@ test("modal fechado por Esc dentro da janela e outro aberto: o OK do novo não r
     });
     await page.mouse.click(x, y);
     await page.waitForTimeout(50);
+    const ms = await page.evaluate(() => window.__clicou - window.__abriu); // o clique tem de cair na janela do 2º, medida na página
+    if (ms >= 400) { t.skip(`o clique chegou ${Math.round(ms)} ms depois do 2º modal, fora da janela dele`); return; }
     assert.equal(await page.evaluate(() => window.__res), "pendente");
     await page.waitForTimeout(JANELA);
     await page.mouse.click(x, y);
