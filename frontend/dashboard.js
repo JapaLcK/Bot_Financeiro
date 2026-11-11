@@ -11824,7 +11824,6 @@ function render(d) {
    PROGRAMA DE AFILIADOS — aba só aparece pra quem é afiliado
 ═══════════════════════════════════════════════════════════════════════ */
 let _affiliateCache = null;
-let _contaDaCarga = null; // o marcador de troca de conta (`webapp/src/dashboard/lib/sessao.ts`), lido no init
 const _affiliateChannel = makeFetchChannel(); // dedup + abort + geração
 
 async function _fetchAffiliate({ force = false } = {}) {
@@ -11839,7 +11838,6 @@ async function _fetchAffiliate({ force = false } = {}) {
 // Chamado no init: se o user é afiliado, mostra o item "Afiliados" no sidenav.
 async function initAffiliateNav() {
   try {
-    _contaDaCarga = getCookie("pb_conta");
     const res = await fetch(`${API}/api/affiliate/me`, { credentials: "same-origin" });
     if (!res.ok) return; // 404 = não é afiliado
     _affiliateCache = await res.json();
@@ -12105,11 +12103,25 @@ async function requestAffiliatePayout() {
   const valor = fmt(_affiliateCache?.stats?.available || 0);
   // O botão só desliga depois: o modal guarda o foco nele, e o Esc volta para lá.
   if (!await confirmModal(`Saque de ${valor} para a chave Pix ${pixKey}. Confira a chave: é para ela que o pagamento vai.`, { title: "Confirmar saque", okText: "Confirmar saque" })) return;
-  // A conta trocou noutra aba: a chave digitada aqui não vira saque da conta nova.
-  if (getCookie("pb_conta") !== _contaDaCarga) { location.reload(); return; }
   const btn = document.getElementById("affiliate-payout-btn");
   if (btn) btn.disabled = true;
   try {
+    // A conta pode ter trocado noutra aba (#1412): o servidor diz de quem é a sessão agora, e a chave digitada aqui não vira saque de outra
+    // conta. O 401 da sessão divergente é do auth-refresh.js (vai ao /login sem POST); falha de rede ou status ruim chega aqui e nada sai.
+    let dono;
+    try {
+      const v = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
+      if (!v.ok) throw new Error(String(v.status));
+      dono = (await v.json()).user_id;
+    } catch (_e) {
+      await alertModal("Não conseguimos verificar sua sessão. Esta solicitação de saque não foi enviada. Tente novamente.", { title: "Saque" });
+      return;
+    }
+    if (Number(dono) !== Number(USER_ID)) {
+      await alertModal("A conta conectada mudou. Esta solicitação de saque não foi enviada. A página será recarregada; confira a conta antes de tentar novamente.", { title: "Saque" });
+      location.reload();
+      return;
+    }
     const res = await fetch(`${API}/api/affiliate/payout`, {
       method: "POST",
       credentials: "same-origin",

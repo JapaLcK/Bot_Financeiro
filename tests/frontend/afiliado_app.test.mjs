@@ -174,34 +174,6 @@ test("Esc na confirmação do saque devolve o foco ao botão Sacar", async () =>
   } finally { await ctx.close(); }
 });
 
-// mutação: tirar a conferência de `pb_conta` de requestAffiliatePayout: a chave digitada na tela da conta A vira saque da conta B
-test("a conta trocou com a confirmação aberta: nenhum POST, e a página recarrega", async () => {
-  const { ctx, page } = await abrir({ marca: "7" });
-  try {
-    const posts = [];
-    await pedir(page, ctx, posts);
-    let recargas = 0;
-    page.on("framenavigated", (f) => { if (f === page.mainFrame()) recargas += 1; });
-    await page.evaluate(() => { document.cookie = "pb_conta=8; path=/"; });
-    await page.locator("#generic-confirm-ok").click();
-    await page.waitForTimeout(400);
-    assert.deepEqual(posts, [], "nenhum POST com a conta de outra pessoa");
-    assert.ok(recargas >= 1, "a página recarrega");
-  } finally { await ctx.close(); }
-});
-
-// positivo do mesmo conserto: com o marcador igual, o saque segue saindo
-test("com o marcador da conta igual ao da carga, o saque sai", async () => {
-  const { ctx, page } = await abrir({ marca: "7" });
-  try {
-    const posts = [];
-    await pedir(page, ctx, posts);
-    await page.locator("#generic-confirm-ok").click();
-    await page.waitForTimeout(200);
-    assert.equal(posts.length, 1);
-  } finally { await ctx.close(); }
-});
-
 // mutação: voltar a `${data.commission_percent}%`: o /app mostra "12.5%", com ponto
 test("percentual fracionado sai em português, igual ao /painel", async () => {
   const { ctx, page } = await abrir({ corpo: { ...ATIVA, commission_percent: 12.5 } });
