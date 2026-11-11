@@ -1,8 +1,9 @@
 /**
  * #1411 no frontend/modals.js (`.pig-modal`), o confirmModal da settings (e da home): o mesmo defeito do /app
  * (confirma_duplo_clique_app.test.mjs), em "Encerrar todas as outras" sessões. Na janela de `JANELA_DO_DUPLO_CLIQUE` os botões não
- * recebem ponteiro, o fundo não fecha e o Enter não confirma; o Enter repetido nunca confirma.
- * Controles negativos: tirar o `cedo()` do Enter deixa vermelho o Enter-Enter; tirar o `e.repeat`, o Enter segurado.
+ * recebem ponteiro, o fundo não fecha e o Enter/Espaço não confirma; o Enter repetido nunca confirma.
+ * Controles negativos: tirar o `cedo()` do teclado deixa vermelhos o Enter-Enter e o Espaço-Espaço; tirar o `e.repeat`, o Enter segurado;
+ * tirar o `preventDefault` do mousedown na janela deixa o foco no body depois do duplo clique; torná-lo incondicional impede selecionar o texto.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -63,6 +64,7 @@ test("settings 390x844: dois cliques em 'Encerrar todas as outras' (120 ms) não
     await page.waitForTimeout(400);
     assert.equal(await pigAberto(page), 1, "o 2º clique sobre o primário");
     assert.deepEqual(deletes, []);
+    assert.ok(await page.evaluate(() => !!document.activeElement?.closest(".pig-modal")), "o foco fica no diálogo");
     await page.keyboard.press("Escape");
     await page.mouse.click(x, y);
     await page.waitForTimeout(120);
@@ -121,5 +123,38 @@ test("settings 390x844: Enter segurado em 'Encerrar todas as outras' abre o moda
     await page.waitForTimeout(300);
     assert.equal(await pigAberto(page), 1);
     assert.deepEqual(deletes, []);
+  } finally { await ctx.close(); }
+});
+
+// O primário nasce focado e o Espaço o ativa no keyup: o 2º aperto de um Espaço-Espaço rápido confirmaria sem leitura.
+test("settings 390x844: Espaço, Espaço (120 ms) em 'Encerrar todas as outras' não confirma; Espaço passada a janela confirma", async () => {
+  const { ctx, page, deletes } = await naSettings();
+  try {
+    await page.locator("#sessions-revoke-others-btn").focus();
+    await page.keyboard.press(" ");
+    await page.waitForTimeout(120);
+    await page.keyboard.press(" ");
+    await page.waitForTimeout(300);
+    assert.equal(await pigAberto(page), 1);
+    assert.deepEqual(deletes, []);
+    await page.waitForTimeout(JANELA);
+    await page.keyboard.press(" ");
+    await page.waitForTimeout(300);
+    assert.deepEqual(deletes, [1]);
+  } finally { await ctx.close(); }
+});
+
+// O mousedown só é bloqueado na janela: depois dela, dá para selecionar e copiar o texto da confirmação.
+test("settings 390x844: passada a janela, arrastar seleciona o texto da confirmação", async () => {
+  const { ctx, page } = await naSettings();
+  try {
+    await page.locator("#sessions-revoke-others-btn").click();
+    await page.waitForTimeout(JANELA);
+    const b = await page.locator(".pig-modal-body").boundingBox();
+    await page.mouse.move(b.x + 2, b.y + 5);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.width - 5, b.y + 5, { steps: 5 });
+    await page.mouse.up();
+    assert.ok((await page.evaluate(() => String(getSelection()))).length > 5);
   } finally { await ctx.close(); }
 });

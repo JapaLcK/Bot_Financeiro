@@ -140,14 +140,17 @@
   }
 
   // O 2º clique do duplo clique que abriu o modal cai onde estava o botão de baixo; ali pode estar o primário (#1411). Na janela os
-  // botões não recebem ponteiro, o fundo não fecha e o Enter não confirma. Cópia do `JANELA_DO_DUPLO_CLIQUE` do /painel
+  // botões não recebem ponteiro, o fundo não fecha e o Enter/Espaço não confirma. Cópia do `JANELA_DO_DUPLO_CLIQUE` do /painel
   // (webapp/src/dashboard/parts/dialog.ts). Devolve "ainda na janela?".
   const JANELA_DO_DUPLO_CLIQUE = 400;
-  function travarDuploClique(acoes) {
+  function travarDuploClique(overlay, acoes) {
     const abertoEm = performance.now();
+    const cedo = () => performance.now() - abertoEm < JANELA_DO_DUPLO_CLIQUE;
     acoes.style.pointerEvents = "none";
     setTimeout(() => { acoes.style.pointerEvents = ""; }, JANELA_DO_DUPLO_CLIQUE);
-    return () => performance.now() - abertoEm < JANELA_DO_DUPLO_CLIQUE;
+    // Na janela o 2º clique cai no cartão e levaria o foco do primário para o body. Só na janela: depois dela, dá para selecionar o texto.
+    overlay.addEventListener("mousedown", (e) => { if (cedo()) e.preventDefault(); });
+    return cedo;
   }
 
   function openModal({ kind, message, opts }) {
@@ -177,7 +180,7 @@
       `;
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
-      const cedo = travarDuploClique(modal.querySelector(".pig-modal-actions"));
+      const cedo = travarDuploClique(overlay, modal.querySelector(".pig-modal-actions"));
       // Trigger animation on next frame
       requestAnimationFrame(() => overlay.classList.add("open"));
 
@@ -218,9 +221,10 @@
           if (isConfirm) close(false);
           return;
         }
+        // Enter/Espaço segurado, ou o 2º de um aperto duplo rápido no botão que abriu o modal: só o primeiro vale
+        if ((e.key === "Enter" || e.key === " ") && (e.repeat || cedo())) { e.preventDefault(); return; }
         if (e.key === "Enter") {
           e.preventDefault();
-          if (e.repeat || cedo()) return; // Enter segurado, ou o 2º de um Enter-Enter rápido: só o primeiro aperto vale
           close(isConfirm ? true : undefined);
           return;
         }

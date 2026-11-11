@@ -5,7 +5,8 @@
  * Controle negativo: tirar o `pointerEvents = "none"` de `_genericModalAbrir` deixa vermelhos os "alinhado" de 390 e 320 e os toques;
  * tirar a conta de tempo do clique no fundo deixa vermelhos o "sem alinhar" de 1280 e o alerta; tirar o `e.repeat` deixa vermelho o Enter segurado;
  * tirar a janela do teclado (`cedo`) deixa vermelhos o Enter-Enter e o Espaço-Espaço; tirar o `clearTimeout(_genericModalTrava)` deixa vermelho
- * o "fechado por Esc"; tirar o `preventDefault` do mousedown na janela deixa vermelhos os seis duplos cliques com chave (o foco cai no body).
+ * o "fechado por Esc"; tirar o `preventDefault` do mousedown na janela deixa vermelhos os seis duplos cliques com chave (o foco cai no body);
+ * torná-lo incondicional deixa vermelho o "arrastar seleciona o texto do saque".
  * O mesmo defeito no frontend/modals.js: confirma_duplo_clique_settings.test.mjs.
  */
 import { test, before, after } from "node:test";
@@ -175,6 +176,21 @@ test("Enter no 'Confirmar saque' passada a janela confirma", async () => {
     await page.keyboard.press("Enter");
     await page.waitForTimeout(300);
     assert.deepEqual(posts, [JSON.stringify({ pix_key: CHAVE })]);
+  } finally { await ctx.close(); }
+});
+
+// O mousedown só é bloqueado na janela: depois dela, dá para selecionar e copiar o texto da confirmação, onde está a chave Pix.
+test("passada a janela, arrastar seleciona o texto do saque", async () => {
+  const { ctx, page } = await naTela({});
+  try {
+    await page.locator("#affiliate-payout-btn").click();
+    await page.waitForTimeout(JANELA);
+    const b = await page.locator("#generic-confirm-body").boundingBox();
+    await page.mouse.move(b.x + 2, b.y + 5);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.width - 5, b.y + 5, { steps: 5 });
+    await page.mouse.up();
+    assert.match(await page.evaluate(() => String(getSelection())), /^Saque de R\$/);
   } finally { await ctx.close(); }
 });
 
