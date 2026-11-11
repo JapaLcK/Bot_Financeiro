@@ -1678,7 +1678,11 @@ seguem `paid`, e a `latest_charge` expandida vem com `refunded` True). Falha do 
 na consulta propaga, e forma inesperada num pagamento `paid` também levanta (falha
 FECHADO): `payment.type` diferente de `payment_intent`, `payment_intent` vazio, ou
 `latest_charge` não expandida (string, nulo, sem os campos). Nos dois casos não envia
-nem fecha, o claim expira com backoff e a próxima passada confere de novo. Depois de
+nem fecha, o claim expira com backoff e a próxima passada confere de novo. As quatro chamadas
+do job à Stripe (`list_line_items`, `Session.retrieve` e as duas de `cobrancas_da_fatura`) usam
+`cliente_stripe`: prazo de 8 s por chamada, sem retentativa (#1499). Limite: a passada não
+para na primeira falha de rede, então com a Stripe pendurada cada linha aberta custa cerca
+de 8 s. Depois de
 enviado não há o que desfazer: a linha `enviado` fica como está, e o link já saiu.
 `estornado` é final: não há botão para liberar a entrega, e liberar exige ajuste manual
 no banco; contestação GANHA continua com `disputed` True, então também segura para
@@ -2808,10 +2812,11 @@ pendência, e o novo pedido sai sem ela. Erro da Stripe ou falta de `STRIPE_SECR
 possível conferir reembolsos na Stripe agora. Tente de novo em instantes."; no "Marcar pago", mais "Se o
 Pix já saiu, use Pagamento já realizado."), sem recarregar, e o log `affiliate_payout_check_failed` com o
 saque e o tipo do erro, sem a fatura. Prazo total de 20 s (`PRAZO_CONFERENCIA_S`): estouro é 503, nunca
-500; a thread que estourou termina sozinha, e o que ela gravar é idempotente. O SDK sozinho espera até
-80 s por chamada, e não há prazo por chamada: dar um pede `StripeClient` com timeout em
-`cobrancas_da_fatura`, que o e-book também usa, ou mudar o cliente HTTP global do `stripe`, que vale para o
-processo inteiro. Por isso a conferência roda num executor próprio de `VAGAS_CONFERENCIA` (4) threads,
+500; a thread que estourou termina sozinha, e o que ela gravar é idempotente. Cada chamada da conferência
+(`cobrancas_da_fatura` e `Dispute.list`) usa `cliente_stripe` (`core/services/ebook_entrega.py`):
+`StripeClient` próprio, com prazo de 8 s (`PRAZO_STRIPE_S`) e sem retentativa, em vez dos 80 s × 3 do SDK;
+o cliente global do `stripe` não muda (#1499). Mesmo assim a thread segura a vaga durante a consulta, e por
+isso a conferência roda num executor próprio de `VAGAS_CONFERENCIA` (4) threads,
 nunca no padrão do asyncio, que as outras rotas usam via `to_thread`; com as vagas ocupadas por consultas
 presas, o QR e o "Marcar pago" recusam com o mesmo 503 na hora, sem consultar, e o "Pagamento já
 realizado" registra e marca. Depois da consulta, o QR relê o saque inteiro: rejeitado, pago, bloqueado ou
@@ -2827,7 +2832,8 @@ fora no "Pagamento já realizado": não há comissão para marcar, e com o webho
 reconfere sozinho; o script percorre as linhas com `paid_cents` (lido no código, não medido neste caso).
 (c) Sem limite de faturas por saque: muitas comissões caem no 503, e o admin tenta de novo; não medido
 com número real. (d) Com a Stripe presa, só 4 conferências rodam por vez no processo: a quinta recebe 503
-até uma thread soltar, o que pode levar os 80 s do SDK. Medido em 2026-11-09 com servidor real e a Stripe
+até uma thread soltar, o que leva cerca de 8 s por fatura (16 s se a Stripe responder a primeira chamada e
+prender a segunda; por leitura, não medido contra a Stripe real). Medido em 2026-11-09 com servidor real e a Stripe
 falsa presa por 30 s, 40 cliques de QR: `GET /admin/api/affiliates` no meio levou 10 ms (antes, 18,5 s)
 e `/admin/api/overview`, 21 ms (antes, 100 s). Remedir antes de reusar.
 

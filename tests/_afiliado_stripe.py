@@ -9,6 +9,8 @@ Sem prefixo `test_`: o pytest não coleta este arquivo.
 import time
 from types import SimpleNamespace
 
+from _stripe_cliente_falso import instalar
+
 
 def simular_stripe(monkeypatch, stripe_mod=None, por_pagamento=None):
     if stripe_mod is None:
@@ -39,6 +41,7 @@ def simular_stripe(monkeypatch, stripe_mod=None, por_pagamento=None):
             monkeypatch.setattr(stripe_mod, nome, type(nome, (), {}), raising=False)
         monkeypatch.setattr(getattr(stripe_mod, nome), metodo, staticmethod(funcao), raising=False)
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_xxx")
+    instalar(monkeypatch)  # o `cliente_stripe` de produção cai nestes falsos (#1499)
     f.cobra = lambda fatura, devolvido=0, amount=100_000, disputed=False: f.cobrancas.__setitem__(
         fatura, {"amount": amount, "amount_refunded": devolvido, "disputed": disputed})
     return f

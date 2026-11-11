@@ -27,13 +27,23 @@ from db.ebook_entregas import abertas, fechar, reivindicar
 from db.google_auth import conta_sem_credencial
 
 
+PRAZO_STRIPE_S = 8  # por chamada, sem retentativa: distingue lenta de pendurada (o mesmo do `funil_fonte_stripe`)
+
+
+def cliente_stripe(key: str):
+    """Cliente próprio, com prazo curto e sem retentativa: não herda os 80 s × 3 do SDK nem muda o global
+    (#1499). Quem falha é a linha ou a conferência, e quem tenta de novo é o próximo ciclo ou o admin."""
+    import stripe  # noqa: PLC0415
+
+    return stripe.StripeClient(key, http_client=stripe.RequestsClient(timeout=PRAZO_STRIPE_S),
+                               max_network_retries=0)
+
+
 def _compra_estornada(sid: str, key: str) -> bool:
     """Estorno (parcial ou total, D2) ou contestação (D3) na cobrança da compra.
     Sem fatura ou sem pagamento (cupom 100%) → False. Erro do Stripe propaga:
     quem chama não envia nem fecha, e o claim expira."""
-    import stripe  # noqa: PLC0415
-
-    inv = _ler(stripe.checkout.Session.retrieve(sid, api_key=key), "invoice")
+    inv = _ler(cliente_stripe(key).v1.checkout.sessions.retrieve(sid), "invoice")
     inv = _ler(inv, "id") or inv          # id ou objeto expandido
     if not inv:
         return False
@@ -43,29 +53,26 @@ def cobrancas_da_fatura(inv: str, key: str):
     """As cobranças dos pagamentos pagos da fatura. Forma inesperada num pagamento pago
     levanta (falha FECHADO): por isso o acesso direto por `[...]`, e não o `_ler`, que
     leria "sem estorno"."""
-    import stripe  # noqa: PLC0415
-
+    c = cliente_stripe(key)
     # `limit=100`: tentativas antes da paga somam linhas; o padrão 10 deixaria
     # o pagamento pago fora da página e o estorno passaria batido.
-    for pag in stripe.InvoicePayment.list(invoice=inv, api_key=key, limit=100)["data"]:
+    for pag in c.v1.invoice_payments.list(params={"invoice": inv, "limit": 100})["data"]:
         if pag["status"] != "paid":       # open/canceled; estornado continua "paid"
             continue
         pagamento = pag["payment"]
         if pagamento["type"] != "payment_intent" or not pagamento["payment_intent"]:
             raise RuntimeError(f"pagamento de forma inesperada: {pagamento['type']}")
-        ch = stripe.PaymentIntent.retrieve(
-            pagamento["payment_intent"], expand=["latest_charge"], api_key=key)["latest_charge"]
+        ch = c.v1.payment_intents.retrieve(
+            pagamento["payment_intent"], params={"expand": ["latest_charge"]})["latest_charge"]
         if isinstance(ch, str) or ch is None:
             raise RuntimeError("latest_charge não veio expandida")
         yield ch
 
 
 def _conferir_stripe(sid: str, preco: str, key: str) -> tuple[str, str | None]:
-    import stripe  # noqa: PLC0415
-
     # `limit=100`: o padrão do Stripe é 10, e plano + 10 extras são 11 linhas —
     # a que ficasse fora da página fecharia `nao_comprou` para sempre.
-    itens = stripe.checkout.Session.list_line_items(sid, api_key=key, limit=100)
+    itens = cliente_stripe(key).v1.checkout.sessions.line_items.list(sid, params={"limit": 100})
     item = next((i for i in itens["data"] if i["price"]["id"] == preco), None)
     if item is None:
         return "nao_comprou", None
