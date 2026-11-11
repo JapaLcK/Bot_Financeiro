@@ -223,6 +223,7 @@ _LACOS_ESPERADOS = {
     "core/services/open_finance_proactive.py::run_reconnect_notifications",
     "core/services/open_finance_proactive.py::run_reconnect_push",
     "core/services/piggy_agents.py::run_agent_emails_once",
+    "core/services/insights_notificacao.py::run_insight_emails_once",
     "core/services/engagement_scheduler.py::_check_and_send",
     "core/services/payment_reminder.py::check_payment_reminder",
     "core/services/declaracao_lembrete.py::notify_declaracoes_whatsapp_once",

@@ -153,11 +153,12 @@ def _conta(monkeypatch):
 
 
 def test_rajada_lenta_recusa_na_hora_sem_consultar(adm, mundo, monkeypatch):
-    """Stripe lenta (o SDK espera até 80 s por chamada): a conferência roda num executor próprio de
-    `VAGAS_CONFERENCIA` threads, nunca no executor padrão que as outras rotas usam via `to_thread`. Cheio,
-    o QR recusa com 503 na hora, sem consultar."""
+    """Stripe lenta: o prazo por chamada (#1499) limita a espera, mas a vaga fica presa durante a consulta.
+    A conferência roda num executor próprio de 4 threads, nunca no executor padrão que as outras rotas usam
+    via `to_thread`. Cheio, o QR recusa com 503 na hora, sem consultar. Literal 4: lendo a constante, o
+    teste acompanhava a mutação dela (#1507); `test_vagas_conferencia_fixadas` a fixa."""
     monkeypatch.setattr(admin_dashboard, "PRAZO_CONFERENCIA_S", 0.3)
-    vagas = getattr(admin_dashboard, "VAGAS_CONFERENCIA", 4)
+    vagas = 4
     conta = _conta(monkeypatch)
     c = _afiliado()
     _, _, saque = _dois(c)

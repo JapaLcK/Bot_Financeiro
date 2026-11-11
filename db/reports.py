@@ -582,6 +582,16 @@ def retirar_adesao_sem_direito(user_id: int, motivo: str, cur=None, *, so_o_recu
     return retirou
 
 
+# A parte SQL do portão do aviso de insight, sobre `auth_accounts` (sem alias, sem outra tabela no FROM).
+# `insight_email_permitido` e os enumeradores do envio (`db.insight_estado.list_users_*`) usam ESTE texto:
+# um dialeto só (§0.7). `plan_gate_ok` fica em Python, por usuário.
+PERMITIDO_SQL = """(insight_aviso_aderiu_em IS NOT NULL
+    AND NOT insight_email_opt_out
+    AND NOT engagement_opt_out
+    AND coalesce(deletion_status, '') NOT IN ('scheduled', 'processing')
+    AND (insight_aviso_coberto_ate IS NULL OR insight_aviso_coberto_ate >= now()))"""
+
+
 def insight_email_permitido(user_id: int) -> bool:
     """O portão de consentimento do envio do aviso de insight (PR 2 do PL-06 B6).
 
@@ -592,18 +602,7 @@ def insight_email_permitido(user_id: int) -> bool:
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT insight_aviso_aderiu_em IS NOT NULL
-                       AND NOT insight_email_opt_out
-                       AND NOT engagement_opt_out
-                       AND coalesce(deletion_status, '') NOT IN ('scheduled', 'processing')
-                       AND (insight_aviso_coberto_ate IS NULL OR insight_aviso_coberto_ate >= now())
-                       AS permitido
-                FROM auth_accounts WHERE user_id = %s
-                """,
-                (int(user_id),),
-            )
+            cur.execute(f"SELECT {PERMITIDO_SQL} AS permitido FROM auth_accounts WHERE user_id = %s", (int(user_id),))
             row = cur.fetchone()
     if not (row and row["permitido"]):
         return False

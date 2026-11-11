@@ -6,6 +6,9 @@ Dispensar grava como referência a severidade (e a medida) que o usuário VIU; a
 (`insights_contrato.projetar`) esconde o dispensado que não piorou além disso (D4). A chave é a de `insights_contrato.chave()`: opaca, comparada inteira.
 
 `registrar`/`dispensadas` são fail-open (o feed sai, sem registro ou sem filtro); `marcar` (o PUT) levanta.
+
+O envio do aviso por e-mail (PL-06 B6, `core.services.insights_notificacao.run_insight_emails_once`) mora no fim: o
+claim do dia e a pendência em `daily_report_prefs`, a última gravidade avisada em `notificado_*`. Tudo estrito (levanta).
 """
 from __future__ import annotations
 
@@ -15,6 +18,7 @@ from decimal import Decimal
 from core.services.insights_contrato import medida
 
 from .connection import get_conn
+from .reports import PERMITIDO_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -107,3 +111,103 @@ def marcar(user_id: int, chave: str, *, dispensado: bool | None, util: bool | No
     if row["dispensado"] is None:
         raise ValorObrigatorio(chave)
     return {"dispensado": row["dispensado"], "util": row["util"]}
+
+
+# ── Envio do aviso por e-mail (PL-06 B6) ─────────────────────────────────────────────────────────────────
+
+def _ids(sql: str, args: tuple) -> list[int]:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, args)
+        return [int(r["user_id"]) for r in cur.fetchall()]
+
+
+def list_users_for_insight_email(dia) -> list[int]:
+    """Rodada diária: o portão em SQL (`PERMITIDO_SQL`, o mesmo do `insight_email_permitido`), com e-mail e sem claim em `dia`."""
+    return _ids(
+        f"""select distinct a.user_id from auth_accounts a
+            where {PERMITIDO_SQL} and (nullif(a.email, '') is not null or a.email_enc is not null)
+              and not exists (select 1 from daily_report_prefs p
+                              where p.user_id = a.user_id and p.last_insight_email_date = %s)
+            order by a.user_id""", (dia,))
+
+
+def list_users_insight_email_pendente(dia) -> list[int]:
+    """Rodadas de pendentes: quem tem claim em `dia` e chaves de um e-mail montado que não saiu."""
+    return _ids(
+        f"""select distinct a.user_id from auth_accounts a
+            where {PERMITIDO_SQL}
+              and exists (select 1 from daily_report_prefs p where p.user_id = a.user_id
+                          and p.last_insight_email_date = %s and cardinality(p.insight_email_pendente) > 0)
+            order by a.user_id""", (dia,))
+
+
+def reivindicar_dia(user_id: int, dia) -> bool:
+    """Claim atômico do dia (uma réplica ganha); zera a pendência de ontem. Não liga relatório nenhum: linha
+    ausente em `daily_report_prefs` já vale como ligada."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """insert into daily_report_prefs (user_id, last_insight_email_date) values (%s, %s)
+               on conflict (user_id) do update
+                 set last_insight_email_date = excluded.last_insight_email_date, insight_email_pendente = null
+                 where daily_report_prefs.last_insight_email_date is distinct from excluded.last_insight_email_date
+               returning user_id""", (user_id, dia))
+        ganhou = cur.fetchone() is not None
+        conn.commit()
+    return ganhou
+
+
+def devolver_dia(user_id: int, dia) -> None:
+    """Desfaz o claim de `dia` (falha antes de montar o e-mail): só se ainda é o dele."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update daily_report_prefs set last_insight_email_date = null"
+                    " where user_id = %s and last_insight_email_date = %s", (user_id, dia))
+        conn.commit()
+
+
+def guardar_pendente(user_id: int, dia, chaves: list[str]) -> None:
+    """As chaves do e-mail que não saiu, só sob o claim de `dia`. Nunca vão a log."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update daily_report_prefs set insight_email_pendente = %s"
+                    " where user_id = %s and last_insight_email_date = %s", (list(chaves), user_id, dia))
+        conn.commit()
+
+
+def pegar_pendente(user_id: int, dia) -> list[str]:
+    """Tira as chaves pendentes de `dia` da linha e as devolve, atômico: de duas réplicas, só uma as pega."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """with o as (select insight_email_pendente as chaves from daily_report_prefs
+                          where user_id = %(u)s and last_insight_email_date = %(d)s
+                            and cardinality(insight_email_pendente) > 0
+                          for update)
+               update daily_report_prefs set insight_email_pendente = null
+               where user_id = %(u)s and exists (select 1 from o)
+               returning (select chaves from o)""", {"u": user_id, "d": dia})
+        row = cur.fetchone()
+        conn.commit()
+    return list(row["chaves"]) if row else []
+
+
+def estado_de_envio(user_id: int, chaves: list[str]) -> dict[str, dict]:
+    """chave -> dispensa e último aviso, só das chaves pedidas do próprio usuário. Estrita, ao contrário de `dispensadas`."""
+    if not chaves:
+        return {}
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select chave, dispensado_em, dispensado_severidade, dispensado_valor, notificado_em, notificado_severidade"
+            " from insight_estado where user_id = %s and chave = any(%s)", (user_id, list(chaves)))
+        return {r["chave"]: dict(r) for r in cur.fetchall()}
+
+
+def marcar_notificados(user_id: int, itens: list[dict]) -> None:
+    """Grava a gravidade avisada (por e-mail ou coberta por outro canal) de cada item. Uma linha por chave,
+    em ordem fixa de lock, como o `registrar`."""
+    lote = dict(sorted({it["key"]: it["severity"] for it in reversed(itens)}.items()))
+    if not lote:
+        return
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """update insight_estado e set notificado_em = now(), notificado_severidade = x.s
+               from unnest(%s::text[], %s::text[]) as x(c, s)
+               where e.user_id = %s and e.chave = x.c""", (list(lote), list(lote.values()), user_id))
+        conn.commit()

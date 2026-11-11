@@ -736,6 +736,14 @@ def init_db():
         """
         alter table daily_report_prefs add column if not exists monthly_enabled boolean not null default true;
         """,
+        # PL-06 B6 (envio): o claim do dia do aviso de insight por e-mail e as chaves do e-mail montado
+        # cujo envio falhou (só elas voltam nas rodadas de pendentes). Dono, reset, export e merge: os da tabela.
+        """
+        alter table daily_report_prefs add column if not exists last_insight_email_date date;
+        """,
+        """
+        alter table daily_report_prefs add column if not exists insight_email_pendente text[];
+        """,
 
         # -----------------------------
         # Credit cards
@@ -2044,6 +2052,13 @@ def init_db():
           primary key (user_id, chave),
           check ((dispensado_em is null) = (dispensado_severidade is null))
         )
+        """,
+        # PL-06 B6 (envio): a última gravidade avisada por e-mail (ou coberta por outro canal) de cada chave.
+        """
+        alter table insight_estado add column if not exists notificado_em timestamptz
+        """,
+        """
+        alter table insight_estado add column if not exists notificado_severidade text
         """,
 
         # ─── Refresh tokens (auth: access curto 15min + refresh longo 14d) ─────

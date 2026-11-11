@@ -1678,7 +1678,11 @@ seguem `paid`, e a `latest_charge` expandida vem com `refunded` True). Falha do 
 na consulta propaga, e forma inesperada num pagamento `paid` também levanta (falha
 FECHADO): `payment.type` diferente de `payment_intent`, `payment_intent` vazio, ou
 `latest_charge` não expandida (string, nulo, sem os campos). Nos dois casos não envia
-nem fecha, o claim expira com backoff e a próxima passada confere de novo. Depois de
+nem fecha, o claim expira com backoff e a próxima passada confere de novo. As quatro chamadas
+do job à Stripe (`list_line_items`, `Session.retrieve` e as duas de `cobrancas_da_fatura`) usam
+`cliente_stripe`: prazo de 8 s por chamada, sem retentativa (#1499). Limite: a passada não
+para na primeira falha de rede, então com a Stripe pendurada cada linha aberta custa cerca
+de 8 s. Depois de
 enviado não há o que desfazer: a linha `enviado` fica como está, e o link já saiu.
 `estornado` é final: não há botão para liberar a entrega, e liberar exige ajuste manual
 no banco; contestação GANHA continua com `disputed` True, então também segura para
@@ -2500,7 +2504,7 @@ agente, mudança de plano), com link de descadastro (`make_unsub_url` + `unsub_h
 
 Falha de e-mail é silenciosa por contrato: loga e não quebra o fluxo principal.
 
-**Aviso de insight por e-mail (PL-06 B6, adesão no PR 1; o envio é o PR 2).** Só recebe quem aderiu no interruptor "Avisos do
+**Aviso de insight por e-mail (PL-06 B6: adesão no PR 1, envio no PR 2).** Só recebe quem aderiu no interruptor "Avisos do
 Piggy por e-mail" (`/settings` e `/painel`): `auth_accounts.insight_aviso_aderiu_em`, nula = não aderiu, sem default nem backfill, então
 `insight_email_opt_out = false` não é adesão (P4 (c)). `GET /settings/{uid}/notifications` manda `insight_alert_email_enabled` (a adesão gravada, leitura
 direta), `insight_alert_email_available` (`plan_gate_ok(uid, "insights")`), `insight_alert_email_notice` (`texto_adesao()` de
@@ -2514,7 +2518,7 @@ Sem plano, o 402 `subscription_required` do `GET` traz `insight_alert_email_enab
 `/settings` mostra "Desligar agora", sem interruptor, com o texto da margem (cópia de `AVISO_SEM_PLANO` no HTML, comparada por teste). O `/painel` não tem esse caminho: conta cortada é mandada para `/precos` pelo gate
 da página. O link "Cancelar inscrição" do e-mail continua desligando tudo.
 `INSIGHT_EMAIL_USERS` (`liberado`, lida a cada chamada): vazia ou ausente = ninguém, ids por vírgula comparados como texto; `*` não libera ninguém enquanto
-`AVISO_ABERTO_A_TODOS` for falsa (trava do app nativo, que ainda retira a adesão em silêncio; virar a constante exige o laço do PR 2 e o PR 3, e um teste cobra).
+`AVISO_ABERTO_A_TODOS` for falsa (trava do app nativo, que ainda retira a adesão em silêncio; virar a constante exige o PR 3, e um teste cobra).
 Cancelar retira a adesão e nada a devolve sem o interruptor (P7 (b)): `set_engagement_opt_out(uid, True)` (chat "parar emails", `PATCH engagement_email_enabled`,
 `/unsubscribe`) e `set_insight_email_opt_out(uid, True)` apagam a coluna na mesma transação; "reativar emails" e religar os interruptores não a tocam. Chat e página do
 `/unsubscribe` dizem que os avisos só voltam ligando de novo, para quem pode religar (`orientacao_aviso`). **Perder o direito (D1, §12 a §15 do plano B6):** o gatilho `trg_insight_aviso_direito`
@@ -2540,8 +2544,28 @@ comissão de afiliado (#1418): reembolso no Stripe sem cancelar a assinatura nã
 `plan_gate_ok`, mas o gatilho segue por tier, então ligar responde 409 "Ligue Insights financeiros primeiro." (mensagem errada; nada é gravado e o e-mail segue bloqueado);
 issue #1481.
 "Recomeçar do zero" limpa a adesão (P6 (a)); no merge ela anda com a linha de `auth_accounts`; o export leva a adesão VIVA e a cobertura em `conta_login`. `db.insight_email_permitido(uid)`
-é o portão do envio: adesão, flags, fora de exclusão, marca em dia e `plan_gate_ok`; conta ausente False, erro sobe. Testes: `tests/test_insights_adesao*.py`,
-`tests/frontend/notificacoes_aviso_insight.test.mjs`.
+é o portão do envio: adesão, flags, fora de exclusão, marca em dia e `plan_gate_ok`; conta ausente False, erro sobe. A parte SQL dele é `db.reports.PERMITIDO_SQL`, a mesma
+dos enumeradores do envio (um dialeto). Testes: `tests/test_insights_adesao*.py`, `tests/frontend/notificacoes_aviso_insight.test.mjs`.
+**O envio (PR 2, §17 do plano B6)** é `core/services/insights_notificacao.run_insight_emails_once`, a cada 15 min no fuso do app (`utils_date._tz`): das 10h às 10h59
+(`HORA_ENVIO`) a rodada diária enumera quem passa no `PERMITIDO_SQL`, tem e-mail e não tem claim no dia (`db.insight_estado.list_users_for_insight_email`); por usuário,
+`liberado` → `filtrar_por_acesso` → `insight_email_permitido` → claim atômico do dia (`daily_report_prefs.last_insight_email_date`) →
+`generate_ai_insights(force=True, estrito=True, sem_corte=True)` (a lista inteira, sem o corte de 6 do feed; detector em falha levanta `GeracaoIncompleta`) →
+dedupe → até `LIMITE` novos no e-mail (os de fora não são marcados e saem num dia seguinte) → portão de novo → e-mail. Das 11h às 20h59, só no 1º quarto de cada hora, só quem tem pendência (`insight_email_pendente`: as chaves de um e-mail montado que o
+Resend recusou) e só aquelas chaves: novidade depois do corte das 10h e quem aderiu depois dele ficam para amanhã. Env vazia: o laço nem consulta o banco. **Dedupe** em
+`insight_estado.notificado_em`/`notificado_severidade`: só warning e critical, com linha no estado; dispensado só volta se `piorou` (a régua do painel, com valor); já avisado
+só volta se a GRAVIDADE subiu (valor não conta). **`bill_due` coberto por outro canal** é marcado como avisado ANTES de tentar o e-mail, em todo caminho (envio, recusa, bloqueio, detector em falha), sem e-mail: WhatsApp pela evidência
+(`bill_instances.reminder_last_sent_on = hoje`, `db.bills.contas_lembradas_em`: o lembrete foi aceito pela Meta), Carteiro por **cobertura presumida pela previsão**, não por
+entrega confirmada (`carteiro_manda_email`: agente ativo, e-mail ligado, agentes liberados; só D-3 e D-0): se o e-mail do Carteiro falhar, o item fica marcado e o da B6 não
+sai. **Falhas:** falha antes de montar, inclusive detector em falha, devolve o dia (ou a pendência) e a hora das 10h tenta de novo; envio recusado guarda as chaves dos
+novos e não os marca (os cobertos já foram marcados antes); falha entre o envio e a marca repete o e-mail no dia seguinte (aceito).
+**Limites do envio (§19–§20 do plano B6), aceitos:** o dedupe entre canais NÃO é garantia absoluta. A conta pode chegar pelos dois canais quando o usuário não é processado
+no dia em que o outro canal fala: app fora das 10h00 às 10h59, detector de contas caído a hora inteira, portão fechado só naquele dia; issue #1530 (lembrete registrado por
+ocorrência). A evidência do WhatsApp só conta se o lembrete sair antes da rodada: `WA_BILL_REMINDER_HOUR` ≥ `HORA_ENVIO` duplica (o padrão 9 e a produção sem a env ficam
+antes; um teste amarra o padrão). Com a #1434 aberta, o lembrete sai e vale como evidência mesmo para quem desligou as atualizações do WhatsApp. O e-mail deduplica a
+lista inteira antes do corte de 6, então pode citar um aviso que está fora dos 6 do painel; ele leva o `title` e a `message` do feed, sem depender do painel. O e-mail usa `send_agent_report_email` com assunto e `log_subject` fixos (`ASSUNTO`), `title`/`message` do feed escapados (nunca
+`impacto`/`acoes`), "Gerenciar estes avisos" para `/settings?view=notifications`, a linha `ALCANCE_CANCELAR` (a mesma do `texto_adesao()`) e o rodapé `RODAPE_CANCELAR`
+(parâmetro `rotulo_cancelar` de `_piggy_html`; os e-mails dos agentes seguem com o rodapé antigo). Log: WARNING com `user_id` na coluna e só `causa_segura`; fim da volta
+em `insight_email_run`, só contagens. Testes: `tests/test_insights_envio*.py`.
 
 ### Push (app iOS)
 
@@ -2663,7 +2687,12 @@ em revisão" (`owed_cents`) soma toda comissão `pending`, inclusive a em revis�
 saque aberto: dois pedidos simultâneos dão um saque, e a FK do webhook que grava comissão
 não espera essa trava. Ele lê as comissões duas vezes: `for update` nas elegíveis e nova leitura
 excluindo pendência aberta, porque o webhook parcial não altera a linha da comissão, e o Postgres
-não reavalia o filtro nesse caso.
+não reavalia o filtro nesse caso. Na exportação LGPD (`db/privacy.py`): `afiliado` (com `indicacoes`,
+a mesma contagem de `stats.referrals`, e `chave_pix` decifrada, auditada em `pii_access_log` com
+`ATOR_TITULAR`), `afiliado_comissoes` (com `original_amount_cents`), `afiliado_saques` (com `chave_pix`
+do pedido) e `indicacao_recebida`; nunca `referred_user_id`, `stripe_invoice_id`,
+`pix_key_enc`/`pix_key_hash`, pendências e eventos de reembolso, nem pagamentos de indicado; linha
+indecifrável sai `(indecifrável)`, sem derrubar o ZIP.
 
 "Cadastros indicados" é `stats.referrals`; "Clientes que pagaram" é `stats.paying_clients`,
 que vem de `affiliate_referral_payments` (`db/affiliate_payments.py`) e nunca da comissão, do
@@ -2814,10 +2843,11 @@ pendência, e o novo pedido sai sem ela. Erro da Stripe ou falta de `STRIPE_SECR
 possível conferir reembolsos na Stripe agora. Tente de novo em instantes."; no "Marcar pago", mais "Se o
 Pix já saiu, use Pagamento já realizado."), sem recarregar, e o log `affiliate_payout_check_failed` com o
 saque e o tipo do erro, sem a fatura. Prazo total de 20 s (`PRAZO_CONFERENCIA_S`): estouro é 503, nunca
-500; a thread que estourou termina sozinha, e o que ela gravar é idempotente. O SDK sozinho espera até
-80 s por chamada, e não há prazo por chamada: dar um pede `StripeClient` com timeout em
-`cobrancas_da_fatura`, que o e-book também usa, ou mudar o cliente HTTP global do `stripe`, que vale para o
-processo inteiro. Por isso a conferência roda num executor próprio de `VAGAS_CONFERENCIA` (4) threads,
+500; a thread que estourou termina sozinha, e o que ela gravar é idempotente. Cada chamada da conferência
+(`cobrancas_da_fatura` e `Dispute.list`) usa `cliente_stripe` (`core/services/ebook_entrega.py`):
+`StripeClient` próprio, com prazo de 8 s (`PRAZO_STRIPE_S`) e sem retentativa, em vez dos 80 s × 3 do SDK;
+o cliente global do `stripe` não muda (#1499). Mesmo assim a thread segura a vaga durante a consulta, e por
+isso a conferência roda num executor próprio de `VAGAS_CONFERENCIA` (4) threads,
 nunca no padrão do asyncio, que as outras rotas usam via `to_thread`; com as vagas ocupadas por consultas
 presas, o QR e o "Marcar pago" recusam com o mesmo 503 na hora, sem consultar, e o "Pagamento já
 realizado" registra e marca. Depois da consulta, o QR relê o saque inteiro: rejeitado, pago, bloqueado ou
@@ -2833,7 +2863,8 @@ fora no "Pagamento já realizado": não há comissão para marcar, e com o webho
 reconfere sozinho; o script percorre as linhas com `paid_cents` (lido no código, não medido neste caso).
 (c) Sem limite de faturas por saque: muitas comissões caem no 503, e o admin tenta de novo; não medido
 com número real. (d) Com a Stripe presa, só 4 conferências rodam por vez no processo: a quinta recebe 503
-até uma thread soltar, o que pode levar os 80 s do SDK. Medido em 2026-11-09 com servidor real e a Stripe
+até uma thread soltar, o que leva cerca de 8 s por fatura (16 s se a Stripe responder a primeira chamada e
+prender a segunda; por leitura, não medido contra a Stripe real). Medido em 2026-11-09 com servidor real e a Stripe
 falsa presa por 30 s, 40 cliques de QR: `GET /admin/api/affiliates` no meio levou 10 ms (antes, 18,5 s)
 e `/admin/api/overview`, 21 ms (antes, 100 s). Remedir antes de reusar.
 
@@ -2890,7 +2921,10 @@ lá. A justificativa é texto livre: a tela orienta a não escrever nome ou docu
 seguinte não pede. Rollback: o repair volta a FK para `cascade`, e os nulos ficam.
 **Afiliado que exclui a própria conta** ("mantém, sem a pessoa", A3, D8 = B, D9 = A).
 `desvincular_afiliado` roda na transação de `delete_user_data`, depois do `_lock_user` e antes de apagar
-`affiliates`, travando na ordem afiliado, saques, comissões, pendências (a do `request_payout`). Ela
+`affiliates`, travando na ordem afiliado, saques, comissões, pendências (a do `request_payout`). Antes
+disso, e para todo usuário, ela trava em ordem de id os afiliados ligados a ele (o próprio `for update`,
+quem o indicou ou tem comissão dele `for key share`): é a ordem global entre exclusões simultâneas de
+contas ligadas por indicação, que davam deadlock nas referrals e comissões (#1414). Ela
 grava o código do afiliado nas pendências e nos saques e zera chave Pix e nota dos saques. Regra: mesmo
 comportamento de afiliado ativo. A comissão paga (N1) guarda o valor em `paid_cents`, e a de saque
 aberto guarda o vínculo ("guardar vínculo", decisão do dono): `commission_cents` e `orphan_payout_id`.
@@ -3351,7 +3385,9 @@ chave), o aviso ao admin das pendências de reembolso de afiliado (`_afiliado_al
 patrimônio (`_patrimonio_foto` → `core/services/patrimonio_foto.py`, a cada hora, a partir
 das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos`; atrás de
 `PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não
-consulta nada), e os índices das FKs (`_tarefa_fk_indexes` →
+consulta nada), o aviso de insight por e-mail (`_insight_email` →
+`core/services/insights_notificacao.run_insight_email_loop`, a cada 15 min, das 10h às 20h59 do
+fuso do app; `INSIGHT_EMAIL_USERS` vazia = não consulta nada; ver "Aviso de insight por e-mail"), e os índices das FKs (`_tarefa_fk_indexes` →
 `db/schema_repairs.ensure_fk_indexes_once`: uma vez por boot, 1 conexão do pool, sem
 retry em processo; falha vira WARNING e o próximo boot repara), e o CHECK de valor
 finito em toda coluna numérica (`_tarefa_finito_checks` →

@@ -28,6 +28,7 @@ import frontend.finance_bot_websocket_custom as dashboard
 from _apoio_auth_app import csrf
 from _billing_grants_helpers import garantir_system_event_logs
 from _afiliado_stripe import simular_stripe
+from _stripe_cliente_falso import instalar
 from core.services import admin_notify, email_service
 import core.services.afiliado_reembolso as modulo_reembolso
 from core.services.afiliado_reembolso import tratar_evento
@@ -631,6 +632,7 @@ def script(monkeypatch):
     fake = _StripeDoScript()
     monkeypatch.setitem(sys.modules, "stripe", fake)
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_xxx")
+    instalar(monkeypatch)
     return SimpleNamespace(rodar=modulo.rodar, main=modulo.main, stripe=fake)
 
 
