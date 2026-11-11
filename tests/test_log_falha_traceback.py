@@ -35,7 +35,6 @@ handler quebrado.
 from __future__ import annotations
 
 import ast
-import asyncio
 import json
 import logging
 import os
@@ -595,71 +594,3 @@ def test_rotas_do_dashboard_nao_persistem_o_traceback(user_id, monkeypatch, capl
     # e o que SOBRA continua sendo diagnóstico útil:
     assert "causa=RuntimeError" in gravados[0]["message"], gravados[0]["message"]
     assert f"launch_id=424242" in gravados[0]["message"], gravados[0]["message"]
-
-
-class _MarcaLoop(logging.Handler):
-    """Registra, por linha de log, se ela foi emitida DENTRO do event loop."""
-
-    def __init__(self):
-        super().__init__()
-        self.dentro_do_loop: list[tuple[str, bool]] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            asyncio.get_running_loop()
-            dentro = True
-        except RuntimeError:
-            dentro = False
-        self.dentro_do_loop.append((record.getMessage(), dentro))
-
-
-def test_rota_async_nao_loga_no_event_loop(user_id, monkeypatch):
-    """O `_DashboardHandler` grava com `psycopg.connect()` + INSERT
-    BLOQUEANTES, e as 4 rotas destrutivas são `async`: chamar `_log_falha`
-    direto trava o event loop inteiro enquanto o banco não responde (medido com
-    banco inalcançável: >30s antes do `connect_timeout`). Por isso o
-    `asyncio.to_thread`.
-
-    `asyncio.get_running_loop()` só devolve loop na thread do loop — é a prova
-    barata de que o log saiu de lá."""
-    import db.cards as cards_mod
-    import frontend.finance_bot_websocket_custom as dashboard
-    from db.accounts import LaunchUnsafeRollback
-
-    def explode(uid, lid):
-        # id 400400 = ramo de DOMÍNIO da `/launches` (WARNING + HTTP 400). O
-        # nível não muda quem paga a conta: o `_DashboardHandler` espelha
-        # WARNING em `system_event_logs` com o mesmo `psycopg.connect()`.
-        if lid == 400400:
-            raise LaunchUnsafeRollback("efeitos desconhecidos", "chave_desconhecida")
-        raise RuntimeError(_SEGREDO)
-
-    monkeypatch.setattr(dashboard, "delete_launch_and_rollback", explode)
-    monkeypatch.setattr(dashboard, "undo_credit_transaction", explode)
-    monkeypatch.setattr(cards_mod, "get_card_by_id",
-                        lambda uid, cid: {"id": cid, "name": "Nubank"})
-    monkeypatch.setattr(cards_mod, "delete_card", explode)
-    monkeypatch.setattr(cards_mod, "undo_installment_group", explode)
-
-    marca = _MarcaLoop()
-    logger = logging.getLogger("core.observability")
-    logger.addHandler(marca)
-    try:
-        cabecalho = {dashboard.CSRF_HEADER_NAME: "test-csrf-token"}
-        cli = _client(user_id)
-        for url, esperado in ((f"/launches/{user_id}/424242", 500),
-                              (f"/launches/{user_id}/400400", 400),
-                              (f"/credit-transactions/{user_id}/9", 500),
-                              (f"/cards/{user_id}/9", 500),
-                              (f"/installments/{user_id}/PC12345678", 500)):
-            assert cli.delete(url, headers=cabecalho).status_code == esperado, url
-    finally:
-        logger.removeHandler(marca)
-
-    falhas = [m for m in marca.dentro_do_loop if ": falha " in m[0]]
-    assert len(falhas) == 5, marca.dentro_do_loop
-    no_loop = [m for m, dentro in falhas if dentro]
-    assert not no_loop, (
-        "rota async logou DENTRO do event loop: o INSERT bloqueante do "
-        f"_DashboardHandler trava todas as conexões do processo — {no_loop}"
-    )

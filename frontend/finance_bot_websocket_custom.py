@@ -7647,10 +7647,8 @@ async def _create_billing_portal(user_id: int, customer_id: str, return_path: st
             return_url=f"{DASHBOARD_URL}{return_path}",
         )
     except stripe.error.StripeError as exc:
-        await asyncio.to_thread(
-            _log_falha, "billing_portal", user_id, exc,
-            route=route, request_id=getattr(exc, "request_id", None),
-        )
+        _log_falha("billing_portal", user_id, exc,
+                   route=route, request_id=getattr(exc, "request_id", None))
         raise HTTPException(
             status_code=502,
             detail="Não foi possível abrir o gerenciamento da assinatura agora. Tente novamente em instantes.",
@@ -8510,11 +8508,8 @@ async def delete_launch_route(
         # divergir. Condição de DOMÍNIO: frase própria, sem `str(exc)`. O `detail` é
         # renderizado pro usuário (`frontend/dashboard.js`), e o `str(exc)`
         # daqui mostrava "lançamento sem 'efeitos'" cru no modal do app.
-        # `to_thread` igual ao ramo técnico abaixo: WARNING também é espelhado
-        # em `system_event_logs` pelo `_DashboardHandler`, com o mesmo
-        # `psycopg.connect()` bloqueante — o nível não muda quem paga a conta.
-        await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
-                                nivel=logging.WARNING, launch_id=int(launch_id))
+        _log_falha("delete_launch", user_id, exc,
+                   nivel=logging.WARNING, launch_id=int(launch_id))
         # `[type(exc)]` casaria por tipo EXATO dentro de um `except` que casa por
         # `isinstance`: uma subclasse futura entraria aqui e levantaria KeyError
         # (medido: 500 com `detail=None`). O `next(...)` usa a mesma regra do `except`.
@@ -8531,10 +8526,8 @@ async def delete_launch_route(
         # nunca viu esta falha, nunca gravou pilha nenhuma. Ligar
         # `com_traceback=True` aqui não restaura rastro: CRIA persistência nova
         # do `DETAIL: Key (…)=(…)` em `system_event_logs`.
-        # `to_thread`: a rota é async e o `_DashboardHandler` grava com
-        # `psycopg.connect()` bloqueante (ver `core/system_event_log.py`).
-        await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
-                                launch_id=int(launch_id))
+        _log_falha("delete_launch", user_id, exc,
+                   launch_id=int(launch_id))
         raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     _invalidate_dashboard_current_cache(user_id)
@@ -8629,8 +8622,8 @@ async def delete_credit_transaction_route(
         # Sem traceback, mesma medição da `/launches` acima: na `main` esta rota
         # também era `HTTPException(500, f"Erro ao apagar compra: {exc}")`, que o
         # middleware deixa passar — nunca houve pilha gravada aqui para manter.
-        await asyncio.to_thread(_log_falha, "undo_credit_transaction", user_id, exc,
-                                credit_tx_id=int(tx_id))
+        _log_falha("undo_credit_transaction", user_id, exc,
+                   credit_tx_id=int(tx_id))
         raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     if result is None:

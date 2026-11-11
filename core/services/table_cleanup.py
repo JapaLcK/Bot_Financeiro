@@ -175,10 +175,5 @@ async def run_table_cleanup_loop() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # pragma: no cover - defensivo
-            # `to_thread` aqui também, e pelo MESMO motivo do `log_event`:
-            # `get_logger` deixa o `_DashboardHandler` no root logger, e o
-            # `emit` dele chama `log_system_event_sync` → `psycopg.connect` +
-            # INSERT na thread do caller. Um `logger.warning` daqui é o mesmo
-            # INSERT bloqueante, dentro do event loop do app.
-            await asyncio.to_thread(logger.warning, "[table_cleanup] erro: %s", exc)
+            logger.warning("[table_cleanup] erro: %s", exc)
         espera = _interval_hours() * 3600
