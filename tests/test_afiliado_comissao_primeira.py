@@ -31,6 +31,7 @@ Controles negativos (rodados à mão, §3 do `CLAUDE.md`; o que fica vermelho es
   T17 `except` da comissão só com `print`        → a falha some sem rastro.
   T17b conferência de volta no `try` da comissão → "não registrada" para comissão que existe.
   T18 `returning *` no insert da comissão         → `FeatureNotSupported` depois da coluna refeita.
+  T19 divisor só pelo prefixo embutido da fatura  → plano anual depois do prefixo vira divisor 1.
 """
 import re
 import threading
@@ -763,4 +764,54 @@ def test_t18_insert_da_comissao_sobrevive_a_coluna_refeita(pool_de):
         outra.execute("alter table affiliate_commissions add column payment_check_pending boolean not null default false")
     linha = record_commission_for_invoice(indicados[6].uid, f"in_{uuid.uuid4().hex[:12]}", 4990, AGORA)
     assert linha and (linha["amount_cents"], linha["paid_months"]) == (4990, 1)
+
+
+# ── T19: o plano depois do prefixo de 10 linhas (`has_more`) ────────────────
+
+def _fatura_paginada(cobrar, uid, prefixo, todas, valor, falha=False):
+    fatura = f"in_{uuid.uuid4().hex[:12]}"
+    if not falha:
+        cobrar.fake.linhas[fatura] = todas
+    _evento(cobrar, "invoice.paid", {"id": fatura, "metadata": {"finbot_user_id": str(uid)}, "subscription": "sub_afil",
+                                     "amount_paid": valor, "lines": {"data": prefixo, "has_more": True}},
+            _T_LIFE + 900)
+    return fatura
+
+
+@pytest.mark.parametrize("com_extras", [True, False], ids=["com_cadernos", "sem_cadernos"])
+def test_t19_plano_anual_fora_do_prefixo_divide_por_12(cobrar, com_extras):
+    """A fatura anual reprocessada com a assinatura já mensal: o plano só aparece em `list_lines`."""
+    sub = _fake_sub("active", "price_agora", interval="month")
+    sub["metadata"] = {"ebook_price": "price_caderno"} if com_extras else {}
+    cobrar.fake.subs["sub_afil"] = sub
+    ind = _indicado(_afiliado())
+    if com_extras:
+        prefixo = [_linha("price_caderno", 990)]
+        todas = prefixo + [_linha_de_plano("price_anual", "year")]
+        valor = 19900 + 990
+    else:  # sem cadernos na metadata, o prefixo traz só um rateio mensal
+        prefixo = [{**_linha_de_plano("price_mensal_antigo", "month"), "amount": 0}]
+        todas = prefixo + [_linha_de_plano("price_anual", "year")]
+        valor = 19900
+    fatura = _fatura_paginada(cobrar, ind.uid, prefixo, todas, valor)
+    assert cobrar.fake.listou == [fatura]
+    assert [(x["amount_cents"], x["paid_months"]) for x in _comissoes(ind.uid)] == [(1658, 12)]
+
+
+def test_t19_paginacao_que_falha_cai_em_12_com_aviso(cobrar):
+    cobrar.fake.subs["sub_afil"] = _fake_sub("active", "price_agora", interval="month")
+    ind = _indicado(_afiliado())
+    _fatura_paginada(cobrar, ind.uid, [{**_linha_de_plano("price_mensal_antigo", "month"), "amount": 0}], None, 19900,
+                     falha=True)
+    assert [x["paid_months"] for x in _comissoes(ind.uid)] == [12]
+    with get_conn() as conn:
+        avisos = conn.execute("select count(*) as n from system_event_logs where event_type = %s and user_id = %s",
+                              ("affiliate_commission_interval_unknown", ind.uid)).fetchone()["n"]
+    assert avisos == 1
+
+
+def test_t19_positivo_fatura_sem_has_more_nao_pagina(cobrar):
+    ind = _indicado(_afiliado())
+    cobrar(ind.uid, valor=4990, linhas=[_linha_de_plano("price_desconhecido", "month")])
+    assert cobrar.fake.listou == [] and [x["paid_months"] for x in _comissoes(ind.uid)] == [1]
 

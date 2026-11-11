@@ -2887,7 +2887,8 @@ comissão já registrada não muda. Base é o valor pago na primeira cobrança c
 sem os extras), gravada em `invoice_amount_cents`, com `commission_bps` e `paid_months` na linha:
 `amount = base × bps / 10000 / paid_months`, numa conta só, meio centavo para cima (`valor_da_comissao`).
 `paid_months` é 12 no plano anual: no cartão, `_meses_do_plano` lê o intervalo de cada linha de plano da PRÓPRIA fatura
-(fora os extras): no formato antigo, `price.recurring`/`plan` da linha; no `dahlia`, que só traz o id, o
+(fora os extras; todas as linhas, por `linhas_da_fatura`, que pagina com `has_more`, porque o objeto só embute
+10 e o plano pode vir depois; paginação que falha cai em 12 com log): no formato antigo, `price.recurring`/`plan` da linha; no `dahlia`, que só traz o id, o
 `recurring` do item 0 da assinatura se o id for o mesmo, senão `stripe.Price.retrieve`. Só sem linha legível
 usa a assinatura. Mensal só se todas forem mensais; intervalo desconhecido ou falha do `retrieve` cai em 12,
 o menor valor, com log `affiliate_commission_interval_unknown` (ids das linhas). O divisor só é calculado
