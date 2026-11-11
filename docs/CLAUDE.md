@@ -2663,7 +2663,12 @@ em revisão" (`owed_cents`) soma toda comissão `pending`, inclusive a em revis�
 saque aberto: dois pedidos simultâneos dão um saque, e a FK do webhook que grava comissão
 não espera essa trava. Ele lê as comissões duas vezes: `for update` nas elegíveis e nova leitura
 excluindo pendência aberta, porque o webhook parcial não altera a linha da comissão, e o Postgres
-não reavalia o filtro nesse caso.
+não reavalia o filtro nesse caso. Na exportação LGPD (`db/privacy.py`): `afiliado` (com `indicacoes`,
+a mesma contagem de `stats.referrals`, e `chave_pix` decifrada, auditada em `pii_access_log` com
+`ATOR_TITULAR`), `afiliado_comissoes` (com `original_amount_cents`), `afiliado_saques` (com `chave_pix`
+do pedido) e `indicacao_recebida`; nunca `referred_user_id`, `stripe_invoice_id`,
+`pix_key_enc`/`pix_key_hash`, pendências e eventos de reembolso, nem pagamentos de indicado; linha
+indecifrável sai `(indecifrável)`, sem derrubar o ZIP.
 
 "Cadastros indicados" é `stats.referrals`; "Clientes que pagaram" é `stats.paying_clients`,
 que vem de `affiliate_referral_payments` (`db/affiliate_payments.py`) e nunca da comissão, do
