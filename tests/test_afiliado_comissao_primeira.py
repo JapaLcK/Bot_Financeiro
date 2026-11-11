@@ -815,3 +815,17 @@ def test_t19_positivo_fatura_sem_has_more_nao_pagina(cobrar):
     cobrar(ind.uid, valor=4990, linhas=[_linha_de_plano("price_desconhecido", "month")])
     assert cobrar.fake.listou == [] and [x["paid_months"] for x in _comissoes(ind.uid)] == [1]
 
+
+@pytest.mark.parametrize("quem", ["sem_afiliado", "ja_decidido"])
+def test_t19_positivo_has_more_de_quem_nao_pode_gerar_nao_pagina(cobrar, quem):
+    """Com `has_more`, só busca as linhas quem ainda pode gerar comissão: zero `list_lines` sem afiliado
+    ou com o marcador já gravado."""
+    if quem == "sem_afiliado":
+        uid = _conta(plano=False).uid
+    else:
+        uid = _indicado(_afiliado()).uid
+        cobrar(uid, valor=4990)
+    _fatura_paginada(cobrar, uid, [_linha_de_plano("price_desconhecido", "month")],
+                     [_linha_de_plano("price_desconhecido", "month")], 4990)
+    assert cobrar.fake.listou == []
+
