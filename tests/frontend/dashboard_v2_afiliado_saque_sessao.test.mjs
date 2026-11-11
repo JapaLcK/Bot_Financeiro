@@ -4,7 +4,8 @@
  * A recarga é ATRASADA nos testes da troca (`lenta`): a página velha vive até a nova chegar, e o desmonte que roda nela (o `catch` de
  * `agir` fecha o diálogo) não pode apagar a marca. Com recarga instantânea esse caminho não existe e o teste não o veria.
  * Controles negativos: tirar as duas chamadas de `marcar` deixa vermelhos P1, P2 e P3; desmontar sem olhar `deSaida()` deixa vermelhos
- * os dois P3; tirar o `pagehide` deixa vermelhos P6 e P7; tirar a rolagem até o aviso deixa vermelhos P1 390x844 e 320x568.
+ * os dois P3; tirar o `pagehide` deixa vermelhos P6 e P7; tirar a rolagem até o aviso deixa vermelhos P1 390x844 e 320x568; tirar o
+ * `daRecarga.current = false` deixa vermelho P8.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -154,5 +155,24 @@ test("P7: F5 com o POST em voo não avisa que a sessão mudou", async () => {
     await t.page.waitForTimeout(300);
     assert.equal(await alerta(t.page).count(), 0);
     assert.equal(await t.page.evaluate((m) => sessionStorage.getItem(m), MARCA), null);
+  });
+});
+
+// P8: só o aviso da recarga leva o foco ao título e rola; a falha comum seguinte fica onde a pessoa está (no campo que ela usa).
+test("P8 390x844: depois do aviso da recarga, a falha comum não puxa o foco nem rola a tela", async () => {
+  await comSaque({ width: 390, height: 844 }, async (t) => {
+    await t.page.evaluate((m) => sessionStorage.setItem(m, JSON.stringify({ etapa: "confirmando", em: Date.now() })), MARCA);
+    await t.page.reload();
+    await alerta(t.page).waitFor();
+    assert.equal(await alerta(t.page).innerText(), ANTES);
+    await t.page.waitForTimeout(300);
+    await t.page.locator("#afil-pix").fill("abc");
+    const antes = await t.page.evaluate(() => { document.getElementById("afil-pix").scrollIntoView({ block: "start" }); return scrollY; });
+    await t.page.locator("#afil-pix").press("Enter");
+    await alerta(t.page).filter({ hasText: "Informe sua chave Pix." }).waitFor();
+    await t.page.waitForTimeout(300);
+    const r = await t.page.evaluate(() => ({ foco: document.activeElement?.id, scrollY }));
+    console.log("P8", antes, JSON.stringify(r));
+    assert.deepEqual(r, { foco: "afil-pix", scrollY: antes });
   });
 });
