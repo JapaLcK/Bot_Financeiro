@@ -3785,9 +3785,10 @@ function _genericModalAbrir(okBtn) {
 function confirmModal(message, opts = {}) {
   _ensureGenericConfirmModal();
   const title = opts.title || "Confirmar";
-  const okText = opts.okText || "OK";
+  // `confirmText`/`destructive` são os nomes do modals.js, que vários chamadores daqui usam.
+  const okText = opts.okText || opts.confirmText || "OK";
   const cancelText = opts.cancelText || "Cancelar";
-  const danger = !!opts.danger;
+  const danger = !!(opts.danger || opts.destructive);
   document.getElementById("generic-confirm-title").textContent = title;
   document.getElementById("generic-confirm-body").textContent = message || "";
   const cancelBtn = document.getElementById("generic-confirm-cancel");

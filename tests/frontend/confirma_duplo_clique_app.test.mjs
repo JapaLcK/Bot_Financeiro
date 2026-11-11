@@ -270,3 +270,21 @@ test("settings 390x844: passada a janela, o primário confirma (1 DELETE) e o fu
   } finally { await ctx.close(); }
 });
 
+// ── o rótulo: o confirmModal do /app lia só `okText`/`danger`, e 6 chamadores passam os nomes do modals.js (`confirmText`/`destructive`) ──
+// Controle negativo: voltar a `opts.okText || "OK"` e `!!opts.danger` deixa vermelho o primeiro (o botão sai "OK", verde).
+test("o botão do confirmModal do /app segue o que os chamadores reais pedem", async () => {
+  const { ctx, page } = await abrirApp(browser, ORIGIN, {});
+  try {
+    const botao = () => page.evaluate(() => { const b = document.getElementById("generic-confirm-ok"); const r = [b.textContent, b.className]; document.getElementById("generic-confirm-cancel").click(); return r; });
+    await page.evaluate(() => { deleteInvestment("Tesouro"); }); // confirmText + destructive
+    assert.deepEqual(await botao(), ["Excluir", "inst-delete-btn"]);
+    await page.evaluate(() => { _catEditState = { id: 7, is_system: false, original_name: "Mercado" }; categoryDeleteFromModal(); }); // okText + danger
+    assert.deepEqual(await botao(), ["Excluir", "inst-delete-btn"]);
+    await page.evaluate(() => { // confirmText + destructive: false (antecipar fatura futura)
+      payBillState = { balance: 0, selectedId: 1, submitting: false, bills: [{ id: 1, due_amount: 100, period_end: "2099-12-31", card_name: "Nubank", label: "dez" }] };
+      document.getElementById("pay-bill-amount").value = "10";
+      submitPayBill();
+    });
+    assert.deepEqual(await botao(), ["Sim, pagar", "btn-save"]);
+  } finally { await ctx.close(); }
+});
