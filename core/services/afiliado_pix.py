@@ -39,8 +39,9 @@ def registrar(cobranca, evt) -> None:
 
 def estornado_cents(payment_id: str) -> int:
     """O devolvido acumulado do pagamento, em centavos: a soma de `refunds[].value` do Asaas
-    (`buscar_pagamento`). Item com `status` conta só se `DONE` (sem diferenciar maiúscula; cancelado ou
-    pendente não saiu); sem `status`, conta (forma a conferir no sandbox). Cada `value` passa pela regra
+    (`buscar_pagamento`). Item com `status` conta só se `DONE` (sem diferenciar maiúscula); `CANCELLED` é
+    pulado; qualquer outro (`PENDING`...) levanta, pois o acumulado ainda vai crescer; sem `status`, conta
+    (forma a conferir no sandbox). Cada `value` passa pela regra
     do `value` do webhook (`centavos_do_valor`: número finito, >= 0, até 2 casas). Levanta com o Asaas
     fora ou com qualquer forma inesperada: nunca um número inventado."""
     from core.services.asaas import buscar_pagamento
@@ -51,8 +52,10 @@ def estornado_cents(payment_id: str) -> int:
         raise ValueError("refunds do Asaas em forma inesperada")
     total = 0
     for e in estornos:
-        if e.get("status") is not None and str(e["status"]).upper() != "DONE":
-            continue
+        if (st := str(e["status"]).upper() if e.get("status") is not None else "DONE") != "DONE":
+            if st == "CANCELLED":
+                continue
+            raise ValueError("estorno do Asaas ainda não concluído")
         cents = centavos_do_valor(e.get("value"))
         if cents is None:
             raise ValueError("value de refunds do Asaas inválido")
@@ -66,12 +69,13 @@ def marcar(cobranca, tipo: str, tentativas: int = 0) -> None:
     sem comissão vira `no_commission`, que `promover` resolve se ela nascer depois.
     Devolvido: no total, o cobrado (plano + cadernos). No parcial, o acumulado do Asaas, só quando
     ele decide algo (`precisa_do_acumulado`: comissão não estornada, ou a paga de afiliado excluído);
-    fora do ar, em forma inesperada ou ainda zerado (estorno não concluído), levanta e vira
-    retentativa, até `TENTATIVAS_ATE_TRAVAR` (`tentativas` = falhas anteriores do evento de parcial,
-    ou do órfão; a compra passa 0): cerca de 5 minutos com o dreno passando a cada 60 s. Daí segue com
-    0, e a pendência `open/0` bloqueia o saque e avisa o admin, em vez de esperar a purga fechar o
-    evento calado. Estorno do Asaas que leve mais que isso para ficar `DONE` acaba em `open/0`, e o
-    admin decide pelo Asaas. Sem isso, devolvido 0: o rótulo sai igual e o parcial não depende do
+    fora do ar, em forma inesperada, com refund não `DONE`/`CANCELLED` ou ainda zerado (estorno não
+    concluído), levanta e vira retentativa, até `TENTATIVAS_ATE_TRAVAR` (`tentativas` = falhas
+    anteriores do evento de parcial, ou do órfão; a compra passa 0): cerca de 5 minutos com o dreno
+    passando a cada 60 s. Daí segue com `desconhecido=True` e a revisão vai a `open` com o acumulado
+    já registrado (0 no 1º parcial; o valor anterior no 2º, pois `registrar_reembolso` usa o maior),
+    que bloqueia o saque e avisa o admin, em vez de esperar a purga fechar o evento calado. Estorno do
+    Asaas que leve mais que isso para ficar `DONE` acaba em `open`, e o admin decide pelo Asaas. Sem isso, devolvido 0: o rótulo sai igual e o parcial não depende do
     Asaas. Tabela de estados × eventos: `docs/CLAUDE.md`, "Afiliado no dreno do Pix".
     `ponytail:` comissão que nasce entre a checagem e a trava fica em revisão com devolvido 0
     (`open/0`, do lado seguro: bloqueia o saque). Só um parcial seguinte com acumulado maior, ou a

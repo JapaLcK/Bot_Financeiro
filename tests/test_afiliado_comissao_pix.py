@@ -536,10 +536,9 @@ def test_p18_parcial_de_indicado_sem_comissao_rotula_sem_o_asaas(externo):
 
 # ── P19: a soma de `refunds` ─────────────────────────────────────────────────
 
-def test_p19_estorno_cancelado_ou_pendente_nao_conta(externo):
+def test_p19_estorno_cancelado_nao_conta(externo):
     ind, cobranca = _cara(_afiliado())
-    externo["refunds"] = [{"value": 50.0, "status": "DONE"}, {"value": 900.0, "status": "CANCELLED"},
-                          {"value": 30.0, "status": "PENDING"}]
+    externo["refunds"] = [{"value": 50.0, "status": "DONE"}, {"value": 900.0, "status": "CANCELLED"}]
     entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)
     assert _revisao(cobranca["external_reference"])["refunded_cents"] == 5000
 
@@ -643,14 +642,65 @@ def test_p20_com_comissao_soma_zero_retenta_ate_o_estorno_concluir(externo, refu
 
 @pytest.mark.parametrize("refunds,esperado", [
     ([{"value": 50}], 5000), ([{"value": 0.1}, {"value": 0.2}], 30), ([], 0),
-    ([{"value": 50.0, "status": "done"}, {"value": 9.0, "status": "Pending"}], 5000),
-], ids=["inteiro", "soma_de_float", "vazio", "status_minusculo"])
+    ([{"value": 50.0, "status": "done"}, {"value": 9.0, "status": "Cancelled"}], 5000),
+    ([{"value": 50.0, "status": "DONE"}, {"value": 7.0, "status": "DONE"}], 5700),
+], ids=["inteiro", "soma_de_float", "vazio", "status_minusculo", "done_e_done"])
 def test_p20_estornado_cents(monkeypatch, refunds, esperado):
     import core.services.asaas as asaas
     from core.services.afiliado_pix import estornado_cents
 
     monkeypatch.setattr(asaas, "buscar_pagamento", lambda pid: {"refunds": refunds})
     assert estornado_cents("pay_x") == esperado
+
+
+@pytest.mark.parametrize("status", ["PENDING", "AWAITING_CRITICAL_ACTION_AUTHORIZATION"])
+def test_p20_estornado_cents_recusa_estorno_nao_concluido(monkeypatch, status):
+    import core.services.asaas as asaas
+    from core.services.afiliado_pix import estornado_cents
+
+    monkeypatch.setattr(asaas, "buscar_pagamento", lambda pid: {"refunds": [
+        {"value": 50.0, "status": "DONE"}, {"value": 9.0, "status": status}]})
+    with pytest.raises(ValueError):
+        estornado_cents("pay_x")
+
+
+def test_p20_segundo_parcial_com_refund_pendente_nao_fecha_nem_libera_o_saque(externo):
+    """Parcial anterior resolvido + novo refund PENDING: sem o conserto o total antigo fecha o evento e a
+    revisão segue resolved (saque livre); com ele retenta e, esgotadas as tentativas, reabre a revisão (open)."""
+    from core.services.pix_drain import TENTATIVAS_ATE_TRAVAR
+    from db.affiliate_reviews import resolver_parcial
+
+    ind, cobranca = _cara(_afiliado())
+    chave = cobranca["external_reference"]
+    externo["refunds"] = [{"value": 10.0, "status": "DONE"}]
+    entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)
+    rev = _revisao(chave)
+    assert resolver_parcial(rev["id"], "admin", 8325, "aprovado inteiro: devolveu pouco", rev["refunded_cents"])
+    externo["refunds"] = [{"value": 10.0, "status": "DONE"}, {"value": 20.0, "status": "PENDING"}]
+    evt = entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)
+    assert (evento(evt)["attempts"], evento(evt)["processed_at"], _revisao(chave)["status"]) == (1, None, "resolved")
+    for _ in range(TENTATIVAS_ATE_TRAVAR - 1):
+        drenar_evento(evt)
+    assert _revisao(chave)["status"] == "resolved"  # ainda retentando
+    drenar_evento(evt)
+    rev = _revisao(chave)  # reaberta (o acumulado nunca desce: segue 1000)
+    assert (rev["status"], rev["refunded_cents"], evento(evt)["processed_at"] is not None) == ("open", 1000, True)
+
+
+@pytest.mark.parametrize("novo", ["CANCELLED", "DONE"])
+def test_p20_segundo_parcial_com_refund_concluido_ou_cancelado_fecha(externo, novo):
+    from db.affiliate_reviews import resolver_parcial
+
+    ind, cobranca = _cara(_afiliado())
+    chave = cobranca["external_reference"]
+    externo["refunds"] = [{"value": 10.0, "status": "DONE"}]
+    entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)
+    rev = _revisao(chave)
+    assert resolver_parcial(rev["id"], "admin", 8325, "aprovado inteiro: devolveu pouco", rev["refunded_cents"])
+    externo["refunds"] = [{"value": 10.0, "status": "DONE"}, {"value": 20.0, "status": novo}]
+    evt = entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)
+    assert evento(evt)["processed_at"] is not None
+    assert _revisao(chave)["status"] == ("open" if novo == "DONE" else "resolved")
 
 
 @pytest.mark.parametrize("valor", [1e300, 0.005, 33.333, "50.00"], ids=["absurdo", "meio_centavo", "tres_casas", "texto"])

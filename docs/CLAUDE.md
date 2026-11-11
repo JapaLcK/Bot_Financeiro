@@ -1816,13 +1816,14 @@ Reembolso do Pix passa pela máquina do cartão: `marcar` chama `registrar_reemb
 cobrado (plano + cadernos, `total_cents`), sem rede. No parcial, só quando o valor decide algo
 (`precisa_do_acumulado`: comissão não estornada da chave, ou a que saiu com o afiliado e `_aplicar` ainda
 refaz pela linha da pendência, `_comissao_que_saiu`: a paga, N1, ou a de um saque órfão ainda aberto): a soma de `refunds[].value` do `buscar_pagamento` (`estornado_cents`; item com
-`status` conta só se `DONE`, sem diferenciar maiúscula; sem `status` conta; cada `value` pela regra do
+`status` conta só se `DONE`, sem diferenciar maiúscula; `CANCELLED` é pulado, outro status (`PENDING`...) levanta e o efeito retenta; sem `status` conta; cada `value` pela regra do
 `value` do webhook, `centavos_do_valor`). Asaas fora, forma inesperada ou soma zero (estorno ainda não
 concluído) levantam e o efeito tenta de novo, até `TENTATIVAS_ATE_TRAVAR` (`pix_drain.py`, o mesmo limiar
-do "evento travado"): cerca de 5 minutos com o dreno passando a cada 60 s. Na passada seguinte segue com 0:
-pendência `open/0`, saque bloqueado, aviso ao admin, e o evento fecha (sem o teto ele retentaria até a
+do "evento travado"): cerca de 5 minutos com o dreno passando a cada 60 s. Na passada seguinte segue com
+`desconhecido=True`: revisão `open` com o acumulado já registrado (0 no 1º parcial; o valor anterior
+no 2º, pois `registrar_reembolso` usa o maior), saque bloqueado, aviso ao admin, e o evento fecha (sem o teto ele retentaria até a
 purga de 7 dias, que fecha calada e deixa a comissão sacável). Estorno do Asaas que leve mais que isso
-para ficar `DONE` acaba em `open/0`, e o admin decide pelo Asaas; o teto se revê com a medição no sandbox.
+para ficar `DONE` acaba em `open`, e o admin decide pelo Asaas; o teto se revê com a medição no sandbox.
 A retentativa da compra (o rótulo final do `registrar`, quando a comissão nasce depois do parcial) não
 conta para o teto: ela retenta sozinha até o valor sair. A forma de `refunds` ainda não foi conferida no sandbox.
 Fora disso o Asaas não é consultado: devolvido 0, só o rótulo, e o parcial de quem não tem afiliado
