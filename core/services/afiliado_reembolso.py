@@ -20,7 +20,7 @@ from core.pg_text import limpa_para_pg
 from core.services import admin_notify
 from core.services.extras_assinar import _ler
 from db.affiliate_reviews import faturas_do_saque, marcar_avisada, registrar_reembolso, reivindicar
-from db.affiliate_reviews_manutencao import comissoes_a_conferir, liberar_conferencia, marcar_conferencia
+from db.affiliate_reviews_manutencao import adiar_conferencia, comissoes_a_conferir, liberar_conferencia, marcar_conferencia
 
 _FUSO = ZoneInfo("America/Sao_Paulo")
 _DATA = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
@@ -218,20 +218,28 @@ def _adiada(commission_id: int, motivo: str) -> None:
     )
 
 
-def conferir_comissao(commission_id: int, fatura: str) -> bool | None:
+def conferir_comissao(commission_id: int, fatura: str, *, adiar: bool = False) -> bool | None:
     """Confere na Stripe a comissão que nasceu sem linha da fatura (A5). True se a marca saiu.
 
     Fora de transação. Reembolso vira pendência pela mesma máquina do webhook; sem reembolso a
-    comissão segue o fluxo normal. A marca fica, e o worker tenta de novo, sem prazo, em dois casos:
-    False quando a fatura ainda não permite concluir (`SemConfirmacao`), e None quando a Stripe
-    falhou ou não há chave, o que vale para todas. Erro de banco sobe para quem chamou."""
+    comissão segue o fluxo normal. A marca fica, e o worker tenta de novo, em dois casos:
+    False quando a fatura ainda não permite concluir (`SemConfirmacao`, ou 4xx da própria fatura: 400,
+    403, 404), e None quando a Stripe falhou para todas (conexão, prazo, chave, limite, 5xx) ou não há
+    chave. Erro de banco sobe para quem chamou.
+    `adiar`, só do worker: o False grava a hora e o motivo, e a comissão espera 1 h (#1497)."""
+    import stripe  # noqa: PLC0415
+
     chave = os.getenv("STRIPE_SECRET_KEY")
     if not chave:
         return None
     try:
         tipo, devolvido, _ = devolvido_na_stripe(fatura, chave)
-    except SemConfirmacao as exc:
-        _adiada(commission_id, str(exc))
+    except (SemConfirmacao, stripe.InvalidRequestError, stripe.PermissionError) as exc:
+        # O texto da Stripe pode trazer a fatura: no motivo vai só o status.
+        motivo = str(exc) if isinstance(exc, SemConfirmacao) else f"stripe_{exc.http_status}"
+        _adiada(commission_id, motivo)
+        if adiar:
+            adiar_conferencia(commission_id, motivo)
         return False
     except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer a fatura
         _adiada(commission_id, type(exc).__name__)
@@ -243,13 +251,13 @@ def conferir_comissao(commission_id: int, fatura: str) -> bool | None:
 
 
 def conferir_pendentes(limite: int = 20) -> int:
-    """Passada do `_afiliado_alerta_worker`. Fatura que ainda não permite concluir fica para a próxima
-    volta e não segura as seguintes; queda da Stripe para a passada, que as outras bateriam nela."""
+    """Passada do `_afiliado_alerta_worker`. Fatura que ainda não permite concluir espera 1 h e não segura
+    as seguintes; queda da Stripe para a passada sem gravar nada, que as outras bateriam nela."""
     if not os.getenv("STRIPE_SECRET_KEY"):
         return 0
     conferidas = 0
     for c in comissoes_a_conferir(limite):
-        feita = conferir_comissao(c["id"], c["stripe_invoice_id"])
+        feita = conferir_comissao(c["id"], c["stripe_invoice_id"], adiar=True)
         if feita is None:
             break
         conferidas += feita

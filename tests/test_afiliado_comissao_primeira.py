@@ -503,6 +503,11 @@ def test_t11_migracao_roda_uma_vez_e_preserva_o_historico(monkeypatch):
     db.init_db()
     assert get_affiliate_by_user(c.uid)["commission_bps"] == 2500
     assert _comissoes(ind.uid) == linha
+    with get_conn() as conn:  # #1497: só as colunas da conferência faltam; o `update` do percentual não roda de novo
+        conn.execute("alter table affiliate_commissions drop column payment_check_tried_at, drop column payment_check_reason")
+        conn.commit()
+    db.init_db()
+    assert get_affiliate_by_user(c.uid)["commission_bps"] == 2500
     with get_conn() as conn:
         padrao = conn.execute("select column_default from information_schema.columns where table_name = 'affiliates'"
                               " and column_name = 'commission_bps'").fetchone()["column_default"]

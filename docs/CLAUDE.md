@@ -2876,9 +2876,15 @@ chamadas no caso comum) e, só com `disputed`, `Dispute.list`; disputa perdida c
 ganha não conta, aberta mantém a marca. Com reembolso, `registrar_reembolso` com ator `sistema` (total
 solta estorna, parcial vai para revisão); sem, a marca sai. Falha da Stripe, `payment_record`, nenhuma
 cobrança paga ou falta de `STRIPE_SECRET_KEY` deixam a marca, e o `_afiliado_alerta_worker` repete
-`conferir_pendentes` a cada 5 min, sem prazo e sem script manual. Na passada, fatura que ainda não
-permite concluir (disputa aberta, `payment_record`, sem cobrança paga) fica para a próxima volta sem
-segurar as seguintes; só a queda da Stripe (erro da API) para a passada. Toda adiada deixa o log
+`conferir_pendentes` a cada 5 min, sem prazo e sem script manual. A fila é a das marcadas nunca
+tentadas, por id, e depois a da tentativa mais antiga (`payment_check_tried_at`). Fatura que ainda não
+permite concluir (disputa aberta, `payment_record`, sem cobrança paga) grava a tentativa e o motivo
+(`payment_check_reason`: `disputa_aberta`, `forma_inesperada`, `sem_cobranca`) e só volta depois de 1 h
+(`ESPERA_CONFERENCIA_S`), sem segurar as seguintes. Erro 4xx da própria fatura (400, 403 e 404, como
+"No such invoice") vale o mesmo, com o motivo `stripe_<status>`, e a marca fica. A queda da Stripe
+(conexão, prazo, 401, 429, 5xx) para a passada sem gravar nada. Só o
+worker espera e grava: webhook, QR, "Marcar pago" e "Pagamento já realizado" conferem na hora. Liberar
+zera a tentativa e o motivo (#1497). Toda adiada deixa o log
 `affiliate_commission_check_pending` com o motivo, sem a fatura. Na lista do afiliado, a marcada
 aparece "em conferência" (`commissions[].checking`), no `/painel` e no `/app`. Comissão antiga nasce `false` na
 migração, sem conferência em massa. O overview do admin mostra quantas aguardam e a mais antiga
