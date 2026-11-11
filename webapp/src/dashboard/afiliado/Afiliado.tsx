@@ -49,6 +49,7 @@ function Area({ d, falhou, tentar, sessao }: { d: Dados; falhou: boolean; tentar
     ["Clientes que pagaram", String(s.paying_clients), s.refunded_clients ? plural(s.refunded_clients, "reembolsado", "reembolsados") : "pagamento confirmado"],
     ["Comissões geradas", money(s.generated), "sem as estornadas"],
     ["Em carência", money(s.held), `libera ${d.hold_days} dias após a cobrança`],
+    ["Em revisão", money(s.review), "reembolso de cliente em análise"],
     ["Disponível", money(s.available), `saque mínimo de ${money(d.min_payout)}`, s.available > 0 ? "gain" : undefined],
     ["Em saque", money(s.requested), "pedido em análise"],
     ["Já pago", money(s.paid), "enviado por Pix"],

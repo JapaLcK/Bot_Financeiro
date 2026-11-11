@@ -40,27 +40,33 @@ def registrar_pagamento(referred_user_id: int, source: str, payment_ref: str,
             return cur.rowcount > 0
 
 
+def _rotular(cur, source: str, payment_ref: str, tipo: str, quando: datetime | None) -> bool:
+    """O `update` do rótulo, para quem já tem transação aberta (`registrar_reembolso`)."""
+    if tipo not in ("partial", "total"):
+        raise ValueError("tipo deve ser 'partial' ou 'total'.")
+    cur.execute(
+        """
+        update affiliate_referral_payments
+           set refund_status = %s, refunded_at = %s
+         where source = %s and payment_ref = %s
+           and refund_status <> 'total' and refund_status <> %s
+        """,
+        (tipo, quando, source, payment_ref, tipo),
+    )
+    return cur.rowcount > 0
+
+
 def marcar_reembolso(source: str, payment_ref: str, tipo: str, quando: datetime | None) -> bool:
     """Rotula o pagamento como reembolsado (`partial` ou `total`). True se mudou.
 
     Nunca rebaixa `total` para `partial`. Pagamento fora do registro é no-op, e
     quem chama decide o que fazer com o False.
     """
-    if tipo not in ("partial", "total"):
-        raise ValueError("tipo deve ser 'partial' ou 'total'.")
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                update affiliate_referral_payments
-                   set refund_status = %s, refunded_at = %s
-                 where source = %s and payment_ref = %s
-                   and refund_status <> 'total' and refund_status <> %s
-                """,
-                (tipo, quando, source, payment_ref, tipo),
-            )
+            mudou = _rotular(cur, source, payment_ref, tipo, quando)
             conn.commit()
-            return cur.rowcount > 0
+            return mudou
 
 
 def resumo_conversao(affiliate_id: int) -> dict:

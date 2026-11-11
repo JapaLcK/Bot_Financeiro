@@ -2187,20 +2187,24 @@ async def lifespan(app: FastAPI):
                 falha_de_tarefa("[stripe_email]", exc)
             await asyncio.sleep(300)
 
-    async def _afiliado_avisos_worker():
-        """Reenvia ao admin os avisos de reembolso de afiliado que ficaram pendentes por falta de
-        canal, a cada 5 min, a 1ª volta sem delay. Inerte sem `ADMIN_NOTIFY_WEBHOOK_URL`. Ver
-        `core/services/afiliado_reembolso.py`."""
-        from core.services.afiliado_reembolso import reenviar_avisos_pendentes  # noqa: PLC0415
+    async def _afiliado_alerta_worker():
+        """Manutenção das pendências de reembolso de afiliado, a cada 5 min, a 1ª volta sem
+        delay (a retomada depois de reinício): limpa `no_commission` antiga, confere na Stripe a
+        comissão marcada (inerte sem `STRIPE_SECRET_KEY`) e reenvia ao admin o aviso pendente
+        (inerte sem `ADMIN_NOTIFY_WEBHOOK_URL`). Ver `core/services/afiliado_reembolso.py`."""
+        from core.services import afiliado_reembolso  # noqa: PLC0415
+        from db import affiliate_reviews_manutencao  # noqa: PLC0415
         while True:
             try:
-                n = await asyncio.to_thread(reenviar_avisos_pendentes)
+                await asyncio.to_thread(affiliate_reviews_manutencao.limpar_sem_comissao)
+                await asyncio.to_thread(afiliado_reembolso.conferir_pendentes)
+                n = await asyncio.to_thread(afiliado_reembolso.reenviar_pendentes)
                 if n:
-                    print(f"[afiliado_avisos] {n} aviso(s) entregue(s).", flush=True)
+                    print(f"[afiliado] {n} aviso(s) de reembolso entregue(s).", flush=True)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                falha_de_tarefa("[afiliado_avisos]", exc)
+                falha_de_tarefa("[afiliado]", exc)
             await asyncio.sleep(300)
 
     async def _remarketing_worker():
@@ -2327,7 +2331,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
-                asyncio.create_task(_afiliado_avisos_worker(), name="afiliado_avisos"),
+                asyncio.create_task(_afiliado_alerta_worker(), name="afiliado_alerta_worker"),
                 asyncio.create_task(_remarketing_worker(), name="remarketing_worker"),
                 asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
                 asyncio.create_task(_tarefa_finito_checks(), name="finito_checks"),
@@ -7036,6 +7040,11 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                         record_commission_for_invoice,
                         user_id, invoice_id, int(amount_cents),
                     )
+                    if commission and commission["payment_check_pending"]:
+                        # Sem linha da fatura: confere na Stripe antes de a comissão poder ser paga (A5).
+                        # Falha deixa a marca, e o worker tenta de novo; nunca derruba o webhook.
+                        from core.services.afiliado_reembolso import conferir_comissao
+                        await asyncio.to_thread(conferir_comissao, commission["id"], invoice_id)
                     if commission:
                         await log_system_event(
                             "info",
@@ -7514,7 +7523,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
 
     elif event["type"] in ("charge.refunded", "charge.dispute.closed"):
         # Reembolso de indicado de afiliado. Sem try: nada aqui segura grant nem comissão de
-        # outro evento, tudo é idempotente, e a falha vira 5xx e reentrega, como o `retrieve`.
+        # outro evento, tudo é idempotente, e falha de banco ou da Stripe vira 5xx e reentrega.
         from core.services.afiliado_reembolso import tratar_evento
         await asyncio.to_thread(tratar_evento, event)
 

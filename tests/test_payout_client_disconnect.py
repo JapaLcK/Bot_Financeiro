@@ -22,6 +22,7 @@ import pytest
 from starlette.requests import ClientDisconnect, Request
 
 import core.admin_dashboard as admin_dashboard
+from _afiliado_stripe import simular_stripe
 import db
 from db import ensure_user
 from db.affiliates import (
@@ -106,6 +107,12 @@ def _set_note(payout_id: int, note: str) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _stripe_sem_reembolso(monkeypatch):
+    """"Marcar pago" confere a Stripe antes de liquidar; aqui ela não tem reembolso nenhum."""
+    simular_stripe(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
 def _sem_log_no_banco(monkeypatch):
     async def _noop(*args, **kwargs):
         return None
@@ -117,9 +124,12 @@ def _sem_log_no_banco(monkeypatch):
 def saque(user_id):
     """Saque em aberto (`status='requested'`) com 1 comissão travada nele.
 
-    As três colunas que o `request_payout` exige (db/affiliates.py):
-    `invoice_amount_cents` acima do mínimo, `available_at` no passado e
-    `status='pending'` — sem elas ele recusa com "Saldo disponível (R$ 0.00)".
+    As colunas que o `request_payout` exige (db/affiliates.py):
+    `invoice_amount_cents` acima do mínimo, `available_at` no passado,
+    `status='pending'` e a conferência na Stripe já feita
+    (`payment_check_pending = false`, A5; quem a mede é
+    `tests/test_afiliado_conferencia.py`) — sem elas ele recusa com
+    "Saldo disponível (R$ 0.00)".
     """
     indicado = int(uuid.uuid4().int % 10_000_000_000)
     ensure_user(indicado)
@@ -129,7 +139,8 @@ def saque(user_id):
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update affiliate_commissions set available_at = now() - interval '1 day' where id = %s",
+                "update affiliate_commissions set available_at = now() - interval '1 day',"
+                " payment_check_pending = false where id = %s",
                 (comissao["id"],),
             )
         conn.commit()

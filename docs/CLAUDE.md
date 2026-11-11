@@ -2650,15 +2650,20 @@ A área do próprio afiliado é `GET /api/affiliate/me` e `POST /api/affiliate/p
 (`frontend/routes/affiliates.py`), sem gate de plano: o `affiliate_id` sai sempre de
 `get_affiliate_by_user` com o usuário da sessão, e o corpo do saque só tem `pix_key`.
 Conta desativada lê e saca o que já acumulou; só deixa de acumular. O `/me` devolve
-`stats.generated` (soma dos quadros, sem estornadas), `hold_days` (`COMMISSION_HOLD_DAYS`)
-e `commissions[].payout_id`, e nunca dado do indicado. `stats.requested` e `stats.paid` vêm
-de `affiliate_payouts` (`status` `requested` e `paid`), não das comissões: excluir a conta do
-indicado apaga a comissão em cascata, e o saque aberto ou o Pix feito não some do total. Só a
-parte em carência ou disponível cai com a exclusão. `admin_list_affiliates`
-ainda soma as comissões, então o "pago" do admin pode ficar menor nesse caso.
+`stats.generated`, `hold_days` (`COMMISSION_HOLD_DAYS`), `commissions[].payout_id`,
+`commissions[].in_review` e `commissions[].original_amount` (nulo sem ajuste), e nunca dado do
+indicado. Quadros: `stats.held`, `.available`, `.review`, `.requested` e `.paid`, e
+`generated_cents = held + available + review + requested + paid`, sem estornadas. "Em revisão"
+(`review`) é comissão `pending`, sem saque, com pendência `open`, e tem precedência sobre carência
+e disponível; comissão parcial já em saque segue em "Em saque", com o saque bloqueado.
+`stats.requested` e `stats.paid` vêm de `affiliate_payouts` (`status` `requested` e `paid`), não
+das comissões, e `admin_list_affiliates` soma o "pago" do mesmo jeito. A coluna do admin "A pagar ou
+em revisão" (`owed_cents`) soma toda comissão `pending`, inclusive a em revisão e a de saque bloqueado.
 `request_payout` trava a linha de `affiliates` (`for no key update`) antes de checar o
 saque aberto: dois pedidos simultâneos dão um saque, e a FK do webhook que grava comissão
-não espera essa trava.
+não espera essa trava. Ele lê as comissões duas vezes: `for update` nas elegíveis e nova leitura
+excluindo pendência aberta, porque o webhook parcial não altera a linha da comissão, e o Postgres
+não reavalia o filtro nesse caso.
 
 "Cadastros indicados" é `stats.referrals`; "Clientes que pagaram" é `stats.paying_clients`,
 que vem de `affiliate_referral_payments` (`db/affiliate_payments.py`) e nunca da comissão, do
@@ -2677,62 +2682,239 @@ clientes com todos os pagamentos devolvidos por inteiro, que seguem em `paying_c
 
 Reembolso da Stripe: `charge.refunded` e `charge.dispute.closed` (só `status = lost`) vão a
 `core/services/afiliado_reembolso.py`. **Ação do dono: habilitar os dois eventos no endpoint do
-Stripe; sem isso nenhum chega, com todos os testes verdes.** A fatura sai de `charge.invoice`
-ou, sem ele, de `InvoicePayment.list(payment=...)`: o formato do evento segue a versão de API do
-endpoint, e o caminho inverso não foi conferido contra a Stripe real. `total` se o devolvido (ou
-a disputa) cobre a cobrança, senão `partial`. Comissão da fatura: total estorna com
-`reverse_commission` se ela está fora de saque; em saque ou paga não muda e avisa o admin
-(`notify_afiliado_alerta` + `affiliate_refund_commission_kept`); parcial só avisa. Comissão só
-existe na 1ª fatura, então reembolso de renovação só rotula. Falha da API vira 5xx e reentrega,
-porque tudo é idempotente. A comissão vem antes do rótulo: morrer entre os dois repete o alerta
-em vez de perdê-lo. Comissão em saque reembolsada por inteiro não volta a ser sacável:
-`reject_payout` a estorna na mesma transação, com a trava nas comissões antes de ler o rótulo;
-`reverse_commission` trava a linha pelo `id` antes do `update`, e o webhook o repete depois do
-rótulo. As três partes juntas fecham a corrida: qualquer uma a menos deixa a comissão solta.
+Stripe; sem isso nenhum chega e nenhuma pendência nasce, com todos os testes verdes.** A fatura sai
+de `charge.invoice` ou, sem ele, de `InvoicePayment.list(payment=...)`: o formato do evento segue a
+versão de API do endpoint, e o caminho inverso não foi conferido contra a Stripe real.
+`fatura_da_cobranca` devolvendo None vira só log, sem pendência: conferir na Stripe real antes de
+ligar. `total` se o devolvido (ou a disputa) cobre a cobrança, senão `partial`.
 
-Aviso ao admin, separado do "tratado" (estorno + rótulo): `affiliate_commissions.refund_alert`
-(`partial`/`total`, nunca rebaixa) e `refund_alert_sent_at` (nulo = não entregue). Invariante,
-pelo webhook: o rótulo que ele grava só vem depois do aviso entregue ou registrado pendente, então
-o retorno antecipado da reentrega nunca cala um aviso perdido. O rótulo gravado pelo script
-(`scripts/backfill_afiliado_pagamentos.py`) não deixa aviso nem pendência e cala as reentregas
-posteriores do evento (no total, o estorno de comissão fora de saque ainda acontece). Dois caminhos:
-canal configurado que recusa (timeout, não-2xx) → 5xx sem rótulo e a Stripe reentrega; canal
-ausente → 200 com pendência e log `error` com `event_id` e `commission_id`, e o laço
-`afiliado_avisos` entrega quando `ADMIN_NOTIFY_WEBHOOK_URL` existir. Pendência de comissão já
-`reversed` não é enviada.
+Quem protege o dinheiro é a **pendência no banco** (`db/affiliate_reviews.py`), não o aviso.
+`affiliate_refund_reviews` tem uma linha por fatura reembolsada, sem `user_id` nem dado do indicado;
+`affiliate_refund_review_events` guarda ajuste, rejeição, pagamento registrado e recuperação, com
+autor e horário, só por inserção. `registrar_reembolso` grava rótulo e pendência numa transação, sob
+a trava da fatura e da comissão, e decide com o estado de agora:
 
-Limites do reembolso: (1) o que chega antes do `invoice.paid` é no-op e se perde; quem repara é
-o script. (2) Reembolso só do caderno rotula `partial`, sem distinguir. (3) Plano inteiro devolvido
-com o caderno mantido também vira `partial`: a comissão fica e só o alerta sai. (4) Sem linha no
-registro não há rótulo, e o saque rejeitado devolve a comissão; o alerta sai no reembolso. (5) Canal
-configurado fora do ar além da janela de reentrega da Stripe (janela não conferida aqui) deixa o
-evento inteiro sem efeito, não só o aviso: o rótulo `refund_status` não é gravado, o estorno que
-depende dele não acontece, e um `reject_payout` nesse intervalo devolve a comissão a `pending` em
-vez de estorná-la (ele só estorna com `refund_status = 'total'`). Sobram o log `error`
-`affiliate_refund_commission_kept` e o evento falho no painel da Stripe. Esgotada a reentrega, o
-aviso não volta, nem por reembolso nem por disputa. O script, rodado à mão, repara só o rótulo de
-reembolso (pelo `amount_refunded`), sem aviso e sem estornar a comissão; disputa só entra na
-contagem `contestadas_para_conferir`, sem rótulo. A ordem importa: reenviar o evento falho pelo
-painel da Stripe primeiro e rodar o script depois, porque o rótulo do script cala o reenvio.
-Exclusão da conta do indicado apaga a comissão em cascata, e a pendência some junto.
-(6) Disputa parcial seguida de reembolso do restante fica `partial`, sem novo alerta: o
-`charge.refunded` só olha o devolvido. Hipótese não verificada por trás disso e do cálculo da
-disputa: `charge.amount_refunded` não inclui disputa. Conferir com disputa real no modo de teste
-da Stripe.
+| Comissão \ evento | Parcial | Total |
+|---|---|---|
+| Solta (`pending`, sem saque) | `open`, vai para "Em revisão" | Estorna (D9); linha `resolved`, evento `auto_reversed`, sem aviso |
+| Em saque `requested` | `open`, bloqueia o saque | `open`, bloqueia o saque |
+| `paid` | `open`, sem bloqueio | `recovery`, evento `paid_before_refund` |
+| `reversed` | nada | pendência aberta fecha com `auto_reversed` |
+| Não existe | `no_commission` | `no_commission` |
 
-`scripts/backfill_afiliado_pagamentos.py` completa o registro com o que o boot não alcança
-(fatura de plano sem comissão, webhook perdido, reembolso antigo). Sem `--aplicar` é simulação.
-Rodar com `DATABASE_URL` e `STRIPE_SECRET_KEY` de produção:
-`.venv/bin/python scripts/backfill_afiliado_pagamentos.py [--aplicar]`. É idempotente, só
-imprime contagens, não estorna comissão, não marca contestação (a cobrança não diz se foi
-perdida) e não recupera conta excluída. Rótulo `total` do script não estorna: a comissão antiga
-segue sacável, e a rejeição do saque a estorna sem aviso ao admin. Pula o cartão recusado com Pix
-cobrindo pela `MARCA` na assinatura; assinatura já morta quando a recusa rodou não grava a
-`MARCA`, e o script conta a fatura. Fatura com `payment.type = payment_record` faz `cobrancas_da_fatura` levantar: o
-cliente inteiro sai em `clientes_com_falha`.
+Fato novo só se `refunded_cents` cresce e a linha não é `total`: reentrega não muda nada, linha
+`total` nunca reabre e `tipo` nunca rebaixa. `no_commission` promove em
+`record_commission_for_invoice`, na mesma transação: total nasce `reversed`, parcial nasce `open`.
 
-Conta excluída mantém cadastro e pagamentos: `affiliate_referrals` está em
-`_USER_FK_SET_NULL_TABLES`, com `referred_user_id` nulo. A comissão ainda cai em cascata.
+**Bloqueio.** Regra única (`SAQUE_BLOQUEADO_SQL`): pendência `open` com a comissão no saque. Vale em
+`mark_payout_paid` (`SaqueComPendencia`, 409) e na rota do QR (409). Aviso entregue não libera.
+Travas: nas ações do admin, saque, comissões, pendência; no webhook, fatura, comissão, pendência, sem
+saque. `mark_payout_paid` trava as comissões antes de ler a pendência, em comando separado: é isso
+que enxerga o commit do webhook.
+
+**Como cada pendência fecha.** `partial`: revisão com valor aprovado, justificativa obrigatória
+(`POST /admin/api/affiliates/refund-reviews/{id}/approve`, que recebe o `refunded_cents` visto e dá
+409 se ele envelheceu). `amount_cents` da comissão passa a ser o aprovado, e o do saque cai a
+diferença; aprovado 0 equivale a estorno; saque que ficaria sem valor vira `rejected` com o valor
+histórico. Saque abaixo do mínimo depois do ajuste paga assim mesmo: a regra é do pedido. `total`:
+rejeitar o saque (estorna pelo rótulo **ou** pela pendência, e fecha com `payout_rejected`), ou
+"Pagamento já realizado". Nota sozinha não fecha. Rejeição é do admin, nunca do webhook: rejeitar
+sozinho com o Pix já feito devolveria as outras comissões ao saldo. Rejeitar com pendência `partial`
+mantém a pendência, e a comissão volta para "Em revisão", salvo se o rótulo `total` a estornou (fatura
+com mais de uma cobrança): aí a pendência fecha junto, com `payout_rejected`. O QR só sai de saque
+`requested`: pago, rejeitado ou registrado dá 409. `reverse_commission` fecha a pendência
+aberta com `commission_reversed`.
+
+**"Pagamento já realizado"** (`POST /admin/api/affiliates/payouts/{id}/payment-recorded`): para Pix
+que já saiu. Marca saque e comissões como pagos, sem QR, sem transferência e sem devolver nada ao
+saldo. Nunca recusa por falta de pendência: com a Stripe fora, é o único registro do Pix já feito, e
+sem pendência o evento fica no saque, sem `review_id`. O botão aparece em todo saque `requested`: no
+livre, ao lado de "Pagar via Pix", "Marcar pago" e "Rejeitar" (é a saída quando o "Marcar pago" dá 503 com
+o Pix já feito); no bloqueado e no órfão, só ele e "Rejeitar". Justificativa, data e comprovante seguem
+obrigatórios. `total` vai a `recovery`; `partial` segue `open`, sem bloqueio. Justificativa de 10 a 500 caracteres, contados depois de limpar (NUL e surrogate
+viram U+FFFD, que não conta como texto), `paid_on` não futura em Brasília nem anterior ao
+pedido, `receipt_ref` de 4 a 120 caracteres. Referência e justificativa moram só no evento: nunca em
+log, aviso ou `affiliate_payouts.note`, que sai no `/api/affiliate/me`.
+
+**Recuperação (D4 e D6).** Dinheiro que saiu antes do reembolso: bloco "Recuperações" no admin, nada
+desconta de saque futuro e o afiliado segue vendo o valor em "Já pago", com o selo. Comissão paga
+não muda na revisão: `recovery_cents = max(0, pago - aprovado - recovery_closed_cents)`, atribuído e
+nunca somado, então reprocessar não duplica e o que foi encerrado não é cobrado de novo.
+`POST /admin/api/affiliates/refund-reviews/{id}/close-recovery` encerra como `recovered` (com data
+e referência) ou `waived` (sem elas), e repetir dá 409, sem novo evento.
+
+**Notificação.** A linha é a notificação pendente: `notified_at` nulo, gravado na mesma transação.
+`notified_at` só com `_send` True. O webhook tenta uma vez depois do commit, e o
+`_afiliado_alerta_worker` do `lifespan` repete a cada 300 s, a 1ª volta sem espera, parando na 1ª
+falha. `marcar_avisada` só marca se `refunded_cents` e `status` seguem os do envio: fato novo ou
+"Pagamento já realizado" durante o HTTP deixam o aviso novo pendente. Concorrência por claim com prazo (`reivindicar`, 2 minutos, HTTP fora da transação): processo
+que morre deixa a linha voltar; repetição é possível, perda não. Falha de aviso responde 200; 5xx só
+por banco ou API da Stripe. Log `affiliate_refund_commission_kept` com `alerta_entregue`, nível `error` quando o aviso não sai, e `event_id` quando vem do webhook.
+
+Limites do reembolso: (1) reembolso antes do `invoice.paid` fica coberto por `no_commission` enquanto
+a linha existe; depois da limpeza de 30 dias, quem o pega é a conferência na Stripe (abaixo). (2) Reembolso só do caderno rotula `partial`, sem
+distinguir. (3) Plano inteiro devolvido com o caderno mantido também vira `partial`: a comissão vai
+para revisão. (4) Só o rótulo depende da linha no registro: a pendência não. (5) Sem
+`ADMIN_NOTIFY_WEBHOOK_URL` a notificação fica pendente e a pendência, no admin.
+(6) Valor maior reabre a pendência. Disputa perdida seguida de reembolso não soma: o `charge.refunded`
+só olha `amount_refunded`, então disputa parcial de R$ 30 e reembolso dos R$ 70 restantes fica
+`partial` com R$ 70, e não `total`; e disputa de R$ 70 seguida de reembolso de R$ 30 não é fato novo
+(30 < 70) e fica como a disputa deixou. A comissão fica em revisão nos dois casos, sem estorno
+sozinho. Hipótese não verificada por trás disso e do cálculo da disputa: `charge.amount_refunded` não
+inclui disputa. Conferir com disputa real no modo de teste da Stripe. (7) Pix por fora: o sistema não alcança QR já aberto nem Pix digitado à mão.
+Revisão com valor menor com QR antigo aberto deixa o admin pagar o valor velho; a tela avisa, e o
+caminho é "Pagamento já realizado" antes da revisão. (8) Comissão apagada pela cascata antes do deploy
+de `affiliate_commissions` em `_USER_FK_SET_NULL_TABLES` não volta, e o saque `requested` que a incluía
+segue sem ligação. Conferir antes do deploy, só leitura: saques `requested` cujo `amount_cents` difere
+da soma das comissões deles. (9) Reembolso parcial maior sobre recuperação ainda aberta troca a
+`recovery` por `open`: a recuperação sai da lista "Recuperações" até a nova revisão, que a recalcula
+pelo valor aprovado (atribuído, nunca somado), e o evento `reopened` guarda o anterior. (10) O webhook
+decide por cobrança, e a fatura pela soma não é vista: fatura com duas cobranças pagas, uma devolvida
+pela metade e a outra inteira, fica com rótulo `total` (o da 2ª cobrança) e pendência `partial`
+(os 40 devolvidos da 2ª não são maiores que os 50 da 1ª). A rejeição do saque estorna pelo rótulo e fecha a pendência; o
+produto não gera fatura de plano com duas cobranças pagas hoje.
+
+**Conferência na Stripe antes de liberar (A5).** Comissão que nasce sem linha da fatura (o caso comum,
+e também o da linha `no_commission` já limpa) nasce com `payment_check_pending = true`: conta como
+"Em carência" mesmo com `available_at` vencido e fica fora das duas leituras de `request_payout`. Depois
+do commit, o `invoice.paid` chama `conferir_comissao` no `try` que já existe: `cobrancas_da_fatura` (2
+chamadas no caso comum) e, só com `disputed`, `Dispute.list`; disputa perdida conta como devolvida,
+ganha não conta, aberta mantém a marca. Com reembolso, `registrar_reembolso` com ator `sistema` (total
+solta estorna, parcial vai para revisão); sem, a marca sai. Falha da Stripe, `payment_record`, nenhuma
+cobrança paga ou falta de `STRIPE_SECRET_KEY` deixam a marca, e o `_afiliado_alerta_worker` repete
+`conferir_pendentes` a cada 5 min, sem prazo e sem script manual. Na passada, fatura que ainda não
+permite concluir (disputa aberta, `payment_record`, sem cobrança paga) fica para a próxima volta sem
+segurar as seguintes; só a queda da Stripe (erro da API) para a passada. Toda adiada deixa o log
+`affiliate_commission_check_pending` com o motivo, sem a fatura. Na lista do afiliado, a marcada
+aparece "em conferência" (`commissions[].checking`), no `/painel` e no `/app`. Comissão antiga nasce `false` na
+migração, sem conferência em massa. O overview do admin mostra quantas aguardam e a mais antiga
+(`commission_checks`), para notar queda longa. Com linha da fatura, `promover` decide e não há consulta.
+**Conferir antes de pagar.** O `charge.refunded` pode se perder, então o QR, o "Marcar pago" e o
+"Pagamento já realizado" consultam a Stripe por cada fatura do saque antes de o dinheiro sair
+(`conferir_saque`): as das comissões do saque e, no saque órfão, as das linhas do vínculo. A regra é a
+mesma da conferência e do script (`devolvido_na_stripe`), 2 chamadas por fatura no caso comum, até 4
+faturas em paralelo, com o HTTP fora de transação e de trava. Reembolso achado vai por
+`registrar_reembolso` com ator `sistema`, e quem recusa é a regra de bloqueio que já existe: QR 409
+("Reembolso de cliente achado na Stripe: o saque ficou bloqueado para revisão.", e a tela recarrega a
+lista) e "Marcar pago" 409 ("Reembolso achado na Stripe: o saque ficou bloqueado. Se o Pix já saiu, use
+Pagamento já realizado."). Disputa aberta (D10 = A): 409 ("Uma comissão deste saque tem disputa aberta na
+Stripe. Rejeite o saque para liberar as outras; ela volta quando a disputa fechar."), e a comissão ganha
+`payment_check_pending`: rejeitado o saque, ela fica "Em carência" até o worker do A5 liberar ou abrir
+pendência, e o novo pedido sai sem ela. Erro da Stripe ou falta de `STRIPE_SECRET_KEY`: 503 ("Não foi
+possível conferir reembolsos na Stripe agora. Tente de novo em instantes."; no "Marcar pago", mais "Se o
+Pix já saiu, use Pagamento já realizado."), sem recarregar, e o log `affiliate_payout_check_failed` com o
+saque e o tipo do erro, sem a fatura. Prazo total de 20 s (`PRAZO_CONFERENCIA_S`): estouro é 503, nunca
+500; a thread que estourou termina sozinha, e o que ela gravar é idempotente. O SDK sozinho espera até
+80 s por chamada, e não há prazo por chamada: dar um pede `StripeClient` com timeout em
+`cobrancas_da_fatura`, que o e-book também usa, ou mudar o cliente HTTP global do `stripe`, que vale para o
+processo inteiro. Por isso a conferência roda num executor próprio de `VAGAS_CONFERENCIA` (4) threads,
+nunca no padrão do asyncio, que as outras rotas usam via `to_thread`; com as vagas ocupadas por consultas
+presas, o QR e o "Marcar pago" recusam com o mesmo 503 na hora, sem consultar, e o "Pagamento já
+realizado" registra e marca. Depois da consulta, o QR relê o saque inteiro: rejeitado, pago, bloqueado ou
+órfão no meio recusa, e o valor do QR é o relido (revisão parcial no meio encolhe o QR). O "Marcar pago"
+relê na própria trava (`status = 'requested'` no update). "Marcar pago" não consulta saque já bloqueado ou órfão: a
+recusa que já existe responde. "Pagamento já realizado" nunca recusa: confere antes (reembolso achado
+vira recuperação no registro) e, com a Stripe fora, registra e marca `payment_check_pending` nas comissões
+do saque; `comissoes_a_conferir` não filtra status, então o worker confere a paga e, com reembolso, abre
+recuperação. Limites: (a) reembolso na janela entre a consulta e a trava de `mark_payout_paid`, com o
+webhook perdido, não é visto na hora: o saque paga, e só o script (primeira passada, comissão paga) o
+acha depois; com o webhook entregue, a trava das comissões espera e recusa. (b) Saque órfão com a Stripe
+fora no "Pagamento já realizado": não há comissão para marcar, e com o webhook perdido depois ninguém
+reconfere sozinho; o script percorre as linhas com `paid_cents` (lido no código, não medido neste caso).
+(c) Sem limite de faturas por saque: muitas comissões caem no 503, e o admin tenta de novo; não medido
+com número real. (d) Com a Stripe presa, só 4 conferências rodam por vez no processo: a quinta recebe 503
+até uma thread soltar, o que pode levar os 80 s do SDK. Medido em 2026-11-09 com servidor real e a Stripe
+falsa presa por 30 s, 40 cliques de QR: `GET /admin/api/affiliates` no meio levou 10 ms (antes, 18,5 s)
+e `/admin/api/overview`, 21 ms (antes, 100 s). Remedir antes de reusar.
+
+**Retenção de `no_commission`:** 30 dias. `limpar_sem_comissao`, na mesma volta do worker, apaga só
+`no_commission` sem comissão, sem evento e com mais de 30 dias; é escolha operacional, não garantia
+contra evento atrasado, que é coberto pela conferência. Pendência ligada a comissão ou a afiliado que
+excluiu a conta segue as regras acima e não é limpa.
+
+`scripts/backfill_afiliado_pagamentos.py` repara o que os webhooks não viram. **`--aplicar` pode
+alterar saldos: estorna comissão solta com reembolso total confirmado.** Sem ele é simulação. Rodar
+com `DATABASE_URL` e `STRIPE_SECRET_KEY` de produção:
+`.venv/bin/python scripts/backfill_afiliado_pagamentos.py [--aplicar]`. A primeira passada é sobre
+comissões `status <> 'reversed'`, antes da de rótulo, que morrendo no meio deixaria `total` sem
+pendência, e porque conta excluída só existe por ali. Ela percorre também a linha da fatura cuja
+comissão saiu com o afiliado (`paid_cents`, ou `orphan_payout_id` de saque órfão ainda aberto), pela
+mesma `registrar_reembolso`, e a lista como `pendência N`; órfão rejeitado fica fora. **O script trata disputa** (decisão do dono, muda
+o D5): usa `devolvido_na_stripe`, a mesma regra da conferência, numa função só. Disputa perdida conta
+como devolvida e segue estorno ou revisão; ganha não conta; aberta fica listada sem alteração.
+Reembolso total confirmado é ao menos uma cobrança e todas devolvidas por inteiro (reembolso mais
+disputa perdida); alguma devolvida, mas não todas, é parcial. Categorias: `a_estornar` (total,
+`pending`, sem saque; lista id e valor, e o total), `segue_revisao` (parcial, ou total em saque ou
+paga), `sem_confirmacao` (erro da API, `forma_inesperada` como `payment_record`, `sem_cobranca`,
+`disputa_aberta`; lista id e o motivo, sem alteração) e `ja_registrada`
+(pendência já `total`, ou já com esse devolvido; só conta). Pendência parcial registrada é relida: o
+total que o webhook perdeu é fato novo. O `--aplicar` não confia na classificação: chama
+`registrar_reembolso`, a mesma função do webhook, com ator `script`, e a categoria e a linha impressa
+são o desfecho relido depois, não a previsão. `sem_confirmacao` faz o script sair com 1. A segunda
+passada completa o registro (fatura de plano sem comissão, webhook perdido, reembolso antigo): fatura
+com cobrança contestada não é rotulada, só contada em `contestadas_para_conferir`: o rótulo dela vem
+da primeira passada, junto da pendência, quando a disputa se resolve; e não recupera conta excluída. Pula o cartão recusado com Pix
+cobrindo pela `MARCA` na assinatura; assinatura já morta quando a recusa rodou não grava a `MARCA`,
+e o script conta a fatura. Fatura com `payment.type = payment_record` faz `cobrancas_da_fatura`
+levantar: nessa passada, o cliente inteiro sai em `clientes_com_falha`. É idempotente, e não imprime
+fatura, cliente nem indicado.
+
+Conta excluída mantém cadastro, pagamentos e comissão: `affiliate_referrals` e
+`affiliate_commissions` estão em `_USER_FK_SET_NULL_TABLES`, com `referred_user_id` nulo. É a comissão
+que liga o reembolso ao saque: sem ela, reembolso depois da exclusão não acharia o que bloquear. Ela
+fica nos quadros: carência, disponível e saque seguem iguais. Depois da exclusão o registro fica
+desvinculado do usuário, dados financeiros retidos:
+
+| | Tabela | Campos |
+|---|---|---|
+| Removido | Conta e dados pessoais | O que `delete_user_data` apaga; e `referred_user_id`, que vira nulo |
+| Retido | `affiliate_commissions` | id, afiliado, `stripe_invoice_id`, valor da fatura, comissão, status, `available_at`, `payout_id`, `created_at` |
+| Retido | `affiliate_referrals` | id, afiliado, `code_used`, `created_at` |
+| Retido | `affiliate_referral_payments` | origem, `payment_ref`, valor, datas, rótulo |
+| Retido | `affiliate_refund_reviews` e `affiliate_refund_review_events` | Fatura, valores, status, referência, justificativa, autor |
+
+`stripe_invoice_id` segue ligado ao cliente dentro da Stripe, e nada no repositório apaga o cliente
+lá. A justificativa é texto livre: a tela orienta a não escrever nome ou documento. O `init_db` faz o
+`drop not null` guardado antes do repair: FK `set null` com `not null` quebra a exclusão de conta com
+`NotNullViolation`. A troca da FK pede lock exclusivo uma vez, na fila atrás de leitura aberta; o boot
+seguinte não pede. Rollback: o repair volta a FK para `cascade`, e os nulos ficam.
+**Afiliado que exclui a própria conta** ("mantém, sem a pessoa", A3, D8 = B, D9 = A).
+`desvincular_afiliado` roda na transação de `delete_user_data`, depois do `_lock_user` e antes de apagar
+`affiliates`, travando na ordem afiliado, saques, comissões, pendências (a do `request_payout`). Ela
+grava o código do afiliado nas pendências e nos saques e zera chave Pix e nota dos saques. Regra: mesmo
+comportamento de afiliado ativo. A comissão paga (N1) guarda o valor em `paid_cents`, e a de saque
+aberto guarda o vínculo ("guardar vínculo", decisão do dono): `commission_cents` e `orphan_payout_id`.
+Sem linha da fatura, ela nasce `resolved`, com evento `affiliate_deleted` apontando o saque. A pendência
+`open` delas segue aberta; só a `open` de comissão solta (nunca paga nem em saque) fecha, com
+`affiliate_deleted`, porque não há o que bloquear nem recuperar. Comissão não paga e fora de saque sai
+sem linha. Essas linhas nunca entram na limpeza. Depois, `affiliates` cai e leva referrals, pagamentos
+e comissões; `affiliate_payouts.affiliate_id` e `affiliate_refund_reviews.commission_id` viram nulos
+pela FK `set null`. Reembolso que chega depois é decidido pela linha (`_comissao_que_saiu`): paga segue
+a regra da paga (total vira recuperação; parcial vai para revisão e o admin decide pelo `paid_cents`);
+no saque órfão aberto, a regra da comissão em saque, e a pendência `open` bloqueia o órfão
+(`SAQUE_BLOQUEADO_SQL` lê também `orphan_payout_id`). Recuperação segue no admin e encerra como antes;
+o histórico e a recuperação apontam o saque pelo vínculo ou pelo `payout_id` do evento. No bloco
+"Reembolsos para revisar", a linha mostra o valor e a situação que a comissão tinha (paga ou no saque
+órfão), com o selo "conta excluída", e a revisão de comissão paga diz que a diferença vira recuperação.
+Saque `requested` vira órfão (D9 = A): "Marcar pago" dá 409 e o QR, 422 (sem chave); o admin registra
+"Pagamento já realizado" ou rejeita (sem nota). "Pagamento já realizado" no órfão grava `paid_cents` nas
+linhas do vínculo: total aberta vira recuperação na hora, e reembolso posterior vira recuperação. Revisão
+parcial no órfão aberto ajusta `affiliate_payouts.amount_cents` e o `commission_cents` da linha, como no
+saque vivo. Rejeitar o órfão fecha a pendência aberta do vínculo sem recuperação, porque a comissão nunca
+foi paga, e reembolso depois não muda nada. Travas na mesma ordem de sempre: saque, linhas da fatura; o
+webhook lê o saque depois de travar a linha.
+A migração de `affiliate_payouts` (em produção) é guardada: `drop not null`, FK `cascade` para `set
+null` e `affiliate_code`, cada passo só quando há o que mudar, e o boot seguinte não pede lock.
+
+| | Tabela | Campos |
+|---|---|---|
+| Removido | `affiliates`, referrals, pagamentos e comissões do afiliado | Tudo, pela cascata de `affiliates` |
+| Removido | `affiliate_payouts` | `pix_key_enc` e `note`; `affiliate_id` vira nulo |
+| Retido | `affiliate_payouts` | id, valor, status, `requested_at`, `paid_at`, `affiliate_code` |
+| Retido | `affiliate_refund_reviews` e eventos | Fatura, valores (`paid_cents`, `commission_cents`), status, `affiliate_code`, saque (`orphan_payout_id`), referência, justificativa, autor |
+
+Também aqui: desvinculado do usuário, dados financeiros retidos. `affiliate_code` pode ter sido escolhido
+à mão e lembrar o nome da pessoa; retido para validação de LGPD do dono.
 Limites aceitos: (1) quem exclui a conta e se recadastra com o mesmo e-mail conta 2 vezes em
 cadastros e pagantes, porque reconhecer a pessoa exigiria guardar dado pessoal; (2) se o efeito
 `afiliado` falha e o indicado exclui a conta antes da retentativa, o pagante se perde: o dreno
@@ -3103,9 +3285,8 @@ entrega do e-book da `/assinar`
 1ª volta sem delay; inerte sem `STRIPE_SECRET_KEY` no ambiente), o e-mail trocado em
 `/settings` levado ao cliente do Stripe (`_stripe_email_worker` →
 `core/services/stripe_email_sync.sincronizar_pendentes`, mesma cadência e mesma guarda da
-chave), os avisos de reembolso de afiliado pendentes (`_afiliado_avisos_worker` →
-`core/services/afiliado_reembolso.reenviar_avisos_pendentes`, a cada 5 min, a 1ª volta sem
-delay, lote de 20, para na 1ª falha do canal, `for update skip locked` por linha; inerte sem
+chave), o aviso ao admin das pendências de reembolso de afiliado (`_afiliado_alerta_worker` →
+`core/services/afiliado_reembolso.reenviar_pendentes`, mesma cadência, inerte sem
 `ADMIN_NOTIFY_WEBHOOK_URL`), e a foto diária do
 patrimônio (`_patrimonio_foto` → `core/services/patrimonio_foto.py`, a cada hora, a partir
 das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos`; atrás de

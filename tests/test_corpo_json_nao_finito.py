@@ -49,6 +49,15 @@ def test_affiliate_commission_bps_nao_finito_da_422(afiliado_stub, token):
     assert afiliado_stub == []
 
 
+@pytest.mark.parametrize("token", NAO_FINITOS, ids=NF_IDS)
+def test_aprovacao_de_reembolso_nao_finito_da_422(token):
+    r = _post_texto(
+        _admin_client(), "/admin/api/affiliates/refund-reviews/999999999/approve",
+        '{"approved_cents": %s, "refunded_cents": 1, "justification": "justificativa ok"}' % token,
+    )
+    assert r.status_code == 422, r.text
+
+
 @pytest.fixture
 def plano_espiao(monkeypatch):
     """`set_account_plan` vira espião que devolve None (→ 404, o mesmo fim da

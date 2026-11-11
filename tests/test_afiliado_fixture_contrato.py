@@ -18,6 +18,8 @@ from pathlib import Path
 
 from db.affiliate_payments import marcar_reembolso, registrar_pagamento
 from db.affiliates import mark_payout_paid, reject_payout, request_payout, reverse_commission, set_affiliate_status
+from db.affiliate_reviews import registrar_reembolso, resolver_parcial
+from db.connection import get_conn
 from test_afiliado_area import _afiliado, _comissao, _me
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -109,7 +111,7 @@ def _status(resposta):
 
 
 def _resposta_real():
-    """Todo estado que a rota devolve: comissão em carência, em saque, paga e estornada; saque aberto, pago com nota e rejeitado; reembolso total e parcial; conta ativa e desativada.
+    """Todo estado que a rota devolve: comissão em carência, em saque, em revisão, ajustada, paga e estornada; saque aberto, pago com nota e rejeitado; reembolso total e parcial; conta ativa e desativada.
 
     Devolve as duas leituras, ativa e desativada; em cada uma, `paid_at`, `note` e `payout_id` vêm nulos e preenchidos."""
     agora = datetime.now(timezone.utc)
@@ -123,8 +125,19 @@ def _resposta_real():
         assert registrar_pagamento(comissao.indicado.uid, "stripe", comissao.fatura, 10000, agora)
         assert marcar_reembolso("stripe", comissao.fatura, tipo, agora)
     assert reverse_commission(total.id)
+    ajustada, em_revisao = _comissao(c, 10), _comissao(c, 10)
+    for comissao in (ajustada, em_revisao):
+        registrar_reembolso(comissao.fatura, "partial", 3000, agora)
+    with get_conn() as conn:
+        pendencia = conn.execute("select id from affiliate_refund_reviews where stripe_invoice_id = %s",
+                                 (ajustada.fatura,)).fetchone()["id"]
+    assert resolver_parcial(pendencia, "admin", 600, "Ajuste do valor aprovado", 3000)
     _comissao(c, 10, disponivel=False)
     request_payout(c.aff["id"])
+    em_conferencia = _comissao(c, 10)  # depois do saque, para ficar fora dele
+    with get_conn() as conn:
+        conn.execute("update affiliate_commissions set payment_check_pending = true where id = %s", (em_conferencia.id,))
+        conn.commit()
     ativa = _me(c)
     assert set_affiliate_status(c.aff["id"], "disabled")
     return ativa, _me(c)
@@ -163,6 +176,7 @@ def test_nulos_aparecem_nos_dois_estados():
     assert r["payouts[].paid_at"] == {"nulo", "data"}
     assert r["payouts[].note"] == {"nulo", "texto"}
     assert r["commissions[].payout_id"] == {"nulo", "numero"}
+    assert r["commissions[].original_amount"] == {"nulo", "numero"}
 
 
 # ── controles: o comparador acusa, numa cópia ───────────────────────────────

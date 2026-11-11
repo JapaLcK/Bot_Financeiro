@@ -41,11 +41,13 @@ def referred_user_id(user_id):
 
 
 def _make_available(commission_id: int):
-    """Antecipa a carência da comissão pra ontem (testa o bucket disponível)."""
+    """Antecipa a carência da comissão pra ontem (testa o bucket disponível), já conferida na Stripe:
+    a conferência (A5) é medida em `tests/test_afiliado_conferencia.py`."""
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update affiliate_commissions set available_at = now() - interval '1 day' where id = %s",
+                "update affiliate_commissions set available_at = now() - interval '1 day',"
+                " payment_check_pending = false where id = %s",
                 (commission_id,),
             )
         conn.commit()

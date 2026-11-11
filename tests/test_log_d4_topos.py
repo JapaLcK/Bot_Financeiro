@@ -58,7 +58,7 @@ _TOPOS = {
     "ebook": ("core.services.ebook_entrega:entregar_pendentes", "[ebook]"),
     "stripe_email": ("core.services.stripe_email_sync:sincronizar_pendentes", "[stripe_email]"),
     "remarketing": ("core.services.remarketing:rodar_uma_vez", "[remarketing]"),
-    "afiliado_avisos": ("core.services.afiliado_reembolso:reenviar_avisos_pendentes", "[afiliado_avisos]"),
+    "afiliado": ("db.affiliate_reviews_manutencao:limpar_sem_comissao", "[afiliado]"),
     "account_deletion": ("frontend.finance_bot_websocket_custom:process_due_account_deletions",
                          "[account_deletion]"),
     "of_trial_expiry": ("core.services.open_finance_trial_expiry:enforce_of_bank_limits", "[of_trial_expiry]"),

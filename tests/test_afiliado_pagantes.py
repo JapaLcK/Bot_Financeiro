@@ -511,11 +511,11 @@ def test_resposta_so_leva_contagens_e_rotulo(cobrar):
     marcar_reembolso("stripe", fatura, "partial", AGORA)
     r = TestClient(dashboard.app).get(ME, headers=c.h)
     m = r.json()
-    assert set(m["stats"]) == {"referrals", "held", "available", "requested", "paid", "generated",
+    assert set(m["stats"]) == {"referrals", "held", "available", "review", "requested", "paid", "generated",
                                "paying_clients", "refunded_clients", "refunds"}
     assert set(m["stats"]["refunds"]) == {"total", "partial"}
-    assert set(m["commissions"][0]) == {"id", "invoice_amount", "amount", "status", "available_at",
-                                        "created_at", "payout_id", "payment_refund"}
+    assert set(m["commissions"][0]) == {"id", "invoice_amount", "amount", "original_amount", "in_review", "checking", "status",
+                                        "available_at", "created_at", "payout_id", "payment_refund"}
     assert [p for p in (fatura, ind.email, str(ind.uid), "referral_id", "refunded_at",
                         "stripe", "source") if p in r.text] == []
 
@@ -717,9 +717,10 @@ def test_backfill_nao_prende_o_boot_atras_de_transacao_aberta(monkeypatch, caplo
     assert [x["payment_ref"] for x in _linhas(c)] == ["in_trava"]
 
 
-def test_boot_nao_pede_lock_exclusivo_quando_a_coluna_ja_aceita_nulo():
+@pytest.mark.parametrize("tabela", ["affiliate_referrals", "affiliate_commissions", "affiliate_payouts"])
+def test_boot_nao_pede_lock_exclusivo_quando_a_coluna_ja_aceita_nulo(tabela):
     leitor = _em_outra_conexao()
-    leitor.execute("select count(*) from affiliate_referrals")  # fica ocioso na transação, como um relatório
+    leitor.execute(f"select count(*) from {tabela}")  # fica ocioso na transação, como um relatório
     boot = threading.Thread(target=db.init_db, daemon=True)
     try:
         boot.start()

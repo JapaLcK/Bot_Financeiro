@@ -408,6 +408,27 @@ button:disabled { opacity: .6; cursor: wait; }
 .btn-xs { font-size: 11px; padding: 4px 10px; border-radius: 8px; white-space: nowrap; }
 .btn-sky { background: #0ea5e9; color: #04212e; border: 0; font-weight: 700; }
 
+/* Formulário das pendências de reembolso: `<dialog>` nativo, um só para as três ações. */
+/* `margin: auto`: é ela que centra o `<dialog>`, e o reset do `*` a zera. */
+.aff-form { margin: auto; background: #12121a; color: var(--text); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 16px; padding: 22px; width: min(420px, calc(100vw - 32px));
+            max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+            overflow-y: auto; }
+.aff-form::backdrop { background: rgba(0,0,0,.75); }
+.aff-form form { display: grid; gap: 12px; }
+.aff-form h3 { margin: 0; font-size: 1.1rem; }
+.aff-form p { margin: 0; color: var(--muted); font-size: 12.5px; }
+.aff-form label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+.aff-form label[hidden] { display: none; }
+/* 16px: o Safari do iPhone não dá zoom ao focar */
+.aff-form .field { max-width: none; font-size: 16px; font-family: inherit; }
+.aff-form-erro { color: #fca5a5; font-size: 13px; }
+.aff-form-erro:empty { display: none; }
+.aff-form-botoes { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.aff-selo { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.aff-checks { margin: 0 0 8px; }
+.aff-checks:empty { display: none; }
+
 /* Barra de estatísticas de e-mail (era flex inline no HTML) */
 .stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
 .stats-bar > div { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07);
@@ -985,7 +1006,7 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
     <div class="table-wrap">
       <table class="table as-cards">
         <thead><tr>
-          <th>Código</th><th>Email</th><th>%</th><th>Indicados</th><th>A pagar</th><th>Já pago</th><th>Chave Pix</th><th>Status</th><th></th>
+          <th>Código</th><th>Email</th><th>%</th><th>Indicados</th><th>A pagar ou em revisão</th><th>Já pago</th><th>Chave Pix</th><th>Status</th><th></th>
         </tr></thead>
         <tbody id="aff-list"></tbody>
       </table>
@@ -1002,6 +1023,67 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
         <tbody id="aff-payouts"></tbody>
       </table>
     </div>
+    <div class="section-title" style="margin-top:18px">
+      <h2><i class="ph ph-receipt" aria-hidden="true"></i> Reembolsos para revisar</h2>
+      <span class="meta">Enquanto estiver aqui, o saque que contém a comissão não paga</span>
+    </div>
+    <p id="aff-checks" class="meta aff-checks" role="status"></p>
+    <div class="table-wrap">
+      <table class="table as-cards">
+        <thead><tr>
+          <th>Afiliado</th><th>Comissão</th><th>Reembolso</th><th>Devolvido ao cliente</th><th>Onde está</th><th>Aviso</th><th></th>
+        </tr></thead>
+        <tbody id="aff-reviews"></tbody>
+      </table>
+    </div>
+    <div class="section-title" style="margin-top:18px">
+      <h2><i class="ph ph-warning" aria-hidden="true"></i> Recuperações</h2>
+      <span class="meta">Dinheiro que saiu antes do reembolso. Nada desconta de saque futuro</span>
+    </div>
+    <div class="table-wrap">
+      <table class="table as-cards">
+        <thead><tr>
+          <th>Afiliado</th><th>Valor</th><th>Reembolso em</th><th>Origem</th><th>Referência</th><th></th>
+        </tr></thead>
+        <tbody id="aff-recoveries"></tbody>
+      </table>
+    </div>
+    <div class="section-title" style="margin-top:18px">
+      <h2><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i> Histórico de reembolsos</h2>
+      <span class="meta">Os 50 mais recentes</span>
+    </div>
+    <div class="table-wrap">
+      <table class="table as-cards">
+        <thead><tr>
+          <th>Afiliado</th><th>Quando</th><th>Ação</th><th>Valor</th><th>Autor</th><th>Referência</th><th>Justificativa</th>
+        </tr></thead>
+        <tbody id="aff-refund-history"></tbody>
+      </table>
+    </div>
+    <dialog id="aff-form" class="aff-form" aria-labelledby="aff-form-title">
+      <form onsubmit="submitAffForm(event)">
+        <h3 id="aff-form-title"></h3>
+        <p id="aff-form-hint"></p>
+        <label data-campo="result">Resultado
+          <select id="aff-f-result" class="field" onchange="syncAffResult()">
+            <option value="recovered">Valor recuperado</option>
+            <option value="waived">Recuperação dispensada</option>
+          </select></label>
+        <label data-campo="value">Valor aprovado (R$)
+          <input id="aff-f-value" class="field" type="number" min="0" step="0.01" inputmode="decimal" /></label>
+        <label data-campo="date">Data do pagamento
+          <input id="aff-f-date" class="field" type="date" /></label>
+        <label data-campo="ref">Referência do comprovante
+          <input id="aff-f-ref" class="field" type="text" minlength="4" maxlength="120" pattern="[A-Za-z0-9._:\/\-]+" autocomplete="off" title="Só letras, números e . _ : / -" /></label>
+        <label data-campo="just">Justificativa (não escreva nome nem documento)
+          <textarea id="aff-f-just" class="field" rows="3" minlength="10" maxlength="500"></textarea></label>
+        <p id="aff-form-error" class="aff-form-erro" role="alert"></p>
+        <div class="aff-form-botoes">
+          <button class="btn-danger btn-xs" type="button" onclick="$id('aff-form').close()">Cancelar</button>
+          <button id="aff-form-send" class="btn-primary btn-xs" type="submit">Confirmar</button>
+        </div>
+      </form>
+    </dialog>
   </section>
 
   <!-- ── Acessos PII (LGPD audit) ───────────────────────────────────── -->
@@ -2519,7 +2601,7 @@ async function loadAffiliates() {
         <td data-label="Email">${esc(a.email || '—')}</td>
         <td data-label="Comissão">${(a.commission_bps / 100).toFixed(0)}%</td>
         <td data-label="Indicados">${a.referrals}</td>
-        <td data-label="A pagar">${fmtCents(a.owed_cents)}</td>
+        <td data-label="A pagar ou em revisão">${fmtCents(a.owed_cents)}</td>
         <td data-label="Já pago">${fmtCents(a.paid_cents)}</td>
         <td data-label="Chave Pix">${esc(a.pix_key || '—')}</td>
         <td data-label="Status"><span>${a.status === 'active' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:5px"></span>ativo' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>desativado'}</span></td>
@@ -2531,10 +2613,16 @@ async function loadAffiliates() {
     const payouts = data.payouts || [];
     $id('aff-payouts').innerHTML = payouts.map(p => {
       const when = new Date(p.requested_at).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-      const st = p.status === 'paid' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:5px"></span>pago' : (p.status === 'rejected' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>rejeitado' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;margin-right:5px"></span>aguardando');
-      const actions = p.status === 'requested' ? `
+      const orfao = p.orphan ? ' · <span class="aff-selo">conta excluída</span>' : '';
+      const st = p.blocked ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>bloqueado: reembolso em análise' : p.status === 'paid' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:5px"></span>pago' : (p.status === 'rejected' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>rejeitado' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;margin-right:5px"></span>aguardando');
+      // Órfão (afiliado excluiu a conta) não tem chave nem "Marcar pago": registra o pagamento ou rejeita.
+      // No livre, "Pagamento já realizado" é a saída quando o "Marcar pago" dá 503 com a Stripe fora e o Pix já saiu.
+      const pagar = p.blocked || p.orphan ? `
+        <button class="btn-primary btn-xs" type="button" onclick="openRecordedForm(${p.id})">Pagamento já realizado</button>` : `
         <button class="btn-primary btn-xs btn-sky" type="button" onclick="showPayoutPix(${p.id})"><i class="ph ph-sparkle" aria-hidden="true"></i> Pagar via Pix</button>
         <button class="btn-primary btn-xs" type="button" onclick="payoutAction(${p.id}, 'paid')">Marcar pago</button>
+        <button class="btn-xs" type="button" onclick="openRecordedForm(${p.id})">Pagamento já realizado</button>`;
+      const actions = p.status === 'requested' ? `${pagar}
         <button class="btn-danger btn-xs" type="button" onclick="payoutAction(${p.id}, 'reject')">Rejeitar</button>` : '';
       return `
       <tr>
@@ -2542,10 +2630,11 @@ async function loadAffiliates() {
         <td data-label="Pedido em">${when}</td>
         <td data-label="Valor"><strong>${fmtCents(p.amount_cents)}</strong></td>
         <td data-label="Chave Pix">${esc(p.pix_key || '—')}</td>
-        <td data-label="Status"><span>${st}${p.note ? ' · ' + esc(p.note) : ''}</span></td>
+        <td data-label="Status"><span>${st}${orfao}${p.note ? ' · ' + esc(p.note) : ''}</span></td>
         <td data-actions style="white-space:nowrap">${actions}</td>
       </tr>`;
     }).join('') || '<tr><td colspan="6" style="color:var(--muted)">Nenhum saque solicitado.</td></tr>';
+    renderRefundBlocks(data);
   } catch (e) {
     console.error('loadAffiliates', e);
     const meta = $id('aff-meta');
@@ -2599,7 +2688,7 @@ async function toggleAffiliateStatus(id, status) {
 }
 
 async function payoutAction(id, action) {
-  const label = action === 'paid' ? 'Confirmar que o Pix deste saque JÁ FOI PAGO?' : 'Rejeitar este saque? As comissões voltam pro saldo do afiliado, menos as de fatura reembolsada.';
+  const label = action === 'paid' ? 'Confirmar que o Pix deste saque JÁ FOI PAGO?' : 'Rejeitar este saque? As comissões voltam pro saldo do afiliado, menos as de fatura reembolsada por inteiro, e a de reembolso parcial volta para revisão. Se o Pix já saiu, não rejeite.';
   if (!confirm(label)) return;
   const note = prompt('Observação (opcional):') || '';
   const res = await fetch(`/admin/api/affiliates/payouts/${id}/${action}`, {
@@ -2607,9 +2696,167 @@ async function payoutAction(id, action) {
     headers: { ...authH(), 'Content-Type': 'application/json' },
     body: JSON.stringify(note ? { note } : {}),
   });
-  if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.detail || 'Erro.'); return; }
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    alert(d.detail || 'Erro.');
+    if (res.status === 409) loadAffiliates();  // o saque mudou de estado: a lista mostra o de agora
+    return;
+  }
   loadAffiliates();
 }
+
+/* ── Pendências de reembolso ────────────────────────────────────── */
+const AFF_ORIGEM = { paid_before_refund: 'Comissão já paga', payment_recorded: 'Pagamento já realizado', partial_approved: 'Revisão parcial' };
+const AFF_ACAO = { partial_approved: 'Revisão parcial', payout_rejected: 'Saque rejeitado', payment_recorded: 'Pagamento já realizado',
+  paid_before_refund: 'Já paga antes do reembolso', auto_reversed: 'Estorno automático', commission_reversed: 'Estorno manual',
+  recovery_recovered: 'Valor recuperado', recovery_waived: 'Recuperação dispensada', reopened: 'Reaberta por reembolso maior',
+  affiliate_deleted: 'Afiliado excluiu a conta' };
+const fmtDia = d => d ? new Date(d).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—';
+const hojeBrasilia = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+let affPendencias = new Map();
+let affFormAtual = null;
+
+function renderRefundBlocks(data) {
+  const reviews = data.refund_reviews || [], recoveries = data.refund_recoveries || [];
+  affPendencias = new Map([...reviews, ...recoveries].map(r => [r.id, r]));
+  const checks = data.commission_checks || {};
+  $id('aff-checks').textContent = checks.count
+    ? `${checks.count} comiss${checks.count === 1 ? 'ão aguarda' : 'ões aguardam'} conferência na Stripe, a mais antiga de ${fmtDia(checks.oldest)}`
+    : '';
+  $id('aff-reviews').innerHTML = reviews.map(r => {
+    const onde = r.commission_status === 'paid' ? 'já paga' : (r.payout_id ? `no saque ${r.payout_id}` : 'fora do saque');
+    const acao = r.tipo === 'partial'
+      ? `<button class="btn-primary btn-xs" type="button" onclick="openReviewForm(${r.id})">Revisar valor</button>`
+      : '<span class="meta">Rejeite o saque ou registre o pagamento</span>';
+    return `
+      <tr>
+        <td data-primary data-label="Afiliado"><code>${esc(r.code)}</code></td>
+        <td data-label="Comissão"><strong>${fmtCents(r.commission_cents)}</strong></td>
+        <td data-label="Reembolso">${r.tipo === 'total' ? 'total' : 'parcial'}</td>
+        <td data-label="Devolvido">${fmtCents(r.refunded_cents)}</td>
+        <td data-label="Onde está"><span>${esc(onde)}${r.affiliate_deleted ? ' · <span class="aff-selo">conta excluída</span>' : ''}</span></td>
+        <td data-label="Aviso">${r.notified_at ? 'entregue' : 'pendente'}</td>
+        <td data-actions>${acao}</td>
+      </tr>`;
+  }).join('') || '<tr><td colspan="7" style="color:var(--muted)">Nenhum reembolso para revisar.</td></tr>';
+  $id('aff-recoveries').innerHTML = recoveries.map(r => `
+      <tr>
+        <td data-primary data-label="Afiliado"><code>${esc(r.code)}</code></td>
+        <td data-label="Valor"><strong>${fmtCents(r.recovery_cents)}</strong></td>
+        <td data-label="Reembolso em">${fmtDia(r.refunded_at)}</td>
+        <td data-label="Origem"><span>${esc(AFF_ORIGEM[r.origem] || '—')}${r.affiliate_deleted ? ' · <span class="aff-selo">conta excluída</span>' : ''}</span></td>
+        <td data-label="Referência">${esc(r.referencia || '—')}</td>
+        <td data-actions><button class="btn-primary btn-xs" type="button" onclick="openRecoveryForm(${r.id})">Encerrar</button></td>
+      </tr>`).join('') || '<tr><td colspan="6" style="color:var(--muted)">Nenhuma recuperação aberta.</td></tr>';
+  $id('aff-refund-history').innerHTML = (data.refund_history || []).map(e => `
+      <tr>
+        <td data-primary data-label="Afiliado"><code>${esc(e.code)}</code></td>
+        <td data-label="Quando">${fmtDia(e.created_at)}</td>
+        <td data-label="Ação">${esc(AFF_ACAO[e.action] || e.action)}</td>
+        <td data-label="Valor">${e.after_cents === null ? (e.before_cents === null ? '—' : fmtCents(e.before_cents)) : (e.before_cents === null ? fmtCents(e.after_cents) : fmtCents(e.before_cents) + ' → ' + fmtCents(e.after_cents))}</td>
+        <td data-label="Autor">${esc(e.actor)}</td>
+        <td data-label="Referência">${esc(e.receipt_ref || '—')}</td>
+        <td data-label="Justificativa">${esc(e.justification || '—')}</td>
+      </tr>`).join('') || '<tr><td colspan="7" style="color:var(--muted)">Nada por aqui ainda.</td></tr>';
+}
+
+/* `campos`: os que aparecem. Campo escondido sai da validação nativa do formulário. */
+function showAffFields(campos) {
+  document.querySelectorAll('#aff-form [data-campo]').forEach(label => {
+    const visivel = campos.includes(label.dataset.campo);
+    label.hidden = !visivel;
+    const campo = label.querySelector('input, textarea, select');
+    campo.disabled = !visivel;
+    campo.required = visivel;
+  });
+}
+
+function openAffForm({ title, hint, campos, caminho, corpo, dataRotulo = 'Data do pagamento' }) {
+  affFormAtual = { campos, caminho, corpo };
+  $id('aff-form-title').textContent = title;
+  $id('aff-form-hint').textContent = hint;
+  $id('aff-form-error').textContent = '';
+  ['aff-f-value', 'aff-f-ref', 'aff-f-just'].forEach(id => { $id(id).value = ''; });
+  $id('aff-f-result').value = 'recovered';
+  $id('aff-f-date').value = hojeBrasilia();
+  $id('aff-f-date').max = hojeBrasilia();
+  $id('aff-f-date').parentElement.firstChild.textContent = dataRotulo;
+  showAffFields(campos);
+  $id('aff-form').showModal();
+  lockPageScroll();
+}
+
+function syncAffResult() {
+  const recuperou = $id('aff-f-result').value === 'recovered';
+  showAffFields(recuperou ? affFormAtual.campos : ['result', 'just']);
+}
+
+function openReviewForm(id) {
+  const r = affPendencias.get(id);
+  const hint = r.commission_status === 'paid'
+    ? 'Comissão já paga: nada muda no saque, e a diferença vira recuperação.'
+    : (r.payout_id ? 'Se o Pix deste saque já saiu, não revise agora: use "Pagamento já realizado" no saque e revise depois. QR gerado antes da revisão traz o valor velho.' : 'A comissão volta ao saldo com o valor aprovado.');
+  openAffForm({
+    title: 'Revisar comissão de ' + fmtCents(r.commission_cents),
+    hint: `Devolvido ao cliente: ${fmtCents(r.refunded_cents)}. ${hint}`,
+    campos: ['value', 'just'],
+    caminho: `/admin/api/affiliates/refund-reviews/${id}/approve`,
+    corpo: () => ({ approved_cents: Math.round(Number($id('aff-f-value').value) * 100), refunded_cents: r.refunded_cents, justification: $id('aff-f-just').value }),
+  });
+  $id('aff-f-value').max = (r.commission_cents / 100).toFixed(2);
+}
+
+function openRecordedForm(id) {
+  openAffForm({
+    title: 'Pagamento já realizado',
+    hint: 'Para Pix que já saiu: antes do reembolso, ou quando "Marcar pago" não conseguiu conferir a Stripe. Marca o saque e as comissões como pagos, sem novo Pix e sem devolver nada ao saldo.',
+    campos: ['date', 'ref', 'just'],
+    caminho: `/admin/api/affiliates/payouts/${id}/payment-recorded`,
+    corpo: () => ({ paid_on: $id('aff-f-date').value, receipt_ref: $id('aff-f-ref').value, justification: $id('aff-f-just').value }),
+  });
+}
+
+function openRecoveryForm(id) {
+  const r = affPendencias.get(id);
+  openAffForm({
+    title: 'Encerrar recuperação de ' + fmtCents(r.recovery_cents),
+    hint: 'Não mexe em saldo: só registra como o caso terminou.',
+    campos: ['result', 'date', 'ref', 'just'],
+    dataRotulo: 'Data da recuperação',
+    caminho: `/admin/api/affiliates/refund-reviews/${id}/close-recovery`,
+    corpo: () => {
+      const result = $id('aff-f-result').value, justification = $id('aff-f-just').value;
+      return result === 'waived' ? { result, justification } : { result, justification, recovered_on: $id('aff-f-date').value, receipt_ref: $id('aff-f-ref').value };
+    },
+  });
+}
+
+async function submitAffForm(e) {
+  e.preventDefault();
+  const botao = $id('aff-form-send'), erro = $id('aff-form-error');
+  botao.disabled = true;
+  erro.textContent = '';
+  try {
+    const res = await fetch(affFormAtual.caminho, {
+      method: 'POST',
+      headers: { ...authH(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(affFormAtual.corpo()),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      erro.textContent = typeof d.detail === 'string' ? d.detail : 'Não deu para salvar.';
+      if (res.status === 409) loadAffiliates();
+      return;
+    }
+    $id('aff-form').close();
+    loadAffiliates();
+  } catch {
+    erro.textContent = 'Não deu para confirmar. Recarregue a página e confira antes de tentar de novo.';
+  } finally {
+    botao.disabled = false;
+  }
+}
+$id('aff-form').addEventListener('close', unlockPageScroll);
 
 /* Mostra o QR + copia e cola pra pagar o saque. O BR Code vem pronto do
    servidor com chave e valor embutidos — o admin só escaneia e confirma. */
@@ -2618,6 +2865,7 @@ async function showPayoutPix(id) {
   if (!res.ok) {
     const d = await res.json().catch(() => ({}));
     alert(d.detail || 'Não consegui gerar o Pix deste saque.');
+    if (res.status === 409) loadAffiliates();  // a conferência na Stripe bloqueou: a lista mostra o saque como está
     return;
   }
   const d = await res.json();

@@ -1248,6 +1248,10 @@ def delete_user_data(
                 # os ciclos com `accrue_*` seguem fechados só pela ordem pai → lote.
                 from .bank_movements import _lock_user
                 _lock_user(cur, user_id)
+                # Afiliado que exclui a conta: saques, pendências e histórico ficam, desvinculados do
+                # usuário (A3, D8). Antes do laço, que apaga `affiliates` e leva as comissões.
+                from .affiliate_reviews_manutencao import desvincular_afiliado
+                desvincular_afiliado(cur, user_id)
                 from .family_grants import release_user
                 familia_afetada = release_user(cur, user_id, "family_owner_deleted")
                 for table in user_owned_tables:
