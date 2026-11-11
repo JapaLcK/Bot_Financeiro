@@ -45,10 +45,11 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-_HELP_FALLBACK_MARKERS: tuple[str, ...] = (
-    "Posso te ajudar com",       # "🧾 Posso te ajudar com fatura/pagamento assim:" e variantes
-    "Não entendi exatamente",    # respostas de classifier confuso vindas dos handlers
-)
+def _marcas_de_ajuda() -> tuple[str, ...]:
+    """O começo das dicas "tente assim" dos handlers ("🧾 Posso te ajudar com fatura/pagamento assim:", "Não entendi
+    exatamente…"), da fonte delas (`help_handler`)."""
+    from core.handlers.help_handler import NAO_ENTENDI_EXATAMENTE, POSSO_TE_AJUDAR_COM
+    return POSSO_TE_AJUDAR_COM, NAO_ENTENDI_EXATAMENTE
 
 
 # "Isto é pergunta?" tem TRÊS respostas diferentes (cede a linha? suprime a
@@ -188,7 +189,7 @@ def _looks_like_help_fallback(response: str | None) -> bool:
     """
     if not response:
         return False
-    return any(marker in response for marker in _HELP_FALLBACK_MARKERS)
+    return any(marker in response for marker in _marcas_de_ajuda())
 
 
 def _is_ofx_attachment(a) -> bool:
@@ -306,6 +307,9 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
         if not cartao or str(recusa).startswith(tuple(t.split("{")[0] for t in (tx.VALOR_ABREVIADO, tx.VALOR_AMBIGUO,
                                                                                     tx.LONGA))):
             return str(recusa), False
+    from core.handlers.launches import vira_lancamento
+    if declarando and not cartao and sum(vira_lancamento(uid, fp.limpar(p, banco=True)) for p in parts) > 1:
+        return tx.UM_POR_MENSAGEM, False  # T16, a mesma regra do texto (DP-7 A, #1315): nenhuma fila, nada armado
     for i, part in enumerate(parts):
         if is_multi and is_comparative_question(part):
             puladas.append(part)  # igual ao texto
@@ -385,10 +389,7 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
     else:
         # Nenhum pedaço virou lançamento válido — mostra UM fallback só
         # (não repetido por pedaço).
-        body = fallbacks[0] if fallbacks else (
-            "🎙️ Recebi seu áudio, mas não entendi o que registrar.\n"
-            'Tente algo como: "gastei 50 no mercado".'
-        )
+        body = fallbacks[0] if fallbacks else AUDIO_SEM_LANCAMENTO
 
     # Aviso depois da pergunta: o texto com pergunta diz "a pergunta acima".
     # Fila que já existia não chega aqui: com ela o áudio não é dividido (_handle_audio).
@@ -431,10 +432,15 @@ def _resposta_da_ia(uid: int, text: str, platform: str, rotulo: str,
 _IA_TENTOU = object()
 
 
-def _reentrega_da_declaracao(uid: int, texto: str | None, platform: str) -> str | None:
-    """`declaracao_ia.na_chegada` (None com a flag desligada). Respondeu: a pergunta aberta da IA fica como estava."""
+def _reentrega_da_declaracao(uid: int, texto: str | None, platform: str, msg: IncomingMessage) -> str | None:
+    """`declaracao_ia.na_chegada` e, depois dela, a resposta à confirmação do roteador (`declaracao_confirma.responde`,
+    #1315: botão, "sim"/"não" digitado ou falado); None com a flag desligada. Respondeu: a pergunta aberta da IA fica
+    como estava."""
+    from core.handlers.declaracao_confirma import responde
     from core.services.ai_chat.tools.declaracao_ia import na_chegada
     reentregue = na_chegada(uid, (texto or "").strip(), platform)
+    if reentregue is None:
+        reentregue = responde(uid, (texto or "").strip(), msg, platform)
     if reentregue is not None:
         pergunta_no_turno.set(MANTEM)
     return reentregue
@@ -548,9 +554,11 @@ def _handle_audio(msg: IncomingMessage, platform: str,
 
     prefix = "_" if platform == "discord" else ""
     preview = f'🎙️ {prefix}Entendi: "{transcription}"{prefix}\n\n'
-    reentregue = _reentrega_da_declaracao(uid, transcription, platform)  # o "sim" falado (`handle_incoming` viu só o anexo)
+    reentregue = _reentrega_da_declaracao(uid, transcription, platform, msg)  # o "sim" falado (`handle_incoming` viu só o anexo)
     if reentregue is not None:
         return [OutgoingMessage(text=preview + format_for_platform(reentregue, platform))]
+    from core.handlers.declaracao_suspensao import suspende
+    suspende(uid, transcription, platform)  # #1315: a fala é outro comando; a confirmação sai antes de ele rodar
 
     # Mesma regra do texto (5b do `handle_incoming`): pergunta da IA em aberto
     # e nenhuma pendência → a transcrição inteira responde à IA. Se a consulta
@@ -681,12 +689,7 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     try:
         from core.services.plan_service import feature_enabled
         if not feature_enabled(uid, "image_ocr_enabled"):
-            return [OutgoingMessage(
-                text=(
-                    "🐷 Ler foto de cupom ou comprovante é um recurso dos planos pagos.\n"
-                    "Dá uma olhada nos planos: https://pigbankai.com/precos"
-                )
-            )]
+            return [OutgoingMessage(text=IMAGEM_SO_NOS_PAGOS)]
     except Exception as exc:
         logger.warning(
             "gate Pro da leitura de imagem falhou pro user %s — seguindo fail-open (OCR liberado) causa=%s sqlstate=%s",
@@ -694,29 +697,17 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         )
 
     if not data:
-        return [OutgoingMessage(
-            text="📷 Recebi uma imagem, mas não consegui baixá-la. Tente reenviar."
-        )]
+        return [OutgoingMessage(text=IMAGEM_NAO_BAIXOU)]
 
     result = analyze_image(data, filename)
 
     # Falha na API
     if result is None:
-        return [OutgoingMessage(
-            text=(
-                "📷 Recebi sua imagem, mas não consegui analisá-la agora.\n"
-                "Tente digitar o lançamento manualmente, ex: `gastei 50 no mercado`."
-            )
-        )]
+        return [OutgoingMessage(text=IMAGEM_NAO_ANALISOU)]
 
     # Imagem sem dado financeiro
     if not result.get("tem_dado_financeiro"):
-        return [OutgoingMessage(
-            text=(
-                "📷 Analisei a imagem, mas não encontrei informações financeiras nela.\n"
-                "Se quiser registrar um gasto, escreva: `gastei [valor] [onde]`"
-            )
-        )]
+        return [OutgoingMessage(text=IMAGEM_SEM_DADO_FINANCEIRO)]
 
     # Monta resumo dos dados extraídos
     tipo  = result.get("tipo") or "despesa"
@@ -1059,9 +1050,84 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     ))]
 
 
+# Respostas de quem não atendeu o pedido: a fonte delas e dos marcadores do `_nao_ajudou` (#1315, R4-3).
+AUDIO_SEM_LANCAMENTO = ("🎙️ Recebi seu áudio, mas não entendi o que registrar.\n"
+                        'Tente algo como: "gastei 50 no mercado".')
+ERRO_INTERNO = "⚠️ Ocorreu um erro interno ao processar sua mensagem. Tente novamente em instantes."
+IMAGEM_SO_NOS_PAGOS = ("🐷 Ler foto de cupom ou comprovante é um recurso dos planos pagos.\n"
+                       "Dá uma olhada nos planos: https://pigbankai.com/precos")
+IMAGEM_NAO_BAIXOU = "📷 Recebi uma imagem, mas não consegui baixá-la. Tente reenviar."
+IMAGEM_NAO_ANALISOU = ("📷 Recebi sua imagem, mas não consegui analisá-la agora.\n"
+                       "Tente digitar o lançamento manualmente, ex: `gastei 50 no mercado`.")
+IMAGEM_SEM_DADO_FINANCEIRO = ("📷 Analisei a imagem, mas não encontrei informações financeiras nela.\n"
+                              "Se quiser registrar um gasto, escreva: `gastei [valor] [onde]`")
+ANEXO_NAO_BAIXOU = "📎 Recebi o {ext}, mas não consegui baixar o arquivo. Reenvie o .{kind} por favor."
+
+
+def _tem_audio(msg: IncomingMessage) -> bool:
+    return any(is_audio_attachment(getattr(a, "filename", ""), getattr(a, "content_type", ""))
+               for a in (msg.attachments or []))
+
+
+def _sem_texto(msg: IncomingMessage) -> bool:
+    """R4-1: o que chega ao core sem texto nem anexo que seja pedido (a reação do WhatsApp, inclusive a 👍, e a
+    localização chegam com o texto vazio; a figurinha, como imagem `image/webp`). Não mexe na confirmação. A MENSAGEM
+    de texto "👍" tem texto e confirma, com as proteções."""
+    return not (msg.text or "").strip() and all(
+        getattr(a, "content_type", "") == "image/webp" for a in (msg.attachments or []))
+
+
+# O comando não ajudou (#1315, R3-1 A): o "não entendi" do roteador, o "Só consigo ajudar…", a lista de ajuda, a IA que
+# não tem ferramenta (`report_out_of_scope`) ou falhou, o áudio sem nada a registrar, o erro interno. Aí a confirmação
+# que saiu antes do comando volta (a mesma ação); qualquer outra resposta é o comando atendido.
+def marcas_de_nao_ajudou() -> tuple[str, ...]:
+    """Os trechos, importados da fonte de cada texto (§0.7): a 1ª linha dos de várias linhas (a resposta pode vir
+    formatada ou com a pergunta depois); dos moldes, o trecho fixo antes do 1º campo (o do anexo, o do meio)."""
+    from core.intent_router import NOT_UNDERSTOOD_MSG, OUT_OF_SCOPE_MSG
+    from core.services.ai_chat.runner import ERROR_MSG
+    from core.services.ai_chat.tools.meta import _FALLBACK_BASE
+    from core.services.ofx_service import _PRO_REQUIRED_OFX_MSG, FATURA_DETECTADA, FATURA_NAO_IMPORTOU
+    from core.services.statement_service import _PRO_REQUIRED_STATEMENT_MSG, NAO_IMPORTOU
+    textos = (NOT_UNDERSTOOD_MSG, OUT_OF_SCOPE_MSG, _FALLBACK_BASE, ERROR_MSG, AUDIO_SEM_LANCAMENTO, ERRO_INTERNO,
+              IMAGEM_SO_NOS_PAGOS, IMAGEM_NAO_BAIXOU, IMAGEM_NAO_ANALISOU, IMAGEM_SEM_DADO_FINANCEIRO,
+              _PRO_REQUIRED_OFX_MSG, _PRO_REQUIRED_STATEMENT_MSG, FATURA_DETECTADA)
+    moldes = (NAO_IMPORTOU, FATURA_NAO_IMPORTOU)
+    return (*(t.split("\n")[0] for t in textos), *(m.split("{")[0] for m in moldes),
+            ANEXO_NAO_BAIXOU.split("{ext}")[1].split("{kind}")[0], *_marcas_de_ajuda())
+
+
+def _nao_ajudou(texto: str) -> bool:
+    return any(m in texto for m in marcas_de_nao_ajudou())
+
+
 def handle_incoming(msg: IncomingMessage, *,
                     ignora_pendencias: bool = False,
                     de_botao: bool = False) -> list[OutgoingMessage]:
+    """O turno inteiro (`_atende`) e, se ele tirou a confirmação de declaração viva para rodar outro comando
+    (`declaracao_confirma.suspende`, #1315), o desfecho dela: o comando não ajudou, a mesma pergunta volta; ajudou, ela
+    se encerra e a resposta avisa (DP-6)."""
+    from core.handlers import declaracao_suspensao as ds
+    token = ds.SUSPENSA.set(None)
+    try:
+        outs = _atende(msg, ignora_pendencias=ignora_pendencias, de_botao=de_botao)
+        if ds.SUSPENSA.get() is None:
+            return outs
+        from core.intent_router import _AVISO_PERGUNTA_CANCELADA, NADA_A_CANCELAR
+        saida = "\n".join(o.text for o in outs)
+        no_lugar = ds.desfecho(msg, saida, nao=saida.rstrip().endswith(NADA_A_CANCELAR),
+                               nao_ajudou=_nao_ajudou(saida))
+        if no_lugar is not None:
+            return [OutgoingMessage(text=format_for_platform(no_lugar, msg.platform))]
+        if outs and not outs[0].text.startswith(_AVISO_PERGUNTA_CANCELADA):  # o `route` já pode tê-lo posto
+            outs[0] = OutgoingMessage(text=_AVISO_PERGUNTA_CANCELADA + outs[0].text)
+        return outs
+    finally:
+        ds.SUSPENSA.reset(token)
+
+
+def _atende(msg: IncomingMessage, *,
+            ignora_pendencias: bool = False,
+            de_botao: bool = False) -> list[OutgoingMessage]:
     # `ignora_pendencias`: repassado cru ao `route()`. Um chamador só — a
     # porta 4 (`adapters/whatsapp/wa_runtime.py`), quando o CAS de abandono
     # dela perde para uma pergunta NOVA que outra tarefa acabou de pôr na
@@ -1101,9 +1167,12 @@ def handle_incoming(msg: IncomingMessage, *,
 
         # Declaração pelo banco pelo chat IA (flag): o "sim" anotado e a reentrega respondida pelo id da mensagem,
         # antes de anexos, da guarda anti-sequestro e da IA (`declaracao_ia.na_chegada`).
-        reentregue = _reentrega_da_declaracao(_normalize_user_id(msg), msg.text, platform)
+        reentregue = _reentrega_da_declaracao(_normalize_user_id(msg), msg.text, platform, msg)
         if reentregue is not None:
             return [OutgoingMessage(text=format_for_platform(reentregue, platform))]
+        if not _tem_audio(msg) and not _sem_texto(msg):  # o áudio só depois da transcrição; sem texto não mexe (R4-1)
+            from core.handlers.declaracao_suspensao import suspende
+            suspende(_normalize_user_id(msg), msg.text, platform)  # #1315: outro comando, a confirmação sai antes de ele rodar
 
         # ------------------------------------------------------------------
         # 1. Anexo OFX — tratamento especial (não passa pelo classificador)
@@ -1114,7 +1183,7 @@ def handle_incoming(msg: IncomingMessage, *,
                 a = ofx_atts[0]
                 if not getattr(a, "data", None):
                     return [OutgoingMessage(
-                        text="📎 Recebi o OFX, mas não consegui baixar o arquivo. Reenvie o .ofx por favor."
+                        text=ANEXO_NAO_BAIXOU.format(ext="OFX", kind="ofx")
                     )]
 
                 uid = _normalize_user_id(msg)
@@ -1179,7 +1248,7 @@ def handle_incoming(msg: IncomingMessage, *,
                 ext = stmt_kind.upper()
                 if not getattr(a, "data", None):
                     return [OutgoingMessage(
-                        text=f"📎 Recebi o {ext}, mas não consegui baixar o arquivo. Reenvie o .{stmt_kind} por favor."
+                        text=ANEXO_NAO_BAIXOU.format(ext=ext, kind=stmt_kind)
                     )]
 
                 uid = _normalize_user_id(msg)
@@ -1421,9 +1490,7 @@ def handle_incoming(msg: IncomingMessage, *,
                          type(log_exc).__name__, getattr(log_exc, "sqlstate", None), extra={"user_id": uid_for_log})
 
         # Retorna mensagem amigável ao usuário em vez de silêncio
-        return [OutgoingMessage(
-            text="⚠️ Ocorreu um erro interno ao processar sua mensagem. Tente novamente em instantes."
-        )]
+        return [OutgoingMessage(text=ERRO_INTERNO)]
 
     finally:
         if pergunta_ia is not None and pergunta_no_turno.get() != MANTEM:

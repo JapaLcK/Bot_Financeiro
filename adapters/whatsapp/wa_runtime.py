@@ -401,6 +401,27 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
             except Exception as exc:
                 logger.warning("WA send credit delete button failed, fallback texto: %s", exc)
 
+    # A confirmação da declaração pelo banco (#1315): o botão leva o id da ação no livro, e só sai junto da pergunta
+    # dela neste corpo (outra coisa trocou a linha no meio: só texto, nunca o botão de outra confirmação).
+    elif (pending and pending.get("action_type") == "confirm_declaracao_banco"
+            and str((pending.get("payload") or {}).get("question") or "\0") in body):
+        from core.handlers.declaracao_confirma import BOTAO_NAO as DECL_BOTAO_NAO
+        from core.handlers.declaracao_confirma import BOTAO_SIM as DECL_BOTAO_SIM
+        lid = int(pending["payload"]["livro_id"])
+        try:
+            send_interactive_buttons(
+                to=to_wa_id,
+                body=body,
+                buttons=[{"id": f"{DECL_BOTAO_SIM}{lid}", "title": "Sim"},
+                         {"id": f"{DECL_BOTAO_NAO}{lid}", "title": "Não"}],
+                footer="Toque para responder",
+            )
+            return
+        except Exception as exc:
+            logger.warning("WA send_interactive_buttons (declaração) falhou, fallback para texto "
+                           "uid=%s causa=%s sqlstate=%s", user_id, type(exc).__name__,
+                           getattr(exc, "sqlstate", None), extra={"user_id": user_id})
+
     elif _pending_supports_confirmation_buttons(pending):
         logger.info("WA sending interactive confirmation buttons to=%s", mask_phone(to_wa_id))
         try:
@@ -1461,6 +1482,8 @@ def process_message(message: InboundMessage) -> None:
             text=message.text or "",
             message_id=msg_id,
             attachments=attachments,
+            botao=interactive_id,
+            enviado_em=message.timestamp,
         )
 
         core_started = True

@@ -13,7 +13,7 @@ import time
 import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -30,6 +30,7 @@ from _apoio_auth_app import csrf
 from _lifespan_probe import sondar
 from core.services import admin_notify
 from core.services.afiliado_reembolso import reenviar_pendentes, tratar_evento
+from db.affiliate_payments import marcar_reembolso
 from db.affiliate_reviews import PendenciaMudou, reivindicar, registrar_reembolso, resolver_parcial
 from db.affiliates import (
     SaqueComPendencia,
@@ -153,11 +154,14 @@ def _realizado(adm, saque, **campos):
     return _post(adm, f"payouts/{saque}/payment-recorded", corpo)
 
 
-def _encerrar(adm, com, resultado="recovered", **campos):
-    corpo = {"result": resultado, "justification": "Afiliado devolveu por Pix"}
+def _encerrar(adm, com, resultado="recovered", visto=None, **campos):
+    """Sem `visto`, o valor de agora: o formulário aberto e enviado sem fato novo no meio."""
+    rev = _rev(com.fatura)
+    corpo = {"result": resultado, "justification": "Afiliado devolveu por Pix",
+             "recovery_cents": rev["recovery_cents"] if visto is None else visto}
     if resultado == "recovered":
         corpo |= {"recovered_on": _hoje(), "receipt_ref": "E7654321"}
-    return _post(adm, f"refund-reviews/{_rev(com.fatura)['id']}/close-recovery", {**corpo, **campos})
+    return _post(adm, f"refund-reviews/{rev['id']}/close-recovery", {**corpo, **campos})
 
 
 def _dois_com_saque(c):
@@ -606,12 +610,119 @@ def test_encerrar_validacao(adm, resultado, campos):
 
 
 def test_encerrar_repetido(adm):
+    """Os dois admins viram R$ 100: o segundo dá 409 pelo status, não pelo valor."""
     c = _afiliado()
     a, _ = _paga_e_saca(c)
     _total(a)
-    assert _encerrar(adm, a, "waived").status_code == 200
-    assert _encerrar(adm, a, "recovered").status_code == 409
+    assert _encerrar(adm, a, "waived", visto=10_000).status_code == 200
+    assert _encerrar(adm, a, "recovered", visto=10_000).status_code == 409
     assert _acoes(a.fatura) == ["paid_before_refund", "recovery_waived"]
+
+
+def _recuperacao_de_40(adm):
+    """Paga R$ 100, parcial, revisão aprova R$ 60: recuperação de R$ 40."""
+    c = _afiliado()
+    a, _ = _paga_e_saca(c)
+    _parcial(a)
+    assert _aprovar(adm, a, 6_000).status_code == 200
+    return a
+
+
+def _visto(adm, com):
+    """O valor que o formulário mostra: o do overview, não o do banco."""
+    return next(r for r in adm.get(OVERVIEW).json()["refund_recoveries"] if r["commission_id"] == com.id)["recovery_cents"]
+
+
+@pytest.mark.parametrize("resultado", ["recovered", "waived"])
+@pytest.mark.parametrize("fato", ["total", "disputa_perdida", "parcial_maior"])
+def test_encerrar_com_valor_velho_da_409(mundo, adm, fato, resultado):
+    """Formulário aberto com R$ 40, fato novo pela rota, envio com o valor velho: 409, nada gravado.
+    Sem a comparação do valor, `total` e `disputa_perdida` encerram R$ 100 com 200; `parcial_maior` é a guarda de status."""
+    a = _recuperacao_de_40(adm)
+    visto = _visto(adm, a)
+    assert visto == 4_000
+    if fato == "total":
+        _total(a)
+    elif fato == "disputa_perdida":
+        mundo.cobrancas["ch_d"] = _cobranca(a.fatura, devolvido=30_000)
+        assert _enviar("charge.dispute.closed", {"object": "dispute", "status": "lost", "charge": "ch_d",
+                                                 "amount": 70_000}).status_code == 200
+    else:
+        _parcial(a, 50_000)
+    antes = _rev(a.fatura)
+    r = _encerrar(adm, a, resultado, visto=visto)
+    assert r.status_code == 409, r.text
+    rev = _rev(a.fatura)
+    assert rev == antes and rev["recovery_closed_cents"] == 0
+    assert [x for x in _acoes(a.fatura) if x.startswith("recovery_")] == []
+    visao = adm.get(OVERVIEW).json()
+    if fato == "parcial_maior":
+        assert rev["status"] == "open" and a.id in [x["commission_id"] for x in visao["refund_reviews"]]
+    else:
+        assert rev["status"] == "recovery" and _visto(adm, a) == 10_000
+
+
+def test_encerrar_depois_de_recarregar_passa(adm):
+    """Positivo: o mesmo total no meio, mas o admin relê o overview antes de enviar."""
+    a = _recuperacao_de_40(adm)
+    assert _visto(adm, a) == 4_000
+    _total(a)
+    visto = _visto(adm, a)
+    assert visto == 10_000
+    assert _encerrar(adm, a, visto=visto).status_code == 200
+    rev = _rev(a.fatura)
+    assert (rev["status"], rev["recovery_cents"], rev["recovery_closed_cents"]) == ("resolved", None, 10_000)
+    fim = [(e["action"], e["before_cents"]) for e in _eventos(a.fatura) if e["action"].startswith("recovery_")]
+    assert fim == [("recovery_recovered", 10_000)]
+
+
+AUSENTE = object()
+
+
+@pytest.mark.parametrize("valor", [AUSENTE, None, "4000", 40.0, 4_000.0, True],
+                         ids=["ausente", "None", "texto", "40.0", "4000.0", "True"])
+def test_encerrar_sem_valor_visto_da_422(adm, valor):
+    """`type`, não `isinstance`: `true` é `int`. Sem a checagem, viram 409 (e 4000.0 passaria)."""
+    a = _recuperacao_de_40(adm)
+    antes, acoes = _rev(a.fatura), _acoes(a.fatura)
+    corpo = {"result": "waived", "justification": "Afiliado devolveu por Pix"}
+    if valor is not AUSENTE:
+        corpo["recovery_cents"] = valor
+    r = _post(adm, f"refund-reviews/{antes['id']}/close-recovery", corpo)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "Valor visto inválido: recarregue a página."
+    assert _rev(a.fatura) == antes and _acoes(a.fatura) == acoes
+
+
+def test_encerrar_concorre_com_webhook(adm, monkeypatch):
+    """O total chega com o formulário aberto e para depois de `_aplicar`, com a linha travada e antes do
+    commit. O encerramento espera a trava e compara com a linha de depois do commit: 409."""
+    a = _recuperacao_de_40(adm)
+    visto = _visto(adm, a)
+    aplicou, solta = threading.Event(), threading.Event()
+    real = reviews._aplicar
+
+    def pausa(*args, **kwargs):
+        linha = real(*args, **kwargs)
+        aplicou.set()
+        assert solta.wait(15)
+        return linha
+
+    monkeypatch.setattr(reviews, "_aplicar", pausa)
+    with ThreadPoolExecutor(2) as pool:
+        try:
+            webhook = pool.submit(tratar_evento, _evento(a.fatura))
+            assert aplicou.wait(15)
+            encerra = pool.submit(_encerrar, adm, a, "recovered", visto)
+            assert _esperando_lock(1)
+        finally:
+            solta.set()
+        assert webhook.exception(timeout=15) is None
+        r = encerra.result(timeout=15)
+    assert r.status_code == 409, r.text
+    rev = _rev(a.fatura)
+    assert (rev["status"], rev["recovery_cents"], rev["recovery_closed_cents"]) == ("recovery", 10_000, 0)
+    assert [x for x in _acoes(a.fatura) if x.startswith("recovery_")] == []
 
 
 # ── Estados ──────────────────────────────────────────────────────────────────
@@ -1232,6 +1343,45 @@ def test_script_duas_vezes(script, capsys):
     assert _quadros(c) == antes and _linha_de(saida, com) == "" and _linha_de(saida, paga) == ""
     assert [(x["action"], x["actor"]) for x in _eventos(com.fatura)] == [("auto_reversed", "script")]
     assert [(x["action"], x["actor"]) for x in _eventos(paga.fatura)] == [("paid_before_refund", "script")]
+
+
+@pytest.mark.parametrize("tipo,esperado", [("total", ("recovery", 10_000)), ("partial", ("open", None))])
+def test_reentrega_cria_pendencia_sobre_rotulo_sem_linha(canal, tipo, esperado):
+    """O estado que o #1418 deixava: comissão paga, rótulo gravado, nenhuma pendência. A reentrega cria."""
+    c = _afiliado()
+    a, _ = _paga_e_saca(c)
+    assert marcar_reembolso("stripe", a.fatura, tipo, AGORA)
+    assert _rev(a.fatura) is None
+    _total(a) if tipo == "total" else _parcial(a)
+    rev = _rev(a.fatura)
+    assert (rev["status"], rev["recovery_cents"]) == esperado
+    assert len(canal.enviados) == 1
+
+
+@pytest.mark.parametrize("estado,tipo,esperado", [("paga", "total", "recovery"), ("paga", "partial", "open"),
+                                                  ("solta", "partial", "open"), ("em_saque", "total", "open")])
+def test_script_cria_pendencia_do_rotulo_sem_linha(script, capsys, estado, tipo, esperado):
+    """O mesmo estado do #1418 reparado pelo script: a simulação lista e não grava, o `--aplicar` cria a
+    pendência com a data do reembolso na Stripe."""
+    c = _afiliado()
+    if estado == "paga":
+        com, _ = _paga_e_saca(c)
+    else:
+        com = _paga(c)
+        if estado == "em_saque":
+            request_payout(c.aff["id"])
+    assert marcar_reembolso("stripe", com.fatura, tipo, AGORA)
+    devolvido = 100_000 if tipo == "total" else 30_000
+    script.stripe.cobrancas[com.fatura] = {"amount": 100_000, "amount_refunded": devolvido, "disputed": False}
+    script.stripe.reembolsos[com.fatura] = [1_790_600_000]
+    _, saida = _roda(script, capsys, False)
+    assert _linha_de(saida, com).startswith("segue_revisao:") and _rev(com.fatura) is None
+    _, saida = _roda(script, capsys, True)
+    rev = _rev(com.fatura)
+    assert (rev["status"], rev["tipo"], rev["refunded_cents"]) == (esperado, tipo, devolvido)
+    assert rev["refunded_at"] == datetime.fromtimestamp(1_790_600_000, timezone.utc)
+    assert rev["recovery_cents"] == (10_000 if esperado == "recovery" else None)
+    assert _status(com)["status"] != "reversed"
 
 
 def test_script_alcanca_conta_excluida(script, capsys):

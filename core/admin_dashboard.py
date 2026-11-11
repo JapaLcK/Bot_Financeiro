@@ -1438,6 +1438,27 @@ ADMIN_PLAN_VALUES: tuple[str, ...] = ("free", "essencial", "pro", "pro_max")
 ADMIN_PLAN_MONTHS_MAX = 120
 
 
+def _retirar_aviso_do_admin(cur, user_id: int) -> None:
+    """O ajuste do operador é ATO: sem o recurso `insights` no plano, a adesão ao aviso por e-mail sai na hora,
+    sem a margem de 1 h e mesmo com carência aberta, NA MESMA TRANSAÇÃO do ajuste (§15 do plano B6).
+
+    A reprojeção de membro de família roda depois do commit (`recompute_entitlement` abre as próprias
+    conexões, então não entra nesta transação sem refatorar o billing). Por isso o estado final que ela
+    daria é lido aqui pela entrada dela: grant `family` vigente com tier que tem `insights` = o membro segue
+    com o recurso, e nada sai.
+    """
+    from core.services.insights_notificacao import planos_com_insights
+    from db.reports import retirar_adesao_sem_direito
+
+    cur.execute(
+        "select 1 from plan_grants where user_id = %s and source = 'family' and status = 'active'"
+        " and starts_at <= now() and ends_at > now() and lower(plan_stored) = any(%s)",
+        (user_id, planos_com_insights()),
+    )
+    if cur.fetchone() is None:
+        retirar_adesao_sem_direito(user_id, "admin", cur=cur, so_o_recurso=True)
+
+
 def set_account_plan(
     plan: str,
     months: int = 12,
@@ -1557,6 +1578,7 @@ def set_account_plan(
                               f"({plan}) NAO virou grant: {type(exc).__name__}")
                     except Exception:
                         pass
+                _retirar_aviso_do_admin(cur, int(row["user_id"]))
         conn.commit()
         if row:
             from db_support import invalidate_auth_user_cache
@@ -2582,7 +2604,8 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     async def admin_affiliate_review_close_recovery(
         review_id: int, request: Request, username: str = Depends(_get_current_admin)
     ):
-        """Encerra a recuperação. Body: {"result", "justification", "recovered_on", "receipt_ref"}."""
+        """Encerra a recuperação. Body: {"result", "recovery_cents", "justification", "recovered_on",
+        "receipt_ref"}; `recovery_cents` é o que o formulário mostrou: valor velho dá 409."""
         from core.services.afiliado_reembolso import dia_em_brasilia, validar_comprovante, validar_justificativa
         from db.affiliate_reviews import PendenciaMudou, encerrar_recuperacao, refunded_at_da_pendencia
 
@@ -2590,6 +2613,9 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         resultado = payload.get("result")
         if resultado not in ("recovered", "waived"):
             raise HTTPException(status_code=422, detail="Resultado inválido.")
+        visto = payload.get("recovery_cents")
+        if type(visto) is not int:  # `type`: `true` é `int` para `isinstance`
+            raise HTTPException(status_code=422, detail="Valor visto inválido: recarregue a página.")
         data = referencia = None
         try:
             justificativa = validar_justificativa(payload.get("justification"))
@@ -2604,7 +2630,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
         try:
             ok = await asyncio.to_thread(
-                encerrar_recuperacao, review_id, resultado, username, justificativa, data, referencia)
+                encerrar_recuperacao, review_id, resultado, username, justificativa, visto, data, referencia)
         except PendenciaMudou as exc:
             raise HTTPException(status_code=409, detail=str(exc))
         if not ok:

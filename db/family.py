@@ -155,6 +155,10 @@ def leave_family(user_id: int) -> None:
         revogados = _remove_locked(cur, gid, user_id, "left")
         conn.commit()
     recompute_users(revogados, owner_id)
+    # Sair é ato do próprio membro: sem o recurso `insights` no estado final, a adesão ao aviso por e-mail sai na
+    # hora (§15 do plano B6); com plano próprio elegível, fica.
+    from db.reports import retirar_adesao_sem_direito
+    retirar_adesao_sem_direito(user_id, "familia", so_o_recurso=True)
 
 
 def list_members(owner_user_id: int) -> list[dict]:

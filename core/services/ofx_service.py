@@ -61,6 +61,11 @@ def format_ofx_report(rep: dict) -> str:
     return "\n\n".join(blocks)
 
 
+# A fatura que não importou e o aviso de "falta o cartão" (o `handle_incoming` os lê: a confirmação da declaração
+# volta, #1315).
+FATURA_NAO_IMPORTOU = "❌ Erro ao importar fatura do {cartao}: {erro}"
+FATURA_DETECTADA = "💳 **Fatura de cartão detectada!**\n\n"
+
 _PRO_REQUIRED_OFX_MSG = (
     "📄 **Importar OFX é uma feature do PigBank+ (Pro).**\n\n"
     "No plano Free voce pode lançar gastos manualmente pelo chat ou pelo dashboard. "
@@ -160,8 +165,8 @@ def handle_credit_ofx_import(user_id: str, attachment_bytes: bytes, filename: st
     # Sem cartões cadastrados
     if not cards:
         return (
-            "💳 **Fatura de cartão detectada!**\n\n"
-            "Mas você ainda não tem nenhum cartão cadastrado.\n"
+            FATURA_DETECTADA
+            + "Mas você ainda não tem nenhum cartão cadastrado.\n"
             "Cadastre um cartão primeiro:\n\n"
             "`criar cartão [nome] fechamento [dia] vencimento [dia]`\n\n"
             "Exemplo: `criar cartão Nubank fechamento 18 vencimento 25`\n\n"
@@ -180,8 +185,8 @@ def handle_credit_ofx_import(user_id: str, attachment_bytes: bytes, filename: st
         if not card:
             names = "\n".join(f"  • `{c['name']}`" for c in cards)
             return (
-                "💳 **Fatura de cartão detectada!**\n\n"
-                f"Você tem {len(cards)} cartões cadastrados:\n{names}\n\n"
+                FATURA_DETECTADA
+                + f"Você tem {len(cards)} cartões cadastrados:\n{names}\n\n"
                 "Para importar automaticamente, defina um cartão padrão:\n"
                 "`cartão padrão [nome]`\n\n"
                 "Depois reenvie o arquivo OFX."
@@ -193,4 +198,4 @@ def handle_credit_ofx_import(user_id: str, attachment_bytes: bytes, filename: st
     except Exception as e:
         if violacao_finito(e):
             raise  # tratador central (rota/handle_incoming): `{e}` traz "Failing row contains (...)"
-        return f"❌ Erro ao importar fatura do {card['name']}: {e}"
+        return FATURA_NAO_IMPORTOU.format(cartao=card["name"], erro=e)

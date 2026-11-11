@@ -179,9 +179,31 @@ test("encerrar recuperação: dispensada esconde data e referência, e não as m
     await page.locator("#aff-f-just").fill("Valor pequeno, sem cobrança");
     await page.locator("#aff-form-send").click();
     await page.waitForFunction(() => !document.getElementById("aff-form").open);
-    assert.deepEqual(posts, [{ url: "/admin/api/affiliates/refund-reviews/3/close-recovery", corpo: { result: "waived", justification: "Valor pequeno, sem cobrança" } }]);
+    assert.deepEqual(posts, [{ url: "/admin/api/affiliates/refund-reviews/3/close-recovery", corpo: { result: "waived", recovery_cents: 4000, justification: "Valor pequeno, sem cobrança" } }]);
   } finally { await page.close(); }
 });
+
+// mutação: ler `affPendencias.get(id)` no envio: sai o valor da lista recarregada (10.000) e a rota não acha a diferença
+for (const [nome, width, height] of TAMANHOS.slice(0, 2)) for (const resultado of ["recovered", "waived"]) {
+  test(`encerrar manda o valor da abertura, não o da lista recarregada (${resultado}, ${nome})`, async () => {
+    const visao = structuredClone(VISAO);
+    const { page, posts } = await abrir({ width, height, visao });
+    try {
+      await page.getByRole("button", { name: "Encerrar" }).click();
+      visao.refund_recoveries[0].recovery_cents = 10000;  // um total chega com o formulário aberto
+      await page.evaluate(() => window.loadAffiliates());
+      await page.locator("#aff-recoveries").filter({ hasText: "100,00" }).waitFor();
+      assert.equal(await page.locator("#aff-form").evaluate((d) => d.open), true);
+      await page.locator("#aff-f-result").selectOption(resultado);
+      if (resultado === "recovered") await page.locator("#aff-f-ref").fill("E7654321");
+      await page.locator("#aff-f-just").fill("Afiliado devolveu por Pix");
+      await page.locator("#aff-form-send").click();
+      await page.waitForFunction(() => !document.getElementById("aff-form").open);
+      assert.equal(posts.length, 1);
+      assert.equal(posts[0].corpo.recovery_cents, 4000);
+    } finally { await page.close(); }
+  });
+}
 
 // mutação: fechar o formulário sem olhar `res.ok`: o admin acha que salvou
 test("409 fica no formulário, com a mensagem do servidor", async () => {

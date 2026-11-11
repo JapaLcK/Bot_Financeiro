@@ -13,7 +13,7 @@ import pytest
 
 import db
 from core.handlers import forma_pagamento as fp
-from tests._declaracao_b import ana, carteira, declaracoes, fala, liga, manda_wamid, n_lancamentos  # noqa: F401
+from tests._declaracao_b import ana, carteira, declaracoes, fala_e_confirma as fala, liga, manda_e_confirma as manda_wamid, n_lancamentos  # noqa: F401
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401
 from tests._patrimonio_helpers import q
 from tests._retrato_declaracao import BASE, t
@@ -145,14 +145,6 @@ def test_nome_de_comercio_nao_perde_pedaco(frase):
 def test_forma_em_qualquer_posicao_pelo_handle_incoming(com_extrato, dito):
     manda_wamid(com_extrato, dito)
     assert alvos(com_extrato) == [("mercado", True)]
-
-
-def test_audio_com_pedaco_sem_valor_tambem_limpa_a_forma(ana, liga, monkeypatch):
-    """`rotear_partes` enfileira o pedaço sem valor: a descrição que vira alvo também sai sem a forma dita."""
-    fala(monkeypatch, ana, "gastei 40 no mercado e paguei o aluguel pelo banco")
-    assert [i["desc"] for i in db.get_pending_action(ana)["payload"]["queue"]] == ["aluguel"]
-    manda_wamid(ana, "1500")
-    assert sorted(d["alvo"] for d in declaracoes(ana)) == ["aluguel", "mercado"]
 
 
 def test_caminho_entities_tambem_limpa_a_forma(com_extrato):

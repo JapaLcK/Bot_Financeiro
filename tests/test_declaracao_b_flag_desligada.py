@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 import db
+from tests._declaracao_b import manda_e_confirma  # a flag ligada nestes dois (#1315: grava depois do "sim")
 from tests._declaracao_b import (PORTAS, ana, carteira, declaracoes, fala, liga, manda_wamid,  # noqa: F401
                                  n_lancamentos, pendencia)
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401
@@ -47,8 +48,8 @@ def test_flag_ligada_para_o_usuario_certo_e_desligada_para_o_outro(ana, monkeypa
     _bank(outro)
     monkeypatch.setenv("DECLARACAO_BANCO", "1")
     monkeypatch.setenv("DECLARACAO_BANCO_USER_IDS", f"{ana}")
-    assert "registrada pelo banco" in manda_wamid(ana, "gastei 50 no mercado no pix")[0]
-    assert "Não registrei" in manda_wamid(outro, "gastei 50 no mercado no pix")[0]
+    assert "registrada pelo banco" in manda_e_confirma(ana, "gastei 50 no mercado no pix")[0]
+    assert "Não registrei" in manda_e_confirma(outro, "gastei 50 no mercado no pix")[0]
     assert len(declaracoes(ana)) == 1 and declaracoes(outro) == []
 
 
@@ -87,7 +88,7 @@ def test_quick_entry_legado_segue_recusando_com_a_flag_ligada(ana, liga):
 def test_desligar_depois_nao_apaga_nada(ana, monkeypatch):
     """X8: declara com a flag, desliga: a declaração fica intacta (retrato idêntico) e "pix" volta a ser recusado."""
     monkeypatch.setenv("DECLARACAO_BANCO", "1")
-    assert "registrada pelo banco" in manda_wamid(ana, "gastei 50 no mercado no pix")[0]
+    assert "registrada pelo banco" in manda_e_confirma(ana, "gastei 50 no mercado no pix")[0]
     antes = retrato(ana)
     monkeypatch.delenv("DECLARACAO_BANCO")
     assert retrato(ana) == antes

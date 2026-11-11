@@ -1900,7 +1900,7 @@ trocar de página ou o portão cair não os apagam; só o "Concluído". `enable`
 servidor comita e a resposta é a única cópia dos códigos); resposta perdida relê o status (T2 "gerar novos códigos" se o MFA ligou;
 o 409 "já ativado" do `enable` também vira T2). O S0 corrigiu `_current_session_jti` (`frontend/routes/settings.py`): no painel, que roda só com o `dashboard_token`, o jti vinha `None` e "encerrar os outros" revogava a PRÓPRIA sessão; agora vem do que o gate já resolveu. O C1b pôs os "Dispositivos conectados" na mesma página (`conta/Sessoes.tsx`), pelas rotas antigas `GET /settings/{uid}/sessions`, `DELETE /settings/{uid}/sessions/{jti}` e `DELETE /settings/{uid}/sessions` (encerrar as outras): os DELETE têm `comPrazo` (30 s); a releitura depois de falha usa `comPrazoLeitura` (`conta/api.ts`, compartilhado com `lerStatusMfa`); depois do DELETE a linha sai do cache e o `invalidateQueries` relê (o `cancelRefetch` dele cancela o GET em voo); a sessão atual (`is_current` ou `current_jti`) nunca tem botão; resposta fora do contrato cai no erro com "Tentar de novo" (`sessoesDe`). Limite: com `current_jti` null (só token legado sem jti) "encerrar as outras" revoga todas as linhas de `auth_sessions`, igual à `/settings` (`core/sessions.py:revoke_other_sessions`); o token legado não é linha, então a atual segue válida. O app não tem lista de sessões (`app/app/(app)/seguranca.tsx`).
 
-**Configurações do /painel mostram as Notificações (C2).** `conta/Notificacoes.tsx`, pelas rotas antigas `GET`/`PATCH /settings/{uid}/notifications`: os mesmos 7 controles da `/settings`, cada um salva sozinho (corpo só com o campo tocado, no máximo 1 PATCH em voo por página: a trava é do módulo, então sair da rota e voltar não a solta; várias abas são independentes; a tela segue a resposta e o `invalidateQueries` relê). O horário manda o `daily_report_enabled` atual junto: o servidor liga o diário ao gravar a hora (`set_daily_report_hour`), então sem o campo mexer no horário religaria um diário desligado (a própria `/settings` ainda faz isso: issue #1122). `whatsapp_updates_enabled` é consentimento e só vai com o clique no interruptor dele. `HORAS` (`conta/api.ts`) copia as opções de `#notif-daily-hour` do `settings.html`; o teste compara as duas. Par no app: `app/app/(app)/notificacoes.tsx` (#1121), com horário de qualquer hora e minuto e a seção "No celular" para o push de `plano-push-app.md`.
+**Configurações do /painel mostram as Notificações (C2).** `conta/Notificacoes.tsx`, pelas rotas antigas `GET`/`PATCH /settings/{uid}/notifications`: os mesmos controles da `/settings`, cada um salva sozinho (corpo só com o campo tocado, no máximo 1 PATCH em voo por página: a trava é do módulo, então sair da rota e voltar não a solta; várias abas são independentes; a tela segue a resposta e o `invalidateQueries` relê). O horário manda o `daily_report_enabled` atual junto: o servidor liga o diário ao gravar a hora (`set_daily_report_hour`), então sem o campo mexer no horário religaria um diário desligado (a própria `/settings` ainda faz isso: issue #1122). `whatsapp_updates_enabled` é consentimento e só vai com o clique no interruptor dele. `HORAS` (`conta/api.ts`) copia as opções de `#notif-daily-hour` do `settings.html`; o teste compara as duas. Par no app: `app/app/(app)/notificacoes.tsx` (#1121), com horário de qualquer hora e minuto e a seção "No celular" para o push de `plano-push-app.md`.
 
 **Cobrança do /painel (`/conta/cobranca`).** `conta/Cobranca.tsx` lê `GET /billing/subscription` (fora da `/api/v2`: `billing` está na lista do `chamar`, `lib/v2.ts`) e mostra o plano (`NOME_DO_PLANO`, `lib/v2.ts`, a fonte única do painel), o selo Mensal/Anual/Pix/Vitalício e a data. A rota não diz se é teste, carência ou cancelada no fim: por isso o cartão só diz "Período atual até DD/MM/AAAA", e o Pix "Válido até" (a data sai por split, nunca `new Date`). Ações: `POST /billing/portal?voltar=%2Fpainel` (abre o portal na mesma aba, só se a resposta for `https:`), `POST /billing/cancel-change` (a troca agendada; 400 `no_change` e 409 `no_subscription` só releem) e o link para a `/precos`. Uma trava no módulo para as duas escritas; `refetchOnWindowFocus` desligado (cada leitura chama o Stripe de 1 a 4 vezes), com releitura no `pageshow` do bfcache. Na carência o `plan_tier` do `/api/v2/me` é `free`: o nome vem da assinatura. Par no app: específico da plataforma (ver `paridade-app-dashboard.md`).
 
@@ -2500,6 +2500,49 @@ agente, mudança de plano), com link de descadastro (`make_unsub_url` + `unsub_h
 
 Falha de e-mail é silenciosa por contrato: loga e não quebra o fluxo principal.
 
+**Aviso de insight por e-mail (PL-06 B6, adesão no PR 1; o envio é o PR 2).** Só recebe quem aderiu no interruptor "Avisos do
+Piggy por e-mail" (`/settings` e `/painel`): `auth_accounts.insight_aviso_aderiu_em`, nula = não aderiu, sem default nem backfill, então
+`insight_email_opt_out = false` não é adesão (P4 (c)). `GET /settings/{uid}/notifications` manda `insight_alert_email_enabled` (a adesão gravada, leitura
+direta), `insight_alert_email_available` (`plan_gate_ok(uid, "insights")`), `insight_alert_email_notice` (`texto_adesao()` de
+`core/services/insights_notificacao.py`, com `HORA_ENVIO` e o fuso de `utils_date.tz_name()`; as telas não copiam; `null` = a linha não aparece) e
+`insight_email_off_notice` (só com adesão: desligar "Insights financeiros" também desliga o aviso) e `insight_alert_email_paused_notice` (adesão gravada e plano fora, a
+carência: `AVISO_PAUSADO`, que as duas telas mostram sem cópia). `PATCH` com `true`, nesta ordem: fora de
+`INSIGHT_EMAIL_USERS` 403, sem plano 403 `pro_required` com `feature: insights`, sem e-mail 400, com opt-out 409; o campo é `StrictBool` (`"false"` e `0` dão 422). Telefone e hora
+são validados antes de qualquer escrita. **Desligar sem plano (D2):** só o corpo exato `{"insight_alert_email_enabled": false}` passa por `authorize_account_access` (cortado e sem
+credencial: 200 `{"ok": true, "insight_alert_email_enabled": false}`); conta em exclusão e quem nunca escolheu plano seguem barrados; qualquer outro corpo segue a regra normal.
+Sem plano, o 402 `subscription_required` do `GET` traz `insight_alert_email_enabled: true` só para quem tem adesão (o `plan_selection_required` fica como sempre), e só o
+`/settings` mostra "Desligar agora", sem interruptor, com o texto da margem (cópia de `AVISO_SEM_PLANO` no HTML, comparada por teste). O `/painel` não tem esse caminho: conta cortada é mandada para `/precos` pelo gate
+da página. O link "Cancelar inscrição" do e-mail continua desligando tudo.
+`INSIGHT_EMAIL_USERS` (`liberado`, lida a cada chamada): vazia ou ausente = ninguém, ids por vírgula comparados como texto; `*` não libera ninguém enquanto
+`AVISO_ABERTO_A_TODOS` for falsa (trava do app nativo, que ainda retira a adesão em silêncio; virar a constante exige o laço do PR 2 e o PR 3, e um teste cobra).
+Cancelar retira a adesão e nada a devolve sem o interruptor (P7 (b)): `set_engagement_opt_out(uid, True)` (chat "parar emails", `PATCH engagement_email_enabled`,
+`/unsubscribe`) e `set_insight_email_opt_out(uid, True)` apagam a coluna na mesma transação; "reativar emails" e religar os interruptores não a tocam. Chat e página do
+`/unsubscribe` dizem que os avisos só voltam ligando de novo, para quem pode religar (`orientacao_aviso`). **Perder o direito (D1, §12 a §15 do plano B6):** o gatilho `trg_insight_aviso_direito`
+(`db/insight_aviso_direito.py`, também no INSERT, onde linha sem adesão nunca guarda marca) trata toda perda como **expiração natural**: a marca
+`insight_aviso_coberto_ate` vira o instante da perda (`least(marca antiga, now())`; a varredura que grava `free` às 10h01 de um Pix vencido às 10h00 deixa 10h00),
+a adesão fica até 1 hora (`MARGEM_DIREITO`) e o portão fica fechado; a escrita que devolve o plano depois disso retira, sem depender de escrita no meio. Carência
+aberta não retira; escrita só de status vivo ou de atraso não encolhe a marca; dentro da margem a marca nunca avança para o passado; escrita direta na marca vira o
+valor calculado. **O gatilho não infere downgrade:** Plus que vence sobre um Essencial é perda natural, com a margem. **Adesão viva** é um critério único,
+`pb_insight_adesao_viva` (`aderiu e (marca nula ou now() <= marca + 1 h)`, 60 min exatos ainda vivos): o gatilho, a tela (GET e flag do 402) e a exportação o usam,
+então 30 h depois da perda sem escrita a tela não mostra adesão nem o texto da margem, e ligar de novo funciona (`set_insight_aviso` retira a morta, com audit).
+**Atos retiram na hora, sem margem,** por `db.reports.retirar_adesao_sem_direito(uid, motivo, cur=None, so_o_recurso=False)`, pelo estado FINAL: o padrão retira quem
+ficou sem cobertura (carência incluída) e serve a `customer.subscription.deleted` com `reason` `cancellation_requested` (inclusive o fim de período de quem cancelou:
+o `deleted` chega no fim) ou `payment_disputed`, no fim do ramo, depois da reprojeção (quem foi para o Pix ou trocou de assinatura segue coberto), e ao
+`PAYMENT_REFUNDED` do Pix (estorno total, P10 (b); o parcial não revoga o direito). `so_o_recurso=True` retira quem ficou sem o recurso `insights` no plano, mesmo em
+carência: admin (`set_account_plan`, na MESMA transação do ajuste; membro com grant `family` vigente de tier com `insights` não perde, porque a reprojeção da família
+roda depois do commit e devolve o plano), troca de preço da MESMA assinatura no Stripe para tier sem `insights` (`_materializar_assinatura`, `motivo: downgrade`; quem
+tem `insights` por outro caminho não perde) e sair da família (`leave_family`; sem plano próprio com `insights` vigente retira, mesmo em carência; com ele, fica).
+**Limite declarado:** se a retirada explícita da troca de preço ou da saída da família falhar (ela roda depois da reprojeção, em transação
+própria), a perda fica como expiração natural: a adesão dura até 1 hora, sem envio, e sai na escrita seguinte. Reset e "Desligar agora" já retiram. `payment_failed`,
+`deleted` sem `reason`, varredura, família vista pelo membro (titular cancela ou remove) e a baixa de Pix desfeita são naturais. `charge.refunded` na `main` só trata a
+comissão de afiliado (#1418): reembolso no Stripe sem cancelar a assinatura não toca a adesão, ver issue #1509.
+`tests/test_portao_escritores_plano.py` exige que todo escritor do direito (inclusive `insert ... on conflict ... do update set`) esteja classificado. **Limite com `PLANS_V2_ENABLED=0`:** o Grátis passa no
+`plan_gate_ok`, mas o gatilho segue por tier, então ligar responde 409 "Ligue Insights financeiros primeiro." (mensagem errada; nada é gravado e o e-mail segue bloqueado);
+issue #1481.
+"Recomeçar do zero" limpa a adesão (P6 (a)); no merge ela anda com a linha de `auth_accounts`; o export leva a adesão VIVA e a cobertura em `conta_login`. `db.insight_email_permitido(uid)`
+é o portão do envio: adesão, flags, fora de exclusão, marca em dia e `plan_gate_ok`; conta ausente False, erro sobe. Testes: `tests/test_insights_adesao*.py`,
+`tests/frontend/notificacoes_aviso_insight.test.mjs`.
+
 ### Push (app iOS)
 
 APNs direto, sem serviço intermediário: `core/services/push_service.py` +
@@ -2700,7 +2743,10 @@ desconta de saque futuro e o afiliado segue vendo o valor em "Já pago", com o s
 não muda na revisão: `recovery_cents = max(0, pago - aprovado - recovery_closed_cents)`, atribuído e
 nunca somado, então reprocessar não duplica e o que foi encerrado não é cobrado de novo.
 `POST /admin/api/affiliates/refund-reviews/{id}/close-recovery` encerra como `recovered` (com data
-e referência) ou `waived` (sem elas), e repetir dá 409, sem novo evento.
+e referência) ou `waived` (sem elas). O corpo leva `recovery_cents`, o valor que o formulário mostrou
+na abertura (ausente ou não inteiro dá 422): valor diferente do da linha, sob a trava dela, ou
+recuperação fora de `recovery` (repetir, ou um parcial maior que a devolveu a `open`) dá 409, sem
+evento e sem somar em `recovery_closed_cents`.
 
 **Notificação.** A linha é a notificação pendente: `notified_at` nulo, gravado na mesma transação.
 `notified_at` só com `_send` True. O webhook tenta uma vez depois do commit, e o

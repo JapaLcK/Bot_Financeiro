@@ -5,6 +5,7 @@ import re
 from collections import defaultdict
 
 from core.handlers.forma_pagamento import NEGACAO_RE
+from core.handlers.help_handler import NAO_ENTENDI_EXATAMENTE, POSSO_TE_AJUDAR_COM
 # Helper único das portas destrutivas (a docstring dele lista quais e explica o
 # critério de nível). Ele nunca põe `str(e)` no log.
 from core.intent_classifier import (classify, is_comparative_question, NEGATIVAS_EXATAS,
@@ -1328,7 +1329,7 @@ def _build_credit_contextual_help(text: str) -> str:
 
     if any(expr in norm for expr in ("cartao principal", "cartao padrao", "cartao padrão", "principal")):
         return (
-            "⭐ Posso te ajudar com o cartão principal assim:\n"
+            f"⭐ {POSSO_TE_AJUDAR_COM} o cartão principal assim:\n"
             "• `qual meu cartao principal?`\n"
             "• `mudar cartao principal`\n"
             "• `padrao Nubank`"
@@ -1344,7 +1345,7 @@ def _build_credit_contextual_help(text: str) -> str:
 
     if any(expr in norm for expr in ("pagar", "paguei")) or "fatura" in norm:
         return (
-            "🧾 Posso te ajudar com fatura/pagamento assim:\n"
+            f"🧾 {POSSO_TE_AJUDAR_COM} fatura/pagamento assim:\n"
             "• `pagar fatura` — paga a fatura atual do cartão padrão\n"
             "• `pagar Nubank` — paga a fatura do Nubank (lista se houver mais de uma em aberto)\n"
             "• `pagar fatura maio` — paga a fatura de maio\n"
@@ -1363,8 +1364,8 @@ def _build_credit_contextual_help(text: str) -> str:
 
     if any(expr in norm for expr in ("compra", "compras", "credito", "cartao")):
         return (
-            "Não entendi exatamente o que você quer fazer sobre cartões.\n"
-            "💳 Posso te ajudar com cartões de algumas formas:\n"
+            f"{NAO_ENTENDI_EXATAMENTE} o que você quer fazer sobre cartões.\n"
+            f"💳 {POSSO_TE_AJUDAR_COM} cartões de algumas formas:\n"
             "• `criar cartao Nubank fecha 10 vence 17`\n"
             "• `cartoes`\n"
             "• `gastei 150 no cartao Nubank`\n"
@@ -1373,7 +1374,7 @@ def _build_credit_contextual_help(text: str) -> str:
         )
 
     return (
-        "Não entendi exatamente o que você quer fazer sobre cartões.\n"
+        f"{NAO_ENTENDI_EXATAMENTE} o que você quer fazer sobre cartões.\n"
         "Tente uma destas opções:\n"
         "• `criar cartao Nubank`\n"
         "• `cartoes`\n"

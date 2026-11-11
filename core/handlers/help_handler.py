@@ -5,6 +5,11 @@ from difflib import get_close_matches
 from core.help_text import render_full, render_help, resolve_section
 from utils_text import normalize_text
 
+# O começo das dicas de quem não entendeu o pedido (aqui e em `credit.contextual_help`). O `handle_incoming` os lê para
+# saber que a resposta não atendeu (`_looks_like_help_fallback`; #1315: a confirmação da declaração volta).
+NAO_ENTENDI_EXATAMENTE = "Não entendi exatamente"
+POSSO_TE_AJUDAR_COM = "Posso te ajudar com"
+
 
 def _has_any(norm: str, *terms: str) -> bool:
     return any(term in norm for term in terms)
@@ -41,7 +46,7 @@ def _is_statement_file_help(norm: str) -> bool:
 def _prepend_not_understood(topic: str, body: str) -> str:
     if body.strip().lower().startswith("não entendi"):
         return body
-    return f"Não entendi exatamente o que você quis fazer com {topic}.\n{body}"
+    return f"{NAO_ENTENDI_EXATAMENTE} o que você quis fazer com {topic}.\n{body}"
 
 
 def _credit_contextual_fallback(text: str, platform: str) -> str:
@@ -53,7 +58,7 @@ def _credit_contextual_fallback(text: str, platform: str) -> str:
 def _launches_contextual_fallback(norm: str) -> str:
     if _has_any(norm, "apagar", "excluir", "remover", "deletar", "desfazer"):
         return (
-            "🧾 Posso te ajudar com lançamentos assim:\n"
+            f"🧾 {POSSO_TE_AJUDAR_COM} lançamentos assim:\n"
             "• `listar lancamentos`\n"
             "• `apagar 17`\n"
             "• `desfazer`"
@@ -76,7 +81,7 @@ def _launches_contextual_fallback(norm: str) -> str:
         )
 
     return (
-        "🧾 Posso te ajudar com lançamentos de algumas formas:\n"
+        f"🧾 {POSSO_TE_AJUDAR_COM} lançamentos de algumas formas:\n"
         "• `gastei 50 mercado`\n"
         "• `recebi 1000 salario`\n"
         "• `gastos hoje`\n"
@@ -113,7 +118,7 @@ def _pockets_contextual_fallback(norm: str) -> str:
         )
 
     return (
-        "📦 Posso te ajudar com caixinhas assim:\n"
+        f"📦 {POSSO_TE_AJUDAR_COM} caixinhas assim:\n"
         "• `criar caixinha viagem`\n"
         "• `coloquei 300 na caixinha viagem`\n"
         "• `retirei 100 da caixinha viagem`\n"
@@ -156,7 +161,7 @@ def _investments_contextual_fallback(norm: str) -> str:
         )
 
     return (
-        "📈 Posso te ajudar com investimentos assim:\n"
+        f"📈 {POSSO_TE_AJUDAR_COM} investimentos assim:\n"
         "• `investimentos` para listar a carteira e receber o link mágico do dashboard\n"
         "• `apliquei 200 no investimento CDB`\n"
         "• `resgatei 100 do investimento CDB`\n"
@@ -180,7 +185,7 @@ def _categories_contextual_fallback(norm: str) -> str:
         )
 
     return (
-        "🏷️ Posso te ajudar com categorias assim:\n"
+        f"🏷️ {POSSO_TE_AJUDAR_COM} categorias assim:\n"
         "• `regras de categoria`, `regras de categorias` ou `listar regras`\n"
         "• `aprender ifood como alimentacao`\n"
         "• `aprender rifa como aposta`\n"
@@ -220,7 +225,7 @@ def _report_contextual_fallback(norm: str) -> str:
         )
 
     return (
-        "🗓️ Posso te ajudar com relatórios diários, semanais e mensais:\n"
+        f"🗓️ {POSSO_TE_AJUDAR_COM} relatórios diários, semanais e mensais:\n"
         "• `relatorio`\n"
         "• `resumo semanal`\n"
         "• `resumo mensal`\n"
@@ -548,7 +553,7 @@ def infer_contextual_fallback(text: str, platform: str) -> str:
         return financial_help
 
     return (
-        "Não entendi exatamente o que você quer fazer.\n"
+        f"{NAO_ENTENDI_EXATAMENTE} o que você quer fazer.\n"
         "Tente uma destas opções:\n"
         "• `saldo` — ver saldo atual\n"
         "• `gastei 50 mercado` — registrar despesa\n"
