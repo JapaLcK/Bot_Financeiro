@@ -84,7 +84,7 @@ for (const a of ACOES) {
       assert.deepEqual(errs, []);
       await page.click(`#${a.botao}`);
       assert.equal(await confirmAberto(page), true);
-      await page.clock.runFor(100);   // anima o modal; o relógio está pausado
+      await page.clock.runFor(400);   // anima o modal e passa a janela do duplo clique (modals.js, 400 ms); o relógio está pausado
       await assenta();
       assert.equal(reqs.length, 0, "antes do 'sim' nada vai");
       await page.locator(".pig-modal-overlay").getByRole("button", { name: a.modal }).click();
@@ -97,7 +97,7 @@ for (const a of ACOES) {
     try {
       await page.evaluate((f) => { window[f](); }, a.nome === "reset" ? "requestAccountReset" : "requestAccountDeletion");
       await waitFor(() => confirmAberto(page), "o confirmModal");
-      await page.clock.runFor(100);   // anima o modal; o relógio está pausado
+      await page.clock.runFor(400);   // anima o modal e passa a janela do duplo clique (modals.js, 400 ms); o relógio está pausado
       await assenta();
       assert.equal(reqs.length, 0);
       await page.locator(".pig-modal-overlay").getByRole("button", { name: a.modal }).click();

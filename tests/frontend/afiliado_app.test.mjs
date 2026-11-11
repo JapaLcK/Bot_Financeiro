@@ -5,34 +5,13 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { startServer } from "./_server.mjs";
-import { ATIVA, COM_SAQUE, EM_REVISAO, ZERO, regra } from "./_afiliado.mjs";
+import { ATIVA, CHAVE, COM_SAQUE, EM_REVISAO, ZERO, abrirApp, naArea, pedirApp as pedir, regra } from "./_afiliado.mjs";
 
 let ORIGIN, server, browser;
 before(async () => { ({ proc: server, origin: ORIGIN } = await startServer()); browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
-const json = (body, status = 200) => (r) => r.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-
-async function abrir({ corpo = ATIVA, url = "/dashboard.html", width = 1280, height = 800, clipboard, marca } = {}) {
-  const ctx = await browser.newContext({ viewport: { width, height } });
-  if (marca) await ctx.addCookies([{ name: "pb_conta", value: marca, url: ORIGIN }]);
-  await ctx.route("**/auth/validate", json({ ok: true, user_id: 42 }));
-  await ctx.route("**/auth/me", json({ app_access: true, plan_tier: "pro", dashboard_v2_enabled: true }));
-  await ctx.route("**/auth/dashboard-profile", json({ email: "ana@x.com", plan: "pro", feature_gates: {} }));
-  await ctx.route("**/api/affiliate/me", corpo ? json(corpo) : json({ detail: "x" }, 404));
-  await ctx.route("**cdnjs.cloudflare.com/**", (r) => r.abort());
-  const page = await ctx.newPage();
-  await page.addInitScript(() => { window.WebSocket = class { constructor() { this.readyState = 0; } send() {} close() {} }; });
-  if (clipboard) await page.addInitScript(clipboard);
-  await page.goto(`${ORIGIN}${url}`);
-  await page.waitForFunction(() => typeof window.PBRefresh === "function", null, { timeout: 15000 });
-  return { ctx, page };
-}
-const naArea = async (page) => {
-  await page.waitForFunction(() => document.getElementById("sidenav-affiliate")?.style.display !== "none", null, { timeout: 10000 });
-  await page.evaluate(() => window.navigateTo("affiliate"));
-  await page.locator("#affiliate-link-input").waitFor();
-};
+const abrir = (opts) => abrirApp(browser, ORIGIN, opts);
 
 // mutação: voltar o rótulo a "Afiliados" (dashboard.html), ou mostrar o item antes do 200
 test("o item 'Afiliado' só aparece com o 200 de /api/affiliate/me", async () => {
@@ -93,15 +72,6 @@ test("afiliado 0%: 'sem comissão neste programa', sem nenhum percentual", async
     assert.doesNotMatch(area, /10\s*%|Você recebe/);
   } finally { await ctx.close(); }
 });
-
-const CHAVE = "ana@pix.com";
-async function pedir(page, ctx, posts) {
-  await ctx.route("**/api/affiliate/payout", (r) => { posts.push(r.request().postData()); return r.fulfill({ json: { ok: true, payout: { id: 9 } } }); });
-  await naArea(page);
-  await page.locator("#affiliate-pix-input").fill(CHAVE);
-  await page.locator("#affiliate-payout-btn").click();
-  await page.locator("#generic-confirm-overlay.open").waitFor();
-}
 
 // mutação: tirar o `confirmModal` de requestAffiliatePayout: o POST sai no primeiro clique, sem valor nem chave à vista
 test("saque no /app: a confirmação mostra valor e chave antes do POST; o corpo é exatamente {pix_key}", async () => {

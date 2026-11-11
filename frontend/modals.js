@@ -166,6 +166,13 @@
       `;
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
+      // O 2º clique do duplo clique que abriu o modal cai onde estava o botão de baixo; ali pode estar o primário (#1411). Na janela os
+      // botões não recebem ponteiro e o fundo não fecha. Cópia do `JANELA_DO_DUPLO_CLIQUE` do /painel (webapp/src/dashboard/parts/dialog.ts).
+      const JANELA_DO_DUPLO_CLIQUE = 400;
+      const abertoEm = performance.now();
+      const acoes = modal.querySelector(".pig-modal-actions");
+      acoes.style.pointerEvents = "none";
+      setTimeout(() => { acoes.style.pointerEvents = ""; }, JANELA_DO_DUPLO_CLIQUE);
       // Trigger animation on next frame
       requestAnimationFrame(() => overlay.classList.add("open"));
 
@@ -189,7 +196,7 @@
 
       // Click no overlay = cancela (so em confirm; alert exige clique no OK)
       overlay.addEventListener("click", (e) => {
-        if (e.target === overlay && isConfirm) close(false);
+        if (e.target === overlay && isConfirm && performance.now() - abertoEm >= JANELA_DO_DUPLO_CLIQUE) close(false);
       });
 
       /* O modal declara role="dialog" + aria-modal="true" logo acima, o que
@@ -209,6 +216,7 @@
         }
         if (e.key === "Enter") {
           e.preventDefault();
+          if (e.repeat) return; // Enter segurado: só o primeiro aperto vale
           close(isConfirm ? true : undefined);
           return;
         }

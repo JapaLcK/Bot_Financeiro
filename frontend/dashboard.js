@@ -3694,6 +3694,11 @@ async function saveHouseholdBudgetMetas() {
 
 let _genericModalResolver = null;
 let _genericModalLastFocus = null;
+// O 2º clique do duplo clique que abriu o modal cai onde estava o botão de baixo; ali pode estar o OK (#1411). Nesta janela os botões
+// não recebem ponteiro e o clique no fundo não fecha. Cópia do `JANELA_DO_DUPLO_CLIQUE` do /painel (webapp/src/dashboard/parts/dialog.ts).
+const JANELA_DO_DUPLO_CLIQUE = 400;
+let _genericModalAbertoEm = 0;
+let _genericModalTrava = null;
 
 function _ensureGenericConfirmModal() {
   if (document.getElementById("generic-confirm-overlay")) return;
@@ -3712,7 +3717,7 @@ function _ensureGenericConfirmModal() {
   `;
   document.body.insertAdjacentHTML("beforeend", html);
   document.getElementById("generic-confirm-overlay").addEventListener("click", e => {
-    if (e.target === e.currentTarget) _genericModalClose(false);
+    if (e.target === e.currentTarget && performance.now() - _genericModalAbertoEm >= JANELA_DO_DUPLO_CLIQUE) _genericModalClose(false);
   });
   document.getElementById("generic-confirm-cancel").addEventListener("click", () => _genericModalClose(false));
   document.getElementById("generic-confirm-ok").addEventListener("click", () => _genericModalClose(true));
@@ -3739,6 +3744,8 @@ function _ensureGenericConfirmModal() {
   document.addEventListener("keydown", (e) => {
     const ov = document.getElementById("generic-confirm-overlay");
     if (!ov || !ov.classList.contains("open")) return;
+    // Enter/Espaço segurado repete a tecla: só o primeiro aperto vale (o Esc nunca trava).
+    if (e.repeat && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); return; }
     if (e.key === "Escape") {
       e.stopPropagation();
       _genericModalClose(false);
@@ -3763,6 +3770,18 @@ function _genericModalClose(value) {
   }
 }
 
+// O que confirmModal e alertModal fazem igual ao abrir.
+function _genericModalAbrir(okBtn) {
+  _genericModalLastFocus = document.activeElement;
+  _genericModalAbertoEm = performance.now();
+  const acts = document.querySelector("#generic-confirm-overlay .modal-acts");
+  acts.style.pointerEvents = "none";
+  clearTimeout(_genericModalTrava);
+  _genericModalTrava = setTimeout(() => { acts.style.pointerEvents = ""; }, JANELA_DO_DUPLO_CLIQUE);
+  document.getElementById("generic-confirm-overlay").classList.add("open");
+  okBtn.focus();
+}
+
 function confirmModal(message, opts = {}) {
   _ensureGenericConfirmModal();
   const title = opts.title || "Confirmar";
@@ -3782,9 +3801,7 @@ function confirmModal(message, opts = {}) {
   altBtn.style.display = opts.altText ? "" : "none";
   okBtn.textContent = okText;
   okBtn.className = danger ? "inst-delete-btn" : "btn-save";
-  _genericModalLastFocus = document.activeElement;
-  document.getElementById("generic-confirm-overlay").classList.add("open");
-  okBtn.focus();
+  _genericModalAbrir(okBtn);
   return new Promise(resolve => { _genericModalResolver = resolve; });
 }
 
@@ -3800,9 +3817,7 @@ function alertModal(message, opts = {}) {
   document.getElementById("generic-confirm-alt").style.display = "none";
   okBtn.textContent = okText;
   okBtn.className = "btn-save";
-  _genericModalLastFocus = document.activeElement;
-  document.getElementById("generic-confirm-overlay").classList.add("open");
-  okBtn.focus();
+  _genericModalAbrir(okBtn);
   return new Promise(resolve => { _genericModalResolver = () => resolve(undefined); _genericModalResolver = resolve; });
 }
 

@@ -81,7 +81,7 @@ for (const w of [1440, 390]) {
       await abreEscolha(page, true);
       await page.waitForSelector(ov);
       if (sair === "esc") await page.keyboard.press("Escape");
-      if (sair === "veu") await page.mouse.click(5, 5);
+      if (sair === "veu") { await page.waitForTimeout(450); await page.mouse.click(5, 5); } // o véu só fecha passada a janela do duplo clique (400 ms)
       if (sair === "cancelar") await page.click("#generic-confirm-cancel");
       await page.evaluate(() => window.__fim);
       assert.deepEqual(await page.evaluate(() => [window.__posts, window.__prompts]), [[], []], sair);

@@ -167,6 +167,7 @@ for (const [nome, ler] of [["500", () => ERRO(500, "x")], ["pendurada", () => ()
       await com({ visao: titular({ membros: [MARIA] }) }, async (t) => {
         await abre(t);
         t.s.get = ler();
+        await t.page.waitForTimeout(450); // a janela do duplo clique do Confirma (400 ms) fica fora da medida
         const t0 = Date.now();
         await t.dlg().getByRole("button", { name: botao, exact: true }).click();
         await t.dlg().waitFor({ state: "detached", timeout: 1000 });

@@ -64,7 +64,7 @@ for (const a of ACOES) {
       assert.equal(await page.evaluate(() => typeof window.PBHoldConfirm), "undefined");
       await page.click(`#${a.botao}`);
       assert.equal(await confirmAberto(page), true);
-      await page.clock.runFor(100);
+      await page.clock.runFor(400);   // passa a janela do duplo clique (modals.js, 400 ms); o relógio está pausado
       assert.equal(reqs.length, 0, "antes do 'sim' nada vai");
       await page.locator(".pig-modal-overlay").getByRole("button", { name: a.modal }).click();
       await waitFor(() => reqs.length === 1, "a requisição depois do 'sim'");
