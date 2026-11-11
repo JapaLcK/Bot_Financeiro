@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 import db
-from tests._declaracao_b import (PORTAS, ana, carteira, declaracoes, fala, liga, manda_wamid,  # noqa: F401
+from tests._declaracao_b import (PORTAS, ana, carteira, declaracoes, fala_e_confirma as fala, liga, manda_e_confirma as manda_wamid,  # noqa: F401
                                  n_lancamentos, pendencia, q, sem_pergunta)
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401
 from tests.test_bank_movements import _bank, _sync
@@ -21,15 +21,28 @@ from tests.test_bank_movements import _bank, _sync
 
 @pytest.mark.parametrize("nome", sorted(PORTAS))
 def test_porta_ligada_declara(ana, liga, monkeypatch, nome):
+    """#1315, grupo 1: em toda porta nada grava antes do "sim"; a pergunta mostra o valor e o dia, e o "sim" (mandado
+    depois dela) grava exatamente o mostrado. Controle negativo: gravar direto em `add_from_entities` (como na `main`)
+    deixa vermelho o "0 antes do sim" em todas as portas com declaração."""
+    from tests._declaracao_b import manda_ts
+    from utils_text import fmt_brl
     roteiro, quantas = PORTAS[nome]
     respostas = roteiro(ana, monkeypatch)
+    assert declaracoes(ana) == [] and n_lancamentos(ana) == 0, respostas
+    if not quantas:  # dois gastos numa mensagem: a declaração recusa (E1, DP-7 A), sem confirmação
+        assert any("um gasto por mensagem" in r for r in respostas), respostas
+        assert pendencia(ana) != "confirm_declaracao_banco"
+        return
+    assert pendencia(ana) == "confirm_declaracao_banco"
+    p = db.get_pending_action(ana)["payload"]["_declaracao"]
+    assert any(f"{fmt_brl(p['valor'])} em" in r and "pelo banco*? Responde *sim* ou *não*." in r for r in respostas), \
+        respostas
+    respostas = manda_ts(ana, "sim")
     decls = declaracoes(ana)
     assert len(decls) == quantas, respostas
     assert n_lancamentos(ana) == quantas and carteira(ana) == 200.0
-    if not quantas:  # dois gastos numa mensagem: a declaração recusa (E1)
-        assert any("um gasto por mensagem" in r for r in respostas), respostas
-    else:
-        assert any("registrada pelo banco" in r for r in respostas), respostas
+    assert any("registrada pelo banco" in r for r in respostas), respostas
+    assert float(decls[0]["valor"]) == p["valor"] and decls[0]["criado_em"].date().isoformat() == p["data"]
     assert sem_pergunta(ana)
     for d in decls:  # a chave é hash + ordem no turno; o wamid cru nunca vai para a coluna
         assert d["external_id"].startswith("wa:") and "wamid" not in d["external_id"], d["external_id"]
@@ -149,14 +162,13 @@ def test_conversa_pergunta_abandonada_por_conta_a_pagar(ana, liga):
 
 def test_recorrente_x_banco_pergunta_o_valor(ana, liga):
     """Q42 não é restaurado: `register_if_recurring` não lança sozinho em "banco" (a declaração tem valor travado).
-    Com histórico de 3 aluguéis na Carteira, "paguei o aluguel pelo banco" pergunta o valor e declara a resposta."""
+    Com histórico de 3 aluguéis na Carteira, nada lança sozinho pelo banco."""
     for _ in range(3):
         db.add_launch_and_update_balance(ana, "despesa", 1500, "aluguel", "aluguel", "moradia")
-    manda_wamid(ana, "gastei 40 no mercado e paguei o aluguel no pix")  # multi: o pedaço sem valor vai para a fila, sem lançar
-    assert pendencia(ana) == "multi_launch_values"
-    assert len(declaracoes(ana)) == 1
-    manda_wamid(ana, "1500")
-    assert sorted(float(d["valor"]) for d in declaracoes(ana)) == [40.0, 1500.0]
+    # #1315 (DP-7 A): com o pedaço sem valor a mensagem pelo banco é T16; nada lança sozinho, nem vai para a fila
+    r = manda_wamid(ana, "gastei 40 no mercado e paguei o aluguel no pix")
+    assert "um gasto por mensagem" in r[0], r
+    assert pendencia(ana) is None and declaracoes(ana) == []
 
 
 def test_valor_e_data_da_declaracao_sem_par_seguem_travados_categoria_edita(ana, liga):

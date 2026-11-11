@@ -14,7 +14,7 @@ import pytest
 
 import db
 from core.handlers import declaracao_banco_textos as tx
-from tests._declaracao_b import ana, carteira, declaracoes, fala, liga, manda_wamid, n_lancamentos, pendencia  # noqa: F401
+from tests._declaracao_b import ana, carteira, declaracoes, fala_e_confirma as fala, liga, manda_e_confirma as manda_wamid, n_lancamentos, pendencia  # noqa: F401
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401
 from tests._pendencia_credito_helpers import diga
 from tests.test_fatura_cartao_do_banco_sem_pagar import banco, pagamentos, pago, recusou
@@ -155,23 +155,22 @@ def test_texto_sem_valor_respondido_com_cartao(ana, liga):
 
 
 def test_audio_sem_valor_respondido_com_banco_declara(ana, liga, monkeypatch):
-    """Positivo da R2: com "banco", o gasto declara e o aluguel vai para a fila e declara com o valor."""
+    """Positivo da R2: com "banco" (sem cartão) o áudio segue o caminho da declaração; desde a #1315 (DP-7 A) o gasto com
+    o pedaço sem valor é T16, sem fila e sem confirmação (antes: declarava o gasto e a fila declarava o aluguel)."""
     fala(monkeypatch, ana, ALUGUEL)
-    assert "Quanto foi" in manda_wamid(ana, "banco")[0]
-    manda_wamid(ana, "1500")
-    assert [float(d["valor"]) for d in declaracoes(ana)] == [50.0, 1500.0]
+    assert "um gasto por mensagem" in manda_wamid(ana, "banco")[0]
+    assert declaracoes(ana) == [] and pendencia(ana) is None
 
 
 def test_audio_dois_sem_valor_respondido_com_banco_declara(ana, liga, monkeypatch):
-    """Positivo do pedaço sem valor marcado no `resolver`: com "banco" (nada marcado) a fila declara um por um."""
+    """Positivo do pedaço sem valor marcado no `resolver`: com "banco" (nada marcado) os pedaços seguem o caminho da
+    declaração; desde a #1315 (DP-7 A), dois sem valor são T16, sem fila (antes: a fila declarava um por um)."""
     fala(monkeypatch, ana, "paguei a luz e paguei o aluguel")
-    manda_wamid(ana, "banco")
-    manda_wamid(ana, "100")
-    manda_wamid(ana, "1500")
-    assert [(float(d["valor"]), d["alvo"]) for d in declaracoes(ana)] == [(100.0, "luz"), (1500.0, "aluguel")]
+    assert "um gasto por mensagem" in manda_wamid(ana, "banco")[0]
+    assert declaracoes(ana) == [] and pendencia(ana) is None
 
 
-# A fila respondida com valor + "cartão" (rodada 9, refeita na rodada 10): `test_declaracao_b_fila_cartao.py`.
+# A fila respondida com valor + "cartão" (rodadas 9 e 10) saiu com a #1315: a fila não carrega mais item pelo banco.
 def _manual(uid):
     db.set_default_card(uid, db.create_card(uid, "Manual", closing_day=10, due_day=17))
 

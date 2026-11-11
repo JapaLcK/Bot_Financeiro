@@ -96,8 +96,8 @@ def test_a_corrida_da_mensagem_que_arma_responde_no_runner_sem_o_negrito_do_site
     m1 = snowflake()
     gancho, na_chegada, primeira, respostas = hi._reentrega_da_declaracao, di.na_chegada, [], []
 
-    def fura_a_fila(uid, texto, platform):
-        r = gancho(uid, texto, platform)
+    def fura_a_fila(uid, texto, platform, msg):
+        r = gancho(uid, texto, platform, msg)
         if r is None and not primeira:
             primeira.append(None)
             primeira[0] = dc(ana_ia, "piggy " + FRASE, m1)

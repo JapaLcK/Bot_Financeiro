@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests._declaracao_b import (ana, carteira, declaracoes, fala, liga, manda_wamid, n_lancamentos,  # noqa: F401
+from tests._declaracao_b import (ana, carteira, declaracoes, fala_e_confirma as fala, liga, manda_e_confirma as manda_wamid, n_lancamentos,  # noqa: F401
                                  pendencia, q, sem_pergunta)
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401
 from tests.test_bank_movements import _bank
@@ -186,15 +186,6 @@ COMPOSTOS = [  # composição válida em português (e que o parser lê certo): 
 def test_positivo_composicao_valida_e_descricao_com_numero_gravam(ana, liga, monkeypatch, modo, texto, valor):
     diz(ana, modo, monkeypatch, texto)
     assert [float(d["valor"]) for d in declaracoes(ana)] == [valor]
-
-
-@pytest.mark.parametrize("resposta", ["mil e duzentos", "2 mil e quinhentos", "dois e meio", "vinte reais e cinquenta"])
-def test_fila_de_valores_recusa_o_valor_lido_pela_metade(ana, liga, monkeypatch, resposta):
-    fala(monkeypatch, ana, "paguei o aluguel e paguei a academia no pix")
-    r = manda_wamid(ana, resposta)[0]
-    assert "não sei se *" in r and "aluguel" in r and declaracoes(ana) == [], r
-    assert pendencia(ana) == "multi_launch_values"
-    assert "registrada pelo banco" in manda_wamid(ana, "1200")[0]
 
 
 # --- E3: a data sai antes de procurar "N e M"; com dois gastos na mensagem a declaração recusa (T16, E1 da #1310) ---

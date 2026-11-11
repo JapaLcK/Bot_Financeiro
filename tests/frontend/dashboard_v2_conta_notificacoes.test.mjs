@@ -1,5 +1,5 @@
 /**
- * /painel#/conta/configuracoes (conta/Notificacoes.tsx, conta/api.ts): "Notificações", as 7 preferências da /settings.
+ * /painel#/conta/configuracoes (conta/Notificacoes.tsx, conta/api.ts): "Notificações", as preferências da /settings (a linha do aviso de insight: notificacoes_aviso_insight.test.mjs).
  *   · a carga bate com o GET; cada interruptor salva sozinho, com o corpo mínimo (só o campo tocado) e o CSRF; UM PATCH em voo, no máximo (também se a rota é deixada e reaberta: a trava é do módulo);
  *   · a tela segue a RESPOSTA do PATCH; 400 sai verbatim, 500/prazo viram a reserva, 401 vira "sessão"; em toda falha o interruptor volta ao servidor;
  *   · 402 no GET = sem plano; sem e-mail/WhatsApp = interruptores travados e link para o Perfil; semanal fora do plano (travado, ou gravado e desligável);

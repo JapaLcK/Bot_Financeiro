@@ -820,6 +820,9 @@ def _resolve_desempate(pending: dict, msg: IncomingMessage, user_id: int) -> str
     return None
 
 
+# O "não" sem pendência nenhuma para cancelar (o `handle_incoming` o lê no #1315: era o "não" à confirmação suspensa).
+NADA_A_CANCELAR = "Nada a cancelar."
+
 # O abandono da via nova (C1) descarta uma pergunta que o usuário acabou de ver
 # na tela. O comando roda; o aviso é para ele não ficar esperando a resposta da
 # pergunta que morreu.
@@ -929,7 +932,7 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     if inferred_help is not None:
         norm = normalize_text(text)
         if (
-            "Não entendi exatamente" in inferred_help
+            h_help.NAO_ENTENDI_EXATAMENTE in inferred_help
             and any(term in norm for term in ("investimento", "investimentos", "aporte", "resgate", "cdb", "tesouro", "cdi"))
         ):
             return h_investido.carteira(user_id)
@@ -1148,7 +1151,7 @@ def route(result: IntentResult, msg: IncomingMessage, *,
 
     if intent == "confirm.no":
         resp = h_pending.resolve_delete(user_id, confirmed=False)
-        return resp if resp is not None else "Nada a cancelar."
+        return resp if resp is not None else NADA_A_CANCELAR
 
     # -----------------------------------------------------------------------
     # 2. Fora do escopo
@@ -1456,12 +1459,18 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
     if intent == "emails.resubscribe":
         import db as _db
         _db.set_engagement_opt_out(user_id, False)
-        return "✅ Pronto! Você voltará a receber as dicas e insights do Piggy por email."
+        from core.services.insights_notificacao import orientacao_aviso
+        orientacao = orientacao_aviso(user_id)
+        return ("✅ Pronto! Você voltará a receber as dicas e as curiosidades do Piggy por email."
+                + (f"\n{orientacao}" if orientacao else ""))
 
     if intent == "emails.unsubscribe":
         import db as _db
         _db.set_engagement_opt_out(user_id, True)
-        return "👍 Ok! Você não vai mais receber os emails de dicas do Piggy.\nSeus emails de segurança (código de verificação etc.) continuam normais.\nQuer voltar a receber? É só mandar *reativar emails*."
+        from core.services.insights_notificacao import orientacao_aviso
+        orientacao = orientacao_aviso(user_id)
+        return ("👍 Ok! Você não vai mais receber os e-mails opcionais do Piggy, inclusive os dos agentes.\nSeus emails de segurança (código de verificação etc.) continuam normais.\nQuer voltar a receber? É só mandar *reativar emails*."
+                + (f"\n{orientacao}" if orientacao else ""))
 
     # --- dashboard ---
     if intent == "dashboard.open":

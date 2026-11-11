@@ -102,6 +102,7 @@ from db import (
     verify_user_password,
     PasswordNotSetError,
     get_user_email,
+    set_engagement_opt_out,
     create_data_export_token,
     consume_data_export_token,
     has_recent_export_request,
@@ -6553,7 +6554,9 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             await asyncio.to_thread(set_payment_status, uid, sub_status)
             return True
         from core.services.billing_access import recompute_entitlement  # noqa: PLC0415
-        from db.plan_grants import upsert_grant  # noqa: PLC0415
+        from db.plan_grants import plano_do_grant, upsert_grant  # noqa: PLC0415
+        # Tier anterior DESTA assinatura: a troca de preço para um tier sem `insights` é ato (§15 do plano B6).
+        tier_antes = await asyncio.to_thread(plano_do_grant, int(uid), "stripe", str(sub_id))
         aplicou = await asyncio.to_thread(
             upsert_grant, int(uid), "stripe", str(sub_id), plan_value,
             datetime.now(timezone.utc), expires_dt,
@@ -6582,6 +6585,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         # `auth_accounts` sai dos grants, não de uma escrita paralela à mão:
         # duas fontes escrevendo o mesmo par é como elas divergem.
         await asyncio.to_thread(recompute_entitlement, int(uid))
+        from core.services.insights_notificacao import planos_com_insights  # noqa: PLC0415
+        if (tier_antes or "").lower() in planos_com_insights() and (plan_value or "").lower() not in planos_com_insights():
+            # Troca de preço para um tier sem `insights`: retira a adesão ao aviso na hora, pelo estado final
+            # (quem tem `insights` por outro caminho, como um Pix Plus, não perde nada).
+            from db.reports import retirar_adesao_sem_direito  # noqa: PLC0415
+            await asyncio.to_thread(retirar_adesao_sem_direito, int(uid), "downgrade", so_o_recurso=True)
         return True
 
     async def _fire_email(uid: int, fn, *args, dedup_days: float = 1.0) -> bool:
@@ -7535,6 +7544,14 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     revoke_grant, int(user_id), _src, _ref,
                     "stripe_subscription_deleted", _versao, _evt_id)
             await asyncio.to_thread(recompute_entitlement, int(user_id))
+            # Aviso de insight (PL-06 B6, §13/§14 do plano): cancelar e contestar são atos e retiram a adesão
+            # na hora, pelo estado FINAL, depois da reprojeção; quem segue coberto (foi para o Pix, trocou de
+            # assinatura) não perde nada. `payment_failed` e `reason` ausente ficam como expiração natural.
+            _motivo_aviso = {"cancellation_requested": "cancelamento", "payment_disputed": "contestacao"}.get(
+                _g(_g(obj, "cancellation_details"), "reason"))
+            if _motivo_aviso:
+                from db.reports import retirar_adesao_sem_direito  # noqa: PLC0415
+                await asyncio.to_thread(retirar_adesao_sem_direito, int(user_id), _motivo_aviso)
             print(f"[billing] user {user_id} → free (cancelado)")
             await log_system_event(
                 "warning",
@@ -7958,15 +7975,10 @@ async def _apply_unsubscribe(uid: int, token: str) -> bool:
     if not row or not _verify_unsub_token(uid, row["email"], token):
         return False
 
-    async with await db_connect() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                "UPDATE auth_accounts SET engagement_opt_out = true WHERE user_id = %s",
-                (uid,),
-            )
-        await conn.commit()
-    from db_support import invalidate_auth_user_cache
-    invalidate_auth_user_cache(uid)
+    # A mesma escrita do "parar emails": os três flags e a adesão ao aviso de insight.
+    # Só `engagement_opt_out` aqui, o `sync_engagement_opt_out` de qualquer interruptor
+    # desfazia o cancelamento em silêncio.
+    await asyncio.to_thread(set_engagement_opt_out, uid, True)
     return True
 
 
@@ -7996,6 +8008,11 @@ async def unsubscribe(uid: int, token: str):
             "em Configurações → Notificações, ou mandar “parar emails” pro bot.",
         ))
 
+    # Só depois do token válido: quem consegue religar os avisos agora é avisado de que eles
+    # não voltam com "reativar emails" (D3 do PL-06 B6). Texto constante, sem dado da conta.
+    from core.services.insights_notificacao import orientacao_aviso
+    orientacao = await asyncio.to_thread(orientacao_aviso, uid)
+    orientacao_html = f'<p style="font-size:13px">{orientacao}</p>' if orientacao else ""
     return HTMLResponse(_stamp_asset_versions("""
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -8019,13 +8036,14 @@ async def unsubscribe(uid: int, token: str):
   <div class="card">
     <div class="icon">🐷</div>
     <h1>Descadastro confirmado</h1>
-    <p>Você não vai mais receber os emails de dicas e insights do Piggy.<br/>
+    <p>Você não vai mais receber os e-mails opcionais do Piggy, inclusive os dos agentes.<br/>
        Seus emails de segurança (código de verificação, redefinição de senha) continuam normais.</p>
     <p style="font-size:13px">Arrependeu? Mande "reativar emails" pro bot!
+    ORIENTACAO_AVISO
   </div>
 </body>
 </html>
-"""))
+""").replace("ORIENTACAO_AVISO", orientacao_html))
 
 
 # ─── HTTP API routes ─────────────────────────────────────────────────────────

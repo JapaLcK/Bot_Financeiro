@@ -70,6 +70,10 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
 
     action_type = pending.get("action_type")
 
+    if action_type == "confirm_declaracao_banco":  # o "sim"/"não" exato não chega aqui (#1315)
+        from core.handlers import declaracao_confirma
+        return declaracao_confirma.na_rota(user_id, pending)
+
     # ── Confirmação de lançamento extraído de imagem ─────────────────────────
     if action_type == "confirm_media_launch":
         payload = pending.get("payload", {})

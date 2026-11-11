@@ -312,6 +312,11 @@ def _revoke(cobranca, evt) -> None:
                  last_event_id=evt["event_id"],
                  sem_guarda_de_versao=evt["event_type"] == "PAYMENT_RECEIVED_IN_CASH_UNDONE")
     recompute_entitlement(cobranca["user_id"], origem="pix_estorno")
+    if evt["event_type"] == "PAYMENT_REFUNDED":
+        # Estorno total (ou chargeback perdido) é ato: retira a adesão ao aviso de insight na hora, sem a margem
+        # de 1 h, pelo estado final (P10 (b) do plano B6). Quem segue coberto por outro grant não perde nada.
+        from db.reports import retirar_adesao_sem_direito
+        retirar_adesao_sem_direito(cobranca["user_id"], "estorno")
 
 
 def _email_do_titular(user_id: int) -> str | None:

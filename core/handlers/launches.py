@@ -1190,6 +1190,20 @@ def add_from_entities(
         else is_internal_category(categoria_final)
     )
 
+    if decisao == fp.BANCO and confirmacao is None:  # #1315: o roteador não grava sem "sim"; arma a confirmação
+        from core.handlers import declaracao_confirma
+        from core.services.ai_chat.tools.declaracao_ia import _cabe
+        from datetime import datetime as _dt
+        from utils_date import _tz
+        if not _cabe(valor):  # T4 antes de mostrar, como a IA
+            return decl.tx.valor_casas(valor)
+        # o dia efetivo congelado ao armar: o "sim" depois da meia-noite grava o dia mostrado
+        dia = ((criado_em.astimezone(_tz()) if criado_em.tzinfo else criado_em).date() if isinstance(criado_em, _dt)
+               else criado_em or today_tz())
+        return declaracao_confirma.arma(user_id, {
+            "acao": chave, "tipo": tipo, "valor": float(valor), "alvo": alvo_clean or None, "nota": nota_clean or None,
+            "data": dia.isoformat(), "categoria": categoria_final, "category_reason": reason_final}, platform)
+
     declaracao = ({"declaracao_banco": True, "chave_acao": chave, "confirmacao": confirmacao,
                    "payload_hash": payload_hash}
                   if decisao == fp.BANCO else {})  # sem saldo a mostrar
@@ -1634,18 +1648,6 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
         from core.handlers import forma_pagamento as fp
         forma = head.get("forma_pagamento", fp.DESCONHECIDA)
         decisao = fp.decidir(user_id, forma)
-        if decl.declara(user_id, decisao) and fp._no_cartao(limpo, debito=True):
-            # Rodada 10 (#1310, opção A): valor com "cartão" (ou "cartão de débito") não declara (D8) nem vai à fatura
-            # por aqui. Recusa como o `perigo`: sem CAS, o MESMO item na frente e a pergunta repetida. O texto não diz
-            # "foi no cartão" (a resposta pode negar); quem tem cartão manual lança a compra pela frase inteira.
-            # Rodada 11: o texto da fatura só para despesa no crédito; débito com cartão e receita levam o neutro.
-            from core.handlers.credit import compra_fica_com_o_of
-            if head.get("tipo") == "receita" or not fp._no_cartao(limpo):
-                recusa = decl.tx.FILA_CARTAO_NEUTRO
-            else:
-                recusa = decl.tx.FILA_CARTAO_OF if compra_fica_com_o_of(user_id, limpo) else decl.tx.FILA_CARTAO_MANUAL
-            return f"{recusa}\n\n{_ask_value_question(head)}"
-
         # Tira o head da fila ANTES de registrar: é isso que impede a outra
         # thread de registrar o MESMO item. Fila vazia = apaga a pendência; o
         # `add_from_entities` grava logo abaixo a dele ("categoria errada?").
@@ -1668,11 +1670,11 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
         #
         # Item sem forma que grave (Q40: de antes do deploy, ou do áudio, de
         # quem tem banco conectado) já saiu da fila pelo CAS e não é gravado.
-        if decisao != fp.CARTEIRA and not decl.declara(user_id, decisao):
+        # Item pelo banco não declara pela fila (DP-7 A, #1315: com a flag, a mensagem com dois gastos pelo banco é T16
+        # e a fila nunca nasce com ele).
+        if decisao != fp.CARTEIRA:
             resp = (f"🐷 Não registrei *{head.get('desc') or 'esse lançamento'}*: me manda "
                     "de novo dizendo se foi em dinheiro.")
-        elif decisao == fp.BANCO and (resp := decl.recusa_valor(limpo, valor)):  # confere o valor que grava; o item volta
-            _devolve_head(user_id, head, platform)
         else:
             try:
                 resp = add_from_entities(
@@ -1805,6 +1807,13 @@ def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: s
     )
 
 
+def vira_lancamento(user_id: int, part: str) -> bool:
+    """O pedaço viraria lançamento (com valor) ou item da fila (sem valor), como no laço de `add`? A pergunta
+    comparativa e o pedaço de ruído ("gastei" sozinho) não."""
+    return not is_comparative_question(part) and bool(
+        parse_receita_despesa_natural(user_id, part, aprender=False) or describe_valueless_launch(part))
+
+
 def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
         forma_pagamento: str | None = None) -> str:
     """Receita/despesa por texto. `forma_pagamento` é a forma já DECLARADA
@@ -1842,6 +1851,10 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
     if declarada == fp.DINHEIRO or declara:  # a forma dita não entra no alvo
         text = fp.limpar(text, banco=declara)
     parts = split_financial_transactions(text)
+    if declara and not cartao and sum(vira_lancamento(user_id, p) for p in parts) > 1:
+        # T16 para a mensagem inteira (DP-7 A, #1315): um gasto pelo banco por mensagem, com valor ou sem; a fila
+        # nunca carrega item pelo banco e não disputa a linha com a confirmação
+        return decl.NaoGravou(decl.tx.UM_POR_MENSAGEM)
     if decisao == fp.BANCO and (not declara or cartao):
         tipo_b = "receita" if normalize_text(text).startswith(RECEITA_START_VERBS) else "despesa"
         # Com mais de um lançamento na frase, um valor só não acha nada certo.

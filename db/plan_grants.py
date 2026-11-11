@@ -368,6 +368,17 @@ def list_grants(user_id: int) -> list[dict]:
             return [dict(r) for r in cur.fetchall()]
 
 
+def plano_do_grant(user_id: int, source: str, external_ref: str) -> str | None:
+    """`plan_stored` do grant `(source, external_ref)` do usuário, ou None. A troca de preço de uma assinatura
+    se reconhece comparando com o plano novo (PL-06 B6, `_materializar_assinatura`)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select plan_stored from plan_grants where user_id = %s and source = %s and external_ref = %s"
+                        " order by id desc limit 1", (int(user_id), source, external_ref))
+            row = cur.fetchone()
+    return row["plan_stored"] if row else None
+
+
 def e_primeira_assinatura(user_id: int, source: str, external_ref: str) -> bool:
     """True se a conta não tem grant NENHUM além deste `(source, external_ref)`,
     em qualquer status. Cortesia do admin e acesso de família (`source` 'admin' e 'family')

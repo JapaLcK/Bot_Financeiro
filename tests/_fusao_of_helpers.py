@@ -90,10 +90,13 @@ def manda(uid: int, texto: str) -> str:
 def manda_wamid(uid: int, texto: str, wamid: str | None = None) -> list[str]:
     """Como `manda()`, mas com `message_id` ÚNICO por mensagem (o `manda()` fixa "1" em todas) e todas as
     respostas. A chave de idempotência da declaração pelo banco é o wamid: com id fixo duas mensagens do
-    mesmo teste colidiriam. `wamid` repetido = a MESMA mensagem entregue de novo."""
+    mesmo teste colidiriam. `wamid` repetido = a MESMA mensagem entregue de novo. Leva o `timestamp` da Meta que o
+    `wa_runtime` passa ao core (1 s depois de agora: a resposta mandada depois da pergunta; #1315)."""
+    import time
     out = hi.handle_incoming(IncomingMessage(
         platform="whatsapp", user_id=uid, text=texto,
         message_id=wamid or "wamid.test-" + uuid.uuid4().hex, attachments=[], external_id=str(uid), raw={},
+        enviado_em=str(int(time.time()) + 1),
     ))
     assert out, f"handler devolveu vazio para {texto!r}"
     return [o.text for o in out]

@@ -14,13 +14,19 @@ from __future__ import annotations
 from .connection import get_conn
 
 
-def registra_acao(user_id: int, chave: str, payload_hash: str) -> None:
-    """A ação armada (o `ao_confirmar` da IA), com o HMAC do payload congelado. Repetir não muda nada."""
+def registra_acao(user_id: int, chave: str, payload_hash: str) -> int:
+    """A ação armada (o `ao_confirmar` da IA, ou a confirmação do roteador), com o HMAC do payload congelado. Repetir
+    não muda nada. Devolve o `id` da linha (o botão da confirmação do roteador o leva)."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("""insert into ia_declaracao_livro (user_id, papel, chave, estado, payload_hash)
                        values (%s, 'acao', %s, 'armada', %s)
-                       on conflict (user_id, chave) do nothing""", (user_id, chave, payload_hash))
+                       on conflict (user_id, chave) do nothing returning id""", (user_id, chave, payload_hash))
+        linha = cur.fetchone()
+        if linha is None:
+            cur.execute("select id from ia_declaracao_livro where user_id = %s and chave = %s", (user_id, chave))
+            linha = cur.fetchone()
         conn.commit()
+    return linha["id"]
 
 
 def registra_sim(user_id: int, chave: str, papel: str = "sim") -> bool:
@@ -43,6 +49,26 @@ def _le(cur, user_id: int, chave: str) -> dict | None:
     cur.execute("""select papel, estado, acao, launch_id, user_seq from ia_declaracao_livro
                     where user_id = %s and chave = %s""", (user_id, chave))
     return cur.fetchone()
+
+
+_ACAO = "select id, chave, estado, user_seq, criado_em from ia_declaracao_livro where user_id = %s and papel = 'acao'"
+
+
+def acao_por_id(user_id: int, acao_id: int) -> dict | None:
+    """A ação do botão `decl_*:<id>`, só se for deste usuário (id de outro = None)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(_ACAO + " and id = %s", (user_id, acao_id))
+        return cur.fetchone()
+
+
+def ultima_acao(user_id: int, enviado_em: int, janela) -> dict | None:
+    """A última ação armada dentro da `janela` (timedelta) que não é com certeza posterior ao envio `enviado_em`
+    (segundos Unix; a comparação é na precisão dele, então o empate conta como anterior)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(_ACAO + """ and criado_em >= now() - %s
+                                and date_trunc('second', criado_em) <= to_timestamp(%s)
+                              order by criado_em desc, id desc limit 1""", (user_id, janela, enviado_em))
+        return cur.fetchone()
 
 
 def consome(user_id: int, acao: str, sim: str) -> bool:
