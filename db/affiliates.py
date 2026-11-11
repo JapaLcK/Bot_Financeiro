@@ -16,10 +16,19 @@ Fluxo:
 """
 import re
 import secrets
-from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from .affiliate_payments import resumo_conversao
+from .affiliate_reviews import (
+    PENDENCIA_ABERTA_SQL,
+    SAQUE_BLOQUEADO_SQL,
+    abertas_do_saque,
+    promover,
+    registrar_evento,
+    saque_bloqueado,
+    trava_fatura,
+)
 from .connection import get_conn
 
 DEFAULT_COMMISSION_BPS = 1000       # 10%
@@ -30,6 +39,15 @@ REF_COOKIE_MAX_AGE_DAYS = 30        # janela de atribuição do link
 # Sem 0/O/1/I/L pra código legível em post/print; case-insensitive no lookup.
 _CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 _CODE_RE = re.compile(r"^[A-Za-z0-9]{4,20}$")
+_FUSO = ZoneInfo("America/Sao_Paulo")
+
+
+class SaqueComPendencia(ValueError):
+    """Saque com reembolso de cliente em análise: a rota responde 409."""
+
+
+class SaqueOrfao(ValueError):
+    """Saque de afiliado que excluiu a conta (D9 = A): só "Pagamento já realizado" ou rejeitar."""
 
 
 def _now():
@@ -187,6 +205,7 @@ def record_commission_for_invoice(referred_user_id: int, stripe_invoice_id: str,
         return None
     with get_conn() as conn:
         with conn.cursor() as cur:
+            trava_fatura(cur, stripe_invoice_id)
             cur.execute(
                 """
                 select r.affiliate_id, a.commission_bps
@@ -214,12 +233,17 @@ def record_commission_for_invoice(referred_user_id: int, stripe_invoice_id: str,
             amount_cents = int(invoice_amount_cents) * int(row["commission_bps"]) // 10_000
             if amount_cents <= 0:
                 return None
+            # Sem linha da fatura, ninguém viu reembolso dela, e a linha pode ter sido limpa (A5): a
+            # comissão nasce marcada, fora do disponível, até `conferir_comissao` olhar a Stripe. Com
+            # linha, `promover` decide. Nenhuma chamada HTTP nesta transação.
+            cur.execute("select 1 from affiliate_refund_reviews where stripe_invoice_id = %s", (stripe_invoice_id,))
+            sem_linha = cur.fetchone() is None
             cur.execute(
                 """
                 insert into affiliate_commissions(
                     affiliate_id, referred_user_id, stripe_invoice_id,
-                    invoice_amount_cents, amount_cents, available_at)
-                values (%s, %s, %s, %s, %s, %s)
+                    invoice_amount_cents, amount_cents, available_at, payment_check_pending)
+                values (%s, %s, %s, %s, %s, %s, %s)
                 on conflict (stripe_invoice_id) do nothing
                 returning *
                 """,
@@ -230,9 +254,12 @@ def record_commission_for_invoice(referred_user_id: int, stripe_invoice_id: str,
                     int(invoice_amount_cents),
                     amount_cents,
                     _now() + timedelta(days=COMMISSION_HOLD_DAYS),
+                    sem_linha,
                 ),
             )
             created = cur.fetchone()
+            if created:
+                promover(cur, created)
             conn.commit()
             return created
 
@@ -247,31 +274,36 @@ def get_affiliate_stats(affiliate_id: int) -> dict:
             )
             referrals = int(cur.fetchone()["n"])
             cur.execute(
-                """
+                f"""
                 select
                   coalesce(sum(amount_cents) filter (
-                    where status = 'pending' and payout_id is null and available_at >  now()), 0) as held_cents,
+                    where status = 'pending' and payout_id is null and em_revisao), 0) as review_cents,
                   coalesce(sum(amount_cents) filter (
-                    where status = 'pending' and payout_id is null and available_at <= now()), 0) as available_cents,
-                  -- Do saque, não da comissão: excluir a conta do indicado apaga a
-                  -- comissão em cascata, e o saque aberto ou o Pix já feito não podem
-                  -- sumir do total.
+                    where status = 'pending' and payout_id is null and not em_revisao
+                      and (available_at > now() or payment_check_pending)), 0) as held_cents,
+                  coalesce(sum(amount_cents) filter (
+                    where status = 'pending' and payout_id is null and not em_revisao
+                      and available_at <= now() and not payment_check_pending), 0) as available_cents,
+                  -- Do saque, não da comissão: a revisão parcial ajusta os dois juntos, e a
+                  -- comissão apagada pela cascata antiga não some do total.
                   (select coalesce(sum(amount_cents), 0) from affiliate_payouts
                     where affiliate_id = %s and status = 'requested') as requested_cents,
                   (select coalesce(sum(amount_cents), 0) from affiliate_payouts
                     where affiliate_id = %s and status = 'paid') as paid_cents,
                   count(*) filter (where status <> 'reversed') as commission_count
-                  from affiliate_commissions
-                 where affiliate_id = %s
+                  from (select c.*, {PENDENCIA_ABERTA_SQL.format(c="c")} as em_revisao
+                          from affiliate_commissions c
+                         where c.affiliate_id = %s) comissoes
                 """,
                 (int(affiliate_id), int(affiliate_id), int(affiliate_id)),
             )
             sums = cur.fetchone()
-    buckets = ("held_cents", "available_cents", "requested_cents", "paid_cents")
+    buckets = ("held_cents", "available_cents", "review_cents", "requested_cents", "paid_cents")
     return {
         "referrals": referrals,
         "held_cents": int(sums["held_cents"]),            # em carência
         "available_cents": int(sums["available_cents"]),  # sacável agora
+        "review_cents": int(sums["review_cents"]),        # fora do saque até a revisão
         "requested_cents": int(sums["requested_cents"]),  # em saque pendente
         "paid_cents": int(sums["paid_cents"]),
         # Soma dos quadros: estornada fora, e saque aberto ou pago não encolhe.
@@ -285,17 +317,22 @@ def get_affiliate_stats(affiliate_id: int) -> dict:
 def list_affiliate_commissions(affiliate_id: int, limit: int = 50) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # O rótulo vem pela fatura, com a referral do afiliado: pela pessoa, some com a exclusão.
             cur.execute(
-                """
+                f"""
                 select c.id, c.invoice_amount_cents, c.amount_cents, c.status,
                        c.available_at, c.payout_id, c.created_at,
-                       coalesce(p.refund_status, 'none') as payment_refund
+                       coalesce((select p.refund_status
+                                   from affiliate_referral_payments p
+                                   join affiliate_referrals r on r.id = p.referral_id
+                                  where r.affiliate_id = c.affiliate_id and p.source = 'stripe'
+                                    and p.payment_ref = c.stripe_invoice_id), 'none') as payment_refund,
+                       c.status = 'pending' and c.payout_id is null
+                         and {PENDENCIA_ABERTA_SQL.format(c="c")} as in_review,
+                       c.status = 'pending' and c.payment_check_pending as checking,
+                       (select v.amount_cents from affiliate_refund_reviews v
+                         where v.commission_id = c.id and v.amount_cents <> c.amount_cents) as original_amount_cents
                   from affiliate_commissions c
-                  left join affiliate_referrals r
-                    on r.affiliate_id = c.affiliate_id and r.referred_user_id = c.referred_user_id
-                  left join affiliate_referral_payments p
-                    on p.referral_id = r.id and p.source = 'stripe'
-                   and p.payment_ref = c.stripe_invoice_id
                  where c.affiliate_id = %s
                  order by c.created_at desc
                  limit %s
@@ -305,27 +342,9 @@ def list_affiliate_commissions(affiliate_id: int, limit: int = 50) -> list[dict]
             return cur.fetchall()
 
 
-def comissao_da_fatura(stripe_invoice_id: str) -> dict | None:
-    """A comissão da fatura e o rótulo de reembolso do pagamento dela. Leitura de instante:
-    quem decide o estorno é o `update` de `reverse_commission`."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select c.id, c.status, c.payout_id, c.amount_cents, p.refund_status
-                  from affiliate_commissions c
-                  left join affiliate_referral_payments p
-                    on p.source = 'stripe' and p.payment_ref = c.stripe_invoice_id
-                 where c.stripe_invoice_id = %s
-                """,
-                (stripe_invoice_id,),
-            )
-            return cur.fetchone()
-
-
-def reverse_commission(commission_id: int) -> bool:
+def reverse_commission(commission_id: int, revisor: str = "admin") -> bool:
     """Estorna uma comissão (refund/chargeback da fatura). Só enquanto pending
-    e fora de um saque em andamento.
+    e fora de um saque em andamento. Pendência aberta dela fecha na mesma transação.
 
     A trava vem antes, pelo `id`: o `update` sozinho filtra `payout_id is null` no snapshot, e
     com a comissão ainda no saque ele nem espera o `reject_payout` em voo, que a devolve logo
@@ -342,77 +361,14 @@ def reverse_commission(commission_id: int) -> bool:
                 """,
                 (int(commission_id),),
             )
+            estornou = cur.rowcount > 0
+            if estornou:
+                cur.execute("update affiliate_refund_reviews set status = 'resolved'"
+                            " where commission_id = %s and status = 'open' returning id", (int(commission_id),))
+                for pendencia in cur.fetchall():
+                    registrar_evento(cur, pendencia["id"], "commission_reversed", revisor)
             conn.commit()
-            return cur.rowcount > 0
-
-
-def registrar_aviso_reembolso(commission_id: int, tipo: str, entregue: bool) -> None:
-    """Grava o aviso de reembolso da comissão: entregue agora, ou pendente (`sent_at` nulo).
-    Não rebaixa `total` para `partial`, e o mesmo tipo não entregue não apaga um `sent_at` antigo
-    (reentrega sem canal de aviso que já saiu)."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                update affiliate_commissions
-                   set refund_alert = %s,
-                       refund_alert_sent_at = case when %s then now()
-                                                   when refund_alert is not distinct from %s
-                                                   then refund_alert_sent_at
-                                                   else null end
-                 where id = %s and not (refund_alert is not distinct from 'total' and %s = 'partial')
-                """,
-                (tipo, bool(entregue), tipo, int(commission_id), tipo),
-            )
-            conn.commit()
-
-
-def entregar_avisos_pendentes(enviar: Callable[[dict, str], bool], limite: int = 20) -> int:
-    """Reenvia avisos de reembolso pendentes, um por transação. `enviar(comissao, tipo)` devolve
-    se o canal aceitou; a 1ª recusa para o lote (a falha é do canal, não da linha). Devolve
-    quantos foram entregues.
-
-    `for update skip locked` por linha, molde de `db/webhook_outbox.py::reservar_evento`: o
-    lock vive durante o envio, e outra passada concorrente pula a linha em vez de repetir.
-    `ponytail:` teto — uma conexão presa por até o timeout do canal (5s) por aviso."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select id from affiliate_commissions
-                 where refund_alert is not null and refund_alert_sent_at is null
-                   and status <> 'reversed'
-                 order by id
-                 limit %s
-                """,
-                (int(limite),),
-            )
-            ids = [r["id"] for r in cur.fetchall()]
-    entregues = 0
-    for cid in ids:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    select id, status, payout_id, amount_cents, refund_alert
-                      from affiliate_commissions
-                     where id = %s and refund_alert is not null and refund_alert_sent_at is null
-                       and status <> 'reversed'
-                       for update skip locked
-                    """,
-                    (cid,),
-                )
-                linha = cur.fetchone()
-                if linha is None:
-                    continue
-                if not enviar(linha, linha["refund_alert"]):
-                    conn.rollback()
-                    break
-                cur.execute("update affiliate_commissions set refund_alert_sent_at = now() where id = %s",
-                            (cid,))
-                conn.commit()
-                entregues += 1
-    return entregues
+            return estornou
 
 
 # ─── Saque ────────────────────────────────────────────────────────────────────
@@ -445,16 +401,23 @@ def request_payout(affiliate_id: int, pix_key_enc: str | None = None) -> dict:
             if cur.fetchone():
                 raise ValueError("Você já tem um saque em análise. Aguarde o pagamento.")
 
+            # Conferência pendente (A5) conta como não gerada para tudo que paga.
+            sem_pendencia = f"not {PENDENCIA_ABERTA_SQL.format(c='c')} and not c.payment_check_pending"
             cur.execute(
-                """
-                select id, amount_cents
-                  from affiliate_commissions
-                 where affiliate_id = %s and status = 'pending'
-                   and payout_id is null and available_at <= now()
+                f"""
+                select c.id, c.amount_cents
+                  from affiliate_commissions c
+                 where c.affiliate_id = %s and c.status = 'pending'
+                   and c.payout_id is null and c.available_at <= now() and {sem_pendencia}
                  for update
                 """,
                 (int(affiliate_id),),
             )
+            rows = cur.fetchall()
+            # De novo depois da trava: o webhook parcial cria a pendência sem alterar a linha da
+            # comissão, e o Postgres só reavalia o filtro quando a linha travada mudou.
+            cur.execute(f"select c.id, c.amount_cents from affiliate_commissions c"
+                        f" where c.id = any(%s) and {sem_pendencia}", ([int(r["id"]) for r in rows],))
             rows = cur.fetchall()
             total = sum(int(r["amount_cents"]) for r in rows)
             if total < MIN_PAYOUT_CENTS:
@@ -497,20 +460,31 @@ def list_affiliate_payouts(affiliate_id: int, limit: int = 20) -> list[dict]:
 
 
 def mark_payout_paid(payout_id: int, note: str | None = None) -> bool:
-    """Admin pagou o Pix fora do sistema → marca payout e comissões como pagos."""
+    """Admin pagou o Pix fora do sistema → marca payout e comissões como pagos.
+
+    A trava das comissões vem antes da leitura da pendência, em comando separado: é ela que espera
+    o webhook em voo. Com pendência aberta, levanta `SaqueComPendencia` e nada muda."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 update affiliate_payouts
                    set status = 'paid', paid_at = now(), note = coalesce(%s, note)
-                 where id = %s and status = 'requested'
+                 where id = %s and status = 'requested' and affiliate_id is not null
                 """,
                 (note, int(payout_id)),
             )
             if cur.rowcount == 0:
                 conn.rollback()
+                cur.execute("select 1 from affiliate_payouts where id = %s and status = 'requested'"
+                            " and affiliate_id is null", (int(payout_id),))
+                if cur.fetchone():
+                    raise SaqueOrfao("O afiliado excluiu a conta: registre o pagamento já realizado ou rejeite.")
                 return False
+            cur.execute("select id from affiliate_commissions where payout_id = %s for update", (int(payout_id),))
+            if saque_bloqueado(cur, payout_id):
+                conn.rollback()
+                raise SaqueComPendencia("Este saque tem reembolso de cliente em análise. Resolva a pendência antes.")
             cur.execute(
                 "update affiliate_commissions set status = 'paid' where payout_id = %s",
                 (int(payout_id),),
@@ -519,9 +493,60 @@ def mark_payout_paid(payout_id: int, note: str | None = None) -> bool:
             return True
 
 
-def reject_payout(payout_id: int, note: str | None = None) -> bool:
+def registrar_pagamento_realizado(payout_id: int, paid_on: date, justificativa: str,
+                                  referencia: str, revisor: str) -> bool:
+    """O Pix saiu antes do reembolso: marca saque e comissões como pagos, sem QR, sem transferência e
+    sem devolver nada ao saldo. Pendência `total` vira recuperação; a parcial segue `open`, sem
+    bloqueio, e a revisão usa o caminho da comissão paga. False = saque que não está mais aberto.
+    Nunca recusa por falta de pendência: com a Stripe fora, é o único registro do Pix já feito. Sem
+    pendência (e no saque órfão, D9 = A), o evento fica no saque, sem `review_id`.
+
+    Justificativa e referência só no evento: a nota do saque sai no `/api/affiliate/me`."""
+    pago_em = datetime.combine(paid_on, time(12), _FUSO)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("update affiliate_payouts set status = 'paid', paid_at = %s where id = %s and status = 'requested'"
+                        " returning affiliate_id", (pago_em, int(payout_id)))
+            saque = cur.fetchone()
+            if saque is None:
+                conn.rollback()
+                return False
+            if saque["affiliate_id"] is None:  # órfão: as comissões saíram, o vínculo ficou nas linhas da fatura
+                cur.execute("select * from affiliate_refund_reviews where orphan_payout_id = %s order by id for update",
+                            (int(payout_id),))
+                abertas = [r for r in cur.fetchall() if r["status"] == "open"]
+                cur.execute("update affiliate_refund_reviews set paid_cents = commission_cents where orphan_payout_id = %s",
+                            (int(payout_id),))
+                for r in abertas or [None]:
+                    registrar_evento(cur, r and r["id"], "payment_recorded", revisor, saque=int(payout_id), em=paid_on,
+                                     referencia=referencia, justificativa=justificativa)
+                    if r and r["tipo"] == "total":
+                        cur.execute("update affiliate_refund_reviews set status = 'recovery', recovery_cents = %s,"
+                                    " notified_at = null, notify_claimed_until = null where id = %s",
+                                    (r["commission_cents"], r["id"]))
+                conn.commit()
+                return True
+            cur.execute("select id, amount_cents from affiliate_commissions where payout_id = %s for update",
+                        (int(payout_id),))
+            valores = {c["id"]: c["amount_cents"] for c in cur.fetchall()}
+            abertas = abertas_do_saque(cur, payout_id)  # sem pendência também registra: nunca recusa
+            cur.execute("update affiliate_commissions set status = 'paid' where payout_id = %s", (int(payout_id),))
+            for r in abertas or [None]:  # sem pendência, o comprovante fica no saque
+                registrar_evento(cur, r and r["id"], "payment_recorded", revisor, saque=int(payout_id), em=paid_on,
+                                 referencia=referencia, justificativa=justificativa)
+                if r and r["tipo"] == "total":
+                    cur.execute("update affiliate_refund_reviews set status = 'recovery', recovery_cents = %s,"
+                                " notified_at = null, notify_claimed_until = null where id = %s",
+                                (valores[r["commission_id"]], r["id"]))
+            conn.commit()
+            return True
+
+
+def reject_payout(payout_id: int, note: str | None = None, revisor: str = "admin") -> bool:
     """Rejeita o saque e devolve as comissões pro saldo disponível, menos a de fatura
-    reembolsada por inteiro: essa sai estornada, senão voltaria a ser sacável.
+    reembolsada por inteiro (pelo rótulo ou pela pendência `total`, que aqui fecha): essa sai
+    estornada, senão voltaria a ser sacável. A parcial volta para "Em revisão", com a pendência
+    aberta: quem decide o valor é a revisão.
 
     A trava vem antes da leitura do rótulo: é nela que `reverse_commission` espera. Sem ela, o
     webhook roda entre a leitura e a devolução, não acha a comissão solta, e nenhum dos dois
@@ -533,8 +558,9 @@ def reject_payout(payout_id: int, note: str | None = None) -> bool:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                update affiliate_payouts
-                   set status = 'rejected', note = coalesce(%s, note)
+                update affiliate_payouts  -- órfão sem nota: ela sairia da exclusão e voltaria aqui (D8)
+                   set status = 'rejected',
+                       note = case when affiliate_id is null then null else coalesce(%s, note) end
                  where id = %s and status = 'requested'
                 """,
                 (note, int(payout_id)),
@@ -546,24 +572,34 @@ def reject_payout(payout_id: int, note: str | None = None) -> bool:
                 "select id from affiliate_commissions where payout_id = %s for update",
                 (int(payout_id),),
             )
+            abertas = abertas_do_saque(cur, payout_id)
             cur.execute(
                 """
                 update affiliate_commissions c
                    set payout_id = null,
-                       status = case when c.status = 'pending' and exists (
+                       status = case when c.status = 'pending' and (exists (
                          select 1
                            from affiliate_referral_payments p
                            join affiliate_referrals r on r.id = p.referral_id
                           where r.affiliate_id = c.affiliate_id
                             and p.source = 'stripe' and p.payment_ref = c.stripe_invoice_id
                             and p.refund_status = 'total'
-                       ) then 'reversed' else c.status end
+                       ) or exists (
+                         select 1 from affiliate_refund_reviews v
+                          where v.commission_id = c.id and v.tipo = 'total' and v.status = 'open'
+                       )) then 'reversed' else c.status end
                  where c.payout_id = %s
                 returning c.id, c.status
                 """,
                 (int(payout_id),),
             )
             estornadas = [c["id"] for c in cur.fetchall() if c["status"] == "reversed"]
+            # Parcial sobre comissão que o rótulo `total` estornou também fecha, e a do saque órfão (sem
+            # comissão), que nunca foi paga: fecha sem recuperação.
+            for r in abertas:
+                if r["tipo"] == "total" or r["commission_id"] in estornadas or r["commission_id"] is None:
+                    cur.execute("update affiliate_refund_reviews set status = 'resolved' where id = %s", (r["id"],))
+                    registrar_evento(cur, r["id"], "payout_rejected", revisor, saque=int(payout_id))
             conn.commit()
     for comissao_id in estornadas:
         log_system_event_sync(
@@ -589,8 +625,8 @@ def admin_list_affiliates() -> list[dict]:
                          where r.affiliate_id = a.id) as referrals,
                        coalesce((select sum(c.amount_cents) from affiliate_commissions c
                          where c.affiliate_id = a.id and c.status = 'pending'), 0) as owed_cents,
-                       coalesce((select sum(c.amount_cents) from affiliate_commissions c
-                         where c.affiliate_id = a.id and c.status = 'paid'), 0) as paid_cents
+                       coalesce((select sum(p.amount_cents) from affiliate_payouts p
+                         where p.affiliate_id = a.id and p.status = 'paid'), 0) as paid_cents
                   from affiliates a
                   left join auth_accounts aa on aa.user_id = a.user_id
                  order by a.created_at desc
@@ -599,16 +635,23 @@ def admin_list_affiliates() -> list[dict]:
             return cur.fetchall()
 
 
+# Parcial aberta em comissão já paga segue `open` sem bloqueio: só saque aberto bloqueia.
+_BLOQUEADO = f"p.status = 'requested' and {SAQUE_BLOQUEADO_SQL.format(saque='p.id')}"
+# Saque de afiliado que excluiu a conta (D8): sem dono, com o código gravado na exclusão.
+_ORFAO = "p.affiliate_id is null"
+_DONO = "coalesce(a.code, p.affiliate_code)"
+
+
 def get_payout(payout_id: int) -> dict | None:
     """Um saque específico (mesmas colunas do admin_list_payouts). Usado pra
     montar o Pix copia e cola / QR do pagamento no admin."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                select p.*, a.code, a.user_id, aa.email_enc
+                f"""
+                select p.*, {_DONO} as code, a.user_id, aa.email_enc, {_BLOQUEADO} as blocked, {_ORFAO} as orphan
                   from affiliate_payouts p
-                  join affiliates a on a.id = p.affiliate_id
+                  left join affiliates a on a.id = p.affiliate_id
                   left join auth_accounts aa on aa.user_id = a.user_id
                  where p.id = %s
                 """,
@@ -621,10 +664,10 @@ def admin_list_payouts(status: str | None = None, limit: int = 100) -> list[dict
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                select p.*, a.code, a.user_id, aa.email_enc
+                f"""
+                select p.*, {_DONO} as code, a.user_id, aa.email_enc, {_BLOQUEADO} as blocked, {_ORFAO} as orphan
                   from affiliate_payouts p
-                  join affiliates a on a.id = p.affiliate_id
+                  left join affiliates a on a.id = p.affiliate_id
                   left join auth_accounts aa on aa.user_id = a.user_id
                  where (%s::text is null or p.status = %s)
                  order by p.requested_at desc

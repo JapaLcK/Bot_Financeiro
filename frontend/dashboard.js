@@ -11907,6 +11907,8 @@ async function loadAffiliateView(forceFresh = false, { background = false } = {}
 function _affiliateCommissionStatus(c) {
   if (c.status === "reversed") return { label: "estornada", color: "var(--red)" };
   if (c.status === "paid") return { label: "paga", color: "var(--green)" };
+  if (c.in_review) return { label: "em revisão", color: "var(--text-3)" };
+  if (c.checking) return { label: "em conferência", color: "var(--text-3)" };
   if (c.payout_id) return { label: "em saque", color: "var(--blue)" };
   if (new Date(c.available_at) <= new Date()) return { label: "disponível", color: "var(--green)" };
   const d = new Date(c.available_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
@@ -11949,6 +11951,11 @@ function _renderAffiliateView(data) {
       <div class="stat-value">${fmt(s.held || 0)}</div>
       <div class="stat-delta" style="color:var(--text-3)">libera ${Number(data.hold_days)} dias após a cobrança</div>
     </div>
+    <div class="stat-tile" style="animation-delay:135ms">
+      <div class="stat-label">Em revisão</div>
+      <div class="stat-value">${fmt(s.review || 0)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">reembolso de cliente em análise</div>
+    </div>
     <div class="stat-tile" style="animation-delay:150ms">
       <div class="stat-label">Em saque</div>
       <div class="stat-value">${fmt(s.requested || 0)}</div>
@@ -11984,7 +11991,7 @@ function _renderAffiliateView(data) {
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--glass-border)">
         <div>
           <div style="font-weight:600">${fmt(c.amount)}</div>
-          <div style="font-size:.72rem;color:var(--text-3)">fatura de ${fmt(c.invoice_amount)} · ${fmtDate(c.created_at)}</div>
+          <div style="font-size:.72rem;color:var(--text-3)">fatura de ${fmt(c.invoice_amount)} · ${fmtDate(c.created_at)}${c.original_amount !== null && c.original_amount !== undefined ? ` · ajustada de ${fmt(c.original_amount)}` : ""}</div>
         </div>
         <span style="font-size:.75rem;color:${st.color};text-align:right">${st.label}${refund ? `<br><span style="color:var(--text-3)">${refund}</span>` : ""}</span>
       </div>`;

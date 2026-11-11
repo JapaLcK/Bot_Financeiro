@@ -18,7 +18,7 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 | Esconder valores (modo privacidade) | Não há no `/painel` | Botão e `oculto` em todo o app | — | Web | a discutir com o dono |
 | Seletor de mês | Os 6 últimos meses (`MESES` em `lib/v2.ts`) | Até o início do histórico do plano (`history_earliest_date`) | Quem tem plano maior vê mais meses no app | Web | a discutir com o dono |
 | Comparação de períodos | PR #1033 aberto, fora da `main` | Não há | Nenhum lado tem | Ambos | a discutir com o dono |
-| Área do afiliado | `#/afiliado` (só para afiliado): código, link, números, histórico e saque; sem plano, `/afiliado` | Não há | O app Expo não tem a área; quem é afiliado usa o navegador | App | decidido pelo dono (D1, 2026-11-05): fica fora por agora |
+| Área do afiliado | `#/afiliado` (só para afiliado): código, link, números (com "Em revisão"), histórico e saque; sem plano, `/afiliado` | Não há | O app Expo não tem a área; quem é afiliado usa o navegador | App | decidido pelo dono (D1, 2026-11-05): fica fora por agora |
 
 ## Gastos
 

@@ -2222,14 +2222,37 @@ def init_db():
         """
         create table if not exists affiliate_payouts (
           id bigserial primary key,
-          affiliate_id bigint not null references affiliates(id) on delete cascade,
+          -- Nulo = o afiliado excluiu a conta: o saque fica, desvinculado do usuário (D8).
+          affiliate_id bigint references affiliates(id) on delete set null,
           amount_cents bigint not null,
           status text not null default 'requested', -- 'requested' | 'paid' | 'rejected'
           pix_key_enc text,                         -- snapshot da chave no momento do pedido
           note text,
           requested_at timestamptz not null default now(),
-          paid_at timestamptz
+          paid_at timestamptz,
+          affiliate_code text                       -- gravado só na exclusão do afiliado
         )
+        """,
+        # Banco antigo (D8): `not null`, `cascade` e sem `affiliate_code`. Cada passo só roda quando há
+        # o que mudar: `alter table`, mesmo com `if not exists`, pede lock exclusivo, e no boot faria
+        # fila atrás de leitura aberta.
+        """
+        do $$ declare fk record; begin
+          if exists (select 1 from pg_attribute where attrelid = 'affiliate_payouts'::regclass
+                        and attname = 'affiliate_id' and attnotnull) then
+            alter table affiliate_payouts alter column affiliate_id drop not null;
+          end if;
+          for fk in select conname from pg_constraint where conrelid = 'affiliate_payouts'::regclass
+                      and confrelid = 'affiliates'::regclass and contype = 'f' and confdeltype = 'c' loop
+            execute format('alter table affiliate_payouts drop constraint %I, add constraint %I'
+                           ' foreign key (affiliate_id) references affiliates(id) on delete set null',
+                           fk.conname, fk.conname);
+          end loop;
+          if not exists (select 1 from pg_attribute where attrelid = 'affiliate_payouts'::regclass
+                            and attname = 'affiliate_code' and not attisdropped) then
+            alter table affiliate_payouts add column affiliate_code text;
+          end if;
+        end $$
         """,
         """
         create index if not exists idx_affiliate_payouts_affiliate
@@ -2246,24 +2269,38 @@ def init_db():
         create table if not exists affiliate_commissions (
           id bigserial primary key,
           affiliate_id bigint not null references affiliates(id) on delete cascade,
-          referred_user_id bigint not null references users(id) on delete cascade,
+          -- Nulo = o indicado excluiu a conta: a comissão fica, desvinculada do usuário.
+          referred_user_id bigint references users(id) on delete set null,
           stripe_invoice_id text not null unique,
           invoice_amount_cents bigint not null,
           amount_cents bigint not null,
           status text not null default 'pending',
           available_at timestamptz not null,        -- created_at + carência (estorno/chargeback)
           payout_id bigint references affiliate_payouts(id) on delete set null,
-          created_at timestamptz not null default now()
+          created_at timestamptz not null default now(),
+          -- Conferência na Stripe pendente (A5): fora do disponível até `conferir_comissao` liberar.
+          payment_check_pending boolean not null default false
         )
+        """,
+        # Mesma guarda do `drop not null` de `affiliate_referrals`, e pelo mesmo motivo.
+        """
+        do $$ begin
+          if exists (select 1 from pg_attribute
+                      where attrelid = 'affiliate_commissions'::regclass
+                        and attname = 'referred_user_id' and attnotnull) then
+            alter table affiliate_commissions alter column referred_user_id drop not null;
+          end if;
+          -- `false` de propósito: comissão antiga segue como estava, sem conferência em massa no deploy.
+          if not exists (select 1 from pg_attribute where attrelid = 'affiliate_commissions'::regclass
+                            and attname = 'payment_check_pending' and not attisdropped) then
+            alter table affiliate_commissions add column payment_check_pending boolean not null default false;
+          end if;
+        end $$
         """,
         """
         create index if not exists idx_affiliate_commissions_affiliate
           on affiliate_commissions (affiliate_id, status, available_at)
         """,
-        # Aviso de reembolso ao admin (core/services/afiliado_reembolso.py): sent_at null = pendente.
-        """alter table affiliate_commissions add column if not exists refund_alert text
-             check (refund_alert in ('partial', 'total'))""",
-        """alter table affiliate_commissions add column if not exists refund_alert_sent_at timestamptz""",
         # Pagamento confirmado de indicado (db/affiliate_payments.py). 1 linha por pagamento,
         # sem `user_id` de propósito: o vínculo com a pessoa é o da referral.
         """
@@ -2284,6 +2321,69 @@ def init_db():
         """
         create index if not exists idx_affiliate_referral_payments_referral
           on affiliate_referral_payments (referral_id)
+        """,
+        # Pendência de reembolso (db/affiliate_reviews.py): 1 linha por fatura reembolsada, sem
+        # `user_id` nem dado do indicado. A linha é também a notificação pendente: `notified_at`
+        # nulo. Os eventos só crescem: reembolso maior reabre a pendência sem apagar o ajuste.
+        """
+        create table if not exists affiliate_refund_reviews (
+          id bigserial primary key,
+          stripe_invoice_id text not null unique,
+          -- Nulo em `no_commission` e quando o afiliado excluiu a conta (A3): a pendência e o histórico ficam.
+          commission_id bigint references affiliate_commissions(id) on delete set null,
+          affiliate_code text,                     -- gravado só na exclusão do afiliado
+          paid_cents bigint,                       -- comissão paga, gravado na exclusão: o reembolso depois vira recuperação
+          -- Comissão de saque aberto que saiu com o afiliado (saque órfão, "guardar vínculo"): o valor e o saque.
+          commission_cents bigint,
+          orphan_payout_id bigint references affiliate_payouts(id) on delete set null,
+          tipo text not null check (tipo in ('partial', 'total')),
+          refunded_cents bigint not null,          -- acumulado; maior = fato novo
+          amount_cents bigint,                     -- valor ORIGINAL da comissão; nunca reescrito
+          approved_cents bigint,                   -- valor aprovado na revisão parcial
+          recovery_cents bigint,                   -- quanto falta recuperar
+          recovery_closed_cents bigint not null default 0,  -- já encerrado: reabrir não cobra de novo
+          status text not null default 'open'
+            check (status in ('no_commission', 'open', 'recovery', 'resolved')),
+          refunded_at timestamptz,
+          notified_at timestamptz,                 -- só com `_send` True; não libera nada
+          notify_claimed_until timestamptz,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_affiliate_refund_reviews_status
+          on affiliate_refund_reviews (status, notified_at)
+        """,
+        """
+        create index if not exists idx_affiliate_refund_reviews_commission
+          on affiliate_refund_reviews (commission_id)
+        """,
+        """
+        create index if not exists idx_affiliate_refund_reviews_orphan_payout
+          on affiliate_refund_reviews (orphan_payout_id)
+        """,
+        """
+        create table if not exists affiliate_refund_review_events (
+          id bigserial primary key,
+          -- Nulo só no "Pagamento já realizado" de saque órfão (D9), que não tem pendência.
+          review_id bigint references affiliate_refund_reviews(id) on delete cascade,
+          action text not null check (action in ('partial_approved', 'payout_rejected', 'payment_recorded',
+            'paid_before_refund', 'auto_reversed', 'commission_reversed', 'recovery_recovered',
+            'recovery_waived', 'reopened', 'affiliate_deleted')),
+          actor text not null,                     -- username do admin, 'sistema' ou 'script'
+          before_cents bigint,
+          after_cents bigint,
+          payout_id bigint,
+          event_on date,
+          receipt_ref text,
+          justification text,
+          created_at timestamptz not null default now(),
+          check (review_id is not null or payout_id is not null)
+        )
+        """,
+        """
+        create index if not exists idx_affiliate_refund_review_events_review
+          on affiliate_refund_review_events (review_id, id)
         """,
 
         # ─── Prospecção (lead engine do Instagram) ───────────────────────────────

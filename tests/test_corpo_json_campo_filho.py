@@ -88,7 +88,7 @@ def _espiao_payout(monkeypatch, funcao):
     vistos = []
     monkeypatch.setattr(
         db.affiliates, funcao,
-        lambda payout_id, note: vistos.append(note) or False,
+        lambda payout_id, note, *revisor: vistos.append(note) or False,
     )
     return vistos
 

@@ -297,7 +297,7 @@ def _espiao_payout(monkeypatch, funcao):
     vistos = []
     monkeypatch.setattr(
         db.affiliates, funcao,
-        lambda payout_id, note: vistos.append(note) or False,
+        lambda payout_id, note, *revisor: vistos.append(note) or False,
     )
     return vistos
 
@@ -318,6 +318,27 @@ def test_payout_note_venenoso_nao_da_500(monkeypatch, veneno, acao, funcao):
     assert NUL not in vistos[0]
     vistos[0].encode("utf-8")  # levanta se sobrou surrogate solitário
     assert vistos[0].startswith("AAA") and vistos[0].endswith("BBB"), vistos
+
+
+@pytest.mark.parametrize("veneno", VENENOS, ids=VENENO_IDS)
+@pytest.mark.parametrize("caminho,corpo", [
+    (f"payouts/{INEXISTENTE}/payment-recorded", {"paid_on": "2026-01-01", "receipt_ref": "E1234567"}),
+    (f"refund-reviews/{INEXISTENTE}/approve", {"approved_cents": 1, "refunded_cents": 1}),
+    (f"refund-reviews/{INEXISTENTE}/close-recovery", {"result": "waived"}),
+], ids=["realizado", "aprovar", "encerrar"])
+def test_pendencia_justificativa_venenosa_nao_da_500(veneno, caminho, corpo):
+    """Saneada, a justificativa passa e o id inexistente responde 404."""
+    r = _post_bruto(_admin_client(), f"/admin/api/affiliates/{caminho}",
+                    {**corpo, "justification": _veneno(veneno) + " texto longo"})
+    assert r.status_code == 404, r.text
+
+
+@pytest.mark.parametrize("veneno", VENENOS, ids=VENENO_IDS)
+def test_referencia_venenosa_da_422_sem_500(veneno):
+    r = _post_bruto(_admin_client(), f"/admin/api/affiliates/refund-reviews/{INEXISTENTE}/close-recovery",
+                    {"result": "recovered", "justification": "justificativa ok", "recovered_on": "2026-01-01",
+                     "receipt_ref": _veneno(veneno)})
+    assert r.status_code == 422, r.text
 
 
 @pytest.mark.parametrize("acao,funcao", ACOES_PAYOUT, ids=["paid", "reject"])

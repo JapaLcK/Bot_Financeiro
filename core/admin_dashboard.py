@@ -4,6 +4,8 @@ import asyncio
 import logging
 import os
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -48,6 +50,18 @@ ADMIN_DASHBOARD_USERNAME = (os.getenv("ADMIN_DASHBOARD_USERNAME") or "admin").st
 ADMIN_DASHBOARD_PASSWORD = os.getenv("ADMIN_DASHBOARD_PASSWORD", "")
 ADMIN_DASHBOARD_PASSWORD_HASH = os.getenv("ADMIN_DASHBOARD_PASSWORD_HASH", "")
 ADMIN_DASHBOARD_SESSION_HOURS = float(os.getenv("ADMIN_DASHBOARD_SESSION_HOURS", "12"))
+# Prazo total da conferência na Stripe antes de pagar um saque de afiliado: estouro é 503, e o admin tenta
+# de novo. O SDK sozinho espera até 80 s por chamada, e a thread que estourou segue presa até lá: por isso
+# a conferência tem executor próprio, com VAGAS_CONFERENCIA threads, e nunca o padrão do asyncio, que todas
+# as rotas usam via `to_thread`. Vagas cheias = 503 na hora, sem consultar.
+PRAZO_CONFERENCIA_S = 20
+VAGAS_CONFERENCIA = 4
+_VAGAS_CONFERENCIA = threading.BoundedSemaphore(VAGAS_CONFERENCIA)
+_EXECUTOR_CONFERENCIA = ThreadPoolExecutor(VAGAS_CONFERENCIA, thread_name_prefix="conferir-saque")
+_STRIPE_FORA = "Não foi possível conferir reembolsos na Stripe agora. Tente de novo em instantes."
+_SE_O_PIX_SAIU = " Se o Pix já saiu, use Pagamento já realizado."
+_DISPUTA_ABERTA = ("Uma comissão deste saque tem disputa aberta na Stripe. Rejeite o saque para liberar as outras; "
+                   "ela volta quando a disputa fechar.")
 DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
 ADMIN_AUTH_COOKIE_NAME = "admin_auth_token"
 
@@ -2209,14 +2223,23 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
 
     @app.get("/admin/api/affiliates")
     async def admin_affiliates_overview(username: str = Depends(_get_current_admin)):
-        """Lista afiliados (com saldos) + pedidos de saque em aberto."""
+        """Lista afiliados (com saldos), pedidos de saque, pendências e recuperações."""
+        from db.affiliate_reviews_admin import listar_admin, listar_historico
+        from db.affiliate_reviews_manutencao import resumo_da_conferencia
         from db.affiliates import admin_list_affiliates, admin_list_payouts
 
         affiliates = await asyncio.to_thread(admin_list_affiliates)
         payouts = await asyncio.to_thread(admin_list_payouts, None, 100)
+        pendencias = await asyncio.to_thread(listar_admin)
+        historico = await asyncio.to_thread(listar_historico)
+        conferencia = await asyncio.to_thread(resumo_da_conferencia)
         return JSONResponse(content=_json_safe({
             "affiliates": [_decrypt_affiliate_row(r, username) for r in affiliates],
             "payouts": [_decrypt_affiliate_row(r, username) for r in payouts],
+            "refund_reviews": [r for r in pendencias if r["status"] == "open"],
+            "refund_recoveries": [r for r in pendencias if r["status"] == "recovery"],
+            "refund_history": historico,
+            "commission_checks": conferencia,
         }))
 
     @app.post("/admin/api/affiliates")
@@ -2301,6 +2324,26 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         )
         return {"ok": True, "status": status}
 
+    async def _conferir_saque_na_stripe(payout_id: int) -> dict | None:
+        """Consulta cada fatura do saque antes de o dinheiro sair, fora de transação e com prazo. None = Stripe
+        fora, sem chave, prazo estourado ou vagas cheias: a thread que estourou termina sozinha, segurando a
+        vaga até lá, e o que ela gravar é idempotente."""
+        from core.services import afiliado_reembolso
+
+        if not _VAGAS_CONFERENCIA.acquire(blocking=False):
+            return None
+        try:
+            futuro = _EXECUTOR_CONFERENCIA.submit(afiliado_reembolso.conferir_saque, payout_id)
+        except BaseException:
+            _VAGAS_CONFERENCIA.release()
+            raise
+        # Solta a vaga quando a thread acaba, ou quando o pedido é cancelado antes de começar.
+        futuro.add_done_callback(lambda _: _VAGAS_CONFERENCIA.release())
+        try:
+            return await asyncio.wait_for(asyncio.wrap_future(futuro), PRAZO_CONFERENCIA_S)
+        except (asyncio.TimeoutError, afiliado_reembolso.StripeIndisponivel):
+            return None
+
     @app.get("/admin/api/affiliates/payouts/{payout_id}/pix")
     async def admin_affiliate_payout_pix(
         payout_id: int, username: str = Depends(_get_current_admin)
@@ -2314,16 +2357,31 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         from core.services.pix_brcode import build_pix_brcode, qr_svg_data_url
         from db.affiliates import get_payout
 
-        row = await asyncio.to_thread(get_payout, payout_id)
-        if not row:
-            raise HTTPException(status_code=404, detail="Saque não encontrado.")
+        def aberto(row: dict | None, bloqueado: str) -> dict:
+            if not row:
+                raise HTTPException(status_code=404, detail="Saque não encontrado.")
+            if row["status"] != "requested":  # pago, rejeitado ou registrado: um QR aqui pagaria de novo
+                raise HTTPException(status_code=409, detail="Este saque não está aberto.")
+            if row["blocked"]:
+                raise HTTPException(status_code=409, detail=bloqueado)
+            if not row.get("pix_key_enc"):  # órfão (D9) ou saque sem chave
+                raise HTTPException(status_code=422, detail="Este saque não tem chave Pix registrada.")
+            return row
 
+        aberto(await asyncio.to_thread(get_payout, payout_id), "Este saque tem reembolso de cliente em análise.")
+        # A última chance antes de o dinheiro sair: o `charge.refunded` pode ter se perdido.
+        conferencia = await _conferir_saque_na_stripe(payout_id)
+        if conferencia is None:
+            raise HTTPException(status_code=503, detail=_STRIPE_FORA)
+        if conferencia["disputa"]:
+            raise HTTPException(status_code=409, detail=_DISPUTA_ABERTA)
+        # Relê o saque inteiro: outro admin pode ter rejeitado, pago ou revisado durante a consulta.
+        row = aberto(await asyncio.to_thread(get_payout, payout_id),
+                     "Reembolso de cliente achado na Stripe: o saque ficou bloqueado para revisão.")
         payout = _decrypt_affiliate_row(row, username)  # registra o acesso à PII
         pix_key = (payout.get("pix_key") or "").strip()
         if not pix_key:
-            raise HTTPException(
-                status_code=422, detail="Este saque não tem chave Pix registrada."
-            )
+            raise HTTPException(status_code=422, detail="Este saque não tem chave Pix registrada.")
         try:
             brcode = build_pix_brcode(pix_key, amount_cents=int(payout["amount_cents"]))
         except ValueError as exc:
@@ -2341,8 +2399,9 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     async def admin_affiliate_payout_paid(
         payout_id: int, request: Request, username: str = Depends(_get_current_admin)
     ):
-        """Marca o saque como pago (Pix já feito por fora). Body: {"note": "..."}"""
-        from db.affiliates import mark_payout_paid
+        """Marca o saque como pago (Pix já feito por fora). Body: {"note": "..."}. Confere a Stripe antes:
+        reembolso que chegou enquanto o admin pagava bloqueia, e o caminho é "Pagamento já realizado"."""
+        from db.affiliates import SaqueComPendencia, SaqueOrfao, get_payout, mark_payout_paid
 
         try:
             payload = await request.json()
@@ -2362,7 +2421,22 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         # não replace() inline porque "o que o Postgres aceita" tem de ter uma
         # fonte só (CLAUDE.md §0.7).
         note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
-        ok = await asyncio.to_thread(mark_payout_paid, payout_id, note)
+        row = await asyncio.to_thread(get_payout, payout_id)
+        conferencia = None
+        if row and row["status"] == "requested" and not row["orphan"] and not row["blocked"]:
+            conferencia = await _conferir_saque_na_stripe(payout_id)
+            if conferencia is None:
+                raise HTTPException(status_code=503, detail=_STRIPE_FORA + _SE_O_PIX_SAIU)
+            if conferencia["disputa"]:
+                raise HTTPException(status_code=409, detail=_DISPUTA_ABERTA)
+        try:
+            ok = await asyncio.to_thread(mark_payout_paid, payout_id, note)
+        except SaqueComPendencia as exc:
+            if conferencia and conferencia["reembolso"]:
+                raise HTTPException(status_code=409, detail="Reembolso achado na Stripe: o saque ficou bloqueado." + _SE_O_PIX_SAIU)
+            raise HTTPException(status_code=409, detail=detalhe_seguro(exc))
+        except SaqueOrfao as exc:
+            raise HTTPException(status_code=409, detail=detalhe_seguro(exc))
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
         await log_system_event(
@@ -2399,7 +2473,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         # não replace() inline porque "o que o Postgres aceita" tem de ter uma
         # fonte só (CLAUDE.md §0.7).
         note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
-        ok = await asyncio.to_thread(reject_payout, payout_id, note)
+        ok = await asyncio.to_thread(reject_payout, payout_id, note, username)
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
         await log_system_event(
@@ -2418,7 +2492,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         """Estorna uma comissão (fatura reembolsada/chargeback no Stripe)."""
         from db.affiliates import reverse_commission
 
-        ok = await asyncio.to_thread(reverse_commission, commission_id)
+        ok = await asyncio.to_thread(reverse_commission, commission_id, username)
         if not ok:
             raise HTTPException(
                 status_code=409,
@@ -2430,6 +2504,117 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             f"Comissão {commission_id} estornada.",
             source="affiliates",
             details={"commission_id": commission_id},
+        )
+        return {"ok": True}
+
+    # Referência do comprovante e justificativa ficam só no evento: logs abaixo levam apenas ids.
+    @app.post("/admin/api/affiliates/payouts/{payout_id}/payment-recorded")
+    async def admin_affiliate_payment_recorded(
+        payout_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """O Pix já saiu. Body: {"justification", "paid_on", "receipt_ref"}. Nunca recusa por falta de pendência
+        nem pela Stripe: confere antes (reembolso achado vira recuperação) e, com a Stripe fora, registra e deixa
+        as comissões marcadas para o worker conferir."""
+        from core.services.afiliado_reembolso import dia_em_brasilia, validar_comprovante, validar_justificativa
+        from db.affiliate_reviews import faturas_do_saque
+        from db.affiliate_reviews_manutencao import marcar_conferencia
+        from db.affiliates import get_payout, registrar_pagamento_realizado
+
+        payload = await _json_object_body(request)
+        row = await asyncio.to_thread(get_payout, payout_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Saque não encontrado.")
+        try:
+            justificativa = validar_justificativa(payload.get("justification"))
+            pago_em, referencia = validar_comprovante(
+                payload.get("paid_on"), payload.get("receipt_ref"), dia_em_brasilia(row["requested_at"]))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
+        conferencia = await _conferir_saque_na_stripe(payout_id) if row["status"] == "requested" else {}
+        ok = await asyncio.to_thread(
+            registrar_pagamento_realizado, payout_id, pago_em, justificativa, referencia, username)
+        if not ok:
+            raise HTTPException(status_code=409, detail="Saque já processado.")
+        if conferencia is None:  # Stripe fora: o worker do A5 confere sem prazo, e reembolso vira recuperação
+            faturas = await asyncio.to_thread(faturas_do_saque, payout_id)
+            await asyncio.to_thread(marcar_conferencia, [f["commission_id"] for f in faturas if f["commission_id"]])
+        await log_system_event(
+            "warning",
+            "affiliate_payment_recorded",
+            f"Saque {payout_id} registrado como pago antes do reembolso.",
+            source="affiliates",
+            details={"payout_id": payout_id},
+        )
+        return {"ok": True}
+
+    @app.post("/admin/api/affiliates/refund-reviews/{review_id}/approve")
+    async def admin_affiliate_review_approve(
+        review_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """Fecha a revisão parcial. Body: {"approved_cents", "refunded_cents", "justification"};
+        `refunded_cents` é o que o admin viu: valor velho dá 409."""
+        from core.services.afiliado_reembolso import validar_justificativa
+        from db.affiliate_reviews import PendenciaMudou, resolver_parcial
+
+        payload = await _json_object_body(request)
+        aprovado, visto = payload.get("approved_cents"), payload.get("refunded_cents")
+        if type(aprovado) is not int or type(visto) is not int:  # `type`: `true` é `int` para `isinstance`
+            raise HTTPException(status_code=422, detail="Valor inválido: informe centavos inteiros.")
+        try:
+            justificativa = validar_justificativa(payload.get("justification"))
+            ok = await asyncio.to_thread(resolver_parcial, review_id, username, aprovado, justificativa, visto)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
+        except PendenciaMudou as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        if not ok:
+            raise HTTPException(status_code=404, detail="Pendência não encontrada.")
+        await log_system_event(
+            "warning",
+            "affiliate_refund_review_approved",
+            f"Revisão de reembolso {review_id} fechada.",
+            source="affiliates",
+            details={"review_id": review_id},
+        )
+        return {"ok": True}
+
+    @app.post("/admin/api/affiliates/refund-reviews/{review_id}/close-recovery")
+    async def admin_affiliate_review_close_recovery(
+        review_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """Encerra a recuperação. Body: {"result", "justification", "recovered_on", "receipt_ref"}."""
+        from core.services.afiliado_reembolso import dia_em_brasilia, validar_comprovante, validar_justificativa
+        from db.affiliate_reviews import PendenciaMudou, encerrar_recuperacao, refunded_at_da_pendencia
+
+        payload = await _json_object_body(request)
+        resultado = payload.get("result")
+        if resultado not in ("recovered", "waived"):
+            raise HTTPException(status_code=422, detail="Resultado inválido.")
+        data = referencia = None
+        try:
+            justificativa = validar_justificativa(payload.get("justification"))
+            if resultado == "waived":
+                if payload.get("recovered_on") is not None or payload.get("receipt_ref") is not None:
+                    raise ValueError("Recuperação dispensada não leva data nem referência.")
+            else:
+                quando = await asyncio.to_thread(refunded_at_da_pendencia, review_id)
+                data, referencia = validar_comprovante(
+                    payload.get("recovered_on"), payload.get("receipt_ref"), quando and dia_em_brasilia(quando))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
+        try:
+            ok = await asyncio.to_thread(
+                encerrar_recuperacao, review_id, resultado, username, justificativa, data, referencia)
+        except PendenciaMudou as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        if not ok:
+            raise HTTPException(status_code=404, detail="Pendência não encontrada.")
+        await log_system_event(
+            "warning",
+            "affiliate_recovery_closed",
+            f"Recuperação {review_id} encerrada: {resultado}.",
+            source="affiliates",
+            details={"review_id": review_id, "result": resultado},
         )
         return {"ok": True}
 

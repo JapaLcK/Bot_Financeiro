@@ -66,6 +66,10 @@ _USER_FK_SET_NULL_TABLES: frozenset[str] = frozenset({
     # A conversão do afiliado não encolhe quando o indicado exclui a conta: o cadastro e
     # os pagamentos ficam, sem a pessoa (`referred_user_id` nulo).
     "affiliate_referrals",
+    # A comissão também fica: em saque ou paga, é ela que liga o reembolso ao saque. Sem esta
+    # linha o reparo volta a FK para CASCADE no boot, e o reembolso depois da exclusão não acha
+    # o que bloquear. Desvinculado do usuário, dados financeiros retidos.
+    "affiliate_commissions",
 })
 
 

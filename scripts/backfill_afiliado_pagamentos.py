@@ -1,18 +1,37 @@
-"""Pagamentos de indicado na Stripe que o registro não tem, e os reembolsos antigos deles.
+"""Reembolsos que a Stripe já fez e o sistema não viu: pendências, comissões e pagamentos de indicado.
 
-Completa `affiliate_referral_payments` com o que o `init_db` não alcança: fatura de plano sem
-comissão (afiliado 0% ou desativado, renovação, webhook perdido) e reembolso anterior ao
-`charge.refunded`. Idempotente: rodar de novo não duplica nem rebaixa rótulo.
+ATENÇÃO: `--aplicar` PODE ALTERAR SALDOS. Duas passadas, nesta ordem:
 
-Dinheiro: NÃO estorna comissão antiga e não toca em saque. Contestação fica só na contagem,
-porque a cobrança não diz se foi perdida. Conta excluída não volta: sem titular não há cliente.
-Só imprime contagens.
+1. Comissões (`status <> 'reversed'`), antes de tudo: a passada de rótulo, morrendo no meio, deixaria
+   `total` sem pendência. Sobre comissões, e não sobre clientes, porque conta excluída só existe aqui.
+   Inclui a linha da fatura cuja comissão saiu com o afiliado (paga, ou em saque órfão aberto),
+   listada como `pendência N`.
+   A regra é a da conferência (`devolvido_na_stripe`, uma só): disputa perdida conta como devolvida,
+   ganha não conta, aberta não confirma. Reembolso total confirmado = ao menos uma cobrança, todas
+   devolvidas por inteiro. Alguma devolvida, mas não todas, é parcial. Categorias:
+     a_estornar      total, comissão `pending` e sem saque: lista id e valor, e o total.
+     segue_revisao   parcial, ou total com a comissão em saque ou paga: lista id e valor.
+     sem_confirmacao erro da API, `forma_inesperada` (`payment_record`), `sem_cobranca` ou
+                     `disputa_aberta`: lista id e o motivo, e nada muda. Entra no código de saída.
+     ja_registrada   a pendência já é `total`, ou já tem esse devolvido: só conta, e nada muda.
+   Pendência parcial já registrada é relida: o total que o webhook perdeu é fato novo.
+   `--aplicar` não confia na classificação: chama `registrar_reembolso`, a mesma função do webhook,
+   que decide sob as travas com o estado de agora. Comissão que entrou em saque depois da simulação
+   vira pendência, sem estorno. Com `--aplicar`, a categoria e a linha impressa são o que aconteceu.
+
+2. Clientes: completa `affiliate_referral_payments` com o que o `init_db` não alcança, fatura de
+   plano sem comissão (afiliado 0% ou desativado, renovação, webhook perdido) e reembolso anterior
+   ao `charge.refunded`. Fatura com cobrança contestada não é rotulada, só contada: o rótulo dela
+   vem da primeira passada, junto da pendência. Conta excluída não volta: sem titular não há cliente.
+
+Idempotente: rodar de novo não duplica pendência, evento nem rótulo. Não imprime fatura, cliente nem
+indicado: só ids de comissão, valores e contagens.
 
 Rodar (o dono, na raiz do repositório, com a chave de produção):
     DATABASE_URL='postgres://...' STRIPE_SECRET_KEY='...' .venv/bin/python scripts/backfill_afiliado_pagamentos.py
 Sem `--aplicar` é simulação: lê a Stripe e o banco e não grava nada.
 
-Teste: tests/test_afiliado_reembolso.py.
+Teste: tests/test_afiliado_reembolso.py e tests/test_afiliado_pendencia.py.
 """
 import argparse
 import os
@@ -23,7 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.services.afiliado_reembolso import tipo_do_reembolso  # noqa: E402
+from core.services.afiliado_reembolso import SemConfirmacao, devolvido_na_stripe, tipo_do_reembolso  # noqa: E402
 from core.services.cartao_recusado_por_pix import MARCA  # noqa: E402
 from core.services.ebook_entrega import cobrancas_da_fatura  # noqa: E402
 from core.services.extras_assinar import (  # noqa: E402
@@ -34,7 +53,96 @@ from core.services.extras_assinar import (  # noqa: E402
     linhas_da_fatura,
 )
 from db.affiliate_payments import marcar_reembolso, registrar_pagamento  # noqa: E402
+from db.affiliate_reviews import registrar_reembolso  # noqa: E402
 from db.connection import get_conn  # noqa: E402
+
+
+
+
+def _comissoes() -> list[dict]:
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            select c.id, c.stripe_invoice_id as fatura, c.status, c.payout_id, c.amount_cents,
+                   r.tipo as registrada_tipo, r.refunded_cents as registrada_cents, false as sem_comissao
+              from affiliate_commissions c
+              left join affiliate_refund_reviews r on r.stripe_invoice_id = c.stripe_invoice_id
+             where c.status <> 'reversed'
+            union all
+            -- A comissão saiu com o afiliado (N5): a linha da fatura guarda o que foi pago ou o saque órfão
+            -- ainda aberto. Órfão rejeitado fica fora: a comissão nunca foi paga.
+            select r.id, r.stripe_invoice_id, case when r.paid_cents is not null then 'paid' else 'pending' end,
+                   r.orphan_payout_id, coalesce(r.paid_cents, r.commission_cents), r.tipo, r.refunded_cents, true
+              from affiliate_refund_reviews r
+             where r.commission_id is null
+               and (r.paid_cents is not null
+                    or exists (select 1 from affiliate_payouts p where p.id = r.orphan_payout_id and p.status = 'requested'))
+             order by sem_comissao, id
+            """).fetchall()
+
+
+def _datas_de_reembolso(stripe, cobranca) -> list[int]:
+    return [r["created"] for r in stripe.Refund.list(charge=cobranca["id"], limit=100)["data"]]
+
+
+def _reembolso_confirmado(stripe, fatura_id: str, chave: str) -> tuple[str | None, int, datetime | None]:
+    """O tipo, o devolvido e a data, pela regra da conferência (uma só, §0.7): disputa perdida conta
+    como devolvida, ganha não conta, aberta é `SemConfirmacao`. Total exige todas devolvidas."""
+    tipo, devolvido, cobrancas = devolvido_na_stripe(fatura_id, chave)
+    if tipo is None:
+        return None, 0, None
+    datas = [d for c in cobrancas if c["amount_refunded"] for d in _datas_de_reembolso(stripe, c)]
+    return tipo, devolvido, datetime.fromtimestamp(max(datas), timezone.utc) if datas else None
+
+
+def _categoria(c: dict, linha: dict | None) -> str:
+    """O que aconteceu, relido depois de `registrar_reembolso`: o relatório não conta previsão."""
+    if c["sem_comissao"]:  # sem comissão não há o que estornar
+        return "segue_revisao" if linha and linha["status"] in ("open", "recovery") else "ja_registrada"
+    with get_conn() as conn:
+        estornada = conn.execute("select status = 'reversed' as r from affiliate_commissions where id = %s",
+                                 (c["id"],)).fetchone()["r"]
+    if estornada:
+        return "a_estornar"
+    return "segue_revisao" if linha and linha["status"] in ("open", "recovery") else "ja_registrada"
+
+
+def _comissao(stripe, c: dict, chave: str, aplicar: bool, n: Counter) -> None:
+    tipo, devolvido, quando = _reembolso_confirmado(stripe, c["fatura"], chave)
+    if tipo is None:
+        return
+    if aplicar:
+        linha = registrar_reembolso(c["fatura"], tipo, devolvido, quando, ator="script")
+        categoria, desfecho = _categoria(c, linha), f" · pendência {linha['status'] if linha else 'nenhuma'}"
+    elif c["registrada_tipo"] and devolvido <= c["registrada_cents"]:  # a mesma regra de fato novo
+        categoria, desfecho = "ja_registrada", ""
+    else:
+        solta = c["status"] == "pending" and c["payout_id"] is None
+        categoria, desfecho = ("a_estornar" if tipo == "total" and solta else "segue_revisao"), ""
+    n[categoria] += 1
+    if categoria == "ja_registrada":
+        return
+    n[f"{categoria}_cents"] += c["amount_cents"]
+    print(f"{categoria}: {_quem(c)} · R$ {c['amount_cents'] / 100:.2f}{desfecho}")
+
+
+def _quem(c: dict) -> str:
+    return f"pendência {c['id']}" if c["sem_comissao"] else f"comissão {c['id']}"
+
+
+def _passar_comissoes(stripe, chave: str, aplicar: bool, n: Counter) -> None:
+    for c in _comissoes():
+        if c["registrada_tipo"] == "total":  # nunca reabre: nem relê a Stripe
+            n["ja_registrada"] += 1
+            continue
+        try:
+            _comissao(stripe, c, chave, aplicar, n)
+        except SemConfirmacao as exc:
+            n["sem_confirmacao"] += 1
+            print(f"sem_confirmacao: {_quem(c)} · {exc}")
+        except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer o id da fatura
+            n["sem_confirmacao"] += 1
+            print(f"sem_confirmacao: {_quem(c)} · {type(exc).__name__}")
 
 
 def _clientes() -> list[dict]:
@@ -73,12 +181,15 @@ def _valor_do_plano(stripe, fatura) -> int:
 def _reembolso(stripe, fatura_id: str, chave: str, n: Counter) -> tuple[str | None, datetime | None]:
     """O tipo e a data do reembolso mais recente da fatura."""
     tipos, datas = set(), []
-    for cobranca in cobrancas_da_fatura(fatura_id, chave):
+    cobrancas = list(cobrancas_da_fatura(fatura_id, chave))
+    if any(c["disputed"] for c in cobrancas):  # a passada de comissões não confirmou: não rotula
+        n["contestadas_para_conferir"] += 1
+        return None, None
+    for cobranca in cobrancas:
         tipo = tipo_do_reembolso(cobranca)
         tipos.add(tipo)
-        n["contestadas_para_conferir"] += bool(cobranca["disputed"])
         if tipo:
-            datas += [r["created"] for r in stripe.Refund.list(charge=cobranca["id"], limit=100)["data"]]
+            datas += _datas_de_reembolso(stripe, cobranca)
     quando = datetime.fromtimestamp(max(datas), timezone.utc) if datas else None
     return ("total" if "total" in tipos else "partial" if "partial" in tipos else None), quando
 
@@ -106,6 +217,7 @@ def rodar(aplicar: bool = False) -> Counter:
     chave = os.environ["STRIPE_SECRET_KEY"]
     stripe.api_key = chave
     n: Counter = Counter()
+    _passar_comissoes(stripe, chave, aplicar, n)
     for linha in _clientes():
         n["clientes"] += 1
         try:
@@ -128,7 +240,7 @@ def main() -> int:
     print("aplicado" if args.aplicar else "simulação: nada gravado")
     for nome, valor in sorted(n.items()):
         print(f"{nome}: {valor}")
-    return 1 if n["clientes_com_falha"] else 0
+    return 1 if n["clientes_com_falha"] or n["sem_confirmacao"] else 0
 
 
 if __name__ == "__main__":

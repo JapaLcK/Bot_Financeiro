@@ -9,7 +9,7 @@ pagos e 15 estornados; geradas = 410.
 Controles negativos (rodados à mão, §3 do `CLAUDE.md`):
   - tire a trava de `request_payout` → vermelho em `test_trava_*`.
   - troque a trava por `for update` → vermelho em `test_trava_nao_segura_o_webhook`.
-  - volte `paid_cents` à soma de comissões → vermelho em `test_ja_pago_*`.
+  - volte `paid_cents` à soma de comissões → vermelho em `test_ja_pago_conta_so_*`.
   - volte `requested_cents` à soma de comissões → vermelho em `test_em_saque_*`.
 Controle positivo do isolamento: B saca o dele depois da tentativa de A.
 """
@@ -25,6 +25,7 @@ import core.admin_dashboard as admin_dashboard
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 from _apoio_auth_app import bearer, csrf, sessao_de
+from _afiliado_stripe import simular_stripe
 from _billing_grants_helpers import garantir_system_event_logs
 from conftest import promote_to_pro
 from core.services import email_service
@@ -77,9 +78,18 @@ def _comissao(c, reais, disponivel=True):
     assert record_referral(c.aff["code"], indicado.uid)
     fatura = f"in_{uuid.uuid4().hex[:12]}"
     linha = record_commission_for_invoice(indicado.uid, fatura, reais * 1000)
+    _conferida(linha["id"])
     if disponivel:
         _vence(linha["id"])
     return SimpleNamespace(id=linha["id"], indicado=indicado, fatura=fatura)
+
+
+def _conferida(comissao_id):
+    """A comissão já passou pela conferência na Stripe (A5), sem reembolso. Quem mede a conferência é
+    `tests/test_afiliado_conferencia.py`; aqui ela só não pode ficar no caminho."""
+    with get_conn() as conn:
+        conn.execute("update affiliate_commissions set payment_check_pending = false where id = %s", (comissao_id,))
+        conn.commit()
 
 
 def _vence(comissao_id):
@@ -268,6 +278,7 @@ def test_fluxo_real_do_link_ao_pix_comissao_so_na_primeira_cobranca(monkeypatch)
     monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
     fake = _FakeStripe()
     monkeypatch.setitem(__import__("sys").modules, "stripe", fake)
+    simular_stripe(monkeypatch, fake)  # sem reembolso: o "Marcar pago" confere a Stripe antes
     stripe = TestClient(dashboard.app)
     fake.subs["sub_afil"] = _fake_sub("active")
 
@@ -286,6 +297,7 @@ def test_fluxo_real_do_link_ao_pix_comissao_so_na_primeira_cobranca(monkeypatch)
     assert m["stats"]["held"] == 60 and m["stats"]["available"] == 0
 
     assert _sacar(c).status_code == 400  # ainda em carência
+    _conferida(m["commissions"][0]["id"])  # sem STRIPE_SECRET_KEY aqui: a marca fica, e é o lado seguro (A5)
     _vence(m["commissions"][0]["id"])
     r = _sacar(c)
     assert r.status_code == 200, r.text
@@ -402,9 +414,9 @@ def test_ja_pago_nao_encolhe_quando_o_indicado_exclui_a_conta():
 
     db.delete_user_data(comissao.indicado.uid)
 
-    with get_conn() as conn:  # sem a cascata este teste não mediria nada
-        assert conn.execute("select 1 from affiliate_commissions where id = %s",
-                            (comissao.id,)).fetchone() is None
+    with get_conn() as conn:  # a comissão fica, sem a pessoa
+        assert conn.execute("select referred_user_id from affiliate_commissions where id = %s",
+                            (comissao.id,)).fetchone() == {"referred_user_id": None}
     s = _me(c)["stats"]
     assert (s["paid"], s["generated"]) == (100, 100)
 
@@ -427,11 +439,11 @@ def test_em_saque_nao_encolhe_quando_o_indicado_exclui_a_conta():
     assert (s["requested"], s["paid"], s["generated"]) == (0, 100, 100)
 
 
-def test_rejeicao_depois_da_exclusao_devolve_so_a_comissao_que_sobrou():
+def test_rejeicao_depois_da_exclusao_devolve_a_comissao_inteira():
     c, saque = _saque_de_100_e_indicado_de_60_excluido()
     assert reject_payout(saque)
     s = _me(c)["stats"]
-    assert (s["available"], s["requested"], s["paid"], s["generated"]) == (40, 0, 0, 40)
+    assert (s["available"], s["requested"], s["paid"], s["generated"]) == (100, 0, 0, 100)
 
 
 def test_ja_pago_conta_so_o_saque_pago_e_so_o_do_afiliado():
