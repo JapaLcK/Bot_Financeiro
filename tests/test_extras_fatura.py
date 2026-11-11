@@ -151,17 +151,18 @@ def test_y5_mais_de_10_linhas_busca_todas_pela_api(indicado, tipo):
 
 
 @_TIPOS
-def test_y6_has_more_sem_extras_na_foto_nao_busca(indicado, tipo):
-    """POSITIVO: sem extras na foto não há o que subtrair — nem chamada à API."""
+def test_y6_has_more_sem_extras_na_foto_so_busca_para_o_divisor(indicado, tipo):
+    """POSITIVO: sem extras na foto não há o que subtrair. A única chamada à API é a do divisor da
+    comissão (indicado ainda sem a 1ª cobrança): com `has_more`, o plano pode estar na página seguinte."""
     uid, client, fake, vistos, _ = indicado
-    api = _api_linhas(fake, [])
+    api = _api_linhas(fake, [_linha("price_plano", 1990)])
     evento = _fatura(tipo, uid, "in_y6", 1990, "subscription_create", [_linha("price_plano", 1990)])
     evento["data"]["object"]["lines"]["has_more"] = True
     sub = _sub("precos")
     sub["metadata"] = {}
     r = _post(client, fake, evento, subs={_SUB: sub})
     assert r.status_code == 200, r.text
-    assert (_cobrado(vistos), _comissoes(uid), api) == ([19.9], [1990], [])
+    assert (_cobrado(vistos), _comissoes(uid), api) == ([19.9], [1990], [("in_y6", {"limit": 100})])
 
 
 @_TIPOS

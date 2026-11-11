@@ -999,6 +999,8 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
       <div class="toolbar-stack">
         <input id="aff-new-email" class="field" type="email" placeholder="email da conta" aria-label="E-mail da conta que vira afiliado" />
         <input id="aff-new-code" class="field field-sm" type="text" placeholder="código (opcional)" aria-label="Código do afiliado (opcional)" />
+        <label class="meta" for="aff-new-pct">Comissão (%)</label>
+        <input id="aff-new-pct" class="field field-sm" type="number" min="0" max="100" step="1" value="100" inputmode="numeric" />
         <button class="btn-primary" type="button" onclick="createAffiliate()">+ Criar afiliado</button>
         <span class="meta" id="aff-meta">—</span>
       </div>
@@ -2599,13 +2601,15 @@ async function loadAffiliates() {
           <button class="btn-primary btn-xs" type="button" style="margin-left:6px"
             onclick="copyAffiliateAdminLink('${esc(a.code)}', this)">⧉ Copiar link</button></td>
         <td data-label="Email">${esc(a.email || '—')}</td>
-        <td data-label="Comissão">${(a.commission_bps / 100).toFixed(0)}%</td>
+        <td data-label="Comissão" style="white-space:nowrap">${(a.commission_bps / 100).toLocaleString('pt-BR')}%</td>
         <td data-label="Indicados">${a.referrals}</td>
         <td data-label="A pagar ou em revisão">${fmtCents(a.owed_cents)}</td>
         <td data-label="Já pago">${fmtCents(a.paid_cents)}</td>
         <td data-label="Chave Pix">${esc(a.pix_key || '—')}</td>
         <td data-label="Status"><span>${a.status === 'active' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:5px"></span>ativo' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>desativado'}</span></td>
         <td data-actions><button class="btn-primary btn-xs" type="button"
+          onclick="editAffiliateCommission(${a.id}, ${a.commission_bps})">Editar comissão</button>
+          <button class="btn-primary btn-xs" type="button"
           onclick="toggleAffiliateStatus(${a.id}, '${a.status === 'active' ? 'disabled' : 'active'}')">
           ${a.status === 'active' ? 'Desativar' : 'Reativar'}</button></td>
       </tr>`).join('') || '<tr><td colspan="9" style="color:var(--muted)">Nenhum afiliado ainda.</td></tr>';
@@ -2661,16 +2665,40 @@ async function createAffiliate() {
   const email = ($id('aff-new-email')?.value || '').trim();
   const code = ($id('aff-new-code')?.value || '').trim();
   if (!email) { alert('Informe o email da conta que vira afiliado.'); return; }
+  const pct = percentualInteiro($id('aff-new-pct')?.value);
+  if (pct === null) { alert('A comissão é um número inteiro de 0 a 100.'); return; }
   const res = await fetch('/admin/api/affiliates', {
     method: 'POST',
     headers: { ...authH(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(code ? { email, code } : { email }),
+    body: JSON.stringify({ email, ...(code ? { code } : {}), commission_bps: pct * 100 }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { alert(data.detail || 'Erro ao criar afiliado.'); return; }
   $id('aff-new-email').value = '';
   $id('aff-new-code').value = '';
+  $id('aff-new-pct').value = '100';
   alert('Afiliado criado! Link: ' + location.origin + '/r/' + data.affiliate.code);
+  loadAffiliates();
+}
+
+// Inteiro de 0 a 100 escrito à mão; o resto (vazio, "12,5", "abc", "1e2") é null. O backend confere de novo.
+function percentualInteiro(texto) {
+  const t = String(texto ?? '').trim();
+  return /^\d{1,3}$/.test(t) && Number(t) <= 100 ? Number(t) : null;
+}
+
+async function editAffiliateCommission(id, bpsAtual) {
+  const resposta = prompt('Nova comissão (%), de 0 a 100:', String(bpsAtual / 100));
+  if (resposta === null) return;
+  const pct = percentualInteiro(resposta);
+  if (pct === null) { alert('A comissão é um número inteiro de 0 a 100.'); return; }
+  if (!confirm('Vale para primeiras cobranças processadas a partir de agora. Comissões já registradas não mudam.')) return;
+  const res = await fetch(`/admin/api/affiliates/${id}/commission`, {
+    method: 'POST',
+    headers: { ...authH(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ commission_bps: pct * 100 }),
+  });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.detail || 'Erro.'); return; }
   loadAffiliates();
 }
 

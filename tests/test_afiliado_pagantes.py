@@ -139,8 +139,8 @@ def _admin(monkeypatch):
 
 @pytest.mark.parametrize("corpo,esperado", [
     ({"commission_bps": 0}, 0), ({"commission_bps": "0"}, 0),
-    ({}, 1000), ({"commission_bps": None}, 1000), ({"commission_bps": ""}, 1000),
-    ({"commission_bps": False}, 1000), ({"commission_bps": 2500}, 2500),
+    ({}, 10_000), ({"commission_bps": None}, 10_000), ({"commission_bps": ""}, 10_000),
+    ({"commission_bps": False}, 10_000), ({"commission_bps": 2500}, 2500),
 ], ids=["zero", "zero_texto", "ausente", "null", "vazio", "false", "positivo_normal"])
 def test_admin_grava_zero_como_zero_e_ausente_como_padrao(monkeypatch, corpo, esperado):
     c = _conta(plano=False)
@@ -515,7 +515,7 @@ def test_resposta_so_leva_contagens_e_rotulo(cobrar):
                                "paying_clients", "refunded_clients", "refunds"}
     assert set(m["stats"]["refunds"]) == {"total", "partial"}
     assert set(m["commissions"][0]) == {"id", "invoice_amount", "amount", "original_amount", "in_review", "checking", "status",
-                                        "available_at", "created_at", "payout_id", "payment_refund"}
+                                        "available_at", "created_at", "payout_id", "payment_refund", "paid_months"}
     assert [p for p in (fatura, ind.email, str(ind.uid), "referral_id", "refunded_at",
                         "stripe", "source") if p in r.text] == []
 

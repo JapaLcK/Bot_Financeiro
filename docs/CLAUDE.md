@@ -2651,7 +2651,7 @@ A área do próprio afiliado é `GET /api/affiliate/me` e `POST /api/affiliate/p
 `get_affiliate_by_user` com o usuário da sessão, e o corpo do saque só tem `pix_key`.
 Conta desativada lê e saca o que já acumulou; só deixa de acumular. O `/me` devolve
 `stats.generated`, `hold_days` (`COMMISSION_HOLD_DAYS`), `commissions[].payout_id`,
-`commissions[].in_review` e `commissions[].original_amount` (nulo sem ajuste), e nunca dado do
+`commissions[].in_review`, `commissions[].paid_months` e `commissions[].original_amount` (nulo sem ajuste), e nunca dado do
 indicado. Quadros: `stats.held`, `.available`, `.review`, `.requested` e `.paid`, e
 `generated_cents = held + available + review + requested + paid`, sem estornadas. "Em revisão"
 (`review`) é comissão `pending`, sem saque, com pendência `open`, e tem precedência sobre carência
@@ -2708,8 +2708,8 @@ Fato novo só se `refunded_cents` cresce e a linha não é `total`: reentrega n�
 
 **Bloqueio.** Regra única (`SAQUE_BLOQUEADO_SQL`): pendência `open` com a comissão no saque. Vale em
 `mark_payout_paid` (`SaqueComPendencia`, 409) e na rota do QR (409). Aviso entregue não libera.
-Travas: nas ações do admin, saque, comissões, pendência; no webhook, fatura, comissão, pendência, sem
-saque. `mark_payout_paid` trava as comissões antes de ler a pendência, em comando separado: é isso
+Travas: nas ações do admin, saque, comissões, pendência; no webhook, fatura, indicado (só no nascimento
+da comissão), comissão, pendência, sem saque. `mark_payout_paid` trava as comissões antes de ler a pendência, em comando separado: é isso
 que enxerga o commit do webhook.
 
 **Como cada pendência fecha.** `partial`: revisão com valor aprovado, justificativa obrigatória
@@ -2872,8 +2872,8 @@ desvinculado do usuário, dados financeiros retidos:
 | | Tabela | Campos |
 |---|---|---|
 | Removido | Conta e dados pessoais | O que `delete_user_data` apaga; e `referred_user_id`, que vira nulo |
-| Retido | `affiliate_commissions` | id, afiliado, `stripe_invoice_id`, valor da fatura, comissão, status, `available_at`, `payout_id`, `created_at` |
-| Retido | `affiliate_referrals` | id, afiliado, `code_used`, `created_at` |
+| Retido | `affiliate_commissions` | id, afiliado, `stripe_invoice_id`, valor da fatura, comissão, `commission_bps`, `paid_months`, status, `available_at`, `payout_id`, `created_at` |
+| Retido | `affiliate_referrals` | id, afiliado, `code_used`, `first_charge_ref`, `created_at` |
 | Retido | `affiliate_referral_payments` | origem, `payment_ref`, valor, datas, rótulo |
 | Retido | `affiliate_refund_reviews` e `affiliate_refund_review_events` | Fatura, valores, status, referência, justificativa, autor |
 
@@ -2926,7 +2926,57 @@ cai em `_orfao`, que não registra compra, e sem titular o backfill não acha a 
 `BACKFILL_AFILIADO_PAGAMENTOS_SQL` roda em todo `init_db`, em passo próprio e com
 `lock_timeout` de 1s: qualquer falha vira `logger.error` só com o tipo e o sqlstate, não impede a
 subida, e o próximo boot repete. Fatura Stripe sem comissão não tem histórico para ele.
-`commission_bps` aceita 0. Só a rota `/admin/api/affiliates` recusa decimal, com 400; `create_affiliate` confere apenas a faixa de 0 a 10000.
+**Comissão: percentual individual, uma vez por cliente** (`db/affiliates.py`, `_comissao_da_primeira`).
+Padrão 100% (`DEFAULT_COMMISSION_BPS = 10000`); só o admin muda, pela coluna "%" e pelo botão "Editar
+comissão" (`POST /admin/api/affiliates/{id}/commission`, corpo `{"commission_bps": 0..10000}`, log
+`affiliate_commission_changed` com antes e depois). Vale o percentual vigente quando o pagamento é processado;
+comissão já registrada não muda. Base é o valor pago na primeira cobrança confirmada (o plano já com cupom,
+sem os extras), gravada em `invoice_amount_cents`, com `commission_bps` e `paid_months` na linha:
+`amount = base × bps / 10000 / paid_months`, numa conta só, meio centavo para cima (`valor_da_comissao`).
+`paid_months` é 12 no plano anual: no cartão, `_meses_do_plano` lê o intervalo de cada linha de plano da PRÓPRIA fatura
+(fora os extras; todas as linhas, por `linhas_da_fatura`, que com `has_more` busca uma página de 100 na API,
+porque o objeto só embute 10 e o plano pode vir depois (a fatura tem no máximo 11: plano + 10 extras); a busca
+que falha cai em 12 com log; só para indicado que ainda pode gerar): no formato antigo, `price.recurring`/`plan` da linha; no `dahlia`, que só traz o id, o
+`recurring` do item 0 da assinatura se o id for o mesmo, senão `stripe.Price.retrieve`. Só sem linha legível
+usa a assinatura. Mensal só se todas forem mensais; intervalo desconhecido ou falha do `retrieve` cai em 12,
+o menor valor, com log `affiliate_commission_interval_unknown` (ids das linhas). O divisor só é calculado
+para indicado ainda sem `first_charge_ref`. O pagamento
+que decide grava `affiliate_referrals.first_charge_ref`, gerando ou não (0%, afiliado desativado, valor 0):
+renovação, reativação, nova assinatura e reenvio da 1ª depois de o % subir não reabrem. Sem marcador, o
+histórico decide: comissão de outra chave ou pagamento ANTERIOR em `affiliate_referral_payments`, de
+qualquer origem, encerra sem marcar (não há backfill do marcador: correria contra pagamento em voo). Trial e
+fatura zerada não decidem nada; cancelar no trial e reassinar gera na 1ª paga. Travas: fatura, depois
+`trava_indicado` (consultiva, serializa duas cobranças do mesmo cliente); a referral não é travada, e o
+marcador vem depois do insert: antes dele, a exclusão de conta fecha ciclo com a FK (`DeadlockDetected`).
+Limite: se pagamento e comissão da 1ª fatura falham juntos no webhook (que responde 200), a renovação vira
+primeira. A migração (todos os afiliados para 100%, comissões antigas com o bps de então, `paid_months` 1)
+roda uma vez, guardada pela ausência de `affiliate_commissions.commission_bps`, numa transação só. Ela trava
+`affiliates`, `affiliate_referrals` e `affiliate_commissions` juntas com `nowait`, em laço com teto, sem entrar
+na fila (o teto cabe dentro do `STARTUP_STEP_TIMEOUT` do lifespan; o T11c de
+`tests/test_afiliado_comissao_primeira.py` garante): na fila, qualquer ordem fecha ciclo com quem está em voo (webhook antigo lê referral
+e afiliado e depois grava a comissão; `record_referral` lê o afiliado e grava a referral). Estourado o teto, o
+boot falha com "migração de afiliados: tabelas ocupadas" e nada fica gravado; não há como pular, o código novo lê
+as colunas.
+
+**Ordem de deploy (comissão percentual, cartão e Pix).** `scripts/backfill_afiliado_pagamentos.py --aplicar` roda
+DEPOIS do #1418 e do #1508 em produção e ANTES do deploy dos dois PRs da comissão (cartão e Pix, mergeados juntos). O backfill do boot só traz a fatura Stripe que gerou
+comissão; sem o script, a 1ª fatura paga de cliente cujo afiliado estava em 0% (ou desativado) não está no
+histórico, não há marcador, e a renovação seguinte vira "primeira" e paga 100%.
+
+**Rollback do código** (a migração não volta sozinha):
+1. Antes de reverter, anote os percentuais: `select id, commission_bps from affiliates`.
+2. Rode `update affiliates set commission_bps = 1000` (ou desative os afiliados). Sem isso, o código antigo lê o
+   bps 10000 sem divisor e paga 100% da fatura inteira, inclusive a anual. O `1000` não devolve percentual
+   personalizado: é o valor de antes da migração para todos. As colunas novas podem ficar; o código antigo não as lê.
+3. Com o código antigo, o marcador `first_charge_ref` é ignorado: cliente que o código novo encerrou com 0% ou
+   afiliado desativado volta a gerar comissão na renovação, se o afiliado estiver ativo e acima de 0%.
+4. Ao subir o código novo de novo, a migração NÃO roda (as colunas já existem): devolva os percentuais à mão,
+   `update affiliates set commission_bps = 10000` ou os valores anotados no passo 1.
+
+O `/me` devolve
+`commissions[].paid_months`, e o painel mostra "plano anual de R$ X (base 1/12)" quando é 12.
+`commission_bps` aceita 0. As rotas do admin recusam decimal, com 400; `create_affiliate` e
+`set_affiliate_commission` conferem apenas a faixa de 0 a 10000.
 
 O drill-down de uma conta troca o plano à mão (`POST /admin/api/users/{id}/plan`
 → `set_account_plan`, a mesma escrita do `/admin/grant-pro`): grava

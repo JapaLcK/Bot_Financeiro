@@ -6368,6 +6368,74 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         pid = _g(price, "id")
         return pid if isinstance(pid, str) else None
 
+    async def _meses_do_plano(invoice, extras, sub, user_id, linhas=None) -> int:
+        """Divisor da comissão: 1 no mensal, 12 no anual, pelo intervalo de cada linha de plano da
+        PRÓPRIA fatura (fora os extras): reprocessada depois de uma troca, a assinatura de agora
+        mentiria. A linha traz o intervalo no formato antigo (`price.recurring`/`plan`); na API
+        `dahlia` só o id do price (`pricing.price_details.price`): igual ao do item 0 da assinatura,
+        vale o `recurring` dela; diferente, `stripe.Price.retrieve`. Price expandido na linha é a fonte, sem
+        consulta. Price sem `recurring` é avulso e não conta. Fatura sem linha legível: o item 0 da assinatura. Mensal só se TUDO for mensal; o
+        resto cai em 12, o menor valor, e falha do `retrieve` ou intervalo estranho também, com log:
+        nunca paga 12× por omissão. As linhas são TODAS as da fatura (`linhas_da_fatura`, que com `has_more`
+        busca uma página de 100: o objeto embute só 10, e o plano pode estar depois dos extras); `linhas`
+        reusa as já buscadas. Falha da busca também cai em 12 com log. Sem exceção: o acesso e o e-mail já saíram,
+        e um 5xx faria a Stripe reentregar."""
+        if linhas is None:
+            from core.services.extras_assinar import linhas_da_fatura
+            try:
+                linhas = await asyncio.to_thread(linhas_da_fatura, invoice)
+            except Exception:
+                linhas = None
+
+        def _id(p):
+            return p if isinstance(p, str) else _g(p, "id")
+
+        def ciclo(rec):
+            return (_g(rec, "interval"), _g(rec, "interval_count"))
+
+        items = _g(_g(sub, "items", {}), "data", []) or []
+        price = _g(items[0], "price", {}) if items else {}
+        conhecidos = {("month", 1), ("year", 1)}
+        ciclos, estranhos = set(), []
+
+        def anota(rec, pid):
+            ciclos.add(ciclo(rec))
+            if ciclo(rec) not in conhecidos:
+                estranhos.append(pid if isinstance(pid, str) else None)
+
+        if linhas is None:  # a paginação falhou: sem saber o plano da fatura, o menor valor
+            anota({"interval": "linhas_indisponiveis"}, None)
+        for linha in linhas or []:
+            precos = [p for p in (_g(linha, "price"), _g(_g(_g(linha, "pricing"), "price_details"), "price")) if p]
+            if any(_id(p) in extras for p in precos):
+                continue
+            expandidos = [p for p in precos if not isinstance(p, str)]
+            pid = next((_id(p) for p in precos if isinstance(_id(p), str)), None)
+            if expandidos or _g(linha, "plan"):
+                rec = next((r for r in [_g(p, "recurring") for p in expandidos] + [_g(linha, "plan")]
+                            if _g(r, "interval")), None)
+            elif pid is None:
+                continue
+            elif pid == _id(price):
+                rec = _g(price, "recurring")
+            else:
+                try:
+                    rec = _g(await asyncio.to_thread(stripe.Price.retrieve, pid), "recurring")
+                except Exception:
+                    rec = {"interval": "retrieve_falhou"}
+            if rec is not None:
+                anota(rec, pid)
+        if not ciclos:
+            anota(_g(price, "recurring", {}), _id(price))
+        if ciclos == {("month", 1)}:
+            return 1
+        if estranhos:
+            await log_system_event(
+                "warning", "affiliate_commission_interval_unknown",
+                "Intervalo do plano desconhecido: comissao calculada como anual (1/12).",
+                source="affiliates", user_id=user_id, details={"price_ids": estranhos})
+        return 12
+
     def _subscription_amount(sub) -> tuple[float, str]:
         """Valor recorrente (unit_amount) e moeda do 1º item da assinatura.
 
@@ -7030,36 +7098,60 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                         user_id=user_id, details={"erro": type(exc).__name__},
                     )
 
-                # Comissão de afiliado: se o pagante foi indicado por um afiliado
-                # ativo, credita a % da fatura. Idempotente por invoice id (retry
-                # de webhook não duplica). Nunca pode derrubar o webhook.
+                # Comissão de afiliado: só a 1ª cobrança paga do indicado gera (anual ÷ 12).
+                # Idempotente por invoice id (retry de webhook não duplica). Nunca pode
+                # derrubar o webhook.
+                commission = None
+                invoice_id = _g(invoice, "id")
                 try:
-                    from db.affiliates import record_commission_for_invoice
-                    invoice_id = _g(invoice, "id")
-                    commission = await asyncio.to_thread(
-                        record_commission_for_invoice,
-                        user_id, invoice_id, int(amount_cents),
-                    )
-                    if commission and commission["payment_check_pending"]:
-                        # Sem linha da fatura: confere na Stripe antes de a comissão poder ser paga (A5).
-                        # Falha deixa a marca, e o worker tenta de novo; nunca derruba o webhook.
-                        from core.services.afiliado_reembolso import conferir_comissao
-                        await asyncio.to_thread(conferir_comissao, commission["id"], invoice_id)
-                    if commission:
-                        await log_system_event(
-                            "info",
-                            "affiliate_commission_created",
-                            f"Comissao de afiliado criada: R$ {commission['amount_cents'] / 100:.2f}.",
-                            source="affiliates",
-                            user_id=user_id,
-                            details={
-                                "affiliate_id": commission["affiliate_id"],
-                                "invoice_id": invoice_id,
-                                "amount_cents": commission["amount_cents"],
-                            },
+                    from db.affiliates import get_referral_for_user, record_commission_for_invoice
+                    # Só quem ainda pode gerar: sem isto, toda troca de plano de qualquer cliente
+                    # consultaria a Stripe no divisor. O marcador nunca volta a nulo, e a decisão final
+                    # segue dentro de `_comissao_da_primeira`, sob as travas.
+                    ref = await asyncio.to_thread(get_referral_for_user, user_id)
+                    if ref and not ref["first_charge_ref"]:
+                        commission = await asyncio.to_thread(
+                            record_commission_for_invoice,
+                            user_id, invoice_id, int(amount_cents),
+                            datetime.fromtimestamp(event["created"], timezone.utc),
+                            await _meses_do_plano(invoice, _precos, sub, user_id, _linhas if _precos else None),
                         )
                 except Exception as exc:
-                    print(f"[affiliates] comissao falhou user={user_id}: {causa_segura(exc)}")
+                    # 200 de qualquer jeito: a Stripe não reentrega, e a renovação não vira
+                    # primeira. O log com a fatura é o que permite reenviar o evento à mão.
+                    await log_system_event(
+                        "error", "affiliate_commission_failed",
+                        "Comissao de afiliado nao registrada.", source="affiliates",
+                        user_id=user_id,
+                        details={"invoice_id": invoice_id, "erro": type(exc).__name__},
+                    )
+                if commission and commission["payment_check_pending"]:
+                    # Sem linha da fatura: confere na Stripe antes de a comissão poder ser paga (A5).
+                    # Falha deixa a marca, e o worker tenta de novo; nunca derruba o webhook.
+                    try:
+                        from core.services.afiliado_reembolso import conferir_comissao
+                        await asyncio.to_thread(conferir_comissao, commission["id"], invoice_id)
+                    except Exception as exc:
+                        await log_system_event(
+                            "warning", "affiliate_commission_check_failed",
+                            "Comissao criada; a conferencia na Stripe fica para o worker.",
+                            source="affiliates", user_id=user_id,
+                            details={"invoice_id": invoice_id, "commission_id": commission["id"],
+                                     "erro": type(exc).__name__},
+                        )
+                if commission:
+                    await log_system_event(
+                        "info",
+                        "affiliate_commission_created",
+                        f"Comissao de afiliado criada: R$ {commission['amount_cents'] / 100:.2f}.",
+                        source="affiliates",
+                        user_id=user_id,
+                        details={
+                            "affiliate_id": commission["affiliate_id"],
+                            "invoice_id": invoice_id,
+                            "amount_cents": commission["amount_cents"],
+                        },
+                    )
 
                 # O par do log do ramo de checkout: `billing_reason` é o que
                 # decide se esta fatura vira Purchase ou é pulada por já ter sido

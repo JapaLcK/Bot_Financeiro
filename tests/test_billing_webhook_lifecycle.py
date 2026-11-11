@@ -51,8 +51,9 @@ def _future_ts(days: int) -> int:
 
 class _FakeStripe:
     """Só o que o webhook usa: Webhook.construct_event + Subscription.retrieve +
-    error.SignatureVerificationError. `next_event` é o evento que o próximo POST
-    vai receber; `subs` alimenta o retrieve do checkout/invoice."""
+    Price.retrieve + error.SignatureVerificationError. `next_event` é o evento que o
+    próximo POST vai receber; `subs` alimenta o retrieve do checkout/invoice e
+    `prices` o do price (ausente = a Stripe falhou)."""
 
     class _SigErr(Exception):
         pass
@@ -61,6 +62,9 @@ class _FakeStripe:
         self.api_key = None
         self.next_event = None
         self.subs: dict = {}
+        self.prices: dict = {}
+        self.linhas: dict = {}       # `Invoice.list_lines` (fatura com `has_more`); ausente = a Stripe falhou
+        self.listou: list = []
         outer = self
 
         class _Webhook:
@@ -75,20 +79,36 @@ class _FakeStripe:
             def retrieve(sub_id):
                 return outer.subs[sub_id]
 
+        class _Price:
+            @staticmethod
+            def retrieve(price_id):
+                return outer.prices[price_id]
+
+        class _Invoice:
+            @staticmethod
+            def list_lines(invoice_id, limit=None):
+                outer.listou.append(invoice_id)
+                return {"data": outer.linhas[invoice_id], "has_more": False}
+
         self.Webhook = _Webhook
         self.Subscription = _Subscription
+        self.Price = _Price
+        self.Invoice = _Invoice
         self.error = SimpleNamespace(
             SignatureVerificationError=self._SigErr,
             StripeError=Exception,
         )
 
 
-def _fake_sub(status: str, price_id: str = "price_desconhecido", days: int = 30) -> dict:
+def _fake_sub(status: str, price_id: str = "price_desconhecido", days: int = 30,
+              interval: str = "month") -> dict:
     ts = _future_ts(days)
+    # `recurring` é a forma real da Stripe: sem ele a comissão de afiliado cairia em ÷ 12.
+    price = {"id": price_id, "recurring": {"interval": interval, "interval_count": 1}}
     return {
         "status": status,
         "current_period_end": ts,
-        "items": {"data": [{"price": {"id": price_id}, "current_period_end": ts}]},
+        "items": {"data": [{"price": price, "current_period_end": ts}]},
     }
 
 

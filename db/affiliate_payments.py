@@ -13,6 +13,12 @@ from datetime import datetime
 from .connection import get_conn
 
 
+def origem_da_chave(chave: str) -> tuple[str, str]:
+    """A chave da comissão (`stripe_invoice_id`) como pagamento: `"pix:7"` é a cobrança Pix 7,
+    o resto é fatura Stripe."""
+    return ("pix", chave[4:]) if chave.startswith("pix:") else ("stripe", chave)
+
+
 def registrar_pagamento(referred_user_id: int, source: str, payment_ref: str,
                         amount_cents: int, paid_at: datetime) -> bool:
     """Grava o pagamento do indicado. True se criou a linha.

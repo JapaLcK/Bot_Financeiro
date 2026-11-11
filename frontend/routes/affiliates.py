@@ -106,6 +106,7 @@ async def affiliate_me(request: Request):
                 "available_at": c["available_at"].isoformat(),
                 "payout_id": c["payout_id"],
                 "payment_refund": c["payment_refund"],
+                "paid_months": c["paid_months"],
                 "created_at": c["created_at"].isoformat(),
             }
             for c in commissions
