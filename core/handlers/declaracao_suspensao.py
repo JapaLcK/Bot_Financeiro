@@ -33,12 +33,14 @@ def suspende(user_id: int, texto: str, platform: str) -> None:
                                          new_action_type="confirm_declaracao_suspensa",  # literal: o registro
                                          old_created_at=pend["created_at"]):
             return
+        marcou = True
     else:
         if not db.ai_consume_pending_action(user_id, pend):
             return
         # sem a linha (outra pergunta do roteador nela), o "sim" no meio recebe o T19 de sempre
-        db.claim_pending_action(user_id, "confirm_declaracao_suspensa", {"_ia": _da_ia(pend)}, minutes=minutos)
-    SUSPENSA.set((user_id, viva, texto))
+        marcou = db.claim_pending_action(user_id, "confirm_declaracao_suspensa", {"_ia": _da_ia(pend)},
+                                         minutes=minutos)
+    SUSPENSA.set((user_id, viva, texto, marcou))
 
 
 def _da_ia(pend: dict) -> dict:
@@ -50,9 +52,10 @@ def desfecho(msg, saida: str, nao: bool, nao_ajudou: bool) -> str | None:
     resposta fica e a confirmação se encerra). `nao`: o fluxo leu um "não" sem pendência (o `confirm.no` do
     classificador, "Nada a cancelar."): vale como "não" à confirmação, se mandado depois dela (R3-2 A). `nao_ajudou`
     (ou a saudação, pelo intent do classificador local: R4-3): a resposta e, depois dela, a mesma pergunta, com a
-    mesma ação, se a marca ainda está na linha."""
+    mesma ação, se a marca ainda está na linha (a IA que arma outra a consome: `declaracao_confirma.abandona`) e,
+    na porta da IA, se nenhuma declaração do roteador nasceu."""
     from core.intent_classifier import classify
-    user_id, viva, texto = SUSPENSA.get()
+    user_id, viva, texto, marcou = SUSPENSA.get()
     saudou = classify(texto or "", allow_ai=False).intent == "greeting"
     porta, pend = viva
     atual = db.get_pending_action(user_id)
@@ -71,8 +74,14 @@ def desfecho(msg, saida: str, nao: bool, nao_ajudou: bool) -> str | None:
                                                    old_created_at=marca["created_at"]):
                 volta = pend
         else:
-            marca and db.consume_pending_action(user_id, marca)
-            volta = db.ai_set_pending_action(user_id, pend["tool_name"], pend["tool_args"], pend["summary"])
+            # com marca, só se ela ainda é a nossa e o CAS dela deu certo (sem marca, a linha tinha outra pergunta)
+            pode = (bool(marca) and db.consume_pending_action(user_id, marca)) if marcou else True
+            volta = pode and db.ai_set_pending_action(user_id, pend["tool_name"], pend["tool_args"], pend["summary"])
+            if volta and dc._acao(db.get_pending_action(user_id)):
+                # o roteador armou uma declaração depois de a nossa marca sair (e antes de ela voltar): a dele é a
+                # mais nova; a nossa, recém-restaurada, sai (o `arma` dele tira a da IA só se ela já estava lá)
+                db.ai_consume_pending_action(user_id, volta)
+                volta = None
         if volta:
             pergunta = dc._pergunta((porta, volta), msg.platform)
             return f"{tx.ENVIADA_ANTES}\n\n{pergunta}" if nao else f"{saida}\n\n{pergunta}"

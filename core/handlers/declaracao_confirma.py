@@ -62,12 +62,22 @@ def _acao(pend: dict | None) -> str | None:
 
 
 def abandona(user_id: int, pend: dict | None = None) -> bool:
-    """Tira a confirmação viva (CAS) e encerra a ação no livro: outro comando (DP-6) ou a IA armou outra (R2-6)."""
-    pend = pend or db.get_pending_action(user_id)
-    if not (pend and pend.get("action_type") == TIPO and db.consume_pending_action(user_id, pend)):
-        return False
-    livro.descarta(user_id, pend["payload"]["_declaracao"]["acao"])
-    return True
+    """Tira a confirmação do roteador (CAS) e encerra a ação no livro: a flag desligada (`na_rota`) ou a IA armou outra
+    (R2-6, "a mais recente vence"). Vale também para a confirmação SUSPENSA (a marca `confirm_declaracao_suspensa`, de
+    qualquer porta): o `desfecho` que viria restaurá-la perde o CAS da marca. Uma 2ª leitura cobre o `desfecho` que
+    restaurou a marca entre a leitura e o consumo (ele restaura no máximo uma vez)."""
+    for _ in range(2):
+        pend = pend or db.get_pending_action(user_id)
+        tipo = (pend or {}).get("action_type")
+        if tipo not in (TIPO, SUSPENSA_TIPO):
+            return False
+        p = pend["payload"]
+        acao = (p.get("_declaracao") or p["_ia"]["tool_args"]["_declaracao"])["acao"]
+        if db.consume_pending_action(user_id, pend):
+            livro.descarta(user_id, acao)
+            return True
+        pend = None
+    return False
 
 
 def na_rota(user_id: int, pend: dict) -> str:

@@ -1032,3 +1032,179 @@ def test_dp13_audio_com_pendencia_da_ia_viva(ana_ia_rot, monkeypatch):
     assert PERGUNTA in fala(monkeypatch, uid, GASTO)[0]
     assert pendencia(uid) == dc.TIPO and db.ai_get_pending_action(uid) is None
     assert "registrada pelo banco" in manda_ts(uid, "sim")[0] and db.get_budget(uid, "mercado")["budget"] == 300
+
+
+# ── Codex P1 (PR #1517): a confirmação da IA suspensa não volta por cima de uma mais nova ─────────────────────────
+def _ia_suspensa_que_nao_ajuda(uid, monkeypatch):
+    """A confirmação da IA armada e o comando seguinte ("blablabla xyz") que a IA não atende."""
+    from core.services.ai_chat.tools.meta import _report_out_of_scope_execute
+    _, confirma = _arma_ia(uid, monkeypatch)
+    _tier3(monkeypatch, "out_of_scope", 0.3)
+    _ia_responde(monkeypatch, _report_out_of_scope_execute(uid, {"reason": "t"}))
+    return confirma
+
+
+def _acoes(uid):
+    return q("select chave, estado from ia_declaracao_livro where user_id=%s and papel='acao' order by id", (uid,),
+             fetch=True)
+
+
+def test_ia_suspensa_nao_volta_se_a_marca_foi_trocada_por_declaracao_nova(ana_ia_rot, monkeypatch):
+    """(1) A marca da suspensão é desalojada por uma declaração nova do roteador durante o comando: a pergunta velha da
+    IA não volta, a ação dela fica `descartada`, a nova fica intacta e o "sim" grava a nova uma vez. Negativo (rodado):
+    o `desfecho` antigo (restaurar sem conferir a marca) devolve a pergunta da IA e deixa duas confirmações vivas."""
+    uid = ana_ia_rot
+    confirma = _ia_suspensa_que_nao_ajuda(uid, monkeypatch)
+    out = _em_suspensao(uid, monkeypatch, "blablabla xyz", lambda: manda_ts(uid, PADARIA))
+    assert "R$ 30,00 em padaria" in out["resp"][-1], out
+    assert confirma not in out["cmd"][0] and db.ai_get_pending_action(uid) is None, out
+    nova = viva(uid)
+    assert nova["payload"]["_declaracao"]["valor"] == 30.0
+    assert [a["estado"] for a in _acoes(uid)] == ["descartada", "armada"]
+    time.sleep(1.1)
+    assert "registrada pelo banco" in manda_ts(uid, "sim")[0] and valores(uid) == [30.0]
+
+
+def test_ia_suspensa_volta_sem_interferencia(ana_ia_rot, monkeypatch):
+    """(2) Controle positivo: sem nada no meio, a pergunta da IA volta e o "sim" grava a da IA."""
+    uid = ana_ia_rot
+    confirma = _ia_suspensa_que_nao_ajuda(uid, monkeypatch)
+    assert manda_ts(uid, "blablabla xyz")[0].endswith(f"\n\n{confirma}") and db.ai_get_pending_action(uid)
+    time.sleep(1.1)
+    # "pode registrar": o gancho decide (o "sim" exato iria ao runner, que aqui está trocado pela IA que não ajuda)
+    assert "registrada pelo banco" in manda_ts(uid, "pode registrar")[0] and valores(uid) == [50.0]
+
+
+def test_ia_suspensa_sem_marca_volta_como_hoje(ana_ia_rot, monkeypatch):
+    """(3) A linha do roteador já tinha outra pergunta (a marca nunca existiu) e nenhuma declaração nova nasceu nela:
+    a pergunta da IA volta, como antes do conserto."""
+    uid = ana_ia_rot
+    manda_ts(uid, "gastei 10 no mercado em dinheiro")
+    manda_ts(uid, "apagar #1")
+    apagar = db.get_pending_action(uid)
+    assert apagar["action_type"] == "delete_launch"
+    confirma = _ia_suspensa_que_nao_ajuda(uid, monkeypatch)
+    r = manda_ts(uid, "blablabla xyz")[0]
+    assert r.endswith(f"\n\n{confirma}") and db.ai_get_pending_action(uid) is not None, r
+    assert db.get_pending_action(uid)["created_at"] == apagar["created_at"] and declaracoes(uid) == []
+
+
+@pytest.mark.parametrize("porta", ["roteador", "ia"])
+@pytest.mark.parametrize("linha", ["livre", "ocupada"])
+def test_suspensa_nao_volta_se_nasceu_declaracao_nova_da_ia(ana_ia_rot, monkeypatch, porta, linha):
+    """Irmão do P1 (Tester): com a confirmação suspensa (do roteador ou da IA) e o comando que não ajuda parado, outra
+    mensagem arma uma declaração NOVA da IA (R$ 70). A velha não volta (fica `descartada`), a nova fica e o "sim" grava
+    R$ 70 uma vez. Negativo (rodado): `abandona` sem a marca suspensa (só a confirmação viva, como no R2-6 original), na
+    porta do roteador a de R$ 50 volta e o "sim" grava R$ 50."""
+    import threading
+    import core.services.ai_chat as m
+    from core.handlers import declaracao_suspensao as ds
+    from core.services.ai_chat.tools.meta import _FALLBACK_BASE
+    from tests._chat_ia_apoio import banco
+    from tests._ia_falsa_helpers import openai_falso, texto
+    uid = ana_ia_rot
+    if linha == "ocupada":
+        openai_falso(monkeypatch, texto("x"))
+        manda_ts(uid, "gastei 30 na padaria")  # a pergunta de forma na linha do roteador
+    openai_falso(monkeypatch, *([banco()] if porta == "ia" else []), banco(70, alvo="farmacia"),
+                 *[texto("y") for _ in range(4)])
+    manda_ts(uid, ("piggy " if porta == "ia" else "") + GASTO)
+    real_chat, real_suspende = m.chat, ds.suspende
+    parou, solta = threading.Event(), threading.Event()
+
+    def chat(u, t, **k):  # o comando parado cai no fallback da IA, que não ajuda
+        return _FALLBACK_BASE if threading.current_thread().name == "cmd" else real_chat(u, t, **k)
+
+    def suspende(*a, **k):
+        real_suspende(*a, **k)
+        if threading.current_thread().name == "cmd":
+            parou.set()
+            assert solta.wait(20)
+    monkeypatch.setattr(m, "chat", chat)
+    monkeypatch.setattr(ds, "suspende", suspende)
+    out = {}
+    t = threading.Thread(target=lambda: out.__setitem__("cmd", manda_ts(uid, "blablabla xyz")), name="cmd")
+    t.start()
+    assert parou.wait(20)
+    manda_ts(uid, "piggy gastei 70 na farmacia no pix")
+    nova = db.ai_get_pending_action(uid)
+    solta.set()
+    t.join(30)
+    assert nova and nova["tool_args"]["_declaracao"]["valor"] == 70.0
+    assert out["cmd"][0].startswith("🔕 Cancelei a pergunta anterior.") and "R$ 50,00" not in out["cmd"][0], out
+    assert pendencia(uid) not in (dc.TIPO, dc.SUSPENSA_TIPO)
+    assert db.ai_get_pending_action(uid)["created_at"] == nova["created_at"]
+    assert [a["estado"] for a in _acoes(uid)][0] == "descartada"
+    time.sleep(1.1)
+    manda_ts(uid, "sim")
+    assert valores(uid) == [70.0]
+
+
+def _parado_em(monkeypatch, funcao, quando):
+    """O worker "cmd" para dentro de `db.<funcao>` (antes de executá-la) quando `quando(*args, **kwargs)`."""
+    import threading
+    parou, solta = threading.Event(), threading.Event()
+    real = getattr(db, funcao)
+
+    def no_meio(*a, **k):
+        if threading.current_thread().name == "cmd" and quando(*a, **k):
+            parou.set()
+            assert solta.wait(20)
+        return real(*a, **k)
+    monkeypatch.setattr(db, funcao, no_meio)
+    return parou, solta
+
+
+def _comando_parado(uid, monkeypatch, parou, solta, no_meio):
+    import threading
+    out = {}
+    t = threading.Thread(target=lambda: out.__setitem__("cmd", manda_ts(uid, "blablabla xyz")), name="cmd")
+    t.start()
+    assert parou.wait(20)
+    out["meio"] = no_meio()
+    solta.set()
+    t.join(30)
+    return out
+
+
+def test_janela_entre_ler_a_marca_e_restaurar_porta_do_roteador(ana_ia_rot, monkeypatch):
+    """A IA arma uma declaração nova (R$ 70) depois de o `desfecho` ler a marca e antes de restaurá-la: ela consome a
+    marca (R2-6 estendido) e o `advance` do `desfecho` perde o CAS; a de R$ 50 não volta e o "sim" grava R$ 70.
+    Negativo (rodado): `abandona` sem a marca suspensa deixa as duas vivas e o "sim" grava R$ 50."""
+    import core.services.ai_chat as m
+    from core.services.ai_chat.tools.meta import _FALLBACK_BASE
+    from tests._chat_ia_apoio import banco
+    from tests._ia_falsa_helpers import openai_falso, texto
+    import threading
+    uid = ana_ia_rot
+    _tier3(monkeypatch, "out_of_scope", 0.3)
+    openai_falso(monkeypatch, banco(70, alvo="farmacia"), *[texto("y") for _ in range(3)])
+    manda_ts(uid, GASTO)
+    real_chat = m.chat
+    monkeypatch.setattr(m, "chat", lambda u, t, **k: _FALLBACK_BASE if threading.current_thread().name == "cmd"
+                        else real_chat(u, t, **k))
+    parou, solta = _parado_em(monkeypatch, "advance_pending_action",
+                              lambda *a, **k: k.get("new_action_type") == "confirm_declaracao_banco")
+    out = _comando_parado(uid, monkeypatch, parou, solta, lambda: manda_ts(uid, "piggy gastei 70 na farmacia no pix"))
+    assert out["cmd"][0].startswith("🔕 Cancelei a pergunta anterior.") and "R$ 50,00" not in out["cmd"][0], out
+    assert pendencia(uid) not in (dc.TIPO, dc.SUSPENSA_TIPO)
+    assert db.ai_get_pending_action(uid)["tool_args"]["_declaracao"]["valor"] == 70.0
+    assert [a["estado"] for a in _acoes(uid)][0] == "descartada"
+    time.sleep(1.1)
+    manda_ts(uid, "sim")
+    assert valores(uid) == [70.0]
+
+
+def test_janela_entre_tirar_a_marca_e_restaurar_porta_da_ia(ana_ia_rot, monkeypatch):
+    """Simétrico: a da IA suspensa; o roteador arma R$ 30 depois de o `desfecho` tirar a marca e antes de restaurar a
+    da IA. A restaurada vê a do roteador e sai; fica só a de R$ 30. Negativo (rodado): sem a conferência depois de
+    restaurar, as duas ficam vivas."""
+    uid = ana_ia_rot
+    _ia_suspensa_que_nao_ajuda(uid, monkeypatch)
+    parou, solta = _parado_em(monkeypatch, "ai_set_pending_action", lambda *a, **k: True)
+    out = _comando_parado(uid, monkeypatch, parou, solta, lambda: manda_ts(uid, PADARIA))
+    assert out["cmd"][0].startswith("🔕 Cancelei a pergunta anterior."), out
+    assert db.ai_get_pending_action(uid) is None and viva(uid)["payload"]["_declaracao"]["valor"] == 30.0
+    assert [a["estado"] for a in _acoes(uid)][0] == "descartada"
+    time.sleep(1.1)
+    assert "registrada pelo banco" in manda_ts(uid, "sim")[0] and valores(uid) == [30.0]

@@ -370,7 +370,7 @@ As recusas novas são as decididas: número solto além do valor (E3/D2/D3: “1
 - frases que não chegam ao leitor pela conversa: “não”/“sem” perto de “pelo banco” fazem o `fp.detectar` perguntar a forma (“R$ 50 no mercado não 60 pelo banco”, “em 10x sem juros pelo banco”); a resposta “banco” passa pelo leitor;
 - o recibo por imagem e a tool da IA (fluxo `entities` de `forma_pagamento.resolver`) não têm o texto do usuário e não passam pelo leitor: o valor é conferido pela própria pergunta (“Esse R$ X foi…”) e, no recibo, também pelo “sim” da prévia.
 
-A #1310 (leitor estrito) está entregue. **Bloqueiam LIGAR a flag:** DP-5, DP-6, o par no app nativo (#1244), a DP-14 (a [#1405](https://github.com/JapaLcK/Bot_Financeiro/issues/1405), o “sim” falado à confirmação da IA, bloqueia quando a `WA_IA_PRIMEIRO` estiver ligada para os mesmos usuários), a [#1512](https://github.com/JapaLcK/Bot_Financeiro/issues/1512) (o botão velho de declaração sai com os botões Sim/Não de um “apagar #N” pendente, e um toque apaga o lançamento) e a validação final da [#1315](https://github.com/JapaLcK/Bot_Financeiro/issues/1315) em staging (seção “#1315: o roteador confirma o valor antes de gravar”); decisão do dono de 2026-10-28 para os limites acima. A confirmação em si e a DP-7 (fechada pela DP-9 da #1315) saem desta lista com o merge do PR-1 da #1315.
+A #1310 (leitor estrito) está entregue. **Bloqueiam LIGAR a flag:** DP-5, DP-6, o par no app nativo (#1244), a DP-14 (a [#1405](https://github.com/JapaLcK/Bot_Financeiro/issues/1405), o “sim” falado à confirmação da IA, bloqueia quando a `WA_IA_PRIMEIRO` estiver ligada para os mesmos usuários), a [#1512](https://github.com/JapaLcK/Bot_Financeiro/issues/1512) (o botão velho de declaração sai com os botões Sim/Não de um “apagar #N” pendente, e um toque apaga o lançamento), a [#1522](https://github.com/JapaLcK/Bot_Financeiro/issues/1522) (com dois workers, o “sim” pode gravar um valor diferente daquele que o usuário acredita estar confirmando: o banco manter a confirmação mais recente não garante que ela seja a última pergunta exibida no celular) e a validação final da [#1315](https://github.com/JapaLcK/Bot_Financeiro/issues/1315) em staging (seção “#1315: o roteador confirma o valor antes de gravar”); decisão do dono de 2026-10-28 para os limites acima. A confirmação em si e a DP-7 (fechada pela DP-9 da #1315) saem desta lista com o merge do PR-1 da #1315.
 
 Evidência que motivou o leitor estrito (antes dele, a coluna do meio era o que gravava, errado e travado):
 
@@ -535,7 +535,7 @@ Fecharam: L-b1 (reentrega tardia dá T19), L-b2 e L-b7 (o livro sobrevive ao apa
 
 **b2, pendente:** o app Expo manda `client_message_id` (um por mensagem, o mesmo no reenvio pós-401), junto do build da
 #1244; até lá, com a flag ligada, o chat do app recebe T18. Ligar a flag segue bloqueado por DP-5, DP-6, o par no
-app nativo (#1244), a DP-14 (a [#1405](https://github.com/JapaLcK/Bot_Financeiro/issues/1405), o “sim” falado à confirmação da IA, bloqueia quando a `WA_IA_PRIMEIRO` estiver ligada para os mesmos usuários), a [#1512](https://github.com/JapaLcK/Bot_Financeiro/issues/1512) (o botão velho de declaração sai com os botões Sim/Não de um “apagar #N” pendente, e um toque apaga o lançamento) e a validação final da #1315 em staging (seção seguinte), a mesma lista da seção “Leitura do valor da
+app nativo (#1244), a DP-14 (a [#1405](https://github.com/JapaLcK/Bot_Financeiro/issues/1405), o “sim” falado à confirmação da IA, bloqueia quando a `WA_IA_PRIMEIRO` estiver ligada para os mesmos usuários), a [#1512](https://github.com/JapaLcK/Bot_Financeiro/issues/1512) (o botão velho de declaração sai com os botões Sim/Não de um “apagar #N” pendente, e um toque apaga o lançamento), a [#1522](https://github.com/JapaLcK/Bot_Financeiro/issues/1522) (com dois workers, o “sim” pode gravar um valor diferente daquele que o usuário acredita estar confirmando: o banco manter a confirmação mais recente não garante que ela seja a última pergunta exibida no celular) e a validação final da #1315 em staging (seção seguinte), a mesma lista da seção “Leitura do valor da
 declaração (DP-10)”.
 
 ## #1315: o roteador confirma o valor antes de gravar
@@ -545,7 +545,8 @@ só depois do merge deste: afrouxar o leitor antes da confirmação gravaria “
 Decisões do dono de 2026-11-09 (`.time-dev/1315/decisoes-dono.md`): DP-1, DP-3, DP-4, DP-6, DP-7 A (+ DP-7b), DP-8 A,
 DP-9 A, DP-11, DP-12 A, DP-13, DP-14 condicional; R2-1 A, R2-2 B sem margem, R2-3 A a R2-7 A; sobre o Tester, T-4 A,
 T-5 A e T-6 A; sobre o Tester r2 (2026-11-10), R3-1 A (com os dois ajustes), R3-2 A e R3-3 A; sobre o Tester r3 (2026-11-10),
-R4-1 A a R4-5 A; sobre o Manager, M-1 A, M-1b A, M-6 A, M-8 A e M2-3 A (o PR-1 sai com a flag desligada; a #1512 bloqueia ligá-la). Fora deste PR, em issues: a ordenação das demais pendências da IA pelo horário, o “não” antigo a uma
+R4-1 A a R4-5 A; sobre o Manager, M-1 A, M-1b A, M-6 A, M-8 A e M2-3 A (o PR-1 sai com a flag desligada; a #1512 bloqueia ligá-la); sobre
+o P1 do Codex no #1517, P1-final A (a #1522 bloqueia ligar a flag). Fora deste PR, em issues: a ordenação das demais pendências da IA pelo horário, o “não” antigo a uma
 pendência da IA sem declaração envolvida (T-5, [#1496](https://github.com/JapaLcK/Bot_Financeiro/issues/1496)); o
 “cancelar” nas outras confirmações do roteador ([#1480](https://github.com/JapaLcK/Bot_Financeiro/issues/1480)); o
 defeito da fila da Carteira achado pelo Tester ([#1495](https://github.com/JapaLcK/Bot_Financeiro/issues/1495)).
@@ -629,6 +630,23 @@ cortesia, início de resposta) e `declaracao_suspensao.py` (outro comando com a 
   a pergunta volta. A mensagem sem texto (reação do WhatsApp, inclusive a 👍, localização, figurinha, texto vazio) não
   mexe na confirmação (R4-1); a MENSAGEM de texto “👍” é “sim”. A pergunta aberta da IA sem pendência (a oferta “Quer ver por
   categoria?”) conta como a pergunta mais nova na regra acima: o “sim” a ela vai à IA, não ao texto da ação do livro.
+
+**A mais recente vence também para a confirmação suspensa (P1 do Codex, #1517).** Quando a IA arma qualquer
+confirmação, ela já tirava a do roteador viva (R2-6); agora tira também a marca `confirm_declaracao_suspensa`, de
+qualquer porta, e a ação dela fica `descartada` (`declaracao_confirma.abandona`, por CAS, relendo a linha uma vez se o
+`desfecho` a restaurou no meio). Assim o `desfecho` que viria restaurar a confirmação suspensa perde o CAS da marca e a
+encerra, em qualquer ordem. Na porta da IA, o `desfecho` restaura a pendência da IA só se a marca ainda for a dele e o
+consumo dela der certo, e relê a linha do roteador depois de restaurar: se nasceu uma declaração do roteador, a
+restaurada sai. Cada transição é um CAS na linha de pendências do roteador ou na da IA, sem lock novo.
+
+**Pendente, bloqueia ligar a flag: [#1522](https://github.com/JapaLcK/Bot_Financeiro/issues/1522).** O banco fica com a
+confirmação mais recente, mas isso não garante que ela seja a última pergunta exibida no celular, e o “sim” pode gravar
+um valor diferente daquele que o usuário acredita estar confirmando. Reprodução, com dois workers: a confirmação de
+R$ 50 está suspensa por um comando que não ajudou; outra mensagem faz a IA armar R$ 70, que consome a de R$ 50; o
+primeiro worker ainda manda a resposta com a pergunta de R$ 50. Se essa mensagem chega por último no aparelho, o
+usuário responde “sim” achando que confirma R$ 50 e grava R$ 70. Correção decidida pelo dono (2026-11-10): processar
+o turno inteiro por usuário, incluindo o envio da resposta, e validar a ordem de entrega no aparelho; a aceitação tem
+de demonstrar, com dois workers, que uma pergunta antiga não permite confirmar silenciosamente outro valor.
 
 **Mensagem com mais de um lançamento pelo banco (DP-7 A, DP-7b).** Dois ou mais pedaços que virariam lançamento ou
 item da fila, com valor ou sem, recebem T16 para a mensagem inteira, no texto e no áudio; a fila nunca nasce com item
