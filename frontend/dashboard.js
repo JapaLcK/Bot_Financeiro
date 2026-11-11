@@ -3719,6 +3719,10 @@ function _ensureGenericConfirmModal() {
   document.getElementById("generic-confirm-overlay").addEventListener("click", e => {
     if (e.target === e.currentTarget && performance.now() - _genericModalAbertoEm >= JANELA_DO_DUPLO_CLIQUE) _genericModalClose(false);
   });
+  // Na janela, o 2º clique cai no cartão (os botões não recebem ponteiro) e levaria o foco do OK para o body, fora do diálogo.
+  document.getElementById("generic-confirm-overlay").addEventListener("mousedown", e => {
+    if (performance.now() - _genericModalAbertoEm < JANELA_DO_DUPLO_CLIQUE) e.preventDefault();
+  });
   document.getElementById("generic-confirm-cancel").addEventListener("click", () => _genericModalClose(false));
   document.getElementById("generic-confirm-ok").addEventListener("click", () => _genericModalClose(true));
   document.getElementById("generic-confirm-alt").addEventListener("click", () => _genericModalClose("alt"));
@@ -3744,8 +3748,10 @@ function _ensureGenericConfirmModal() {
   document.addEventListener("keydown", (e) => {
     const ov = document.getElementById("generic-confirm-overlay");
     if (!ov || !ov.classList.contains("open")) return;
-    // Enter/Espaço segurado repete a tecla: só o primeiro aperto vale (o Esc nunca trava).
-    if (e.repeat && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); return; }
+    // O OK nasce focado: o 2º aperto de um Enter-Enter rápido no botão que abriu o modal o confirmaria, e o Enter/Espaço segurado
+    // repete a tecla. Na janela, ou repetida, a tecla não vale (o Esc nunca trava).
+    const cedo = performance.now() - _genericModalAbertoEm < JANELA_DO_DUPLO_CLIQUE;
+    if ((e.key === "Enter" || e.key === " ") && (e.repeat || cedo)) { e.preventDefault(); return; }
     if (e.key === "Escape") {
       e.stopPropagation();
       _genericModalClose(false);

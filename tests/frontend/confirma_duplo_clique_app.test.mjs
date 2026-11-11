@@ -3,7 +3,10 @@
  * "Confirmar saque" da confirmação que o 1º clique tinha acabado de abrir, ou no fundo, que a fechava. Na janela de
  * `JANELA_DO_DUPLO_CLIQUE` os botões não recebem ponteiro e o fundo não fecha; o Enter segurado (repetição) não confirma.
  * Controle negativo: tirar o `pointerEvents = "none"` de `_genericModalAbrir` deixa vermelhos os "alinhado" de 390 e 320 e os toques;
- * tirar a conta de tempo do clique no fundo deixa vermelhos o "sem alinhar" de 1280 e o alerta; tirar o `e.repeat` deixa vermelho o Enter segurado.
+ * tirar a conta de tempo do clique no fundo deixa vermelhos o "sem alinhar" de 1280 e o alerta; tirar o `e.repeat` deixa vermelho o Enter segurado;
+ * tirar a janela do teclado (`cedo`) deixa vermelhos o Enter-Enter e o Espaço-Espaço; tirar o `clearTimeout(_genericModalTrava)` deixa vermelho
+ * o "fechado por Esc"; tirar o `preventDefault` do mousedown na janela deixa vermelhos os seis duplos cliques com chave (o foco cai no body).
+ * O mesmo defeito no frontend/modals.js: confirma_duplo_clique_settings.test.mjs.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -71,6 +74,7 @@ for (const [w, h] of TAMANHOS) {
       await page.waitForTimeout(500);
       assert.deepEqual(posts, [], `sob o Sacar: ${sob}`);
       assert.equal(await page.locator(ABERTO).count(), 1, `sob o Sacar: ${sob}`);
+      assert.ok(await page.evaluate(() => !!document.activeElement?.closest("#generic-confirm-overlay")), "o foco fica no diálogo");
     } finally { await ctx.close(); }
   });
 
@@ -84,6 +88,7 @@ for (const [w, h] of TAMANHOS) {
       await page.waitForTimeout(500);
       assert.deepEqual(posts, [], `sob o Sacar: ${sob}`);
       assert.equal(await page.locator(ABERTO).count(), 1);
+      assert.ok(await page.evaluate(() => !!document.activeElement?.closest("#generic-confirm-overlay")), "o foco fica no diálogo");
     } finally { await ctx.close(); }
   });
 
@@ -161,23 +166,69 @@ test("Cancelar passada a janela fecha, mantém a chave e libera o Sacar", async 
   } finally { await ctx.close(); }
 });
 
-test("Enter no 'Confirmar saque' confirma (o teclado não espera a janela)", async () => {
+test("Enter no 'Confirmar saque' passada a janela confirma", async () => {
   const { ctx, page, posts } = await naTela({});
   try {
     await page.locator("#affiliate-payout-btn").click();
     assert.equal(await page.evaluate(() => document.activeElement?.id), "generic-confirm-ok");
+    await page.waitForTimeout(JANELA);
     await page.keyboard.press("Enter");
     await page.waitForTimeout(300);
     assert.deepEqual(posts, [JSON.stringify({ pix_key: CHAVE })]);
   } finally { await ctx.close(); }
 });
 
-test("Enter segurado no Sacar abre a confirmação e a repetição não confirma", async () => {
+// O OK nasce focado: o 2º aperto de um Enter-Enter (ou Espaço-Espaço) rápido no Sacar o confirmaria sem leitura.
+for (const tecla of ["Enter", "Space"]) {
+  test(`${tecla}, ${tecla} (120 ms) no Sacar abre a confirmação e o 2º aperto não confirma`, async () => {
+    const { ctx, page, posts } = await naTela({});
+    try {
+      await page.locator("#affiliate-payout-btn").focus();
+      await page.keyboard.press(tecla);
+      await page.waitForTimeout(120);
+      await page.keyboard.press(tecla);
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator(ABERTO).count(), 1);
+      assert.deepEqual(posts, []);
+    } finally { await ctx.close(); }
+  });
+}
+
+// A trava de um modal fechado (Esc) antes da janela não pode soltar os botões do seguinte antes da janela DELE: o OK do 2º, aos 250 ms
+// dele, já passou dos 400 ms do 1º.
+test("modal fechado por Esc dentro da janela e outro aberto: o OK do novo não recebe clique antes da janela dele", async () => {
+  const { ctx, page } = await abrirApp(browser, ORIGIN, {});
+  try {
+    const { x, y } = await page.evaluate(async () => {
+      const dorme = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      confirmModal("Primeiro");
+      await dorme(100);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await dorme(150);
+      window.__res = "pendente";
+      confirmModal("Segundo").then((v) => { window.__res = v; });
+      await dorme(250);
+      const b = document.getElementById("generic-confirm-ok").getBoundingClientRect();
+      return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    });
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(50);
+    assert.equal(await page.evaluate(() => window.__res), "pendente");
+    await page.waitForTimeout(JANELA);
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(50);
+    assert.equal(await page.evaluate(() => window.__res), true, "passada a janela, o OK confirma");
+  } finally { await ctx.close(); }
+});
+
+// A repetição do SO começa depois da janela (≈ 500 ms no macOS e no Windows): só o `e.repeat` a segura.
+test("Enter segurado no Sacar abre a confirmação e a repetição, passada a janela, não confirma", async () => {
   const { ctx, page, posts } = await naTela({});
   try {
     await page.locator("#affiliate-payout-btn").focus();
     await page.keyboard.down("Enter");
     await page.locator(ABERTO).waitFor();
+    await page.waitForTimeout(JANELA);
     await page.keyboard.down("Enter"); // já apertada: sai com `repeat: true`
     await page.keyboard.down("Enter");
     await page.keyboard.up("Enter");
@@ -192,82 +243,6 @@ test("a janela é a mesma no /app, no modals.js e no /painel", () => {
   const ler = (f) => Number(readFileSync(new URL(`../../${f}`, import.meta.url), "utf8").match(/JANELA_DO_DUPLO_CLIQUE = (\d+)/)?.[1]);
   const v = ["frontend/dashboard.js", "frontend/modals.js", "webapp/src/dashboard/parts/dialog.ts"].map(ler);
   assert.deepEqual(v, [400, 400, 400]);
-});
-
-// ── o mesmo defeito no frontend/modals.js (`.pig-modal`), que é o confirmModal da settings: "Encerrar todas as outras" sessões ──
-const SESSOES = { sessions: [
-  { jti: "a", is_current: true, device_label: "Este", ip: "1.1.1.1", created_at: "2026-11-01T12:00:00Z", last_seen_at: "2026-11-10T12:00:00Z" },
-  { jti: "b", is_current: false, device_label: "Outro", ip: "2.2.2.2", created_at: "2026-11-01T12:00:00Z", last_seen_at: "2026-11-10T12:00:00Z" },
-] };
-async function naSettings() {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  const page = await ctx.newPage();
-  const deletes = [];
-  const corpo = (b) => ({ status: 200, contentType: "application/json", body: JSON.stringify(b) });
-  await page.route("**/*", (r) => {
-    const u = new URL(r.request().url());
-    if (u.origin !== ORIGIN) return r.abort();
-    return /\.[a-z0-9]+$/i.test(u.pathname) ? r.continue() : r.fulfill(corpo({}));
-  });
-  await page.route("**/auth/validate", (r) => r.fulfill(corpo({ user_id: 1 })));
-  await page.route("**/auth/me", (r) => r.fulfill(corpo({ has_password: true })));
-  await page.route("**/settings/1/security", (r) => r.fulfill(corpo({ ok: true, user_id: 1, email: "a@b.com", plan: "pro", identities: [] })));
-  await page.route("**/settings/1/sessions", (r) => {
-    if (r.request().method() === "DELETE") { deletes.push(1); return r.fulfill(corpo({ revoked: 1 })); }
-    return r.fulfill(corpo(SESSOES));
-  });
-  await page.goto(`${ORIGIN}/settings.html`);
-  const btn = page.locator("#sessions-revoke-others-btn");
-  await btn.waitFor({ state: "visible" });
-  // alinha o botão ao primário do modal (no celular os botões do modal ocupam a largura toda)
-  const priY = await page.evaluate(async () => {
-    document.getElementById("sessions-revoke-others-btn").click(); // o modal de verdade, com o texto de verdade
-    await new Promise((r) => setTimeout(r, 300)); // passada a animação de entrada (.18 s)
-    const r = document.querySelector(".pig-modal-btn-destructive").getBoundingClientRect();
-    document.querySelector(".pig-modal-btn-cancel").click();
-    return (r.top + r.bottom) / 2;
-  });
-  const b0 = await btn.boundingBox();
-  await page.evaluate((dy) => window.scrollBy(0, dy), b0.y + b0.height / 2 - priY);
-  const b = await btn.boundingBox();
-  return { ctx, page, deletes, x: b.x + b.width / 2, y: b.y + b.height / 2 };
-}
-const pigAberto = (page) => page.locator(".pig-modal-overlay").count();
-
-test("settings 390x844: dois cliques em 'Encerrar todas as outras' (120 ms) não confirmam, e o 2º no fundo não fecha", async () => {
-  const { ctx, page, deletes, x, y } = await naSettings();
-  try {
-    await page.mouse.click(x, y);
-    await page.waitForTimeout(120);
-    await page.mouse.click(x, y);
-    await page.waitForTimeout(400);
-    assert.equal(await pigAberto(page), 1, "o 2º clique sobre o primário");
-    assert.deepEqual(deletes, []);
-    await page.keyboard.press("Escape");
-    await page.mouse.click(x, y);
-    await page.waitForTimeout(120);
-    await page.mouse.click(5, 5);
-    await page.waitForTimeout(300);
-    assert.equal(await pigAberto(page), 1, "o 2º clique no fundo");
-    assert.deepEqual(deletes, []);
-  } finally { await ctx.close(); }
-});
-
-test("settings 390x844: passada a janela, o primário confirma (1 DELETE) e o fundo cancela", async () => {
-  const { ctx, page, deletes, x, y } = await naSettings();
-  try {
-    await page.mouse.click(x, y);
-    await page.waitForTimeout(JANELA);
-    await page.mouse.click(5, 5);
-    await page.waitForTimeout(200);
-    assert.equal(await pigAberto(page), 0);
-    assert.deepEqual(deletes, []);
-    await page.mouse.click(x, y);
-    await page.waitForTimeout(JANELA);
-    await page.locator(".pig-modal-btn-destructive").click();
-    await page.waitForTimeout(300);
-    assert.deepEqual(deletes, [1]);
-  } finally { await ctx.close(); }
 });
 
 // ── o rótulo: o confirmModal do /app lia só `okText`/`danger`, e 6 chamadores passam os nomes do modals.js (`confirmText`/`destructive`) ──

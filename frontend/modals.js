@@ -139,6 +139,17 @@
     return escapeHtml(message).replace(/\n/g, "<br>");
   }
 
+  // O 2º clique do duplo clique que abriu o modal cai onde estava o botão de baixo; ali pode estar o primário (#1411). Na janela os
+  // botões não recebem ponteiro, o fundo não fecha e o Enter não confirma. Cópia do `JANELA_DO_DUPLO_CLIQUE` do /painel
+  // (webapp/src/dashboard/parts/dialog.ts). Devolve "ainda na janela?".
+  const JANELA_DO_DUPLO_CLIQUE = 400;
+  function travarDuploClique(acoes) {
+    const abertoEm = performance.now();
+    acoes.style.pointerEvents = "none";
+    setTimeout(() => { acoes.style.pointerEvents = ""; }, JANELA_DO_DUPLO_CLIQUE);
+    return () => performance.now() - abertoEm < JANELA_DO_DUPLO_CLIQUE;
+  }
+
   function openModal({ kind, message, opts }) {
     ensureStyles();
     const o = opts || {};
@@ -166,13 +177,7 @@
       `;
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
-      // O 2º clique do duplo clique que abriu o modal cai onde estava o botão de baixo; ali pode estar o primário (#1411). Na janela os
-      // botões não recebem ponteiro e o fundo não fecha. Cópia do `JANELA_DO_DUPLO_CLIQUE` do /painel (webapp/src/dashboard/parts/dialog.ts).
-      const JANELA_DO_DUPLO_CLIQUE = 400;
-      const abertoEm = performance.now();
-      const acoes = modal.querySelector(".pig-modal-actions");
-      acoes.style.pointerEvents = "none";
-      setTimeout(() => { acoes.style.pointerEvents = ""; }, JANELA_DO_DUPLO_CLIQUE);
+      const cedo = travarDuploClique(modal.querySelector(".pig-modal-actions"));
       // Trigger animation on next frame
       requestAnimationFrame(() => overlay.classList.add("open"));
 
@@ -190,13 +195,12 @@
       };
 
       const btnPrimary = modal.querySelector(".pig-modal-btn-primary, .pig-modal-btn-destructive");
-      const btnCancel = modal.querySelector(".pig-modal-btn-cancel");
       btnPrimary.addEventListener("click", () => close(isConfirm ? true : undefined));
-      if (btnCancel) btnCancel.addEventListener("click", () => close(false));
+      modal.querySelector(".pig-modal-btn-cancel")?.addEventListener("click", () => close(false));
 
       // Click no overlay = cancela (so em confirm; alert exige clique no OK)
       overlay.addEventListener("click", (e) => {
-        if (e.target === overlay && isConfirm && performance.now() - abertoEm >= JANELA_DO_DUPLO_CLIQUE) close(false);
+        if (e.target === overlay && isConfirm && !cedo()) close(false);
       });
 
       /* O modal declara role="dialog" + aria-modal="true" logo acima, o que
@@ -216,7 +220,7 @@
         }
         if (e.key === "Enter") {
           e.preventDefault();
-          if (e.repeat) return; // Enter segurado: só o primeiro aperto vale
+          if (e.repeat || cedo()) return; // Enter segurado, ou o 2º de um Enter-Enter rápido: só o primeiro aperto vale
           close(isConfirm ? true : undefined);
           return;
         }

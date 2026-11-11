@@ -14,7 +14,8 @@
  *   aviso e nome    aria-live de volta DENTRO do botão: VERMELHO (o nome ganha "Cancelado")
  *   bloco que some  sem `holdX.resetar()` no hide* / sem o teste de visibilidade no concluir: VERMELHO
  *   senha no disparo  sem `senhaPreenchida` no requestAccount*: VERMELHO
- *   repeat do teclado  sem o `engolirRepeat`: VERMELHO (o alerta fecha em < 300 ms)
+ *   repeat do teclado  sem o `engolirRepeat`: VERMELHO (o alerta fecha em < 300 ms) até o #1411; desde ele o modals.js
+ *                      também ignora o Enter repetido ou na janela, e só tirar os dois deixa vermelho
  *   positivos: o hold normal (toque parado 1200 ms, Enter) e o fallback por clique continuam
  *   disparando — nenhum conserto virou recusa geral.
  *
@@ -190,6 +191,7 @@ test("delete: Enter ainda apertado depois do disparo — o repeat não fecha o a
     await assenta();
     assert.equal(await modalAberto(page), true, "o repeat não pode fechar o alerta");
     await page.keyboard.up("Enter");
+    await page.clock.runFor(400);   // passa a janela do Enter-Enter (modals.js, 400 ms); o relógio está pausado
     await page.keyboard.press("Enter");   // Enter novo, depois do keyup
     await waitFor(async () => { try { return !(await modalAberto(page)); } catch { return true; } },
                   "o Enter novo fecha o alerta");
