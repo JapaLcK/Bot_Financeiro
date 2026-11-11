@@ -2604,7 +2604,8 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     async def admin_affiliate_review_close_recovery(
         review_id: int, request: Request, username: str = Depends(_get_current_admin)
     ):
-        """Encerra a recuperação. Body: {"result", "justification", "recovered_on", "receipt_ref"}."""
+        """Encerra a recuperação. Body: {"result", "recovery_cents", "justification", "recovered_on",
+        "receipt_ref"}; `recovery_cents` é o que o formulário mostrou: valor velho dá 409."""
         from core.services.afiliado_reembolso import dia_em_brasilia, validar_comprovante, validar_justificativa
         from db.affiliate_reviews import PendenciaMudou, encerrar_recuperacao, refunded_at_da_pendencia
 
@@ -2612,6 +2613,9 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         resultado = payload.get("result")
         if resultado not in ("recovered", "waived"):
             raise HTTPException(status_code=422, detail="Resultado inválido.")
+        visto = payload.get("recovery_cents")
+        if type(visto) is not int:  # `type`: `true` é `int` para `isinstance`
+            raise HTTPException(status_code=422, detail="Valor visto inválido: recarregue a página.")
         data = referencia = None
         try:
             justificativa = validar_justificativa(payload.get("justification"))
@@ -2626,7 +2630,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
         try:
             ok = await asyncio.to_thread(
-                encerrar_recuperacao, review_id, resultado, username, justificativa, data, referencia)
+                encerrar_recuperacao, review_id, resultado, username, justificativa, visto, data, referencia)
         except PendenciaMudou as exc:
             raise HTTPException(status_code=409, detail=str(exc))
         if not ok:

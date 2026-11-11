@@ -260,19 +260,21 @@ def refunded_at_da_pendencia(review_id: int):
     return linha and linha["refunded_at"]
 
 
-def encerrar_recuperacao(review_id: int, resultado: str, ator: str, justificativa: str,
+def encerrar_recuperacao(review_id: int, resultado: str, ator: str, justificativa: str, visto_cents: int,
                          data=None, referencia: str | None = None) -> bool:
     """Admin encerra a recuperação como `recovered` ou `waived`. False = inexistente.
 
     Sem efeito em saldo: nada desconta de saque futuro. Repetir é `PendenciaMudou`, de propósito:
-    dois admins com resultados diferentes não podem parecer ambos atendidos."""
+    dois admins com resultados diferentes não podem parecer ambos atendidos. `visto_cents` é o valor
+    que o formulário mostrou: fato novo entre ver e enviar (total, disputa perdida) também é 409."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("select * from affiliate_refund_reviews where id = %s for update", (int(review_id),))
         r = cur.fetchone()
         if r is None:
             return False
-        if r["status"] != "recovery":
-            raise PendenciaMudou("Esta recuperação já foi encerrada.")
+        if r["status"] != "recovery" or r["recovery_cents"] != visto_cents:
+            raise PendenciaMudou("A recuperação mudou ou já foi encerrada. Feche o formulário e abra de novo"
+                                 " para conferir o valor.")
         cur.execute(
             """
             update affiliate_refund_reviews

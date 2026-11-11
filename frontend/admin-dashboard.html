@@ -2826,7 +2826,9 @@ function openRecoveryForm(id) {
     caminho: `/admin/api/affiliates/refund-reviews/${id}/close-recovery`,
     corpo: () => {
       const result = $id('aff-f-result').value, justification = $id('aff-f-just').value;
-      return result === 'waived' ? { result, justification } : { result, justification, recovered_on: $id('aff-f-date').value, receipt_ref: $id('aff-f-ref').value };
+      // `r` é o da abertura: reler `affPendencias` aqui mandaria o valor da lista recarregada e anularia o 409.
+      const visto = { result, recovery_cents: r.recovery_cents, justification };
+      return result === 'waived' ? visto : { ...visto, recovered_on: $id('aff-f-date').value, receipt_ref: $id('aff-f-ref').value };
     },
   });
 }

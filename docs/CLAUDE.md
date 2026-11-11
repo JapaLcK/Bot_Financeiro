@@ -2741,7 +2741,10 @@ desconta de saque futuro e o afiliado segue vendo o valor em "Já pago", com o s
 não muda na revisão: `recovery_cents = max(0, pago - aprovado - recovery_closed_cents)`, atribuído e
 nunca somado, então reprocessar não duplica e o que foi encerrado não é cobrado de novo.
 `POST /admin/api/affiliates/refund-reviews/{id}/close-recovery` encerra como `recovered` (com data
-e referência) ou `waived` (sem elas), e repetir dá 409, sem novo evento.
+e referência) ou `waived` (sem elas). O corpo leva `recovery_cents`, o valor que o formulário mostrou
+na abertura (ausente ou não inteiro dá 422): valor diferente do da linha, sob a trava dela, ou
+recuperação fora de `recovery` (repetir, ou um parcial maior que a devolveu a `open`) dá 409, sem
+evento e sem somar em `recovery_closed_cents`.
 
 **Notificação.** A linha é a notificação pendente: `notified_at` nulo, gravado na mesma transação.
 `notified_at` só com `_send` True. O webhook tenta uma vez depois do commit, e o
