@@ -2671,9 +2671,11 @@ que enxerga o commit do webhook.
 
 **Como cada pendência fecha.** `partial`: revisão com valor aprovado, justificativa obrigatória
 (`POST /admin/api/affiliates/refund-reviews/{id}/approve`, que recebe o `refunded_cents` visto e dá
-409 se ele envelheceu). `amount_cents` da comissão passa a ser o aprovado, e o do saque cai a
-diferença; aprovado 0 equivale a estorno; saque que ficaria sem valor vira `rejected` com o valor
-histórico. Saque abaixo do mínimo depois do ajuste paga assim mesmo: a regra é do pedido. `total`:
+409 se ele envelheceu). Comissão em saque aberto (vivo ou órfão) só aprova o valor cheio, que destrava
+o saque sem mudar o valor dele; valor menor dá 409 (`SaqueAberto`): o admin rejeita o saque (a pendência
+segue `open` e a comissão volta para "Em revisão") ou registra "Pagamento já realizado" (comissão paga, e
+a revisão gera a recuperação pela diferença, D6). Saque aberto nunca muda de valor. Fora de saque,
+`amount_cents` da comissão passa a ser o aprovado; aprovado 0 equivale a estorno. `total`:
 rejeitar o saque (estorna pelo rótulo **ou** pela pendência, e fecha com `payout_rejected`), ou
 "Pagamento já realizado". Nota sozinha não fecha. Rejeição é do admin, nunca do webhook: rejeitar
 sozinho com o Pix já feito devolveria as outras comissões ao saldo. Rejeitar com pendência `partial`
@@ -2719,8 +2721,7 @@ só olha `amount_refunded`, então disputa parcial de R$ 30 e reembolso dos R$ 7
 (30 < 70) e fica como a disputa deixou. A comissão fica em revisão nos dois casos, sem estorno
 sozinho. Hipótese não verificada por trás disso e do cálculo da disputa: `charge.amount_refunded` não
 inclui disputa. Conferir com disputa real no modo de teste da Stripe. (7) Pix por fora: o sistema não alcança QR já aberto nem Pix digitado à mão.
-Revisão com valor menor com QR antigo aberto deixa o admin pagar o valor velho; a tela avisa, e o
-caminho é "Pagamento já realizado" antes da revisão. (8) Comissão apagada pela cascata antes do deploy
+O valor do saque aberto não muda depois do QR: a revisão com valor menor espera o saque. (8) Comissão apagada pela cascata antes do deploy
 de `affiliate_commissions` em `_USER_FK_SET_NULL_TABLES` não volta, e o saque `requested` que a incluía
 segue sem ligação. Conferir antes do deploy, só leitura: saques `requested` cujo `amount_cents` difere
 da soma das comissões deles. (9) Reembolso parcial maior sobre recuperação ainda aberta troca a
@@ -2768,7 +2769,7 @@ processo inteiro. Por isso a conferência roda num executor próprio de `VAGAS_C
 nunca no padrão do asyncio, que as outras rotas usam via `to_thread`; com as vagas ocupadas por consultas
 presas, o QR e o "Marcar pago" recusam com o mesmo 503 na hora, sem consultar, e o "Pagamento já
 realizado" registra e marca. Depois da consulta, o QR relê o saque inteiro: rejeitado, pago, bloqueado ou
-órfão no meio recusa, e o valor do QR é o relido (revisão parcial no meio encolhe o QR). O "Marcar pago"
+órfão no meio recusa, e o valor do QR é o relido. O "Marcar pago"
 relê na própria trava (`status = 'requested'` no update). "Marcar pago" não consulta saque já bloqueado ou órfão: a
 recusa que já existe responde. "Pagamento já realizado" nunca recusa: confere antes (reembolso achado
 vira recuperação no registro) e, com a Stripe fora, registra e marca `payment_check_pending` nas comissões

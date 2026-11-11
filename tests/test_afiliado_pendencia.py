@@ -296,17 +296,55 @@ def test_valor_aprovado_fora_de_saque(adm):
     assert (item["amount"], item["original_amount"], item["in_review"]) == (60, 100, False)
 
 
-def test_valor_aprovado_em_saque_ajusta_o_saque(adm):
+def test_qr_velho_nao_perde_a_diferenca(adm, mundo):
+    """D11, o caso medido: QR de R$ 170 pago por fora, chega o parcial, e a revisão de R$ 60 respondia 200
+    com o saque encolhido para R$ 130 e os R$ 40 sem registro. Agora ela espera o saque."""
+    c = _afiliado()
+    a, _ = _paga(c), _paga(c, 70)
+    saque = _saque_com_pix(c)
+    qr = adm.get(f"/admin/api/affiliates/payouts/{saque}/pix")
+    assert qr.status_code == 200 and qr.json()["amount_cents"] == 17_000
+    mundo.stripe.cobra(a.fatura, devolvido=30_000)
+    _parcial(a)
+    r = _aprovar(adm, a, 6_000)
+    assert r.status_code == 409 and "ainda aberto" in r.json()["detail"], r.text
+    assert _saque(saque)["amount_cents"] == 17_000 and _comissao_db(a)["amount_cents"] == 10_000
+    assert "partial_approved" not in _acoes(a.fatura)
+    assert _pagar(adm, saque).status_code == 409
+    assert _realizado(adm, saque).status_code == 200  # o caminho certo: o Pix saiu
+    assert (_saque(saque)["status"], _saque(saque)["amount_cents"]) == ("paid", 17_000) and _quadros(c)["paid"] == 170
+    assert _aprovar(adm, a, 6_000).status_code == 200
+    rec = [x for x in adm.get(OVERVIEW).json()["refund_recoveries"] if x["commission_id"] == a.id]
+    assert [x["recovery_cents"] for x in rec] == [4_000]
+
+
+def test_revisao_espera_o_saque_rejeitar(adm):
+    """Positivo: o Pix não saiu. Rejeitar, revisar fora do saque, e o novo pedido sai com o valor revisado."""
     c = _afiliado()
     a, b, saque = _dois_com_saque(c)
     _parcial(a)
-    assert _pagar(adm, saque).status_code == 409
+    assert _aprovar(adm, a, 6_000).status_code == 409
+    assert _rejeitar(adm, saque).status_code == 200
+    assert (_quadros(c)["review"], _quadros(c)["available"]) == (100, 70)
     assert _aprovar(adm, a, 6_000).status_code == 200
-    assert _saque(saque)["amount_cents"] == 13_000
-    assert _comissao_db(a)["amount_cents"] + _comissao_db(b)["amount_cents"] == 13_000
-    assert _quadros(c)["generated"] == 130
-    assert _pagar(adm, saque).status_code == 200
+    assert _quadros(c)["available"] == 130
+    novo = request_payout(c.aff["id"])
+    assert novo["amount_cents"] == 13_000
+    assert _pagar(adm, novo["id"]).status_code == 200
     assert _quadros(c) == {"held": 0, "available": 0, "review": 0, "requested": 0, "paid": 130, "generated": 130}
+
+
+@pytest.mark.parametrize("aprovado,codigo", [(0, 409), (6_000, 409), (10_000, 200)], ids=["zero", "menor", "cheio"])
+def test_revisao_espera_o_saque_valores(adm, aprovado, codigo):
+    """Em saque aberto só o cheio passa: destrava sem mudar o saque. Menor (e o zero) é `SaqueAberto`."""
+    c = _afiliado()
+    a, _, saque = _dois_com_saque(c)
+    _parcial(a)
+    assert _aprovar(adm, a, aprovado).status_code == codigo
+    assert (_saque(saque)["status"], _saque(saque)["amount_cents"]) == ("requested", 17_000)
+    assert _status(a) == {"status": "pending", "payout_id": saque} and _comissao_db(a)["amount_cents"] == 10_000
+    assert ("partial_approved" in _acoes(a.fatura)) is (codigo == 200)
+    assert _pagar(adm, saque).status_code == codigo  # o cheio destrava; o menor segue bloqueado
 
 
 def test_parcial_aprovado_cheio_paga_o_valor_original(adm):
@@ -320,23 +358,14 @@ def test_parcial_aprovado_cheio_paga_o_valor_original(adm):
     assert next(x for x in _me(c)["commissions"] if x["id"] == a.id)["original_amount"] is None
 
 
-@pytest.mark.parametrize("cenario", ["solta", "saque", "unica"])
-def test_aprovado_zero(adm, cenario):
+def test_aprovado_zero(adm):
+    """Solta: o zero em saque aberto é `SaqueAberto` (`test_revisao_espera_o_saque_valores`)."""
     c = _afiliado()
     a = _paga(c)
-    b = _paga(c, 70) if cenario == "saque" else None
-    saque = request_payout(c.aff["id"])["id"] if cenario != "solta" else None
     _parcial(a)
     assert _aprovar(adm, a, 0).status_code == 200
     assert _status(a) == {"status": "reversed", "payout_id": None}
     assert _comissao_db(a)["amount_cents"] == 10_000  # fica como estava
-    if cenario == "saque":
-        assert _saque(saque)["amount_cents"] == 7_000 and _status(b)["payout_id"] == saque
-        assert _pagar(adm, saque).status_code == 200
-    elif cenario == "unica":
-        linha = _saque(saque)
-        assert (linha["status"], linha["amount_cents"], linha["note"]) == ("rejected", 10_000, "Comissão ajustada na revisão.")
-        assert _quadros(c)["generated"] == 0
 
 
 @pytest.mark.parametrize("valor", [10_001, -1, True, 1.5, "6000", None, [60]],
@@ -1066,9 +1095,12 @@ def test_rota_pix_recusa(adm):
     caminho = f"/admin/api/affiliates/payouts/{saque}/pix"
     assert adm.get(caminho).status_code == 409
     assert next(p for p in adm.get(OVERVIEW).json()["payouts"] if p["id"] == saque)["blocked"] is True
-    assert _aprovar(adm, a, 6_000).status_code == 200
+    assert _aprovar(adm, a, 6_000).status_code == 409  # D11: o saque aberto não muda de valor
+    assert adm.get(caminho).status_code == 409
+    assert next(p for p in adm.get(OVERVIEW).json()["payouts"] if p["id"] == saque)["blocked"] is True
+    assert _aprovar(adm, a, 10_000).status_code == 200  # o cheio destrava
     r = adm.get(caminho)
-    assert r.status_code == 200 and r.json()["amount_cents"] == 6_000  # QR novo, com o valor novo
+    assert r.status_code == 200 and r.json()["amount_cents"] == 10_000
     assert next(p for p in adm.get(OVERVIEW).json()["payouts"] if p["id"] == saque)["blocked"] is False
 
 
@@ -1483,7 +1515,7 @@ def test_revisao_recusa_comissao_que_saiu_do_saque_no_meio(mundo):
             segura.execute("update affiliate_commissions set payout_id = null where id = %s", (a.id,))
         finally:
             segura.commit()
-        assert isinstance(revisao.exception(timeout=15), PendenciaMudou)
+        assert type(revisao.exception(timeout=15)) is PendenciaMudou  # não `SaqueAberto`: a comissão saiu do saque
     assert _saque(saque)["amount_cents"] == 17_000 and _comissao_db(a)["amount_cents"] == 10_000
 
 
