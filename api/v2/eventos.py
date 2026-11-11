@@ -185,7 +185,7 @@ class _Marcador:
             tarefa = asyncio.ensure_future(invalidar_insights(self.conn, sorted(lote)))
             if not (await asyncio.wait({tarefa}, timeout=TETO_MARCADOR_S))[0]:
                 # Conexão muda: fechar ANTES de cancelar. Cancelada com a conexão aberta, a tarefa largada tenta o
-                # cancel do psycopg pela mesma rede (5 s) e loga pelo `logging`, que grava no banco dentro do loop.
+                # cancel do psycopg pela mesma rede (5 s).
                 await self.conn.close()
                 tarefa.cancel()
                 tarefa.add_done_callback(lambda t: t.cancelled() or t.exception())
@@ -205,8 +205,7 @@ class _Marcador:
 
     def _falhou(self, exc: Exception) -> None:
         self.pausa_ate = time.monotonic() + PAUSA_MARCADOR_S
-        # `print`, como o resto deste ouvinte: um `logger.warning` no loop grava `system_event_logs`
-        # de forma síncrona (`_DashboardHandler`) e seguraria o aviso que este teto protege. Sem uid: a contagem basta.
+        # `print`, como o resto deste ouvinte. Sem uid: a contagem basta.
         print(f"[eventos] marcador de insights falhou: {type(exc).__name__}, pausa {PAUSA_MARCADOR_S:g} s, "
               f"{len(self.pendentes)} pendente(s)", file=sys.stderr, flush=True)
 

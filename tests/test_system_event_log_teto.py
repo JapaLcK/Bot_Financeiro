@@ -7,9 +7,10 @@ dois moram em `tests/_system_event_log_helpers.py`.
 O `connect_timeout=2` que já existia limita só o handshake. Com a
 `system_event_logs` travada em `access exclusive` (o que um `alter table`, um
 `vacuum full` ou uma migração fazem), o handshake era instantâneo e o INSERT
-esperava o LOCK inteiro — e, como o `_DashboardHandler` mora no ROOT logger em
-nível WARNING (`core/observability.py`), essa espera é paga por qualquer
-`logger.warning()`/`error()` do processo, inclusive dentro do event loop.
+esperava o LOCK inteiro. Até o PR-10a essa espera era paga por qualquer
+`logger.warning()`/`error()` do processo, inclusive no event loop, porque o
+`_DashboardHandler` do ROOT logger gravava na thread de quem loga. Hoje, em
+produção, quem a paga é o ouvinte de `core/log_fila.py`, e na suíte é quem loga.
 
 MECANISMO: uma 2ª sessão com `psycopg.connect` DEDICADO (nunca `get_conn` — o
 lock ficaria segurando uma vaga do pool durante o teste inteiro) trava a tabela,

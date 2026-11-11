@@ -171,8 +171,8 @@ def _apelidos(arvore: ast.Module, alvos=frozenset({"_log_falha"})) -> set[str]:
 def _e_log_falha(no: ast.Call, apelidos: set[str]) -> bool:
     """`_log_falha(...)` direto OU `asyncio.to_thread(_log_falha, ...)`.
 
-    As 4 rotas destrutivas são async e fazem o offload pra thread; sem este
-    segundo caso a varredura mediria ZERO e a guarda ficaria tautológica.
+    Nenhuma porta usa mais o `to_thread` (PR-10b); o ramo fica porque a forma
+    é válida e já existiu.
     Nas duas formas vale o nome qualificado (`observability._log_falha`) e o
     apelido do import.
     """
@@ -198,7 +198,7 @@ def _chamadas_com_traceback(fonte: str | bytes, rel: str) -> list[tuple[str, str
       - `partial(_log_falha, com_traceback=True)`, dentro ou fora do
         `to_thread`.
     Nenhum call site faz nenhuma delas (os 5 arquivos passam `**extra` só de
-    campos nomeados e usam `asyncio.to_thread` direto); cobrir exigiria seguir
+    campos nomeados e chamam `_log_falha` direto); cobrir exigiria seguir
     o valor pelo fluxo. Formas que a guarda PEGA, também medidas: chamada
     direta, `to_thread(_log_falha, …)`, `to_thread(observability._log_falha,
     …)`, `to_thread(lambda: _log_falha(…))`, `observability._log_falha(…)`,
@@ -404,8 +404,9 @@ def _arvore_do_system_event_log() -> ast.Module:
 
 def test_todo_connect_do_system_event_log_tem_timeout_e_teto():
     """A CLASSE, não a instância: as duas funções de `core/system_event_log.py`
-    abrem `psycopg.connect()` de forma bloqueante, e o `_DashboardHandler` é
-    root logger — logo o caller pode ser o event loop. São DOIS tetos, e cada um
+    abrem `psycopg.connect()` de forma bloqueante, e quem as chama direto pode
+    estar no event loop (há chamadas em `async def`); o espelho do `logging` as
+    chama da thread do ouvinte de `core/log_fila.py`. São DOIS tetos, e cada um
     cobre o que o outro não cobre:
 
       - `connect_timeout` (libpq) limita o ESTABELECIMENTO da conexão. Sem ele,
@@ -467,8 +468,9 @@ def test_system_event_log_nao_referencia_logging():
 
     O desfecho de falha deste módulo é `print` no stderr; um `logging.*` aqui
     reentra no `_DashboardHandler` — ele está no ROOT logger em nível WARNING, e
-    chamaria de volta `log_system_event_sync`, a função que acabou de falhar.
-    Com a tabela travada cada volta custa um TCP connect mais o teto inteiro.
+    chamaria de volta `log_system_event_sync`, a função que acabou de falhar (na
+    suíte; em produção volta pela fila). Com a tabela travada cada volta custa
+    um TCP connect mais o teto inteiro.
 
     A guarda de `threading.local` fecha o ciclo em tempo de execução; este
     portão fecha a porta de entrada — um `logger.warning` bem-intencionado
