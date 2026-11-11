@@ -1,7 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Confirma } from "../conta/Confirma";
 import { money } from "../lib/format.js";
+import { deSaida } from "../lib/sessao";
 import { afiliadoQuery, falhaSaque, solicitarSaque, type Afiliado } from "./api";
 
 // A troca de conta recarrega a página (lib/sessao.ts) e a confirmação some sem aviso (#1412). Enquanto ela está aberta, uma marca em
@@ -36,8 +37,25 @@ export function Saque({ d, velho }: { d: Afiliado; velho: boolean }) {
   const limpa = chave.trim();
   // Depois do sucesso a releitura trava o botão que tinha o foco, e ele cairia no body: vai ao título desta seção, à vista da confirmação.
   useEffect(() => { if (feito && !pode) document.getElementById("afil-saque")?.focus(); }, [feito, pode]);
-  useEffect(() => { const aviso = avisoDaRecarga(); if (aviso) setFalha(aviso); }, []);
-  useEffect(() => { if (!confirmando) return; marcar("confirmando"); return desmarcar; }, [confirmando]);
+  // O aviso da recarga fica no pé da página: no celular, abaixo da dobra. Mostrado, a tela vai até ele e o foco, ao título da seção.
+  const alerta = useRef<HTMLParagraphElement>(null);
+  const daRecarga = useRef(false);
+  useEffect(() => { const aviso = avisoDaRecarga(); if (aviso) { daRecarga.current = true; setFalha(aviso); } }, []);
+  useEffect(() => {
+    if (!falha || !daRecarga.current) return;
+    daRecarga.current = false;
+    document.getElementById("afil-saque")?.focus({ preventScroll: true });
+    alerta.current?.scrollIntoView({ block: "center" });
+  }, [falha]);
+  // A recarga da troca deixa a página velha viva até a nova chegar: o `catch` de `agir` fecha o diálogo e este desmonte roda nela. Saindo
+  // (`deSaida`), a marca fica para a página nova. Recarga ou saída por outro motivo (F5) não é troca de sessão: o `pagehide` a tira.
+  useEffect(() => {
+    if (!confirmando) return;
+    marcar("confirmando");
+    const solta = () => { if (!deSaida()) desmarcar(); };
+    window.addEventListener("pagehide", solta);
+    return () => { window.removeEventListener("pagehide", solta); solta(); };
+  }, [confirmando]);
 
   const pedir = (e: FormEvent) => {
     e.preventDefault();
@@ -64,7 +82,7 @@ export function Saque({ d, velho }: { d: Afiliado; velho: boolean }) {
       <button type="submit" className="btn btn-primary" disabled={!pode}>Sacar {money(d.stats.available)}</button>
     </form>
     {aberto ? <p className="faint">Você já tem um saque em análise.</p> : abaixo && <p className="faint">Você ainda não chegou ao mínimo de {money(d.min_payout)}.</p>}
-    {falha && <p role="alert" className="warn">{falha}</p>}
+    {falha && <p ref={alerta} role="alert" className="warn">{falha}</p>}
     <p role="status" className="gain afil-status">{feito ? "Saque solicitado. Acompanhe no histórico." : ""}</p>
     {confirmando && <Confirma titulo="Confirmar saque?" texto={`Saque de ${money(d.stats.available)} para a chave Pix ${limpa}. Confira a chave: é para ela que o pagamento vai.`} botao="Confirmar saque" pendente="Solicitando…" fechar={() => setConfirmando(false)} agir={agir} />}
   </section>;
