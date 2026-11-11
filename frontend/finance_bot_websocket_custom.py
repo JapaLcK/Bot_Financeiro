@@ -3392,7 +3392,7 @@ async def _apply_referral_attribution(request: Request, response: Response, user
                 user_id=int(user_id),
             )
     except Exception as exc:
-        print(f"[affiliates] atribuicao de referral falhou user={user_id}: {exc}")
+        print(f"[affiliates] atribuicao de referral falhou user={user_id}: {causa_segura(exc)}")
     finally:
         response.delete_cookie("ref_code")
 
@@ -3415,7 +3415,7 @@ async def _apply_prospect_attribution(request: Request, response: Response, user
                 user_id=int(user_id),
             )
     except Exception as exc:
-        print(f"[prospects] atribuicao de prospect falhou user={user_id}: {exc}")
+        print(f"[prospects] atribuicao de prospect falhou user={user_id}: {causa_segura(exc)}")
     finally:
         response.delete_cookie("prospect_code")
 
@@ -6217,7 +6217,7 @@ async def billing_change_plan(
                 send_plan_change_scheduled_email, email,
                 plan_names.get(plan, plan.title()), effective_iso, DASHBOARD_URL)
     except Exception as exc:
-        print(f"[billing] email troca agendada user={user_id}: {exc}", file=sys.stderr)
+        print(f"[billing] email troca agendada user={user_id}: {causa_segura(exc)}", file=sys.stderr)
 
     await log_system_event(
         "info", "billing_plan_change_scheduled",
@@ -6595,7 +6595,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             if await asyncio.to_thread(recent_event_exists, chave, int(uid), dedup_days):
                 return True
         except Exception as exc:
-            print(f"[billing] dedup de email falhou user={uid}: {exc}")
+            print(f"[billing] dedup de email falhou user={uid}: {causa_segura(exc)}")
         try:
             email = await _user_email(uid)
             if not email:
@@ -6609,7 +6609,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                                    source="billing", user_id=int(uid))
             return True
         except Exception as exc:
-            print(f"[billing] email {fn.__name__} falhou user={uid}: {exc}")
+            print(f"[billing] email {fn.__name__} falhou user={uid}: {causa_segura(exc)}")
             return False
 
     async def _registrar_cadernos(uid: int, session) -> list:
@@ -6768,7 +6768,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     await asyncio.to_thread(send_founder_email_once, int(user_id),
                                             _dest, "stripe", str(sub_id))
             except Exception as exc:
-                print(f"[billing] email do fundador falhou user={user_id}: {exc}")
+                print(f"[billing] email do fundador falhou user={user_id}: {causa_segura(exc)}")
             # Notificação admin (Slack/Discord webhook)
             try:
                 from core.services.admin_notify import notify_new_pro
@@ -6782,7 +6782,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     interval=_interval,
                 )
             except Exception as exc:
-                print(f"[billing] admin notify falhou user={user_id}: {exc}")
+                print(f"[billing] admin notify falhou user={user_id}: {causa_segura(exc)}")
             # Uma linha dizendo o que este webhook DECIDIU sobre rastreio, antes
             # de decidir. Sem ela, "não apareceu no Meta" não distinguia
             # configuração ausente de envio recusado: os dois davam log nenhum, e
@@ -6795,7 +6795,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                       f"status={sub_status} sid={_g(session, 'id')} "
                       f"capi={_capi_ok()} ga4={_mp_ok()}")
             except Exception as exc:
-                print(f"[billing] rastreio checkout: log falhou: {exc}")
+                print(f"[billing] rastreio checkout: log falhou: {causa_segura(exc)}")
 
             # Valor REALMENTE cobrado nesta sessão (com cupom e com e-book). Com
             # trial o plano vale 0, então aqui ele é exatamente o e-book (medido:
@@ -6845,7 +6845,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                             value=float(_cobrado) / 100.0, currency=_cobrado_moeda,
                             **_capi_kw)
             except Exception as exc:
-                print(f"[billing] meta capi checkout ({sub_status}) falhou user={user_id}: {exc}")
+                print(f"[billing] meta capi checkout ({sub_status}) falhou user={user_id}: {causa_segura(exc)}")
             # GA4 (Measurement Protocol) — a compra com o VALOR real cobrado.
             # Só a compra IMEDIATA: quando a assinatura nasce em trial o dinheiro
             # entra semanas depois, e o purchase daquele caso sai no invoice.paid
@@ -6898,7 +6898,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                         user_id=user_id,
                     )
             except Exception as exc:
-                print(f"[billing] ga4 purchase (checkout) falhou user={user_id}: {exc}")
+                print(f"[billing] ga4 purchase (checkout) falhou user={user_id}: {causa_segura(exc)}")
         elif user_id:
             await log_system_event(
                 "info",
@@ -7041,7 +7041,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                             },
                         )
                 except Exception as exc:
-                    print(f"[affiliates] comissao falhou user={user_id}: {exc}")
+                    print(f"[affiliates] comissao falhou user={user_id}: {causa_segura(exc)}")
 
                 # O par do log do ramo de checkout: `billing_reason` é o que
                 # decide se esta fatura vira Purchase ou é pulada por já ter sido
@@ -7055,7 +7055,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                           f"reason={_g(invoice, 'billing_reason')} "
                           f"capi={_capi_ok()} ga4={_mp_ok()}")
                 except Exception as exc:
-                    print(f"[billing] rastreio invoice: log falhou: {exc}")
+                    print(f"[billing] rastreio invoice: log falhou: {causa_segura(exc)}")
 
                 # Meta Conversions API — Purchase da cobrança REAL (fim do trial
                 # e renovações), com o valor efetivamente pago. A primeira fatura
@@ -7084,7 +7084,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                             event_source_url=f"{DASHBOARD_URL}/home",
                         )
                 except Exception as exc:
-                    print(f"[billing] meta capi invoice purchase falhou user={user_id}: {exc}")
+                    print(f"[billing] meta capi invoice purchase falhou user={user_id}: {causa_segura(exc)}")
 
                 # GA4 (Measurement Protocol) — o mesmo purchase, pelo mesmo motivo
                 # e com o mesmo corte: a primeira fatura da compra imediata
@@ -7112,7 +7112,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                             user_id=user_id,
                         )
                 except Exception as exc:
-                    print(f"[billing] ga4 purchase (invoice) falhou user={user_id}: {exc}")
+                    print(f"[billing] ga4 purchase (invoice) falhou user={user_id}: {causa_segura(exc)}")
 
     elif event["type"] == "checkout.session.expired":
         # Funil: sem usuário resolvido é no-op (200). Reentrega grava outra linha.
@@ -7305,7 +7305,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     attempt_count=_g(invoice, "attempt_count"),
                 )
             except Exception as exc:
-                print(f"[billing] admin notify payment_failed falhou user={user_id}: {exc}")
+                print(f"[billing] admin notify payment_failed falhou user={user_id}: {causa_segura(exc)}")
 
     elif event["type"] == "customer.subscription.updated":
         # Só o Plano Família escuta este evento. O estado vem do `retrieve` (o payload pode chegar fora de
@@ -7478,7 +7478,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                                             _plano_cancelado, expires_for_email,
                                             DASHBOARD_URL)
             except Exception as exc:
-                print(f"[billing] email canceled falhou user={user_id}: {exc}")
+                print(f"[billing] email canceled falhou user={user_id}: {causa_segura(exc)}")
             # Notificação admin
             # DÍVIDA PRÉ-EXISTENTE, não deste PR: `email` só nasce se o
             # `_user_email` acima RETORNAR. Se ele levantar, o except de cima
@@ -7493,7 +7493,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     user_id=user_id, email=email, expires_at=expires_for_email,
                 )
             except Exception as exc:
-                print(f"[billing] admin notify canceled falhou user={user_id}: {exc}")
+                print(f"[billing] admin notify canceled falhou user={user_id}: {causa_segura(exc)}")
 
     elif event["type"] in ("charge.refunded", "charge.dispute.closed"):
         # Reembolso de indicado de afiliado. Sem try: nada aqui segura grant nem comissão de
@@ -9981,6 +9981,7 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
 
         while True:
             raw = await ws.receive_text()
+            t = None
             try:
                 payload = json.loads(raw) if raw.strip().startswith("{") else {"type": raw}
                 t       = payload.get("type")
@@ -10020,7 +10021,7 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
                     await ws.send_text(jdump({"type": "pong"}))
 
             except Exception as exc:
-                print(f"[ws] error handling message type={payload.get('type') if 'payload' in dir() else '?'}: {exc}")
+                print(f"[ws] error handling message type={t if t in ('refresh', 'get_month', 'get_history', 'ping') else 'outro'}: {causa_segura(exc)}")
 
     except WebSocketDisconnect:
         pass

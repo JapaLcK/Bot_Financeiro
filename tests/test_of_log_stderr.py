@@ -195,12 +195,13 @@ def test_aviso_do_registry_vai_ao_stderr_sem_espelho_e_sem_uid(
 
 # ── 3. prints do tick de refresh e de falha ───────────────────────────────────
 
-def _uma_volta_do_tick(monkeypatch, tiques: int = 1) -> None:
+def _uma_volta_do_tick(monkeypatch, tiques: int = 1, log=None) -> None:
     """Roda o `_open_finance_refresh` de verdade por `tiques` voltas e corta na
-    espera seguinte. O PATCH periódico só roda do 2º tique em diante."""
+    espera seguinte. O PATCH periódico só roda do 2º tique em diante. `log`: o
+    `log_system_event` no lugar do neutro (um gravador)."""
     async def _log(*a, **kw):
         return None
-    monkeypatch.setattr(admin_dashboard, "log_system_event", _log)
+    monkeypatch.setattr(admin_dashboard, "log_system_event", log or _log)
     monkeypatch.setattr(dashboard, "_aquece_catalogo", sem_catalogo)
 
     async def _sem_retentativa(**kw):   # varreria as conexões de outros testes
