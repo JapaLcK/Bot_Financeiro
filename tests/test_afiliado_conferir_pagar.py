@@ -18,7 +18,7 @@ import stripe
 import core.admin_dashboard as admin_dashboard
 import core.services.afiliado_reembolso as servico
 from core.services.afiliado_reembolso import conferir_pendentes, tratar_evento
-from db.affiliate_reviews import registrar_reembolso, resolver_parcial
+from db.affiliate_reviews import SaqueAberto, registrar_reembolso, resolver_parcial
 from db.affiliates import reject_payout, request_payout
 from db.connection import get_conn
 from test_afiliado_area import _afiliado, _esperando_lock, _painel_aberto  # noqa: F401
@@ -268,21 +268,26 @@ def test_paid_rejeitado_durante_a_conferencia(adm, mundo):
     assert _pagar(adm, saque).status_code == 404 and _saque(saque)["status"] == "rejected"
 
 
-def test_qr_valor_muda_durante_a_conferencia(adm, mundo, canal):
-    """Revisão parcial de outro admin encolhe o saque durante a consulta: o QR sai com o valor relido."""
+def test_qr_com_revisao_durante_a_conferencia(adm, mundo, canal):
+    """Outro admin tenta revisar com valor menor durante a consulta: `SaqueAberto`, e o QR recusa pelo
+    bloqueio relido. O saque não muda de valor (D11)."""
     c = _afiliado()
     a, _, saque = _dois(c)
-    trava = threading.Lock()
+    trava, erros = threading.Lock(), []
 
     def revisa():
         with trava:
             if _rev(a.fatura) is None:
                 registrar_reembolso(a.fatura, "partial", 30_000, datetime.now(timezone.utc))
-                resolver_parcial(_rev(a.fatura)["id"], "adm2", 6_000, "outro admin revisou", 30_000)
+                try:  # sem o `try`, a exceção sobe pela consulta e o QR daria 503 da Stripe
+                    resolver_parcial(_rev(a.fatura)["id"], "adm2", 6_000, "outro admin revisou", 30_000)
+                except Exception as exc:  # noqa: BLE001
+                    erros.append(exc)
     mundo.stripe.durante = revisa
     r = _pix(adm, saque)
-    assert r.status_code == 200, r.text[:120]
-    assert r.json()["amount_cents"] == _saque(saque)["amount_cents"] == 13_000
+    assert [type(e) for e in erros] == [SaqueAberto]
+    assert r.status_code == 409, r.text[:120]
+    assert _saque(saque)["amount_cents"] == 17_000
 
 def test_corrida_webhook_entre_consulta_e_trava(adm, mundo, monkeypatch):
     """A consulta não acha nada; o webhook entra antes da trava. A regra que já existe recusa."""

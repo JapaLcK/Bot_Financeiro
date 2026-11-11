@@ -15,7 +15,7 @@ from typing import Any
 from uuid import UUID
 
 from core.crypto import PiiAccessContext, decrypt_pii_optional, encrypt_pii_optional
-from core.pg_text import tem_veneno
+from core.pg_text import causa_segura, tem_veneno
 
 from .connection import get_conn
 from .users import _check_password, ensure_user_tx
@@ -609,6 +609,10 @@ def build_user_export_zip(user_id: int) -> bytes:
             zf.writestr(f"csv/{name}.csv", csv_buffer.getvalue())
 
     return buffer.getvalue()
+
+
+class ExclusaoIncompleta(RuntimeError):
+    """Sobra depois da exclusão de conta. O texto é nosso (uid e contagem por tabela), sem dado do titular."""
 
 
 class ResetLockUnavailableError(RuntimeError):
@@ -1333,7 +1337,7 @@ def delete_user_data(
 
                 cur.execute("select 1 from users where id = %s", (user_id,))
                 if cur.fetchone():
-                    raise RuntimeError(f"Falha ao remover usuário {user_id}: registro ainda existe após a limpeza final.")
+                    raise ExclusaoIncompleta(f"Falha ao remover usuário {user_id}: registro ainda existe após a limpeza final.")
 
                 # ANTES do commit, e de dentro da transação: o commit pode levantar
                 # com a transação JÁ APLICADA — é o "commit ambíguo" que
@@ -1388,7 +1392,7 @@ def delete_user_data(
             conn.commit()
 
         if user_still_exists or leftovers:
-            raise RuntimeError(
+            raise ExclusaoIncompleta(
                 f"Falha ao confirmar exclusão do usuário {user_id}: "
                 f"user_exists={user_still_exists}; leftovers={leftovers}"
             )
@@ -1554,7 +1558,8 @@ def excluir_conta_marcada(user_id: int) -> dict:
     # a exclusão que levanta reagenda e volta `deleted: False`, como antes.
     if falha_local is not None:
         _restore_account_deletion_schedule(user_id)
-        return {"user_id": user_id, "deleted": False, "error": str(falha_local)}
+        return {"user_id": user_id, "deleted": False,
+                "error": str(falha_local) if isinstance(falha_local, ExclusaoIncompleta) else causa_segura(falha_local)}
 
     return resultado
 

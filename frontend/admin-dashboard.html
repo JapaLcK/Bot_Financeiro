@@ -2821,9 +2821,10 @@ function syncAffResult() {
 
 function openReviewForm(id) {
   const r = affPendencias.get(id);
+  const emSaque = r.commission_status !== 'paid' && r.payout_status === 'requested';  // o servidor recusa menos que o cheio
   const hint = r.commission_status === 'paid'
     ? 'Comissão já paga: nada muda no saque, e a diferença vira recuperação.'
-    : (r.payout_id ? 'Se o Pix deste saque já saiu, não revise agora: use "Pagamento já realizado" no saque e revise depois. QR gerado antes da revisão traz o valor velho.' : 'A comissão volta ao saldo com o valor aprovado.');
+    : (emSaque ? `Comissão no saque ${r.payout_id}, ainda aberto: só o valor cheio libera, e o saque não muda. Para aprovar menos, rejeite o saque se o Pix não saiu, ou registre "Pagamento já realizado" se saiu; depois revise.` : 'A comissão volta ao saldo com o valor aprovado.');
   openAffForm({
     title: 'Revisar comissão de ' + fmtCents(r.commission_cents),
     hint: `Devolvido ao cliente: ${fmtCents(r.refunded_cents)}. ${hint}`,
@@ -2831,7 +2832,10 @@ function openReviewForm(id) {
     caminho: `/admin/api/affiliates/refund-reviews/${id}/approve`,
     corpo: () => ({ approved_cents: Math.round(Number($id('aff-f-value').value) * 100), refunded_cents: r.refunded_cents, justification: $id('aff-f-just').value }),
   });
-  $id('aff-f-value').max = (r.commission_cents / 100).toFixed(2);
+  const cheio = (r.commission_cents / 100).toFixed(2);
+  $id('aff-f-value').max = cheio;
+  $id('aff-f-value').min = emSaque ? cheio : '0';
+  if (emSaque) $id('aff-f-value').value = cheio;
 }
 
 function openRecordedForm(id) {
@@ -2854,7 +2858,9 @@ function openRecoveryForm(id) {
     caminho: `/admin/api/affiliates/refund-reviews/${id}/close-recovery`,
     corpo: () => {
       const result = $id('aff-f-result').value, justification = $id('aff-f-just').value;
-      return result === 'waived' ? { result, justification } : { result, justification, recovered_on: $id('aff-f-date').value, receipt_ref: $id('aff-f-ref').value };
+      // `r` é o da abertura: reler `affPendencias` aqui mandaria o valor da lista recarregada e anularia o 409.
+      const visto = { result, recovery_cents: r.recovery_cents, justification };
+      return result === 'waived' ? visto : { ...visto, recovered_on: $id('aff-f-date').value, receipt_ref: $id('aff-f-ref').value };
     },
   });
 }

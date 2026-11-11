@@ -30,6 +30,10 @@ class PendenciaMudou(Exception):
     """A pendência não está mais como o admin a viu: a rota responde 409."""
 
 
+class SaqueAberto(PendenciaMudou):
+    """Valor menor que o cheio para comissão em saque aberto: o saque nunca muda de valor depois do QR."""
+
+
 def trava_fatura(cur, fatura: str) -> None:
     """Serializa reembolso e nascimento da comissão da mesma fatura: sem ela, o reembolso não vê
     a comissão, a comissão não vê o reembolso, e nenhum dos dois a segura."""
@@ -199,6 +203,8 @@ def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: st
     """Fecha a revisão parcial com o valor aprovado. False = pendência inexistente.
 
     `PendenciaMudou` se ela não está mais como o admin viu; valor fora da faixa é `ValueError`.
+    Comissão em saque aberto (vivo ou órfão) só aprova o valor cheio, que destrava sem mudar o saque;
+    menor é `SaqueAberto` (D11): o saque nunca muda de valor depois do QR.
     Comissão paga não muda (D6): a diferença vira recuperação, atribuída e nunca somada, então
     reprocessar não duplica, e o que já foi encerrado não é cobrado de novo."""
     with get_conn() as conn, conn.cursor() as cur:
@@ -225,38 +231,27 @@ def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: st
         atual = c["amount_cents"]
         if not 0 <= aprovado_cents <= atual:
             raise ValueError("Valor aprovado fora da faixa.")
+        if saque is not None and aprovado_cents != atual:
+            raise SaqueAberto(f"A comissão está no saque {saque['id']}, ainda aberto: só o valor cheio libera."
+                              " Para aprovar menos, rejeite o saque se o Pix não saiu, ou registre"
+                              " \"Pagamento já realizado\" se saiu; depois revise o valor.")
         diferenca, status, falta = atual - aprovado_cents, "resolved", None
         if c["status"] == "paid":
             falta = max(0, diferenca - r["recovery_closed_cents"]) or None
             status = "recovery" if falta else "resolved"
-        elif diferenca:
-            if c["id"] is None:  # saque órfão: o valor da comissão mora na linha
-                cur.execute("update affiliate_refund_reviews set commission_cents = %s where id = %s",
-                            (aprovado_cents, r["id"]))
-            elif aprovado_cents == 0:  # equivale a estorno: `amount_cents` fica como estava
+        elif diferenca:  # fora de saque aberto: a comissão solta
+            if aprovado_cents == 0:  # equivale a estorno: `amount_cents` fica como estava
                 cur.execute("update affiliate_commissions set status = 'reversed', payout_id = null where id = %s",
                             (c["id"],))
             else:
                 cur.execute("update affiliate_commissions set amount_cents = %s where id = %s",
                             (aprovado_cents, c["id"]))
-            if saque:
-                _encolher_saque(cur, saque, diferenca)
         cur.execute("update affiliate_refund_reviews set status = %s, approved_cents = %s, recovery_cents = %s"
                     " where id = %s", (status, aprovado_cents, falta, r["id"]))
         registrar_evento(cur, r["id"], "partial_approved", revisor, antes=atual, depois=aprovado_cents,
                          saque=c["payout_id"], justificativa=nota)
         conn.commit()
     return True
-
-
-def _encolher_saque(cur, saque: dict, diferenca: int) -> None:
-    """Saque que ficaria sem valor vira `rejected`, com o `amount_cents` histórico."""
-    novo = saque["amount_cents"] - diferenca
-    if novo > 0:
-        cur.execute("update affiliate_payouts set amount_cents = %s where id = %s", (novo, saque["id"]))
-    else:
-        cur.execute("update affiliate_payouts set status = 'rejected', note = 'Comissão ajustada na revisão.'"
-                    " where id = %s", (saque["id"],))
 
 
 def refunded_at_da_pendencia(review_id: int):
@@ -267,19 +262,21 @@ def refunded_at_da_pendencia(review_id: int):
     return linha and linha["refunded_at"]
 
 
-def encerrar_recuperacao(review_id: int, resultado: str, ator: str, justificativa: str,
+def encerrar_recuperacao(review_id: int, resultado: str, ator: str, justificativa: str, visto_cents: int,
                          data=None, referencia: str | None = None) -> bool:
     """Admin encerra a recuperação como `recovered` ou `waived`. False = inexistente.
 
     Sem efeito em saldo: nada desconta de saque futuro. Repetir é `PendenciaMudou`, de propósito:
-    dois admins com resultados diferentes não podem parecer ambos atendidos."""
+    dois admins com resultados diferentes não podem parecer ambos atendidos. `visto_cents` é o valor
+    que o formulário mostrou: fato novo entre ver e enviar (total, disputa perdida) também é 409."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("select * from affiliate_refund_reviews where id = %s for update", (int(review_id),))
         r = cur.fetchone()
         if r is None:
             return False
-        if r["status"] != "recovery":
-            raise PendenciaMudou("Esta recuperação já foi encerrada.")
+        if r["status"] != "recovery" or r["recovery_cents"] != visto_cents:
+            raise PendenciaMudou("A recuperação mudou ou já foi encerrada. Feche o formulário e abra de novo"
+                                 " para conferir o valor.")
         cur.execute(
             """
             update affiliate_refund_reviews

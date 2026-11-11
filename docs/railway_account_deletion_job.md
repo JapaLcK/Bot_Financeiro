@@ -81,8 +81,10 @@ sessão — remeça antes de reusar (CLAUDE.md §2), com
 
 O resumo que a rodada NORMAL grava em `system_event_logs`
 (`event_type = account_deletion_job`) traz **contagens**, incluindo quantos erros
-houve (`details.errors` é um número) — não a lista. O `user_id` e o texto do erro
-saem só no **log do processo** (a saída `[account_deletion_job] concluído: …` do
+houve (`details.errors` é um número) — não a lista. O `user_id` e a causa do erro
+(`motivo=… sqlstate=… status=…`; nas duas sobras, a mensagem nossa: a conta que continua
+existindo dentro da transação, que volta, ou, depois do commit, as tabelas e as contagens que
+ficaram) saem só no **log do processo** (a saída `[account_deletion_job] concluído: …` do
 Railway, retenção finita). O `--dry-run` grava no MESMO `event_type` um resumo
 diferente e menor — `{"due_accounts": N, "dry_run": true}`, sem chave `errors`:
 ele não apaga nada, logo não há erro a contar.
