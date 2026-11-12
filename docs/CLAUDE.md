@@ -2247,7 +2247,7 @@ vira 30 com 30 pago), porque o pago do banco das compras que saem fica no limite
 corrente do cartão do banco: pagamento manual acima do total que sobra depois que uma compra some é aparado ao total, como o
 `rebuild_bill_totals` já faz. Limite: se o `billId` de uma compra
 passa a apontar para fatura do banco que não está no `/bills` (a aberta), a fatura antiga do Pig mantém o pago anterior até a
-do banco fechar e voltar no `/bills`. (também o export LGPD, `db/privacy.py`, lê a tabela.)
+do banco fechar e voltar no `/bills`. (também o export LGPD, `db/privacy_export_conjuntos.py`, lê a tabela.)
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com
@@ -2751,7 +2751,7 @@ em revisão" (`owed_cents`) soma toda comissão `pending`, inclusive a em revis�
 saque aberto: dois pedidos simultâneos dão um saque, e a FK do webhook que grava comissão
 não espera essa trava. Ele lê as comissões duas vezes: `for update` nas elegíveis e nova leitura
 excluindo pendência aberta, porque o webhook parcial não altera a linha da comissão, e o Postgres
-não reavalia o filtro nesse caso. Na exportação LGPD (`db/privacy.py`): `afiliado` (com `indicacoes`,
+não reavalia o filtro nesse caso. Na exportação LGPD (`db/privacy_export.py`): `afiliado` (com `indicacoes`,
 a mesma contagem de `stats.referrals`, e `chave_pix` decifrada, auditada em `pii_access_log` com
 `ATOR_TITULAR`), `afiliado_comissoes` (com `original_amount_cents`), `afiliado_saques` (com `chave_pix`
 do pedido) e `indicacao_recebida`; nunca `referred_user_id`, `stripe_invoice_id`,
@@ -3575,6 +3575,10 @@ grep -ohiE "create table if not exists ([a-z_]+)" db/*.py | awk '{print $NF}' | 
 
 Exceção: os índices de FK nascem em `db/schema_repairs.py::ensure_fk_indexes_once`,
 fora do `init_db` (que segue a fonte do resto do DDL) — ver "Tarefas de fundo".
+
+**Tabela nova com FK para `users` (direta ou por join) → classificar na exportação LGPD**, em
+`db/privacy_export_conjuntos.py`: `EXPORTADAS` (dataset e SQL com `%(uid)s`) ou `NAO_EXPORTADAS`
+(com o motivo). A guarda é `tests/test_exportacao_completa.py`, que lê o fecho de FK no banco.
 
 **Toda coluna `numeric`/`double precision`/`real` do schema `public` tem um CHECK
 `finito_<coluna>` = `abs(col) <= utils_text.VALOR_MAX` (10**13, limite técnico do banco; NULL

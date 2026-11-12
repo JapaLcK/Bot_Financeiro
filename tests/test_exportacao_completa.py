@@ -87,7 +87,13 @@ def _nao_classificadas(exportadas, nao_exportadas, fecho) -> tuple[list, list, l
 
 
 def test_t1_registro_real():
-    assert _nao_classificadas(EXPORTADAS, NAO_EXPORTADAS, _fecho()) == ([], [], [])
+    faltam, orfas, duplicadas = _nao_classificadas(EXPORTADAS, NAO_EXPORTADAS, _fecho())
+    assert not faltam, (f"tabela com FK até `users` sem classificação na exportação LGPD: {faltam}. Classifique em"
+                        " `db/privacy_export_conjuntos.py`: `EXPORTADAS` (dataset e SQL com `%(uid)s`) ou"
+                        " `NAO_EXPORTADAS` (tabela -> motivo)")
+    assert not orfas, (f"nome em `db/privacy_export_conjuntos.py` que não chega a `users` por FK (tabela"
+                       f" removida ou renomeada?): {orfas}")
+    assert not duplicadas, f"tabela em `EXPORTADAS` e em `NAO_EXPORTADAS` ao mesmo tempo: {duplicadas}"
 
 
 def test_t1_guarda_acusa_falta_orfa_e_duplicada():
@@ -133,7 +139,8 @@ def test_t2_guarda_acusa_posicional_estrela_e_coluna_nomeada_com_segredo():
         == [("x", "secret")]
     assert set(_colunas_secretas({"identidades": ("user_identities", "select * from user_identities")})) \
         == {("identidades", "external_id_hash"), ("identidades", "external_id_enc")}
-    # os termos curtos só casam como palavra do snake_case: `basalt` e `notpin` não são `salt` nem `pin`
+    # os termos curtos só casam como palavra do snake_case: `basalt` não é `salt`. (`pin`, `key` e `refresh`
+    # ficaram fora do padrão de propósito: dão falso positivo.)
     assert _colunas_secretas({"x": ("users", "select 1 as otp_code, 1 as card_cvv, 1 as basalt, 1 as private"
                                               " from users where id = %(uid)s")}) \
         == [("x", "otp_code"), ("x", "card_cvv"), ("x", "private")]
@@ -152,7 +159,8 @@ def _vazios(dados: dict, erros: dict) -> list[tuple[str, str | None]]:
 
 
 def test_t3_zip_de_a_nao_tem_nada_de_b():
-    tabelas = {t for t, _ in EXPORTADAS.values()} - set(ORFAS_PENDENTES_DP9)
+    # sem `users`: a linha de `usuario` é a do `ensure_user` do semeador
+    tabelas = {t for t, _ in EXPORTADAS.values()} - set(ORFAS_PENDENTES_DP9) - {"users"}
     a, marca_a, soltas_a, erros_a = semeia("ISOA", tabelas)
     soltas_b = []
     try:
