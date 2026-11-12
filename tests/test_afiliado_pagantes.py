@@ -139,8 +139,8 @@ def _admin(monkeypatch):
 
 @pytest.mark.parametrize("corpo,esperado", [
     ({"commission_bps": 0}, 0), ({"commission_bps": "0"}, 0),
-    ({}, 1000), ({"commission_bps": None}, 1000), ({"commission_bps": ""}, 1000),
-    ({"commission_bps": False}, 1000), ({"commission_bps": 2500}, 2500),
+    ({}, 10_000), ({"commission_bps": None}, 10_000), ({"commission_bps": ""}, 10_000),
+    ({"commission_bps": False}, 10_000), ({"commission_bps": 2500}, 2500),
 ], ids=["zero", "zero_texto", "ausente", "null", "vazio", "false", "positivo_normal"])
 def test_admin_grava_zero_como_zero_e_ausente_como_padrao(monkeypatch, corpo, esperado):
     c = _conta(plano=False)
@@ -183,12 +183,13 @@ def test_percentual_fora_da_faixa_segue_recusado(bps):
         create_affiliate(_conta(plano=False).uid, commission_bps=bps)
 
 
-def test_pix_conta_pagante_e_nao_gera_comissao(externo):
-    c = _afiliado()
+def test_pix_conta_pagante_e_gera_comissao_de_um_doze_avos(externo):
+    c = _afiliado()  # 10%
     cobranca = _pix(_indicado(c))
     entregar("PAYMENT_RECEIVED", cobranca)
     assert _numeros(c) == (1, 1, 0, 0, 0)
-    assert _me(c)["commissions"] == []
+    # 49900 × 10% ÷ 12 = 415,83 → 416 (tests/test_afiliado_comissao_pix.py mede a regra)
+    assert [(x["amount"], x["invoice_amount"], x["paid_months"]) for x in _me(c)["commissions"]] == [(4.16, 499.0, 12)]
     assert [(x["source"], x["payment_ref"], x["amount_cents"]) for x in _linhas(c)] == [
         ("pix", str(cobranca["id"]), cobranca["amount_cents"])]
     assert "afiliado" in efeitos(cobranca["asaas_payment_id"])
@@ -267,6 +268,7 @@ def test_reembolso_pix_parcial_rotula_e_nao_revoga(externo):
     ind = _indicado(c)
     cobranca = _pix(ind)
     entregar("PAYMENT_RECEIVED", cobranca)
+    externo["refunds"] = [{"value": 10.0, "status": "DONE"}]  # com comissão o parcial lê o acumulado
     entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)
     assert _numeros(c) == (1, 1, 0, 0, 1)
     assert [g["status"] for g in list_grants(ind.uid) if g["source"] == "pix"] == ["active"]
@@ -290,6 +292,7 @@ def test_pix_parcial_com_o_afiliado_pendente_rotula_na_retentativa(externo, monk
     with monkeypatch.context() as m:
         m.setattr(pagamentos, "registrar_pagamento", _quebra)
         eid = entregar("PAYMENT_RECEIVED", cobranca)
+    externo["refunds"] = [{"value": 10.0, "status": "DONE"}]
     entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)  # ainda sem linha para marcar
     drenar_evento(eid)
     assert _numeros(c) == (1, 1, 0, 0, 1)
@@ -406,6 +409,7 @@ def test_pix_reembolso_depois_da_exclusao_do_indicado_e_rotulado(externo, tipo, 
     cobranca = _pix(ind)
     entregar("PAYMENT_RECEIVED", cobranca)
     db.delete_user_data(ind.uid)
+    externo["refunds"] = [{"value": 10.0, "status": "DONE"}]  # a comissão segue: o parcial lê o acumulado
     eid = entregar(tipo, cobranca)
     assert evento(eid)["processed_at"] is not None
     assert _numeros(c) == esperado
@@ -515,7 +519,7 @@ def test_resposta_so_leva_contagens_e_rotulo(cobrar):
                                "paying_clients", "refunded_clients", "refunds"}
     assert set(m["stats"]["refunds"]) == {"total", "partial"}
     assert set(m["commissions"][0]) == {"id", "invoice_amount", "amount", "original_amount", "in_review", "checking", "status",
-                                        "available_at", "created_at", "payout_id", "payment_refund"}
+                                        "available_at", "created_at", "payout_id", "payment_refund", "paid_months"}
     assert [p for p in (fatura, ind.email, str(ind.uid), "referral_id", "refunded_at",
                         "stripe", "source") if p in r.text] == []
 

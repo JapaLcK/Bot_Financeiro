@@ -16,8 +16,31 @@ def desvincular_afiliado(cur, user_id: int) -> None:
     `open` de comissão solta fecha: nunca paga nem em saque, não há o que bloquear nem recuperar.
     Roda na transação de `delete_user_data`, antes de apagar `affiliates`, que leva as comissões.
 
-    Travas na ordem do `request_payout` (afiliado, depois comissões), com os saques no meio: afiliado,
+    Ordem global entre exclusões (#1414): roda para todo usuário, afiliado ou não. Primeiro trava, uma
+    linha por vez e em ordem de id, os afiliados ligados ao usuário: o dele FOR UPDATE, e os que o
+    indicaram ou têm comissão dele FOR KEY SHARE. Toda linha-filho que esta transação apaga (cascata) ou
+    anula (set null) pertence a um afiliado travado aqui, e as duas forças conflitam: duas exclusões
+    ligadas se encontram em `affiliates`, em ordem total, e nunca nas referrals e comissões. KEY SHARE
+    convive com o `no key update` do saque e do percentual e com a FK de comissão nova. Subir a força
+    de uma trava já pega seria o deadlock clássico; por isso uma por vez. Indicação nova entre a leitura e
+    a trava não espera nada, mas `record_referral` só roda no cadastro: exige excluir a conta no instante
+    do próprio cadastro (resíduo aceito). Comissão nova sai de afiliado já no conjunto.
+
+    Depois, na ordem do `request_payout` (afiliado, depois comissões), com os saques no meio: afiliado,
     saques, comissões, pendências. Comissões antes do afiliado fariam ciclo com o pedido de saque."""
+    cur.execute(
+        """
+        select a.id, a.user_id = %(u)s as proprio from affiliates a
+         where a.user_id = %(u)s
+            or a.id in (select affiliate_id from affiliate_referrals where referred_user_id = %(u)s
+                        union select affiliate_id from affiliate_commissions where referred_user_id = %(u)s)
+         order by a.id
+        """,
+        {"u": int(user_id)},
+    )
+    for a in cur.fetchall():
+        modo = "for update" if a["proprio"] else "for key share"
+        cur.execute(f"select id from affiliates where id = %s {modo}", (a["id"],))
     cur.execute("select id, code from affiliates where user_id = %s for update", (int(user_id),))
     afiliado = cur.fetchone()
     if afiliado is None:
@@ -84,11 +107,39 @@ def limpar_sem_comissao(dias: int = 30, limite: int = 500) -> int:
     return apagadas
 
 
+ESPERA_CONFERENCIA_S = 3600  # a adiada (fatura que ainda não confirma) volta à fila do worker depois disto
+# Toda marca grava o instante dela; quem libera compara o que leu antes da Stripe, para não apagar a marca
+# posta depois da leitura (#1498). E entra como nunca tentada: não herda a espera de 1 h de um adiamento antigo.
+_MARCA = "payment_check_pending = true, payment_check_marked_at = clock_timestamp(), payment_check_tried_at = null"
+
+
 def comissoes_a_conferir(limite: int = 20) -> list[dict]:
+    """Primeiro as nunca tentadas, por id; depois a tentativa mais antiga, passada a espera (#1497). Assim
+    as que nunca confirmam não seguram as seguintes. A espera é medida pelo `now()` do banco."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select id, stripe_invoice_id from affiliate_commissions where payment_check_pending"
-                    " order by id limit %s", (int(limite),))
+        cur.execute(
+            """
+            select id, stripe_invoice_id, payment_check_marked_at from affiliate_commissions
+             where payment_check_pending
+               and (payment_check_tried_at is null
+                    or payment_check_tried_at < now() - make_interval(secs => %(espera)s))
+             order by payment_check_tried_at nulls first, id
+             limit %(limite)s
+            """,
+            {"espera": ESPERA_CONFERENCIA_S, "limite": int(limite)},
+        )
         return cur.fetchall()
+
+
+def adiar_conferencia(commission_id: int, motivo: str, lido) -> None:
+    """Só o worker: a fatura ainda não confirma. Grava a hora e o motivo, depois do HTTP e numa transação
+    curta; a marca, e com ela o bloqueio financeiro, fica. Marca posta durante o HTTP (`lido`, como em
+    `liberar_conferencia`) não herda a espera: segue nunca tentada (#1498)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update affiliate_commissions set payment_check_tried_at = now(), payment_check_reason = %s"
+                    " where id = %s and payment_check_pending and payment_check_marked_at is not distinct from %s",
+                    (motivo, int(commission_id), lido))
+        conn.commit()
 
 
 def marcar_conferencia(commission_ids: list[int]) -> None:
@@ -96,15 +147,30 @@ def marcar_conferencia(commission_ids: list[int]) -> None:
     if not commission_ids:
         return
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("update affiliate_commissions set payment_check_pending = true where id = any(%s)",
+        cur.execute(f"update affiliate_commissions set {_MARCA} where id = any(%s)",
                     ([int(i) for i in commission_ids],))
         conn.commit()
 
 
-def liberar_conferencia(commission_id: int) -> None:
+def marcar_conferencia_da_fatura(fatura: str) -> int | None:
+    """A do webhook, que só sabe a fatura (#1498): o id da comissão marcada, ou None sem comissão viva."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("update affiliate_commissions set payment_check_pending = false where id = %s", (int(commission_id),))
+        cur.execute(f"update affiliate_commissions set {_MARCA}"
+                    " where stripe_invoice_id = %s and status <> 'reversed' returning id", (fatura,))
+        linha = cur.fetchone()
         conn.commit()
+    return linha["id"] if linha else None
+
+
+def liberar_conferencia(commission_id: int, lido) -> bool:
+    """Tira a marca só se ela segue a que quem confere leu antes da Stripe (`lido` = `payment_check_marked_at`,
+    None na que nasceu marcada). False = outra marca chegou no meio: fica para o worker."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update affiliate_commissions set payment_check_pending = false, payment_check_tried_at = null,"
+                    " payment_check_reason = null, payment_check_marked_at = null"
+                    " where id = %s and payment_check_marked_at is not distinct from %s", (int(commission_id), lido))
+        conn.commit()
+        return cur.rowcount == 1
 
 
 def resumo_da_conferencia() -> dict:

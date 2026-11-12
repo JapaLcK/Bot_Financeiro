@@ -51,9 +51,10 @@ ADMIN_DASHBOARD_PASSWORD = os.getenv("ADMIN_DASHBOARD_PASSWORD", "")
 ADMIN_DASHBOARD_PASSWORD_HASH = os.getenv("ADMIN_DASHBOARD_PASSWORD_HASH", "")
 ADMIN_DASHBOARD_SESSION_HOURS = float(os.getenv("ADMIN_DASHBOARD_SESSION_HOURS", "12"))
 # Prazo total da conferência na Stripe antes de pagar um saque de afiliado: estouro é 503, e o admin tenta
-# de novo. O SDK sozinho espera até 80 s por chamada, e a thread que estourou segue presa até lá: por isso
-# a conferência tem executor próprio, com VAGAS_CONFERENCIA threads, e nunca o padrão do asyncio, que todas
-# as rotas usam via `to_thread`. Vagas cheias = 503 na hora, sem consultar.
+# de novo. Cada chamada à Stripe da conferência tem prazo próprio (`ebook_entrega.PRAZO_STRIPE_S`, sem
+# retentativa), então uma Stripe pendurada solta a vaga em cerca de 8 s por fatura, e não nos 80 s × 3 do SDK.
+# O executor próprio continua: a thread que estourou o prazo total segue com a vaga até a última chamada
+# vencer. Vagas cheias = 503 na hora, sem consultar.
 PRAZO_CONFERENCIA_S = 20
 VAGAS_CONFERENCIA = 4
 _VAGAS_CONFERENCIA = threading.BoundedSemaphore(VAGAS_CONFERENCIA)
@@ -2264,10 +2265,33 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             "commission_checks": conferencia,
         }))
 
+    def _bps_do_corpo(payload: dict, padrao: int | None) -> int:
+        """`commission_bps` do corpo; ausente vira `padrao` (None = obrigatório, 422).
+        A faixa 0..10000 é do `db` (ValueError → 400 em quem chama)."""
+        # int() FORA do try dava 500: 'abc'/NaN → ValueError, [10]/{'a':1}/null →
+        # TypeError, Infinity/1e400 → OverflowError. São as TRÊS que int() levanta
+        # sobre valor vindo de json.loads. Mesmo tratamento do `months`.
+        try:
+            bruto = payload.get("commission_bps")
+            # `or` aqui transformava 0 no padrão: ausente vira padrão, e 0 fica 0. `int()` sozinho
+            # aceita `true`, "1_000", "+5", " 5 " e dígito não ASCII.
+            if bruto in (None, "") or bruto is False:
+                if padrao is None:
+                    raise ValueError("commission_bps ausente")
+                return padrao
+            if bruto is True or (isinstance(bruto, str) and not (bruto.isascii() and bruto.isdigit())):
+                raise ValueError("commission_bps inválido")
+            bps = int(bruto)
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(status_code=422, detail="commission_bps inválido.")
+        if isinstance(bruto, float) and bps != bruto:  # `int(0.5)` gravaria 0% em silêncio
+            raise HTTPException(status_code=400, detail="commission_bps deve ser inteiro.")
+        return bps
+
     @app.post("/admin/api/affiliates")
     async def admin_affiliate_create(request: Request, username: str = Depends(_get_current_admin)):
         """Cria um afiliado a partir do email de uma conta existente.
-        Body: {"email": "...", "code": "OPCIONAL", "commission_bps": 1000}"""
+        Body: {"email": "...", "code": "OPCIONAL", "commission_bps": 10000 (padrão)}"""
         from db import find_user_id_by_email
         from db.affiliates import DEFAULT_COMMISSION_BPS, create_affiliate
 
@@ -2285,24 +2309,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         # .strip() → AttributeError → 500. O `except ValueError` abaixo não pega.
         if code is not None and not isinstance(code, str):
             raise HTTPException(status_code=422, detail="code inválido.")
-        # int() FORA do try dava 500: 'abc'/NaN → ValueError, [10]/{'a':1}/null →
-        # TypeError, Infinity/1e400 → OverflowError. São as TRÊS que int() levanta
-        # sobre valor vindo de json.loads, e o try abaixo só embrulha o
-        # create_affiliate e só pega ValueError. Mesmo tratamento do `months`.
-        try:
-            bruto = payload.get("commission_bps")
-            # `or` aqui transformava 0 em 10%: ausente vira padrão, e 0 fica 0. `int()` sozinho
-            # aceita `true`, "1_000", "+5", " 5 " e dígito não ASCII.
-            if bruto in (None, "") or bruto is False:
-                bps = DEFAULT_COMMISSION_BPS
-            elif bruto is True or (isinstance(bruto, str) and not (bruto.isascii() and bruto.isdigit())):
-                raise ValueError("commission_bps inválido")
-            else:
-                bps = int(bruto)
-        except (TypeError, ValueError, OverflowError):
-            raise HTTPException(status_code=422, detail="commission_bps inválido.")
-        if isinstance(bruto, float) and bps != bruto:  # `int(0.5)` gravaria 0% em silêncio
-            raise HTTPException(status_code=400, detail="commission_bps deve ser inteiro.")
+        bps = _bps_do_corpo(payload, DEFAULT_COMMISSION_BPS)
         try:
             affiliate = await asyncio.to_thread(create_affiliate, int(user_id), code, bps)
         except ValueError as exc:
@@ -2346,6 +2353,30 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         )
         return {"ok": True, "status": status}
 
+    @app.post("/admin/api/affiliates/{affiliate_id}/commission")
+    async def admin_affiliate_set_commission(
+        affiliate_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """Body: {"commission_bps": 0..10000}. Vale para as próximas primeiras cobranças:
+        comissão já registrada não muda."""
+        from db.affiliates import set_affiliate_commission
+
+        bps = _bps_do_corpo(await _json_object_body(request), None)
+        try:
+            antes = await asyncio.to_thread(set_affiliate_commission, affiliate_id, bps)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=detalhe_seguro(exc))
+        if antes is None:
+            raise HTTPException(status_code=404, detail="Afiliado não encontrado.")
+        await log_system_event(
+            "info",
+            "affiliate_commission_changed",
+            f"Comissao do afiliado {affiliate_id}: {antes} -> {bps} bps.",
+            source="affiliates",
+            details={"affiliate_id": affiliate_id, "before_bps": antes, "after_bps": bps},
+        )
+        return {"ok": True, "commission_bps": bps}
+
     async def _conferir_saque_na_stripe(payout_id: int) -> dict | None:
         """Consulta cada fatura do saque antes de o dinheiro sair, fora de transação e com prazo. None = Stripe
         fora, sem chave, prazo estourado ou vagas cheias: a thread que estourou termina sozinha, segurando a
@@ -2377,15 +2408,19 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         sem digitar chave nem valor (que é onde mora o erro).
         """
         from core.services.pix_brcode import build_pix_brcode, qr_svg_data_url
-        from db.affiliates import get_payout
+        from db.affiliates import EM_CONFERENCIA, get_payout
 
-        def aberto(row: dict | None, bloqueado: str) -> dict:
+        def aberto(row: dict | None, bloqueado: str, relido: bool = False) -> dict:
             if not row:
                 raise HTTPException(status_code=404, detail="Saque não encontrado.")
             if row["status"] != "requested":  # pago, rejeitado ou registrado: um QR aqui pagaria de novo
                 raise HTTPException(status_code=409, detail="Este saque não está aberto.")
             if row["blocked"]:
                 raise HTTPException(status_code=409, detail=bloqueado)
+            # Relido: marca que o webhook pôs durante a consulta também segura (#1498). Antes da consulta, não:
+            # a disputa do D10 tem resposta própria, e a consulta decide.
+            if relido and row["checking"]:
+                raise HTTPException(status_code=409, detail=EM_CONFERENCIA)
             if not row.get("pix_key_enc"):  # órfão (D9) ou saque sem chave
                 raise HTTPException(status_code=422, detail="Este saque não tem chave Pix registrada.")
             return row
@@ -2399,7 +2434,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             raise HTTPException(status_code=409, detail=_DISPUTA_ABERTA)
         # Relê o saque inteiro: outro admin pode ter rejeitado, pago ou revisado durante a consulta.
         row = aberto(await asyncio.to_thread(get_payout, payout_id),
-                     "Reembolso de cliente achado na Stripe: o saque ficou bloqueado para revisão.")
+                     "Reembolso de cliente achado na Stripe: o saque ficou bloqueado para revisão.", relido=True)
         payout = _decrypt_affiliate_row(row, username)  # registra o acesso à PII
         pix_key = (payout.get("pix_key") or "").strip()
         if not pix_key:

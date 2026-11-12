@@ -168,10 +168,12 @@ def test_comissao_com_pendencia_ja_existente_nao_e_marcada(fonte):
     """Com linha da fatura, quem decide é `promover`: sem consulta à Stripe."""
     c = _afiliado()
     ind, fatura = _nova(c)
+    fonte.cobra(fatura, devolvido=30_000)
     assert _enviar("charge.refunded", _cobranca(fatura, devolvido=30_000)).status_code == 200
+    antes = fonte.consultas  # o webhook já lê a fatura (#1498); o que se mede é o `invoice.paid`
     _invoice_paid(ind, fatura)
     com = _comissao_da(fatura)
-    assert (com["payment_check_pending"], fonte.consultas, _rev(fatura)["status"]) == (False, 0, "open")
+    assert (com["payment_check_pending"], fonte.consultas - antes, _rev(fatura)["status"]) == (False, 0, "open")
 
 
 # ── Limpeza ──────────────────────────────────────────────────────────────────
@@ -244,8 +246,9 @@ def test_worker_confere_e_limpa():
         "limpa": "db.affiliate_reviews_manutencao:limpar_sem_comissao",
         "confere": "core.services.afiliado_reembolso:conferir_pendentes",
         "aviso": "core.services.afiliado_reembolso:reenviar_pendentes",
+        "reconcilia": "core.services.afiliado_reconciliacao:reconciliar_pagas",
     })
-    assert resultado == {"limpa": True, "confere": True, "aviso": True, "do_disco": []}, diagnostico
+    assert resultado == {"limpa": True, "confere": True, "aviso": True, "reconcilia": True, "do_disco": []}, diagnostico
 
 
 # ── N2: falha de uma comissão não prende a fila; queda geral para a varredura ──

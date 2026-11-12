@@ -44,7 +44,7 @@ from db.affiliates import (
 )
 from db.connection import get_conn
 from test_afiliado_area import ME, _afiliado, _comissao, _esperando_lock, _me, _painel_aberto, _sacar  # noqa: F401
-from test_afiliado_pagantes import AGORA, _admin, _indicado
+from test_afiliado_pagantes import AGORA, _admin, _indicado, _linhas
 from test_afiliado_reembolso import (  # noqa: F401
     _cliente,
     _cobranca,
@@ -53,6 +53,7 @@ from test_afiliado_reembolso import (  # noqa: F401
     _evento,
     _logs,
     _paga,
+    _perde,
     _segura,
     _status,
     mundo,
@@ -220,9 +221,7 @@ def _corrida(primeiro, segundo, com):
 
 
 def _evento_parcial(com, devolvido=30_000):
-    evento = _evento(com.fatura)
-    evento["data"]["object"]["amount_refunded"] = devolvido
-    return evento
+    return _evento(com.fatura, devolvido)
 
 
 def test_pedido_x_webhook_parcial(mundo):
@@ -300,17 +299,55 @@ def test_valor_aprovado_fora_de_saque(adm):
     assert (item["amount"], item["original_amount"], item["in_review"]) == (60, 100, False)
 
 
-def test_valor_aprovado_em_saque_ajusta_o_saque(adm):
+def test_qr_velho_nao_perde_a_diferenca(adm, mundo):
+    """D11, o caso medido: QR de R$ 170 pago por fora, chega o parcial, e a revisão de R$ 60 respondia 200
+    com o saque encolhido para R$ 130 e os R$ 40 sem registro. Agora ela espera o saque."""
+    c = _afiliado()
+    a, _ = _paga(c), _paga(c, 70)
+    saque = _saque_com_pix(c)
+    qr = adm.get(f"/admin/api/affiliates/payouts/{saque}/pix")
+    assert qr.status_code == 200 and qr.json()["amount_cents"] == 17_000
+    mundo.stripe.cobra(a.fatura, devolvido=30_000)
+    _parcial(a)
+    r = _aprovar(adm, a, 6_000)
+    assert r.status_code == 409 and "ainda aberto" in r.json()["detail"], r.text
+    assert _saque(saque)["amount_cents"] == 17_000 and _comissao_db(a)["amount_cents"] == 10_000
+    assert "partial_approved" not in _acoes(a.fatura)
+    assert _pagar(adm, saque).status_code == 409
+    assert _realizado(adm, saque).status_code == 200  # o caminho certo: o Pix saiu
+    assert (_saque(saque)["status"], _saque(saque)["amount_cents"]) == ("paid", 17_000) and _quadros(c)["paid"] == 170
+    assert _aprovar(adm, a, 6_000).status_code == 200
+    rec = [x for x in adm.get(OVERVIEW).json()["refund_recoveries"] if x["commission_id"] == a.id]
+    assert [x["recovery_cents"] for x in rec] == [4_000]
+
+
+def test_revisao_espera_o_saque_rejeitar(adm):
+    """Positivo: o Pix não saiu. Rejeitar, revisar fora do saque, e o novo pedido sai com o valor revisado."""
     c = _afiliado()
     a, b, saque = _dois_com_saque(c)
     _parcial(a)
-    assert _pagar(adm, saque).status_code == 409
+    assert _aprovar(adm, a, 6_000).status_code == 409
+    assert _rejeitar(adm, saque).status_code == 200
+    assert (_quadros(c)["review"], _quadros(c)["available"]) == (100, 70)
     assert _aprovar(adm, a, 6_000).status_code == 200
-    assert _saque(saque)["amount_cents"] == 13_000
-    assert _comissao_db(a)["amount_cents"] + _comissao_db(b)["amount_cents"] == 13_000
-    assert _quadros(c)["generated"] == 130
-    assert _pagar(adm, saque).status_code == 200
+    assert _quadros(c)["available"] == 130
+    novo = request_payout(c.aff["id"])
+    assert novo["amount_cents"] == 13_000
+    assert _pagar(adm, novo["id"]).status_code == 200
     assert _quadros(c) == {"held": 0, "available": 0, "review": 0, "requested": 0, "paid": 130, "generated": 130}
+
+
+@pytest.mark.parametrize("aprovado,codigo", [(0, 409), (6_000, 409), (10_000, 200)], ids=["zero", "menor", "cheio"])
+def test_revisao_espera_o_saque_valores(adm, aprovado, codigo):
+    """Em saque aberto só o cheio passa: destrava sem mudar o saque. Menor (e o zero) é `SaqueAberto`."""
+    c = _afiliado()
+    a, _, saque = _dois_com_saque(c)
+    _parcial(a)
+    assert _aprovar(adm, a, aprovado).status_code == codigo
+    assert (_saque(saque)["status"], _saque(saque)["amount_cents"]) == ("requested", 17_000)
+    assert _status(a) == {"status": "pending", "payout_id": saque} and _comissao_db(a)["amount_cents"] == 10_000
+    assert ("partial_approved" in _acoes(a.fatura)) is (codigo == 200)
+    assert _pagar(adm, saque).status_code == codigo  # o cheio destrava; o menor segue bloqueado
 
 
 def test_parcial_aprovado_cheio_paga_o_valor_original(adm):
@@ -324,23 +361,14 @@ def test_parcial_aprovado_cheio_paga_o_valor_original(adm):
     assert next(x for x in _me(c)["commissions"] if x["id"] == a.id)["original_amount"] is None
 
 
-@pytest.mark.parametrize("cenario", ["solta", "saque", "unica"])
-def test_aprovado_zero(adm, cenario):
+def test_aprovado_zero(adm):
+    """Solta: o zero em saque aberto é `SaqueAberto` (`test_revisao_espera_o_saque_valores`)."""
     c = _afiliado()
     a = _paga(c)
-    b = _paga(c, 70) if cenario == "saque" else None
-    saque = request_payout(c.aff["id"])["id"] if cenario != "solta" else None
     _parcial(a)
     assert _aprovar(adm, a, 0).status_code == 200
     assert _status(a) == {"status": "reversed", "payout_id": None}
     assert _comissao_db(a)["amount_cents"] == 10_000  # fica como estava
-    if cenario == "saque":
-        assert _saque(saque)["amount_cents"] == 7_000 and _status(b)["payout_id"] == saque
-        assert _pagar(adm, saque).status_code == 200
-    elif cenario == "unica":
-        linha = _saque(saque)
-        assert (linha["status"], linha["amount_cents"], linha["note"]) == ("rejected", 10_000, "Comissão ajustada na revisão.")
-        assert _quadros(c)["generated"] == 0
 
 
 @pytest.mark.parametrize("valor", [10_001, -1, True, 1.5, "6000", None, [60]],
@@ -615,9 +643,7 @@ def test_encerrar_com_valor_velho_da_409(mundo, adm, fato, resultado):
     if fato == "total":
         _total(a)
     elif fato == "disputa_perdida":
-        mundo.cobrancas["ch_d"] = _cobranca(a.fatura, devolvido=30_000)
-        assert _enviar("charge.dispute.closed", {"object": "dispute", "status": "lost", "charge": "ch_d",
-                                                 "amount": 70_000}).status_code == 200
+        _perde(a.fatura, 70_000, devolvido=30_000)
     else:
         _parcial(a, 50_000)
     antes = _rev(a.fatura)
@@ -1177,9 +1203,12 @@ def test_rota_pix_recusa(adm):
     caminho = f"/admin/api/affiliates/payouts/{saque}/pix"
     assert adm.get(caminho).status_code == 409
     assert next(p for p in adm.get(OVERVIEW).json()["payouts"] if p["id"] == saque)["blocked"] is True
-    assert _aprovar(adm, a, 6_000).status_code == 200
+    assert _aprovar(adm, a, 6_000).status_code == 409  # D11: o saque aberto não muda de valor
+    assert adm.get(caminho).status_code == 409
+    assert next(p for p in adm.get(OVERVIEW).json()["payouts"] if p["id"] == saque)["blocked"] is True
+    assert _aprovar(adm, a, 10_000).status_code == 200  # o cheio destrava
     r = adm.get(caminho)
-    assert r.status_code == 200 and r.json()["amount_cents"] == 6_000  # QR novo, com o valor novo
+    assert r.status_code == 200 and r.json()["amount_cents"] == 10_000
     assert next(p for p in adm.get(OVERVIEW).json()["payouts"] if p["id"] == saque)["blocked"] is False
 
 
@@ -1275,6 +1304,108 @@ def test_script_confirmacao(script, capsys, caso, motivo):
         assert _linha_de(saida, com) == f"sem_confirmacao: comissão {com.id} · {motivo}"
         assert _rev(com.fatura) is None and _status(com)["status"] == "pending"
     assert com.fatura not in saida
+
+
+def _duas_cobrancas(script, fatura):
+    """R$ 600 com R$ 500 devolvidos e R$ 400 com R$ 400 (P2): pela soma, parcial de R$ 900."""
+    pago = lambda pi: {"status": "paid", "payment": {"type": "payment_intent", "payment_intent": pi}}  # noqa: E731
+    script.stripe.pagamentos[fatura] = [pago(f"{fatura}_a"), pago(f"{fatura}_b")]
+    script.stripe.cobrancas |= {f"{fatura}_a": {"amount": 60_000, "amount_refunded": 50_000, "disputed": False},
+                                f"{fatura}_b": {"amount": 40_000, "amount_refunded": 40_000, "disputed": False}}
+
+
+def _rotulo(fatura):
+    with get_conn() as conn:
+        return conn.execute("select refund_status from affiliate_referral_payments where payment_ref = %s",
+                            (fatura,)).fetchone()["refund_status"]
+
+
+def test_script_duas_cobrancas_sem_comissao_rotula_pela_soma(script, capsys):
+    """S1 (#1498, P3): a 2ª passada usa a regra única; antes, uma cobrança inteira rotulava `total`."""
+    c = _afiliado()
+    fatura = f"in_{uuid.uuid4().hex[:12]}"
+    script.stripe.faturas[_cliente(_indicado(c))] = [_fatura(fatura)]
+    _duas_cobrancas(script, fatura)
+    n, _ = _roda(script, capsys, True)
+    assert (n["reembolsos_partial"], n["reembolsos_total"]) == (1, 0) and _rotulo(fatura) == "partial"
+
+
+def test_script_duas_cobrancas_com_comissao_le_a_fatura_uma_vez(script, capsys):
+    """S2: a 1ª passada registra a parcial de R$ 900; a 2ª não sobe o rótulo para `total` nem relê a fatura."""
+    c = _afiliado()
+    com = _paga(c)
+    script.stripe.faturas[_cliente(com.indicado)] = [_fatura(com.fatura)]
+    _duas_cobrancas(script, com.fatura)
+    _roda(script, capsys, True)
+    rev = _rev(com.fatura)
+    assert (rev["tipo"], rev["refunded_cents"], rev["status"]) == ("partial", 90_000, "open")
+    assert _rotulo(com.fatura) == "partial" and script.stripe.listagens[com.fatura] == 1
+
+
+def test_script_disputa_perdida_sem_reembolso_rotula_total(script, capsys):
+    """S3: disputa perdida conta como devolvida; só a disputa aberta fica sem rótulo."""
+    c = _afiliado()
+    fatura = f"in_{uuid.uuid4().hex[:12]}"
+    script.stripe.faturas[_cliente(_indicado(c))] = [_fatura(fatura, 40_000)]
+    script.stripe.cobrancas[fatura] = {"amount": 40_000, "amount_refunded": 0, "disputed": True}
+    script.stripe.disputas[fatura] = [{"status": "lost", "amount": 40_000}]
+    n, _ = _roda(script, capsys, True)
+    assert _rotulo(fatura) == "total" and (n["reembolsos_total"], n["contestadas_para_conferir"]) == (1, 0)
+
+
+def test_script_payment_record_na_segunda_passada_e_falha_do_cliente(script, capsys):
+    """Positivo do S1-S3: `forma_inesperada` segue derrubando o cliente, como antes da regra única."""
+    c = _afiliado()
+    fatura = f"in_{uuid.uuid4().hex[:12]}"
+    script.stripe.faturas[_cliente(_indicado(c))] = [_fatura(fatura)]
+    script.stripe.pagamentos[fatura] = [{"status": "paid", "payment": {"type": "payment_record", "payment_intent": None}}]
+    n, _ = _roda(script, capsys, True)
+    assert n["clientes_com_falha"] == 1 and _linhas(c) == []
+
+
+def test_script_disputa_aberta_na_fatura_de_comissao_le_uma_vez(script, capsys):
+    """M4: a `SemConfirmacao` da 1ª passada fica guardada; a 2ª conta a contestada sem reler a fatura."""
+    c = _afiliado()
+    com = _paga(c)
+    script.stripe.faturas[_cliente(com.indicado)] = [_fatura(com.fatura)]
+    script.stripe.cobrancas[com.fatura] = {"amount": 100_000, "amount_refunded": 30_000, "disputed": True}
+    script.stripe.disputas[com.fatura] = [{"status": "needs_response", "amount": 70_000}]
+    n, _ = _roda(script, capsys, True)
+    assert (n["sem_confirmacao"], n["contestadas_para_conferir"]) == (1, 1)
+    assert script.stripe.listagens[com.fatura] == 1 and _rotulo(com.fatura) == "none"
+
+
+def test_script_fatura_sem_cobranca_paga_nao_conta_como_contestada(script, capsys):
+    """M5: `sem_cobranca` na 2ª passada fica sem rótulo e sem falha, e não é contestada."""
+    c = _afiliado()
+    fatura = f"in_{uuid.uuid4().hex[:12]}"
+    script.stripe.faturas[_cliente(_indicado(c))] = [_fatura(fatura)]
+    script.stripe.pagamentos[fatura] = []
+    n, _ = _roda(script, capsys, True)
+    assert (n["contestadas_para_conferir"], n["clientes_com_falha"]) == (0, 0) and _rotulo(fatura) == "none"
+
+
+def test_script_falha_na_data_da_1a_passada_rele_na_2a(script, capsys):
+    """M12: o `Refund.list` falha na 1ª passada; nada fica guardado, e a 2ª rotula com a data."""
+    c = _afiliado()
+    com = _paga(c)
+    script.stripe.faturas[_cliente(com.indicado)] = [_fatura(com.fatura)]
+    script.stripe.cobrancas[com.fatura] = {"amount": 100_000, "amount_refunded": 30_000, "disputed": False}
+    real, vezes = script.stripe.Refund.list, []
+
+    def instavel(charge, limit):
+        vezes.append(charge)
+        if len(vezes) == 1:
+            raise ConnectionError("rede")
+        return real(charge=charge, limit=limit)
+
+    script.stripe.Refund.list = staticmethod(instavel)
+    n, _ = _roda(script, capsys, True)
+    with get_conn() as conn:
+        linha = conn.execute("select refund_status, refunded_at from affiliate_referral_payments where payment_ref = %s",
+                             (com.fatura,)).fetchone()
+    assert n["sem_confirmacao"] == 1 and len(vezes) == 2
+    assert (linha["refund_status"], linha["refunded_at"]) == ("partial", datetime.fromtimestamp(1_790_500_000, timezone.utc))
 
 
 def test_script_revalida(script, capsys, monkeypatch):
@@ -1467,17 +1598,24 @@ def test_script_nao_rotula_cobranca_contestada(script, capsys):
     assert _status(a)["payout_id"] == saque and _status(a)["status"] == "pending"
 
 
-def test_rejeicao_fecha_pendencia_da_comissao_estornada_pelo_rotulo(mundo, adm):
-    """A8: duas cobranças na fatura. A 2ª devolvida inteira rotula `total`; a pendência segue parcial."""
+@pytest.mark.parametrize("ordem", [1, -1], ids=["a_de_600_primeiro", "a_de_400_primeiro"])
+def test_duas_cobrancas_somam_parcial_e_a_rejeicao_volta_para_revisao(mundo, adm, ordem):
+    """A8 com a regra única (#1498, P2): R$ 600 com R$ 500 devolvidos e R$ 400 com R$ 400 são parcial de
+    R$ 900 em qualquer ordem, rótulo `partial`. Rejeitar o saque devolve a comissão para a revisão."""
     c = _afiliado()
     a = _paga(c)
     saque = request_payout(c.aff["id"])["id"]
-    assert _enviar("charge.refunded", _cobranca(a.fatura, amount=60_000, devolvido=50_000)).status_code == 200
-    assert _enviar("charge.refunded", _cobranca(a.fatura, amount=40_000, devolvido=40_000)).status_code == 200
+    eventos = [_cobranca(a.fatura, amount=60_000, devolvido=50_000), _cobranca(a.fatura, amount=40_000, devolvido=40_000)]
+    mundo.stripe.cobrancas[a.fatura] = [{"amount": 60_000, "amount_refunded": 50_000, "disputed": False},
+                                        {"amount": 40_000, "amount_refunded": 40_000, "disputed": False}]
+    for objeto in eventos[::ordem]:
+        assert _enviar("charge.refunded", objeto).status_code == 200
+    rev = _rev(a.fatura)
+    assert (rev["tipo"], rev["refunded_cents"], rev["status"]) == ("partial", 90_000, "open")
+    assert [x["refund_status"] for x in _linhas(c)] == ["partial"]
     assert _rejeitar(adm, saque).status_code == 200
-    assert _status(a)["status"] == "reversed"
-    assert _rev(a.fatura)["status"] == "resolved" and _acoes(a.fatura)[-1] == "payout_rejected"
-    assert _quadros(c)["review"] == 0
+    assert _status(a) == {"status": "pending", "payout_id": None}
+    assert _rev(a.fatura)["status"] == "open" and _quadros(c)["review"] == 100
 
 
 @pytest.mark.parametrize("veneno", ["\x00" * 12, "\ud800" * 12, " \x00\ud800 " * 6], ids=["nul", "surrogate", "misto"])
@@ -1633,7 +1771,7 @@ def test_revisao_recusa_comissao_que_saiu_do_saque_no_meio(mundo):
             segura.execute("update affiliate_commissions set payout_id = null where id = %s", (a.id,))
         finally:
             segura.commit()
-        assert isinstance(revisao.exception(timeout=15), PendenciaMudou)
+        assert type(revisao.exception(timeout=15)) is PendenciaMudou  # não `SaqueAberto`: a comissão saiu do saque
     assert _saque(saque)["amount_cents"] == 17_000 and _comissao_db(a)["amount_cents"] == 10_000
 
 

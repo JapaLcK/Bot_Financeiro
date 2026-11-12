@@ -410,16 +410,19 @@ def test_orfao_rejeitado_e_depois_reembolso_nao_abre_nada(canal, adm):
     assert (rev["status"], rev["recovery_cents"]) == ("resolved", None) and canal.enviados == []
 
 
-def test_parcial_no_orfao_ajusta_o_saque_e_vira_recuperacao_depois_do_pagamento(canal, adm):
+def test_orfao_espera_o_saque(canal, adm):
+    """D11 no órfão: o mesmo do saque vivo. Valor menor espera o pagamento, que vira recuperação."""
     c = _afiliado()
     a, _, saque = _orfao_de_170(c)
     _parcial(a)
     assert _bloqueado(adm, saque) is True
-    assert _aprovar(adm, a, 6_000).status_code == 200
-    assert _saque_db(saque)["amount_cents"] == 13_000 and _bloqueado(adm, saque) is False
+    assert _aprovar(adm, a, 6_000).status_code == 409
+    assert _saque_db(saque)["amount_cents"] == 17_000 and _bloqueado(adm, saque) is True
     assert _realizado(adm, saque).status_code == 200
+    assert _aprovar(adm, a, 6_000).status_code == 200
+    assert (_rev(a.fatura)["status"], _rev(a.fatura)["recovery_cents"]) == ("recovery", 4_000)
     _total(a)
-    assert (_rev(a.fatura)["status"], _rev(a.fatura)["recovery_cents"]) == ("recovery", 6_000)
+    assert (_rev(a.fatura)["status"], _rev(a.fatura)["recovery_cents"]) == ("recovery", 10_000)
 
 
 def test_pendencia_aberta_no_saque_sobrevive_a_exclusao_e_bloqueia(canal, adm):

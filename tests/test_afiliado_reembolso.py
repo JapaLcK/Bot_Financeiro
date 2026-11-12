@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,7 @@ import frontend.finance_bot_websocket_custom as dashboard
 from _apoio_auth_app import csrf
 from _billing_grants_helpers import garantir_system_event_logs
 from _afiliado_stripe import simular_stripe
+from _stripe_cliente_falso import instalar
 from core.services import admin_notify, email_service
 import core.services.afiliado_reembolso as modulo_reembolso
 from core.services.afiliado_reembolso import tratar_evento
@@ -50,6 +52,7 @@ from test_afiliado_pagantes import AGORA, _admin, _indicado, _linhas, _numeros
 from test_billing_webhook_lifecycle import _FakeStripe, _fake_sub
 
 SEGREDO = "whsec_teste"
+_MUNDO = None  # o `mundo` do teste: `_cobranca` grava a mesma cobrança na Stripe falsa que o webhook lê (#1498)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 
@@ -83,6 +86,7 @@ def mundo(monkeypatch):
     monkeypatch.setattr(stripe.Subscription, "retrieve", staticmethod(lambda sid, **k: m.subs[sid]))
     monkeypatch.setenv("ADMIN_NOTIFY_WEBHOOK_URL", "https://discord.com/api/webhooks/1/x")
     monkeypatch.setattr(admin_notify, "_send", lambda msg: m.alertas.append(msg) or True)
+    monkeypatch.setitem(globals(), "_MUNDO", m)
     return m
 
 
@@ -96,9 +100,22 @@ def _enviar(tipo, objeto, *, segredo=SEGREDO, evento=None):
 
 
 def _cobranca(fatura=None, intent=None, amount=100_000, devolvido=100_000):
+    """A cobrança do evento. Com fatura, a Stripe falsa passa a mostrar a mesma: o webhook lê o valor lá."""
     objeto = {"id": f"ch_{uuid.uuid4().hex[:10]}", "object": "charge", "amount": amount,
               "amount_refunded": devolvido, "payment_intent": intent}
+    if fatura and _MUNDO is not None:
+        _MUNDO.stripe.cobra(fatura, devolvido=devolvido, amount=amount)
     return {**objeto, "invoice": fatura} if fatura else objeto
+
+
+def _perde(fatura, valor, *, amount=100_000, devolvido=0):
+    """A Stripe com a disputa perdida na cobrança da fatura, e o `charge.dispute.closed` dela pelo HTTP."""
+    ch = f"ch_{uuid.uuid4().hex[:10]}"
+    _MUNDO.cobrancas[ch] = _cobranca(fatura, amount=amount, devolvido=devolvido)
+    _MUNDO.stripe.cobra(fatura, devolvido=devolvido, amount=amount, disputed=True)
+    _MUNDO.stripe.disputas[fatura] = [{"status": "lost", "amount": valor}]
+    r = _enviar("charge.dispute.closed", {"object": "dispute", "status": "lost", "charge": ch, "amount": valor})
+    assert r.status_code == 200, r.text
 
 
 def _reembolsa(fatura, **k):
@@ -144,6 +161,7 @@ def test_total_sem_invoice_acha_a_fatura_pelo_invoice_payment(mundo, fatura_de):
     com = _paga(c)
     mundo.pagamentos["pi_1"] = [{"status": "open", "invoice": "in_tentativa"},
                                 {"status": "paid", "invoice": fatura_de(com.fatura)}]
+    mundo.stripe.cobra(com.fatura, devolvido=100_000)
     _reembolsa(None, intent="pi_1")
     assert mundo.chamadas == [{"payment": {"type": "payment_intent", "payment_intent": "pi_1"}, "limit": 100}]
     assert _numeros(c) == (1, 1, 1, 1, 0)
@@ -181,12 +199,8 @@ def test_reentrega_nao_duplica_nem_repete_alerta(mundo):
 def test_disputa_perdida_e_total_ou_parcial_pelo_valor(mundo):
     c = _afiliado()
     inteira, metade = _paga(c), _paga(c)
-    mundo.cobrancas["ch_i"] = _cobranca(inteira.fatura, devolvido=0)
-    mundo.cobrancas["ch_m"] = _cobranca(metade.fatura, devolvido=0)
-    assert _enviar("charge.dispute.closed", {"object": "dispute", "status": "lost", "charge": "ch_i",
-                                             "amount": 100_000}).status_code == 200
-    assert _enviar("charge.dispute.closed", {"object": "dispute", "status": "lost", "charge": "ch_m",
-                                             "amount": 40_000}).status_code == 200
+    _perde(inteira.fatura, 100_000)
+    _perde(metade.fatura, 40_000)
     assert _numeros(c) == (2, 2, 1, 1, 1)
     assert _status(inteira)["status"] == "reversed" and _status(metade)["status"] == "pending"
 
@@ -195,9 +209,7 @@ def test_disputa_perdida_do_restante_vira_total_e_estorna(mundo):
     c = _afiliado()
     com = _paga(c)
     _reembolsa(com.fatura, devolvido=30_000)
-    mundo.cobrancas["ch_r"] = _cobranca(com.fatura, devolvido=30_000)
-    assert _enviar("charge.dispute.closed", {"object": "dispute", "status": "lost", "charge": "ch_r",
-                                             "amount": 70_000}).status_code == 200
+    _perde(com.fatura, 70_000, devolvido=30_000)
     assert _numeros(c) == (1, 1, 1, 1, 0)
     assert _status(com)["status"] == "reversed"
 
@@ -234,6 +246,7 @@ def test_falha_da_stripe_vira_5xx_e_a_reentrega_conclui(mundo):
     com = _paga(c)
     mundo.pagamentos["pi_f"] = [{"status": "paid", "invoice": com.fatura}]
     objeto = _cobranca(None, intent="pi_f")
+    mundo.stripe.cobra(com.fatura, devolvido=100_000)
     mundo.falha = RuntimeError("stripe fora do ar")
     assert _enviar("charge.refunded", objeto).status_code == 500
     assert _numeros(c) == (1, 1, 0, 0, 0) and _status(com)["status"] == "pending"
@@ -253,6 +266,213 @@ def test_falha_no_rotulo_repete_e_nao_perde_nada(mundo, monkeypatch):
     assert _status(com)["status"] == "pending"  # rótulo e estorno na mesma transação
     assert _enviar("charge.refunded", objeto).status_code == 200
     assert _numeros(c) == (1, 1, 1, 1, 0) and _status(com)["status"] == "reversed"
+
+
+# ── Regra única no webhook (#1498) ───────────────────────────────────────────
+
+def _pendencia(fatura):
+    with get_conn() as conn:
+        return conn.execute("select tipo, refunded_cents, status from affiliate_refund_reviews where stripe_invoice_id = %s",
+                            (fatura,)).fetchone()
+
+
+def _marcada(com):
+    with get_conn() as conn:
+        return conn.execute("select payment_check_pending from affiliate_commissions where id = %s",
+                            (com.id,)).fetchone()["payment_check_pending"]
+
+
+def _reembolso_com_disputa_na_stripe(mundo, fatura, devolvido):
+    """O `charge.refunded` de agora, com a Stripe ainda mostrando a disputa de antes na cobrança."""
+    objeto = _cobranca(fatura, devolvido=devolvido)
+    mundo.stripe.cobra(fatura, devolvido=devolvido, disputed=True)
+    assert _enviar("charge.refunded", objeto).status_code == 200
+
+
+def test_disputa_perdida_e_depois_reembolso_do_restante_somam_total(mundo):
+    """Caso A da issue: disputa perdida de R$ 30, depois reembolso dos R$ 70. Pelo evento era parcial de R$ 70."""
+    c = _afiliado()
+    com = _paga(c)
+    _perde(com.fatura, 30_000)
+    assert dict(_pendencia(com.fatura)) == {"tipo": "partial", "refunded_cents": 30_000, "status": "open"}
+    _reembolso_com_disputa_na_stripe(mundo, com.fatura, 70_000)
+    assert dict(_pendencia(com.fatura)) == {"tipo": "total", "refunded_cents": 100_000, "status": "resolved"}
+    assert _status(com)["status"] == "reversed"
+    assert _me(c)["commissions"][0]["payment_refund"] == "total"
+
+
+def test_disputa_perdida_e_depois_reembolso_menor_somam_total(mundo):
+    """Caso B da issue: disputa perdida de R$ 70, depois reembolso de R$ 30. Pelo evento, 30 não era fato novo."""
+    c = _afiliado()
+    com = _paga(c)
+    _perde(com.fatura, 70_000)
+    _reembolso_com_disputa_na_stripe(mundo, com.fatura, 30_000)
+    assert dict(_pendencia(com.fatura)) == {"tipo": "total", "refunded_cents": 100_000, "status": "resolved"}
+    assert _status(com)["status"] == "reversed"
+
+
+def test_a_stripe_vence_o_evento(mundo):
+    """O evento diz R$ 100 devolvidos e a Stripe diz R$ 30: vale a Stripe, parcial em revisão, sem estorno."""
+    c = _afiliado()
+    com = _paga(c)
+    objeto = _cobranca(com.fatura)
+    mundo.stripe.cobra(com.fatura, devolvido=30_000)
+    assert _enviar("charge.refunded", objeto).status_code == 200
+    assert dict(_pendencia(com.fatura)) == {"tipo": "partial", "refunded_cents": 30_000, "status": "open"}
+    assert _status(com)["status"] == "pending"
+    assert len(mundo.alertas) == 1 and "reembolso parcial" in mundo.alertas[0]
+
+
+def test_disputa_aberta_na_fatura_marca_e_o_worker_conclui(mundo):
+    """P1 = A: a Stripe ainda não confirma. 200, comissão "em conferência", sem pendência; o worker refaz."""
+    c = _afiliado()
+    com = _paga(c)
+    mundo.stripe.disputas[com.fatura] = [{"status": "needs_response", "amount": 70_000}]
+    _reembolso_com_disputa_na_stripe(mundo, com.fatura, 30_000)
+    assert _marcada(com) and _pendencia(com.fatura) is None and _status(com)["status"] == "pending"
+    assert _me(c)["commissions"][0]["checking"] is True and _me(c)["stats"]["available"] == 0
+    mundo.stripe.disputas[com.fatura] = [{"status": "lost", "amount": 70_000}]
+    modulo_reembolso.conferir_pendentes()
+    assert not _marcada(com) and _status(com)["status"] == "reversed"
+    assert dict(_pendencia(com.fatura)) == {"tipo": "total", "refunded_cents": 100_000, "status": "resolved"}
+
+
+def test_worker_nao_apaga_a_marca_que_o_webhook_pos_depois_da_leitura(mundo, monkeypatch):
+    """R5 (#1498): o worker lê a Stripe sem reembolso; antes de liberar, o webhook marca (R$ 30 devolvidos,
+    R$ 70 em disputa aberta). A marca nova fica; com a disputa ganha, a passada seguinte grava a parcial."""
+    c = _afiliado()
+    com = _paga(c)
+    modulo_reembolso.marcar_conferencia([com.id])
+    real = modulo_reembolso.liberar_conferencia
+
+    def webhook_no_meio(commission_id, lido):
+        objeto = _cobranca(com.fatura, devolvido=30_000)
+        mundo.stripe.cobra(com.fatura, devolvido=30_000, disputed=True)
+        mundo.stripe.disputas[com.fatura] = [{"status": "needs_response", "amount": 70_000}]
+        assert _enviar("charge.refunded", objeto).status_code == 200
+        return real(commission_id, lido)
+
+    mundo.stripe.cobra(com.fatura, devolvido=0)
+    with monkeypatch.context() as m:
+        m.setattr(modulo_reembolso, "liberar_conferencia", webhook_no_meio)
+        modulo_reembolso.conferir_pendentes()
+    assert _marcada(com) and _me(c)["stats"]["available"] == 0 and _pendencia(com.fatura) is None
+    mundo.stripe.disputas[com.fatura] = [{"status": "won", "amount": 70_000}]
+    modulo_reembolso.conferir_pendentes()
+    assert not _marcada(com) and dict(_pendencia(com.fatura)) == {"tipo": "partial", "refunded_cents": 30_000, "status": "open"}
+
+
+def test_marca_do_webhook_tira_a_espera_de_um_adiamento_antigo(mundo):
+    """Comissão adiada há 50 min (disputa aberta) recebe a marca do webhook: entra como nunca tentada, e a
+    próxima passada do worker confere já, sem esperar o resto da hora (#1498)."""
+    c = _afiliado()
+    com = _paga(c)
+    with get_conn() as conn:
+        conn.execute("update affiliate_commissions set payment_check_pending = true, payment_check_reason = 'disputa_aberta',"
+                     " payment_check_tried_at = now() - interval '50 minutes' where id = %s", (com.id,))
+        conn.commit()
+    objeto = _cobranca(com.fatura)
+    mundo.stripe.cobra(com.fatura, devolvido=0)  # a Stripe ainda não mostra o reembolso
+    assert _enviar("charge.refunded", objeto).status_code == 200
+    mundo.stripe.cobra(com.fatura, devolvido=100_000)
+    modulo_reembolso.conferir_pendentes()
+    assert _status(com)["status"] == "reversed" and not _marcada(com)
+
+
+def test_comissao_estornada_nao_e_marcada(mundo):
+    """M1: a marca do webhook não pega comissão já estornada (ela nunca mais sai)."""
+    c = _afiliado()
+    com = _paga(c)
+    _reembolsa(com.fatura)
+    assert _status(com)["status"] == "reversed"
+    objeto = _cobranca(com.fatura)
+    mundo.stripe.cobra(com.fatura, devolvido=0)
+    assert _enviar("charge.refunded", objeto).status_code == 200
+    assert not _marcada(com)
+
+
+def _sem_confirmacao(mundo, caso, fatura):
+    import stripe
+    if caso == "payment_record":
+        mundo.stripe.payment_record.add(fatura)
+    elif caso == "stripe_404":
+        mundo.stripe.falha = stripe.InvalidRequestError("No such invoice " + fatura, "invoice", http_status=404)
+    elif caso == "stripe_403":
+        mundo.stripe.falha = stripe.PermissionError("sem acesso a " + fatura, http_status=403)
+    else:
+        mundo.stripe.cobra(fatura, devolvido=0)
+
+
+@pytest.mark.parametrize("caso,motivo", [("payment_record", "forma_inesperada"), ("stripe_404", "stripe_404"),
+                                         ("stripe_403", "stripe_403"), ("zero", "sem_devolucao")])
+def test_fatura_sem_confirmacao_marca_e_responde_200(mundo, caso, motivo):
+    c = _afiliado()
+    com = _paga(c)
+    objeto = _cobranca(com.fatura)
+    _sem_confirmacao(mundo, caso, com.fatura)
+    evento = f"evt_{uuid.uuid4().hex}"
+    assert _enviar("charge.refunded", objeto, evento=evento).status_code == 200
+    assert _marcada(com) and _pendencia(com.fatura) is None and _status(com)["status"] == "pending"
+    assert _me(c)["commissions"][0]["checking"] is True
+    with get_conn() as conn:
+        logs = conn.execute("select details from system_event_logs where event_type = 'affiliate_commission_check_pending'"
+                            " and (details->>'commission_id')::bigint = %s", (com.id,)).fetchall()
+    assert [x["details"] for x in logs] == [{"commission_id": com.id, "motivo": motivo, "event_id": evento}]
+    if caso == "zero":  # o reembolso não se confirmou: o worker libera
+        modulo_reembolso.conferir_pendentes()
+        assert not _marcada(com) and _status(com)["status"] == "pending" and _pendencia(com.fatura) is None
+
+
+def test_sem_confirmacao_e_sem_comissao_so_loga_sem_a_fatura(mundo):
+    fatura = f"in_{uuid.uuid4().hex[:12]}"
+    objeto = _cobranca(fatura)
+    mundo.stripe.cobra(fatura, devolvido=0)
+    evento = f"evt_{uuid.uuid4().hex}"
+    assert _enviar("charge.refunded", objeto, evento=evento).status_code == 200
+    with get_conn() as conn:
+        logs = conn.execute("select details from system_event_logs where event_type = 'affiliate_refund_check_pending'"
+                            " and details->>'event_id' = %s", (evento,)).fetchall()
+    assert [x["details"] for x in logs] == [{"event_id": evento, "motivo": "sem_devolucao"}]
+    assert _pendencia(fatura) is None
+
+
+def test_queda_da_stripe_na_regra_vira_5xx_sem_marca_e_a_reentrega_conclui(mundo):
+    """Positivo do P1: queda não é "sem confirmação". 500, nada gravado, nenhuma marca; a reentrega conclui."""
+    import stripe
+    c = _afiliado()
+    com = _paga(c)
+    objeto = _cobranca(com.fatura)
+    mundo.stripe.falha = stripe.APIConnectionError("stripe fora do ar")
+    assert _enviar("charge.refunded", objeto).status_code == 500
+    assert not _marcada(com) and _pendencia(com.fatura) is None and _status(com)["status"] == "pending"
+    mundo.stripe.falha = None
+    assert _enviar("charge.refunded", objeto).status_code == 200
+    assert _status(com)["status"] == "reversed" and not _marcada(com)
+
+
+def test_conversa_disputa_reembolso_e_parcial_de_outro_afiliado(mundo):
+    """Pelo HTTP, dois afiliados: `invoice.paid` (A5) → disputa perdida de R$ 30 → reembolso de R$ 70 na
+    fatura de A, e um parcial na de B. Cada um vê só o seu; a fatura isola, sem cruzar afiliado."""
+    a, b = _afiliado(), _afiliado()
+    mundo.subs["sub_c"] = _fake_sub("active")
+    faturas = {}
+    for c in (a, b):
+        ind, fatura = _indicado(c), f"in_{uuid.uuid4().hex[:12]}"
+        r = _enviar("invoice.paid", {"object": "invoice", "id": fatura, "subscription": "sub_c", "amount_paid": 100_000,
+                                     "metadata": {"finbot_user_id": str(ind.uid)}, "lines": {"data": [], "has_more": False}})
+        assert r.status_code == 200, r.text
+        faturas[c.aff["code"]] = fatura
+    fa, fb = faturas[a.aff["code"]], faturas[b.aff["code"]]
+    assert [x["checking"] for x in _me(a)["commissions"] + _me(b)["commissions"]] == [False, False]
+    _perde(fa, 30_000)
+    _reembolso_com_disputa_na_stripe(mundo, fa, 70_000)
+    _reembolsa(fb, devolvido=30_000)
+    ma, mb = _me(a), _me(b)
+    assert ma["stats"]["generated"] == 0 and [x["status"] for x in ma["commissions"]] == ["reversed"]
+    assert ma["stats"]["refunds"] == {"total": 1, "partial": 0}
+    assert mb["stats"]["generated"] == 100 and [x["status"] for x in mb["commissions"]] == ["pending"]
+    assert mb["stats"]["refunds"] == {"total": 0, "partial": 1}
+    assert dict(_pendencia(fb)) == {"tipo": "partial", "refunded_cents": 30_000, "status": "open"}
 
 
 # ── Comissão (D9) ────────────────────────────────────────────────────────────
@@ -480,9 +700,9 @@ def test_evento_fora_de_ordem_guarda_a_pendencia_e_nao_atrapalha_o_pagamento(mun
 
 # ── Corrida com o saque ──────────────────────────────────────────────────────
 
-def _evento(fatura):
+def _evento(fatura, devolvido=100_000):
     return {"id": f"evt_{uuid.uuid4().hex}", "type": "charge.refunded", "created": int(time.time()),
-            "data": {"object": _cobranca(fatura)}}
+            "data": {"object": _cobranca(fatura, devolvido=devolvido)}}
 
 
 def _sacar_rota(c):
@@ -561,6 +781,7 @@ def test_conversa_do_link_ao_reembolso(mundo, monkeypatch):
     assert m["stats"]["paying_clients"] == 1 and m["stats"]["held"] == 60
 
     mundo.pagamentos["pi_c"] = [{"status": "paid", "invoice": fatura}]
+    mundo.stripe.cobra(fatura, amount=60_000, devolvido=60_000)
     _reembolsa(None, intent="pi_c", amount=60_000, devolvido=60_000)
     m = _me(c)
     s = m["stats"]
@@ -584,7 +805,7 @@ class _StripeDoScript(_FakeStripe):
     def __init__(self):
         super().__init__()
         self.faturas, self.cobrancas, self.quebra, self.assinaturas = {}, {}, set(), {}
-        self.reembolsos, self.pagamentos, self.disputas = {}, {}, {}
+        self.reembolsos, self.pagamentos, self.disputas, self.listagens = {}, {}, {}, Counter()
         outer = self
 
         class Invoice:
@@ -598,6 +819,7 @@ class _StripeDoScript(_FakeStripe):
         class InvoicePayment:
             @staticmethod
             def list(invoice, api_key, limit):
+                outer.listagens[invoice] += 1
                 pagamentos = outer.pagamentos.get(
                     invoice, [{"status": "paid", "payment": {"type": "payment_intent", "payment_intent": invoice}}])
                 if isinstance(pagamentos, Exception):
@@ -631,6 +853,7 @@ def script(monkeypatch):
     fake = _StripeDoScript()
     monkeypatch.setitem(sys.modules, "stripe", fake)
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_xxx")
+    instalar(monkeypatch)
     return SimpleNamespace(rodar=modulo.rodar, main=modulo.main, stripe=fake)
 
 
@@ -665,15 +888,15 @@ def test_script_aplica_e_e_idempotente_e_estorna_a_comissao_solta(script):
     script.stripe.cobrancas["in_parcial"] = {"amount": 40_000, "amount_refunded": 1_000, "disputed": True}
 
     n = script.rodar(aplicar=True)
-    assert (n["faturas_novas"], n["reembolsos_total"], n["reembolsos_partial"], n["contestadas_para_conferir"]) == (3, 1, 0, 1)
+    assert (n["faturas_novas"], n["reembolsos_total"], n["reembolsos_partial"], n["contestadas_para_conferir"]) == (3, 1, 1, 0)
     achado = {x["payment_ref"]: (x["amount_cents"], x["refund_status"]) for x in _linhas(c)}
-    # contestada: registrada, sem rótulo (A6)
-    assert achado == {com.fatura: (60_000, "total"), "in_sem_comissao": (50_000, "none"), "in_parcial": (40_000, "none")}
+    # contestada sem disputa aberta (ganha): rotulada pela regra única, só o reembolso conta (#1498)
+    assert achado == {com.fatura: (60_000, "total"), "in_sem_comissao": (50_000, "none"), "in_parcial": (40_000, "partial")}
     assert _status(com)["status"] == "reversed"  # total confirmado, comissão solta: `a_estornar`
 
     n = script.rodar(aplicar=True)
     assert (n["faturas_novas"], n["faturas_ja_no_registro"]) == (0, 3)
-    assert len(_linhas(c)) == 3 and _numeros(c) == (2, 2, 1, 1, 0)
+    assert len(_linhas(c)) == 3 and _numeros(c) == (2, 2, 1, 1, 1)
 
 
 def test_script_tira_o_caderno_e_ignora_o_que_nao_e_plano(script):

@@ -17,7 +17,7 @@ export function Comissoes({ lista, semComissao }: { lista: Comissao[]; semComiss
         const st = situacao(c);
         const reembolso = ROTULO_REEMBOLSO[c.payment_refund];
         return <li key={c.id}>
-          <div><b className="num">{money(c.amount)}</b><p className="faint">fatura de {money(c.invoice_amount)} · {dia(c.created_at)}{c.original_amount !== null && ` · ajustada de ${money(c.original_amount)}`}</p></div>
+          <div><b className="num">{money(c.amount)}</b><p className="faint">{c.paid_months === 12 ? `plano anual de ${money(c.invoice_amount)} (base 1/12)` : `fatura de ${money(c.invoice_amount)}`} · {dia(c.created_at)}{c.original_amount !== null && ` · ajustada de ${money(c.original_amount)}`}</p></div>
           <div className="afil-selos"><span className={`selo ${st.classe ?? ""}`}>{st.rotulo}</span>{reembolso && <span className="selo">{reembolso}</span>}</div>
         </li>;
       })}</ul>

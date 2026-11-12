@@ -119,7 +119,8 @@ def test_positivo_clique_legitimo_sobrevive_ao_flood_de_outro_minuto(user_id):
 
 # ─── O custo do 429: o slowapi loga por requisição barrada ───────────────────
 # O `_DashboardHandler` (core/observability.py) espelha todo WARNING do root em
-# `system_event_logs` — um `psycopg.connect()` + INSERT bloqueante POR RECORD.
+# `system_event_logs` — uma linha por record (connect + INSERT no ouvinte da fila
+# em produção; na thread de quem loga na suíte).
 # O slowapi loga um WARNING por requisição BARRADA, então sem o filtro o teto
 # trocava 200 `DELETE` baratos por uma inundação de log pior que a do #321.
 

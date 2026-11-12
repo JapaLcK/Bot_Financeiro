@@ -306,6 +306,16 @@ def list_due_bill_reminders(user_id: int, today: date, days_before: int = 3) -> 
             return [dict(r) for r in (cur.fetchall() or [])]
 
 
+def contas_lembradas_em(user_id: int, dia: date) -> list[dict[str, Any]]:
+    """`id` e `due_date` das contas do usuário cujo lembrete do WhatsApp foi aceito pela Meta em `dia`
+    (`reminder_last_sent_on`): a evidência de cobertura do aviso de insight por e-mail (PL-06 B6)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id, due_date from bill_instances where user_id = %s and reminder_last_sent_on = %s",
+                        (user_id, dia))
+            return [dict(r) for r in (cur.fetchall() or [])]
+
+
 __all__ = [
     "list_bills", "get_bill", "ensure_bill_instance", "mark_bill_paid",
     "create_boleto", "update_boleto", "delete_boleto",

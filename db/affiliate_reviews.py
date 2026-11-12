@@ -8,11 +8,11 @@ fica fora de saque novo e o saque que a contém não é pago. A linha é também
 Estados: `no_commission` (fatura sem comissão, ainda), `open` (admin decide), `recovery` (dinheiro
 já saiu e falta recuperar), `resolved`. `tipo` nunca rebaixa, e linha `total` nunca reabre.
 
-Ordem de travas: nas ações do admin, saque, comissões, pendência; no webhook, fatura, comissão,
-pendência, sem saque. Sem ciclo. Nada aqui guarda dado do indicado; referência do comprovante e
+Ordem de travas: nas ações do admin, saque, comissões, pendência; no webhook, fatura, (indicado),
+comissão, pendência, sem saque. Sem ciclo. Nada aqui guarda dado do indicado; referência do comprovante e
 justificativa moram só em `affiliate_refund_review_events`, nunca em log, aviso ou nota do saque.
 """
-from .affiliate_payments import _rotular
+from .affiliate_payments import _rotular, origem_da_chave
 from .connection import get_conn
 
 # Comissão em revisão e saque bloqueado são a MESMA pendência, vista de dois lados. Fonte única
@@ -24,16 +24,29 @@ SAQUE_BLOQUEADO_SQL = """exists (select 1 from affiliate_refund_reviews v
                                    left join affiliate_commissions vc on vc.id = v.commission_id
                                   where v.status = 'open'
                                     and (vc.payout_id = {saque} or v.orphan_payout_id = {saque}))"""
+# Comissão do saque "em conferência": o webhook ou o D10 marcou e a Stripe ainda não confirmou. Não aparece
+# como bloqueio no admin, mas o dinheiro não sai por ela: QR relido e "Marcar pago" recusam (#1498).
+SAQUE_EM_CONFERENCIA_SQL = """exists (select 1 from affiliate_commissions mc
+                                       where mc.payout_id = {saque} and mc.payment_check_pending)"""
 
 
 class PendenciaMudou(Exception):
     """A pendência não está mais como o admin a viu: a rota responde 409."""
 
 
+class SaqueAberto(PendenciaMudou):
+    """Valor menor que o cheio para comissão em saque aberto: o saque nunca muda de valor depois do QR."""
+
+
 def trava_fatura(cur, fatura: str) -> None:
     """Serializa reembolso e nascimento da comissão da mesma fatura: sem ela, o reembolso não vê
     a comissão, a comissão não vê o reembolso, e nenhum dos dois a segura."""
     cur.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"afiliado_fatura:{fatura}",))
+
+
+def trava_indicado(cur, referred_user_id: int) -> None:
+    """Serializa a 1ª cobrança do mesmo cliente (Pix e cartão). Só depois da `trava_fatura`: sem ciclo."""
+    cur.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"afiliado_indicado:{int(referred_user_id)}",))
 
 
 def registrar_evento(cur, review_id: int, action: str, actor: str, *, antes=None, depois=None,
@@ -121,18 +134,29 @@ def _comissao_que_saiu(cur, a: dict) -> dict | None:
     return None
 
 
-def registrar_reembolso(fatura: str, tipo: str, devolvido_cents: int, quando, ator: str = "sistema") -> dict | None:
+def registrar_reembolso(fatura: str, tipo: str, devolvido_cents: int, quando, ator: str = "sistema",
+                        desconhecido: bool = False, rotular: bool = True) -> dict | None:
     """Rótulo e pendência numa transação só. Decide sob as travas, com o estado de agora: quem chama
-    (webhook ou script) não classifica nada. Reentrega e repetição sem fato novo não mudam nada."""
+    (webhook ou script) não classifica nada. Reentrega e repetição sem fato novo não mudam nada.
+    `desconhecido`: o valor devolvido não se sabe (Asaas fora, baixa desfeita). O fato novo é o próprio
+    desconhecimento: reabre a revisão parcial `resolved` cuja comissão ainda não saiu (a que um saque
+    liberaria), sem apagar o valor já registrado. `recovery` e comissão paga ficam como estão.
+    `rotular=False`: só segura a comissão, sem marcar o pagamento como reembolsado (baixa desfeita)."""
     with get_conn() as conn, conn.cursor() as cur:
         trava_fatura(cur, fatura)
         cur.execute("select id, status, payout_id, amount_cents from affiliate_commissions"
                     " where stripe_invoice_id = %s for update", (fatura,))
         c = cur.fetchone()
-        _rotular(cur, "stripe", fatura, tipo, quando)
+        if rotular:
+            _rotular(cur, *origem_da_chave(fatura), tipo, quando)
         cur.execute("select * from affiliate_refund_reviews where stripe_invoice_id = %s for update", (fatura,))
         a = cur.fetchone()
-        if a is None or (a["tipo"] != "total" and devolvido_cents > a["refunded_cents"]):
+        if a is None or (a["tipo"] != "total" and (devolvido_cents > a["refunded_cents"]
+                                                    or (desconhecido and a["status"] == "resolved"
+                                                     and ((c or _comissao_que_saiu(cur, a)) or {}).get("status")
+                                                     not in (None, "paid", "reversed")))):
+            if a is not None:
+                devolvido_cents = max(devolvido_cents, a["refunded_cents"])
             a = _aplicar(cur, fatura, a, c, tipo, devolvido_cents, quando, ator)
         conn.commit()
     return a
@@ -167,31 +191,38 @@ def abertas_do_saque(cur, payout_id: int) -> list[dict]:
 
 def faturas_do_saque(payout_id: int) -> list[dict]:
     """As faturas a conferir antes de pagar: as das comissões do saque e, no saque órfão, as que ficaram nas
-    linhas gravadas na exclusão. Sem trava: o conjunto só encolhe, e quem decide é a trava de quem paga."""
+    linhas gravadas na exclusão. Sem trava: o conjunto só encolhe, e quem decide é a trava de quem paga.
+    A comissão do Pix (`pix:<id>`) fica fora: não é fatura da Stripe, e o estorno dela chega pelo dreno."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select c.id as commission_id, c.stripe_invoice_id as fatura from affiliate_commissions c where c.payout_id = %s
+            select c.id as commission_id, c.stripe_invoice_id as fatura, c.payment_check_pending as marcada,
+                   c.payment_check_marked_at as marcada_em from affiliate_commissions c
+             where c.payout_id = %s and left(c.stripe_invoice_id, 4) <> 'pix:'
             union all
-            select null, r.stripe_invoice_id from affiliate_refund_reviews r
-             where r.orphan_payout_id = %s and r.commission_id is null
+            select null, r.stripe_invoice_id, false, null from affiliate_refund_reviews r
+             where r.orphan_payout_id = %s and r.commission_id is null and left(r.stripe_invoice_id, 4) <> 'pix:'
             """,
             (int(payout_id), int(payout_id)),
         )
         return cur.fetchall()
 
 
-def saque_bloqueado(cur, payout_id: int) -> bool:
+def saque_bloqueado(cur, payout_id: int) -> dict:
     """Comando próprio, depois da trava das comissões: em READ COMMITTED é ele que enxerga o commit
-    do webhook que a trava esperou. Aviso entregue não libera."""
-    cur.execute(f"select {SAQUE_BLOQUEADO_SQL.format(saque='%(saque)s')} as bloqueado", {"saque": int(payout_id)})
-    return cur.fetchone()["bloqueado"]
+    do webhook que a trava esperou. Aviso entregue não libera. `{pendencia, conferencia}`: qualquer um segura."""
+    saque = "%(saque)s"
+    cur.execute(f"select {SAQUE_BLOQUEADO_SQL.format(saque=saque)} as pendencia,"
+                f" {SAQUE_EM_CONFERENCIA_SQL.format(saque=saque)} as conferencia", {"saque": int(payout_id)})
+    return cur.fetchone()
 
 
 def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: str, visto_cents: int) -> bool:
     """Fecha a revisão parcial com o valor aprovado. False = pendência inexistente.
 
     `PendenciaMudou` se ela não está mais como o admin viu; valor fora da faixa é `ValueError`.
+    Comissão em saque aberto (vivo ou órfão) só aprova o valor cheio, que destrava sem mudar o saque;
+    menor é `SaqueAberto` (D11): o saque nunca muda de valor depois do QR.
     Comissão paga não muda (D6): a diferença vira recuperação, atribuída e nunca somada, então
     reprocessar não duplica, e o que já foi encerrado não é cobrado de novo."""
     with get_conn() as conn, conn.cursor() as cur:
@@ -218,38 +249,27 @@ def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: st
         atual = c["amount_cents"]
         if not 0 <= aprovado_cents <= atual:
             raise ValueError("Valor aprovado fora da faixa.")
+        if saque is not None and aprovado_cents != atual:
+            raise SaqueAberto(f"A comissão está no saque {saque['id']}, ainda aberto: só o valor cheio libera."
+                              " Para aprovar menos, rejeite o saque se o Pix não saiu, ou registre"
+                              " \"Pagamento já realizado\" se saiu; depois revise o valor.")
         diferenca, status, falta = atual - aprovado_cents, "resolved", None
         if c["status"] == "paid":
             falta = max(0, diferenca - r["recovery_closed_cents"]) or None
             status = "recovery" if falta else "resolved"
-        elif diferenca:
-            if c["id"] is None:  # saque órfão: o valor da comissão mora na linha
-                cur.execute("update affiliate_refund_reviews set commission_cents = %s where id = %s",
-                            (aprovado_cents, r["id"]))
-            elif aprovado_cents == 0:  # equivale a estorno: `amount_cents` fica como estava
+        elif diferenca:  # fora de saque aberto: a comissão solta
+            if aprovado_cents == 0:  # equivale a estorno: `amount_cents` fica como estava
                 cur.execute("update affiliate_commissions set status = 'reversed', payout_id = null where id = %s",
                             (c["id"],))
             else:
                 cur.execute("update affiliate_commissions set amount_cents = %s where id = %s",
                             (aprovado_cents, c["id"]))
-            if saque:
-                _encolher_saque(cur, saque, diferenca)
         cur.execute("update affiliate_refund_reviews set status = %s, approved_cents = %s, recovery_cents = %s"
                     " where id = %s", (status, aprovado_cents, falta, r["id"]))
         registrar_evento(cur, r["id"], "partial_approved", revisor, antes=atual, depois=aprovado_cents,
                          saque=c["payout_id"], justificativa=nota)
         conn.commit()
     return True
-
-
-def _encolher_saque(cur, saque: dict, diferenca: int) -> None:
-    """Saque que ficaria sem valor vira `rejected`, com o `amount_cents` histórico."""
-    novo = saque["amount_cents"] - diferenca
-    if novo > 0:
-        cur.execute("update affiliate_payouts set amount_cents = %s where id = %s", (novo, saque["id"]))
-    else:
-        cur.execute("update affiliate_payouts set status = 'rejected', note = 'Comissão ajustada na revisão.'"
-                    " where id = %s", (saque["id"],))
 
 
 def refunded_at_da_pendencia(review_id: int):

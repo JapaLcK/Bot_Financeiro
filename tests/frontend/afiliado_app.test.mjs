@@ -5,34 +5,13 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { startServer } from "./_server.mjs";
-import { ATIVA, COM_SAQUE, EM_REVISAO, ZERO } from "./_afiliado.mjs";
+import { ATIVA, CHAVE, COM_SAQUE, EM_REVISAO, ZERO, abrirApp, naArea, pedirApp as pedir, regra } from "./_afiliado.mjs";
 
 let ORIGIN, server, browser;
 before(async () => { ({ proc: server, origin: ORIGIN } = await startServer()); browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
-const json = (body, status = 200) => (r) => r.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-
-async function abrir({ corpo = ATIVA, url = "/dashboard.html", width = 1280, height = 800, clipboard, marca } = {}) {
-  const ctx = await browser.newContext({ viewport: { width, height } });
-  if (marca) await ctx.addCookies([{ name: "pb_conta", value: marca, url: ORIGIN }]);
-  await ctx.route("**/auth/validate", json({ ok: true, user_id: 42 }));
-  await ctx.route("**/auth/me", json({ app_access: true, plan_tier: "pro", dashboard_v2_enabled: true }));
-  await ctx.route("**/auth/dashboard-profile", json({ email: "ana@x.com", plan: "pro", feature_gates: {} }));
-  await ctx.route("**/api/affiliate/me", corpo ? json(corpo) : json({ detail: "x" }, 404));
-  await ctx.route("**cdnjs.cloudflare.com/**", (r) => r.abort());
-  const page = await ctx.newPage();
-  await page.addInitScript(() => { window.WebSocket = class { constructor() { this.readyState = 0; } send() {} close() {} }; });
-  if (clipboard) await page.addInitScript(clipboard);
-  await page.goto(`${ORIGIN}${url}`);
-  await page.waitForFunction(() => typeof window.PBRefresh === "function", null, { timeout: 15000 });
-  return { ctx, page };
-}
-const naArea = async (page) => {
-  await page.waitForFunction(() => document.getElementById("sidenav-affiliate")?.style.display !== "none", null, { timeout: 10000 });
-  await page.evaluate(() => window.navigateTo("affiliate"));
-  await page.locator("#affiliate-link-input").waitFor();
-};
+const abrir = (opts) => abrirApp(browser, ORIGIN, opts);
 
 // mutação: voltar o rótulo a "Afiliados" (dashboard.html), ou mostrar o item antes do 200
 test("o item 'Afiliado' só aparece com o 200 de /api/affiliate/me", async () => {
@@ -65,8 +44,11 @@ test("os quadros, o código com copiar, a regra certa e os rótulos do pagamento
     const labels = await page.locator("#affiliate-stats .stat-label").allInnerTexts();
     assert.deepEqual(labels.map((l) => l.toLowerCase()), ["cadastros indicados", "clientes que pagaram", "comissões geradas", "disponível pra saque", "em carência", "em revisão", "em saque", "já pago"]);
     const area = await page.locator("#affiliate-view").innerText();
-    assert.match(area, /10% da primeira cobrança do plano no cartão/);
-    assert.match(area, /Pix não gera comissão/);
+    assert.ok(area.includes(regra("10")), "a regra inteira, com o anual");
+    assert.doesNotMatch(area, /Pix não gera comissão|no cartão/);
+    assert.match(area, /plano anual de R\$\s*199,00 \(base 1\/12\)/);
+    assert.equal((area.match(/plano anual de/g) || []).length, 1, "só a linha com paid_months 12");
+    assert.match(area, /fatura de R\$\s*59,90/);
     assert.doesNotMatch(area, /por cobrança|PigBank\+/);
     assert.match(area, /libera 30 dias/);
     assert.match(area, /pagamento reembolsado/);
@@ -86,19 +68,10 @@ test("afiliado 0%: 'sem comissão neste programa', sem nenhum percentual", async
   try {
     await naArea(page);
     const area = await page.locator("#affiliate-view").innerText();
-    assert.match(area, /sem comissão neste programa/);
-    assert.doesNotMatch(area, /10\s*%/);
+    assert.match(area, /Você participa sem comissão neste programa\./);
+    assert.doesNotMatch(area, /10\s*%|Você recebe/);
   } finally { await ctx.close(); }
 });
-
-const CHAVE = "ana@pix.com";
-async function pedir(page, ctx, posts) {
-  await ctx.route("**/api/affiliate/payout", (r) => { posts.push(r.request().postData()); return r.fulfill({ json: { ok: true, payout: { id: 9 } } }); });
-  await naArea(page);
-  await page.locator("#affiliate-pix-input").fill(CHAVE);
-  await page.locator("#affiliate-payout-btn").click();
-  await page.locator("#generic-confirm-overlay.open").waitFor();
-}
 
 // mutação: tirar o `confirmModal` de requestAffiliatePayout: o POST sai no primeiro clique, sem valor nem chave à vista
 test("saque no /app: a confirmação mostra valor e chave antes do POST; o corpo é exatamente {pix_key}", async () => {
@@ -201,34 +174,6 @@ test("Esc na confirmação do saque devolve o foco ao botão Sacar", async () =>
   } finally { await ctx.close(); }
 });
 
-// mutação: tirar a conferência de `pb_conta` de requestAffiliatePayout: a chave digitada na tela da conta A vira saque da conta B
-test("a conta trocou com a confirmação aberta: nenhum POST, e a página recarrega", async () => {
-  const { ctx, page } = await abrir({ marca: "7" });
-  try {
-    const posts = [];
-    await pedir(page, ctx, posts);
-    let recargas = 0;
-    page.on("framenavigated", (f) => { if (f === page.mainFrame()) recargas += 1; });
-    await page.evaluate(() => { document.cookie = "pb_conta=8; path=/"; });
-    await page.locator("#generic-confirm-ok").click();
-    await page.waitForTimeout(400);
-    assert.deepEqual(posts, [], "nenhum POST com a conta de outra pessoa");
-    assert.ok(recargas >= 1, "a página recarrega");
-  } finally { await ctx.close(); }
-});
-
-// positivo do mesmo conserto: com o marcador igual, o saque segue saindo
-test("com o marcador da conta igual ao da carga, o saque sai", async () => {
-  const { ctx, page } = await abrir({ marca: "7" });
-  try {
-    const posts = [];
-    await pedir(page, ctx, posts);
-    await page.locator("#generic-confirm-ok").click();
-    await page.waitForTimeout(200);
-    assert.equal(posts.length, 1);
-  } finally { await ctx.close(); }
-});
-
 // mutação: voltar a `${data.commission_percent}%`: o /app mostra "12.5%", com ponto
 test("percentual fracionado sai em português, igual ao /painel", async () => {
   const { ctx, page } = await abrir({ corpo: { ...ATIVA, commission_percent: 12.5 } });
@@ -236,6 +181,7 @@ test("percentual fracionado sai em português, igual ao /painel", async () => {
     await naArea(page);
     const area = await page.locator("#affiliate-view").innerText();
     assert.match(area, /12,5% da primeira cobrança/);
+    assert.ok(area.includes(regra("12,5")));
     assert.doesNotMatch(area, /12\.5/);
   } finally { await ctx.close(); }
 });

@@ -129,6 +129,7 @@ from db import reauth_codes
 from db.accounts import MENSAGEM_CAIXINHA_COM_MOVIMENTO
 from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, falha_de_tarefa, get_logger
+from core import log_fila
 from core.pg_text import causa_segura, detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
@@ -204,7 +205,8 @@ from frontend.routes.static_pages import router as static_pages_router
 
 load_app_env()
 
-# Instala o `_DashboardHandler` no logger RAIZ deste processo — é o que leva
+# Instala o espelho do painel (a `FilaDoPainel`, que grava pelo `_DashboardHandler`,
+# `core/observability.py`) no logger RAIZ deste processo — é o que leva
 # WARNING/ERROR (inclusive os `_log_falha` das rotas destrutivas) ao
 # `system_event_logs` e ao `backend_errors_24h` do admin. Aqui e não em
 # `core/observability.py` porque aquele é módulo de BIBLIOTECA: 23 módulos de
@@ -2022,6 +2024,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             falha_de_tarefa("[patrimonio_foto]", exc)
 
+    async def _insight_email():
+        try:
+            await asyncio.sleep(1)
+            from core.services.insights_notificacao import run_insight_email_loop  # noqa: PLC0415
+            await run_insight_email_loop()
+        except Exception as exc:
+            falha_de_tarefa("[insight_email]", exc)
+
     async def _recurring_charger():
         try:
             await asyncio.sleep(5)
@@ -2190,14 +2200,16 @@ async def lifespan(app: FastAPI):
     async def _afiliado_alerta_worker():
         """Manutenção das pendências de reembolso de afiliado, a cada 5 min, a 1ª volta sem
         delay (a retomada depois de reinício): limpa `no_commission` antiga, confere na Stripe a
-        comissão marcada (inerte sem `STRIPE_SECRET_KEY`) e reenvia ao admin o aviso pendente
+        comissão marcada (inerte sem `STRIPE_SECRET_KEY`), reconcilia comissão paga com reembolso
+        perdido (#1501) e reenvia ao admin o aviso pendente, o da recuperação achada na mesma volta
         (inerte sem `ADMIN_NOTIFY_WEBHOOK_URL`). Ver `core/services/afiliado_reembolso.py`."""
-        from core.services import afiliado_reembolso  # noqa: PLC0415
+        from core.services import afiliado_reconciliacao, afiliado_reembolso  # noqa: PLC0415
         from db import affiliate_reviews_manutencao  # noqa: PLC0415
         while True:
             try:
                 await asyncio.to_thread(affiliate_reviews_manutencao.limpar_sem_comissao)
                 await asyncio.to_thread(afiliado_reembolso.conferir_pendentes)
+                await asyncio.to_thread(afiliado_reconciliacao.reconciliar_pagas)
                 n = await asyncio.to_thread(afiliado_reembolso.reenviar_pendentes)
                 if n:
                     print(f"[afiliado] {n} aviso(s) de reembolso entregue(s).", flush=True)
@@ -2320,6 +2332,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_engagement(), name="engagement"),
                 asyncio.create_task(_investment_accrual(), name="investment_accrual"),
                 asyncio.create_task(_patrimonio_foto(), name="patrimonio_foto"),
+                asyncio.create_task(_insight_email(), name="insight_email"),
                 asyncio.create_task(_account_deletion_worker(), name="account_deletion"),
                 asyncio.create_task(_recurring_charger(), name="recurring_charger"),
                 asyncio.create_task(_proactive_ai(), name="proactive_ai"),
@@ -2350,6 +2363,8 @@ async def lifespan(app: FastAPI):
     for t in tasks:
         if not t.done():
             print(f"[lifespan] task '{t.get_name()}' não encerrou a tempo.", file=sys.stderr)
+    # Por último: o uvicorn re-levanta o SIGTERM e o processo morre sem `atexit` (core/log_fila.py).
+    log_fila.esvazia_na_saida()
 
 app = FastAPI(
     title="Finance Dashboard",
@@ -2785,14 +2800,13 @@ async def validation_exception_page_handler(request: Request, exc: RequestValida
         # (medido), e um ataque de veneno em massa — que antes gerava 500 mais
         # uma linha em `system_event_logs` — passaria a sair como 422 sem
         # rastro nenhum.
-        # `info` e não `warning` DE PROPÓSITO: o `_DashboardHandler`
-        # (core/observability.py:24) está no root logger e espelha WARNING+ com
-        # um `psycopg.connect()` + INSERT BLOQUEANTE por registro, dentro do
-        # event loop — num caminho anônimo e barato de disparar isso é o vetor
-        # de DoS, não o conserto. Mesmo motivo do `_admin_log.info` do
-        # ClientDisconnect e do `_error_degraded` de `frontend/routes/shared.py`
-        # ("um bot varrendo URL vira um INSERT por 404"). Fica no stderr, que é
-        # onde o `[unhandled]` também aparece.
+        # `info` e não `warning` DE PROPÓSITO: o espelho do root grava WARNING+
+        # em `system_event_logs`, uma linha por registro. Num caminho anônimo e
+        # barato de disparar, isso enche a fila (`core/log_fila.py`) e faz
+        # descartar os avisos que importam: é o vetor, não o conserto. Mesmo
+        # motivo do `_admin_log.info` do ClientDisconnect e do `_error_degraded`
+        # de `frontend/routes/shared.py`. Fica no stderr, que é onde o
+        # `[unhandled]` também aparece.
         logging.getLogger(__name__).info(
             "422 sem input (%s): %s %s",
             veneno.__class__.__name__, request.method, request.url.path,
@@ -3397,7 +3411,7 @@ async def _apply_referral_attribution(request: Request, response: Response, user
                 user_id=int(user_id),
             )
     except Exception as exc:
-        print(f"[affiliates] atribuicao de referral falhou user={user_id}: {exc}")
+        print(f"[affiliates] atribuicao de referral falhou user={user_id}: {causa_segura(exc)}")
     finally:
         response.delete_cookie("ref_code")
 
@@ -3420,7 +3434,7 @@ async def _apply_prospect_attribution(request: Request, response: Response, user
                 user_id=int(user_id),
             )
     except Exception as exc:
-        print(f"[prospects] atribuicao de prospect falhou user={user_id}: {exc}")
+        print(f"[prospects] atribuicao de prospect falhou user={user_id}: {causa_segura(exc)}")
     finally:
         response.delete_cookie("prospect_code")
 
@@ -6222,7 +6236,7 @@ async def billing_change_plan(
                 send_plan_change_scheduled_email, email,
                 plan_names.get(plan, plan.title()), effective_iso, DASHBOARD_URL)
     except Exception as exc:
-        print(f"[billing] email troca agendada user={user_id}: {exc}", file=sys.stderr)
+        print(f"[billing] email troca agendada user={user_id}: {causa_segura(exc)}", file=sys.stderr)
 
     await log_system_event(
         "info", "billing_plan_change_scheduled",
@@ -6367,6 +6381,74 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         price = _g(data[0], "price", {})
         pid = _g(price, "id")
         return pid if isinstance(pid, str) else None
+
+    async def _meses_do_plano(invoice, extras, sub, user_id, linhas=None) -> int:
+        """Divisor da comissão: 1 no mensal, 12 no anual, pelo intervalo de cada linha de plano da
+        PRÓPRIA fatura (fora os extras): reprocessada depois de uma troca, a assinatura de agora
+        mentiria. A linha traz o intervalo no formato antigo (`price.recurring`/`plan`); na API
+        `dahlia` só o id do price (`pricing.price_details.price`): igual ao do item 0 da assinatura,
+        vale o `recurring` dela; diferente, `stripe.Price.retrieve`. Price expandido na linha é a fonte, sem
+        consulta. Price sem `recurring` é avulso e não conta. Fatura sem linha legível: o item 0 da assinatura. Mensal só se TUDO for mensal; o
+        resto cai em 12, o menor valor, e falha do `retrieve` ou intervalo estranho também, com log:
+        nunca paga 12× por omissão. As linhas são TODAS as da fatura (`linhas_da_fatura`, que com `has_more`
+        busca uma página de 100: o objeto embute só 10, e o plano pode estar depois dos extras); `linhas`
+        reusa as já buscadas. Falha da busca também cai em 12 com log. Sem exceção: o acesso e o e-mail já saíram,
+        e um 5xx faria a Stripe reentregar."""
+        if linhas is None:
+            from core.services.extras_assinar import linhas_da_fatura
+            try:
+                linhas = await asyncio.to_thread(linhas_da_fatura, invoice)
+            except Exception:
+                linhas = None
+
+        def _id(p):
+            return p if isinstance(p, str) else _g(p, "id")
+
+        def ciclo(rec):
+            return (_g(rec, "interval"), _g(rec, "interval_count"))
+
+        items = _g(_g(sub, "items", {}), "data", []) or []
+        price = _g(items[0], "price", {}) if items else {}
+        conhecidos = {("month", 1), ("year", 1)}
+        ciclos, estranhos = set(), []
+
+        def anota(rec, pid):
+            ciclos.add(ciclo(rec))
+            if ciclo(rec) not in conhecidos:
+                estranhos.append(pid if isinstance(pid, str) else None)
+
+        if linhas is None:  # a paginação falhou: sem saber o plano da fatura, o menor valor
+            anota({"interval": "linhas_indisponiveis"}, None)
+        for linha in linhas or []:
+            precos = [p for p in (_g(linha, "price"), _g(_g(_g(linha, "pricing"), "price_details"), "price")) if p]
+            if any(_id(p) in extras for p in precos):
+                continue
+            expandidos = [p for p in precos if not isinstance(p, str)]
+            pid = next((_id(p) for p in precos if isinstance(_id(p), str)), None)
+            if expandidos or _g(linha, "plan"):
+                rec = next((r for r in [_g(p, "recurring") for p in expandidos] + [_g(linha, "plan")]
+                            if _g(r, "interval")), None)
+            elif pid is None:
+                continue
+            elif pid == _id(price):
+                rec = _g(price, "recurring")
+            else:
+                try:
+                    rec = _g(await asyncio.to_thread(stripe.Price.retrieve, pid), "recurring")
+                except Exception:
+                    rec = {"interval": "retrieve_falhou"}
+            if rec is not None:
+                anota(rec, pid)
+        if not ciclos:
+            anota(_g(price, "recurring", {}), _id(price))
+        if ciclos == {("month", 1)}:
+            return 1
+        if estranhos:
+            await log_system_event(
+                "warning", "affiliate_commission_interval_unknown",
+                "Intervalo do plano desconhecido: comissao calculada como anual (1/12).",
+                source="affiliates", user_id=user_id, details={"price_ids": estranhos})
+        return 12
 
     def _subscription_amount(sub) -> tuple[float, str]:
         """Valor recorrente (unit_amount) e moeda do 1º item da assinatura.
@@ -6608,7 +6690,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             if await asyncio.to_thread(recent_event_exists, chave, int(uid), dedup_days):
                 return True
         except Exception as exc:
-            print(f"[billing] dedup de email falhou user={uid}: {exc}")
+            print(f"[billing] dedup de email falhou user={uid}: {causa_segura(exc)}")
         try:
             email = await _user_email(uid)
             if not email:
@@ -6622,7 +6704,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                                    source="billing", user_id=int(uid))
             return True
         except Exception as exc:
-            print(f"[billing] email {fn.__name__} falhou user={uid}: {exc}")
+            print(f"[billing] email {fn.__name__} falhou user={uid}: {causa_segura(exc)}")
             return False
 
     async def _registrar_cadernos(uid: int, session) -> list:
@@ -6781,7 +6863,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     await asyncio.to_thread(send_founder_email_once, int(user_id),
                                             _dest, "stripe", str(sub_id))
             except Exception as exc:
-                print(f"[billing] email do fundador falhou user={user_id}: {exc}")
+                print(f"[billing] email do fundador falhou user={user_id}: {causa_segura(exc)}")
             # Notificação admin (Slack/Discord webhook)
             try:
                 from core.services.admin_notify import notify_new_pro
@@ -6795,7 +6877,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     interval=_interval,
                 )
             except Exception as exc:
-                print(f"[billing] admin notify falhou user={user_id}: {exc}")
+                print(f"[billing] admin notify falhou user={user_id}: {causa_segura(exc)}")
             # Uma linha dizendo o que este webhook DECIDIU sobre rastreio, antes
             # de decidir. Sem ela, "não apareceu no Meta" não distinguia
             # configuração ausente de envio recusado: os dois davam log nenhum, e
@@ -6808,7 +6890,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                       f"status={sub_status} sid={_g(session, 'id')} "
                       f"capi={_capi_ok()} ga4={_mp_ok()}")
             except Exception as exc:
-                print(f"[billing] rastreio checkout: log falhou: {exc}")
+                print(f"[billing] rastreio checkout: log falhou: {causa_segura(exc)}")
 
             # Valor REALMENTE cobrado nesta sessão (com cupom e com e-book). Com
             # trial o plano vale 0, então aqui ele é exatamente o e-book (medido:
@@ -6858,7 +6940,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                             value=float(_cobrado) / 100.0, currency=_cobrado_moeda,
                             **_capi_kw)
             except Exception as exc:
-                print(f"[billing] meta capi checkout ({sub_status}) falhou user={user_id}: {exc}")
+                print(f"[billing] meta capi checkout ({sub_status}) falhou user={user_id}: {causa_segura(exc)}")
             # GA4 (Measurement Protocol) — a compra com o VALOR real cobrado.
             # Só a compra IMEDIATA: quando a assinatura nasce em trial o dinheiro
             # entra semanas depois, e o purchase daquele caso sai no invoice.paid
@@ -6911,7 +6993,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                         user_id=user_id,
                     )
             except Exception as exc:
-                print(f"[billing] ga4 purchase (checkout) falhou user={user_id}: {exc}")
+                print(f"[billing] ga4 purchase (checkout) falhou user={user_id}: {causa_segura(exc)}")
         elif user_id:
             await log_system_event(
                 "info",
@@ -7030,36 +7112,60 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                         user_id=user_id, details={"erro": type(exc).__name__},
                     )
 
-                # Comissão de afiliado: se o pagante foi indicado por um afiliado
-                # ativo, credita a % da fatura. Idempotente por invoice id (retry
-                # de webhook não duplica). Nunca pode derrubar o webhook.
+                # Comissão de afiliado: só a 1ª cobrança paga do indicado gera (anual ÷ 12).
+                # Idempotente por invoice id (retry de webhook não duplica). Nunca pode
+                # derrubar o webhook.
+                commission = None
+                invoice_id = _g(invoice, "id")
                 try:
-                    from db.affiliates import record_commission_for_invoice
-                    invoice_id = _g(invoice, "id")
-                    commission = await asyncio.to_thread(
-                        record_commission_for_invoice,
-                        user_id, invoice_id, int(amount_cents),
-                    )
-                    if commission and commission["payment_check_pending"]:
-                        # Sem linha da fatura: confere na Stripe antes de a comissão poder ser paga (A5).
-                        # Falha deixa a marca, e o worker tenta de novo; nunca derruba o webhook.
-                        from core.services.afiliado_reembolso import conferir_comissao
-                        await asyncio.to_thread(conferir_comissao, commission["id"], invoice_id)
-                    if commission:
-                        await log_system_event(
-                            "info",
-                            "affiliate_commission_created",
-                            f"Comissao de afiliado criada: R$ {commission['amount_cents'] / 100:.2f}.",
-                            source="affiliates",
-                            user_id=user_id,
-                            details={
-                                "affiliate_id": commission["affiliate_id"],
-                                "invoice_id": invoice_id,
-                                "amount_cents": commission["amount_cents"],
-                            },
+                    from db.affiliates import get_referral_for_user, record_commission_for_invoice
+                    # Só quem ainda pode gerar: sem isto, toda troca de plano de qualquer cliente
+                    # consultaria a Stripe no divisor. O marcador nunca volta a nulo, e a decisão final
+                    # segue dentro de `_comissao_da_primeira`, sob as travas.
+                    ref = await asyncio.to_thread(get_referral_for_user, user_id)
+                    if ref and not ref["first_charge_ref"]:
+                        commission = await asyncio.to_thread(
+                            record_commission_for_invoice,
+                            user_id, invoice_id, int(amount_cents),
+                            datetime.fromtimestamp(event["created"], timezone.utc),
+                            await _meses_do_plano(invoice, _precos, sub, user_id, _linhas if _precos else None),
                         )
                 except Exception as exc:
-                    print(f"[affiliates] comissao falhou user={user_id}: {exc}")
+                    # 200 de qualquer jeito: a Stripe não reentrega, e a renovação não vira
+                    # primeira. O log com a fatura é o que permite reenviar o evento à mão.
+                    await log_system_event(
+                        "error", "affiliate_commission_failed",
+                        "Comissao de afiliado nao registrada.", source="affiliates",
+                        user_id=user_id,
+                        details={"invoice_id": invoice_id, "erro": type(exc).__name__},
+                    )
+                if commission and commission["payment_check_pending"]:
+                    # Sem linha da fatura: confere na Stripe antes de a comissão poder ser paga (A5).
+                    # Falha deixa a marca, e o worker tenta de novo; nunca derruba o webhook.
+                    try:
+                        from core.services.afiliado_reembolso import conferir_comissao
+                        await asyncio.to_thread(conferir_comissao, commission["id"], invoice_id)
+                    except Exception as exc:
+                        await log_system_event(
+                            "warning", "affiliate_commission_check_failed",
+                            "Comissao criada; a conferencia na Stripe fica para o worker.",
+                            source="affiliates", user_id=user_id,
+                            details={"invoice_id": invoice_id, "commission_id": commission["id"],
+                                     "erro": type(exc).__name__},
+                        )
+                if commission:
+                    await log_system_event(
+                        "info",
+                        "affiliate_commission_created",
+                        f"Comissao de afiliado criada: R$ {commission['amount_cents'] / 100:.2f}.",
+                        source="affiliates",
+                        user_id=user_id,
+                        details={
+                            "affiliate_id": commission["affiliate_id"],
+                            "invoice_id": invoice_id,
+                            "amount_cents": commission["amount_cents"],
+                        },
+                    )
 
                 # O par do log do ramo de checkout: `billing_reason` é o que
                 # decide se esta fatura vira Purchase ou é pulada por já ter sido
@@ -7073,7 +7179,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                           f"reason={_g(invoice, 'billing_reason')} "
                           f"capi={_capi_ok()} ga4={_mp_ok()}")
                 except Exception as exc:
-                    print(f"[billing] rastreio invoice: log falhou: {exc}")
+                    print(f"[billing] rastreio invoice: log falhou: {causa_segura(exc)}")
 
                 # Meta Conversions API — Purchase da cobrança REAL (fim do trial
                 # e renovações), com o valor efetivamente pago. A primeira fatura
@@ -7102,7 +7208,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                             event_source_url=f"{DASHBOARD_URL}/home",
                         )
                 except Exception as exc:
-                    print(f"[billing] meta capi invoice purchase falhou user={user_id}: {exc}")
+                    print(f"[billing] meta capi invoice purchase falhou user={user_id}: {causa_segura(exc)}")
 
                 # GA4 (Measurement Protocol) — o mesmo purchase, pelo mesmo motivo
                 # e com o mesmo corte: a primeira fatura da compra imediata
@@ -7130,7 +7236,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                             user_id=user_id,
                         )
                 except Exception as exc:
-                    print(f"[billing] ga4 purchase (invoice) falhou user={user_id}: {exc}")
+                    print(f"[billing] ga4 purchase (invoice) falhou user={user_id}: {causa_segura(exc)}")
 
     elif event["type"] == "checkout.session.expired":
         # Funil: sem usuário resolvido é no-op (200). Reentrega grava outra linha.
@@ -7323,7 +7429,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     attempt_count=_g(invoice, "attempt_count"),
                 )
             except Exception as exc:
-                print(f"[billing] admin notify payment_failed falhou user={user_id}: {exc}")
+                print(f"[billing] admin notify payment_failed falhou user={user_id}: {causa_segura(exc)}")
 
     elif event["type"] == "customer.subscription.updated":
         # Só o Plano Família escuta este evento. O estado vem do `retrieve` (o payload pode chegar fora de
@@ -7504,7 +7610,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                                             _plano_cancelado, expires_for_email,
                                             DASHBOARD_URL)
             except Exception as exc:
-                print(f"[billing] email canceled falhou user={user_id}: {exc}")
+                print(f"[billing] email canceled falhou user={user_id}: {causa_segura(exc)}")
             # Notificação admin
             # DÍVIDA PRÉ-EXISTENTE, não deste PR: `email` só nasce se o
             # `_user_email` acima RETORNAR. Se ele levantar, o except de cima
@@ -7519,11 +7625,11 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     user_id=user_id, email=email, expires_at=expires_for_email,
                 )
             except Exception as exc:
-                print(f"[billing] admin notify canceled falhou user={user_id}: {exc}")
+                print(f"[billing] admin notify canceled falhou user={user_id}: {causa_segura(exc)}")
 
     elif event["type"] in ("charge.refunded", "charge.dispute.closed"):
         # Reembolso de indicado de afiliado. Sem try: nada aqui segura grant nem comissão de
-        # outro evento, tudo é idempotente, e falha de banco ou da Stripe vira 5xx e reentrega.
+        # outro evento, é idempotente; banco ou Stripe fora vira 5xx e reentrega (fatura sem confirmação: 200).
         from core.services.afiliado_reembolso import tratar_evento
         await asyncio.to_thread(tratar_evento, event)
 
@@ -7541,10 +7647,8 @@ async def _create_billing_portal(user_id: int, customer_id: str, return_path: st
             return_url=f"{DASHBOARD_URL}{return_path}",
         )
     except stripe.error.StripeError as exc:
-        await asyncio.to_thread(
-            _log_falha, "billing_portal", user_id, exc,
-            route=route, request_id=getattr(exc, "request_id", None),
-        )
+        _log_falha("billing_portal", user_id, exc,
+                   route=route, request_id=getattr(exc, "request_id", None))
         raise HTTPException(
             status_code=502,
             detail="Não foi possível abrir o gerenciamento da assinatura agora. Tente novamente em instantes.",
@@ -8404,11 +8508,8 @@ async def delete_launch_route(
         # divergir. Condição de DOMÍNIO: frase própria, sem `str(exc)`. O `detail` é
         # renderizado pro usuário (`frontend/dashboard.js`), e o `str(exc)`
         # daqui mostrava "lançamento sem 'efeitos'" cru no modal do app.
-        # `to_thread` igual ao ramo técnico abaixo: WARNING também é espelhado
-        # em `system_event_logs` pelo `_DashboardHandler`, com o mesmo
-        # `psycopg.connect()` bloqueante — o nível não muda quem paga a conta.
-        await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
-                                nivel=logging.WARNING, launch_id=int(launch_id))
+        _log_falha("delete_launch", user_id, exc,
+                   nivel=logging.WARNING, launch_id=int(launch_id))
         # `[type(exc)]` casaria por tipo EXATO dentro de um `except` que casa por
         # `isinstance`: uma subclasse futura entraria aqui e levantaria KeyError
         # (medido: 500 com `detail=None`). O `next(...)` usa a mesma regra do `except`.
@@ -8425,10 +8526,8 @@ async def delete_launch_route(
         # nunca viu esta falha, nunca gravou pilha nenhuma. Ligar
         # `com_traceback=True` aqui não restaura rastro: CRIA persistência nova
         # do `DETAIL: Key (…)=(…)` em `system_event_logs`.
-        # `to_thread`: a rota é async e o `_DashboardHandler` grava com
-        # `psycopg.connect()` bloqueante (ver `core/system_event_log.py`).
-        await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
-                                launch_id=int(launch_id))
+        _log_falha("delete_launch", user_id, exc,
+                   launch_id=int(launch_id))
         raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     _invalidate_dashboard_current_cache(user_id)
@@ -8523,8 +8622,8 @@ async def delete_credit_transaction_route(
         # Sem traceback, mesma medição da `/launches` acima: na `main` esta rota
         # também era `HTTPException(500, f"Erro ao apagar compra: {exc}")`, que o
         # middleware deixa passar — nunca houve pilha gravada aqui para manter.
-        await asyncio.to_thread(_log_falha, "undo_credit_transaction", user_id, exc,
-                                credit_tx_id=int(tx_id))
+        _log_falha("undo_credit_transaction", user_id, exc,
+                   credit_tx_id=int(tx_id))
         raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     if result is None:
@@ -10008,6 +10107,7 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
 
         while True:
             raw = await ws.receive_text()
+            t = None
             try:
                 payload = json.loads(raw) if raw.strip().startswith("{") else {"type": raw}
                 t       = payload.get("type")
@@ -10047,7 +10147,7 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
                     await ws.send_text(jdump({"type": "pong"}))
 
             except Exception as exc:
-                print(f"[ws] error handling message type={payload.get('type') if 'payload' in dir() else '?'}: {exc}")
+                print(f"[ws] error handling message type={t if t in ('refresh', 'get_month', 'get_history', 'ping') else 'outro'}: {causa_segura(exc)}")
 
     except WebSocketDisconnect:
         pass

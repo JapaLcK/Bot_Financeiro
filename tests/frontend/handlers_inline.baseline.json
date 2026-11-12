@@ -9,6 +9,7 @@
       "copyAffiliateAdminLink",
       "createAffiliate",
       "dismissEvent",
+      "editAffiliateCommission",
       "navigateToFilter",
       "openRecordedForm",
       "openRecoveryForm",

@@ -2,18 +2,28 @@
 `PaymentIntent.retrieve` e `Dispute.list`. Sem configuração, toda fatura tem uma cobrança paga sem
 reembolso: é a Stripe que o QR, o "Marcar pago" e o "Pagamento já realizado" consultam antes de pagar.
 
-`cobra(fatura, devolvido=..., disputed=...)` muda a cobrança; `disputas[fatura]` lista as disputas;
+`cobra(fatura, devolvido=..., disputed=...)` muda a cobrança; `cobrancas[fatura]` também aceita uma lista
+(uma cobrança paga por item; `[]` é fatura sem cobrança paga); `disputas[fatura]` lista as disputas (de
+toda cobrança contestada da fatura); `payment_record` = faturas pagas fora de `PaymentIntent`;
 `falha` faz a listagem levantar; `atraso` a deixa lenta; `consultas` conta as chamadas HTTP.
 Sem prefixo `test_`: o pytest não coleta este arquivo.
 """
 import time
 from types import SimpleNamespace
 
+from _stripe_cliente_falso import instalar
+
 
 def simular_stripe(monkeypatch, stripe_mod=None, por_pagamento=None):
     if stripe_mod is None:
         import stripe as stripe_mod
-    f = SimpleNamespace(cobrancas={}, disputas={}, falha=None, consultas=0, atraso=0.0, durante=None)
+    f = SimpleNamespace(cobrancas={}, disputas={}, falha=None, consultas=0, atraso=0.0, durante=None,
+                        payment_record=set())
+    padrao = {"amount": 100_000, "amount_refunded": 0, "disputed": False}
+
+    def cobrancas(fatura):
+        c = f.cobrancas.get(fatura, padrao)
+        return c if isinstance(c, list) else [c]
 
     def listar(**k):
         if "invoice" not in k:
@@ -25,13 +35,15 @@ def simular_stripe(monkeypatch, stripe_mod=None, por_pagamento=None):
             f.durante()
         if f.falha:
             raise f.falha
-        return {"data": [{"status": "paid", "payment": {"type": "payment_intent", "payment_intent": f"pi_{k['invoice']}"}}]}
+        if k["invoice"] in f.payment_record:
+            return {"data": [{"status": "paid", "payment": {"type": "payment_record", "payment_intent": None}}]}
+        return {"data": [{"status": "paid", "payment": {"type": "payment_intent", "payment_intent": f"pi_{k['invoice']}#{i}"}}
+                         for i in range(len(cobrancas(k["invoice"])))]}
 
     def intent(pi, expand, api_key):
         f.consultas += 1
-        fatura = pi[3:]
-        cobranca = f.cobrancas.get(fatura, {"amount": 100_000, "amount_refunded": 0, "disputed": False})
-        return {"latest_charge": {"id": f"ch_{fatura}", **cobranca}}
+        fatura, _, i = pi[3:].partition("#")
+        return {"latest_charge": {"id": f"ch_{fatura}", **cobrancas(fatura)[int(i)]}}
 
     for nome, metodo, funcao in (("InvoicePayment", "list", listar), ("PaymentIntent", "retrieve", intent),
                                  ("Dispute", "list", lambda charge, limit, api_key: {"data": f.disputas.get(charge[3:], [])})):
@@ -39,6 +51,7 @@ def simular_stripe(monkeypatch, stripe_mod=None, por_pagamento=None):
             monkeypatch.setattr(stripe_mod, nome, type(nome, (), {}), raising=False)
         monkeypatch.setattr(getattr(stripe_mod, nome), metodo, staticmethod(funcao), raising=False)
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_xxx")
+    instalar(monkeypatch)  # o `cliente_stripe` de produção cai nestes falsos (#1499)
     f.cobra = lambda fatura, devolvido=0, amount=100_000, disputed=False: f.cobrancas.__setitem__(
         fatura, {"amount": amount, "amount_refunded": devolvido, "disputed": disputed})
     return f

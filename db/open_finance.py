@@ -34,13 +34,9 @@ from .users import ensure_user, ensure_user_tx
 # `_log_falha` exige uma `Exception` no 3º posicional (`core/observability.py:102`)
 # e aqui não há exceção — o que se loga é um VALOR recusado na fronteira.
 #
-# NÃO é por custo, e a justificativa anterior dizia isso errado: um `warning()` da
-# stdlib NÃO é barato aqui. O `_DashboardHandler` mora no ROOT logger
-# (`core/observability.py:29-46`) e espelha todo WARNING em `system_event_logs`
-# chamando o MESMO `log_system_event_sync`, que abre `psycopg.connect()` próprio
-# (sem pool nenhum) e faz o INSERT bloqueante. A conta é a mesma dos dois lados —
-# inclusive dentro de uma escrita com prazo (`budget_ms`) — e o que a limita são o
-# `connect_timeout=2` e o `statement_timeout` de `core/system_event_log.py`.
+# Custo: desde o PR-10a o espelho do root grava pela fila (`core/log_fila.py`), então
+# em produção um `warning()` aqui custa o `prepare`, não um INSERT; na suíte ele ainda
+# grava na thread de quem loga (`tests/conftest.py`).
 logger = logging.getLogger(__name__)
 
 
@@ -724,14 +720,13 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
     # sabem ler, e "desconhecido" tem um desfecho só. O valor original não se
     # perde — ele fica no `raw` desta mesma linha (`Jsonb(item)`, abaixo), além do
     # log.
-    # `t0` ANTES do aviso, e não depois dele: o `_DashboardHandler` do root logger
-    # espelha todo WARNING em `system_event_logs` com `psycopg.connect()` + INSERT
-    # SÍNCRONOS (`core/observability.py`), com teto próprio de segundos. Com o
-    # relógio começando depois, esse tempo saía de graça e a reconexão com cliente
-    # HTTP esperando podia estourar o `budget_ms` que esta função promete respeitar
-    # (Codex, PR #539). Agora o aviso gasta do MESMO orçamento que o resto: o
-    # `_CursorComTeto` desconta o que ele levou, e o pior caso vira escrita que
-    # falha por prazo — não uma que ignora o prazo.
+    # `t0` ANTES do aviso, e não depois dele: na suíte o espelho do root grava o
+    # WARNING em `system_event_logs` na thread de quem loga, com teto próprio de
+    # segundos, e em produção também gravava até o PR-10a (Codex, PR #539). Com o
+    # relógio começando depois, esse tempo saía de graça e podia estourar o
+    # `budget_ms`; assim o `_CursorComTeto` desconta o que ele levou. Em produção o
+    # aviso agora custa o `prepare` da fila (`core/log_fila.py`), e o relógio antes
+    # dele não custa nada.
     t0 = monotonic()
 
     from core.services.pluggy_health import STATUS_REMOTOS_ACEITOS

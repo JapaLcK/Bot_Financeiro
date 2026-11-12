@@ -6,10 +6,12 @@ Fluxo:
   2. Visitante clica no link → cookie ref_code (30 dias) → ao criar conta,
      record_referral() grava a atribuição (1 afiliado por usuário, primeiro ganha).
   3. Webhook Stripe invoice.paid (valor > 0) chama record_commission_for_invoice():
-     comissão = commission_bps da fatura, APENAS na primeira cobrança paga do
-     indicado — renovações não geram nada (mudou de recorrente pra primeira
-     cobrança em 2026-07-23). Idempotente por stripe_invoice_id, só acumula se
-     o afiliado estiver status='active'.
+     comissão = commission_bps (vigente agora) do valor pago, UMA vez por cliente, na
+     primeira cobrança paga. Plano anual: base ÷ 12 (`paid_months`), arredondada
+     para centavos (`valor_da_comissao`). O pagamento que decide grava
+     `affiliate_referrals.first_charge_ref`, mesmo sem gerar (0%, desativado):
+     renovação, reativação, troca de plano ou reenvio depois de o % subir não
+     reabrem. Idempotente por stripe_invoice_id.
   4. Comissão fica 'pending' com carência (COMMISSION_HOLD_DAYS) antes de virar
      sacável; saque via request_payout() (mínimo MIN_PAYOUT_CENTS) trava as
      comissões no payout; admin paga por Pix fora do sistema e marca pago.
@@ -17,21 +19,25 @@ Fluxo:
 import re
 import secrets
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
-from .affiliate_payments import resumo_conversao
+from .affiliate_payments import PAGAMENTO_DA_COMISSAO_SQL, origem_da_chave, resumo_conversao
 from .affiliate_reviews import (
     PENDENCIA_ABERTA_SQL,
     SAQUE_BLOQUEADO_SQL,
+    SAQUE_EM_CONFERENCIA_SQL,
+    _comissao_que_saiu,
     abertas_do_saque,
     promover,
     registrar_evento,
     saque_bloqueado,
     trava_fatura,
+    trava_indicado,
 )
 from .connection import get_conn
 
-DEFAULT_COMMISSION_BPS = 1000       # 10%
+DEFAULT_COMMISSION_BPS = 10_000     # 100%
 COMMISSION_HOLD_DAYS = 30           # carência anti-estorno antes de ficar sacável
 MIN_PAYOUT_CENTS = 50_00            # saque mínimo R$ 50
 REF_COOKIE_MAX_AGE_DAYS = 30        # janela de atribuição do link
@@ -44,6 +50,10 @@ _FUSO = ZoneInfo("America/Sao_Paulo")
 
 class SaqueComPendencia(ValueError):
     """Saque com reembolso de cliente em análise: a rota responde 409."""
+
+
+# Só a marca, sem pendência (#1498): não há o que resolver, e a próxima consulta relê a Stripe. "Marcar pago" e QR.
+EM_CONFERENCIA = "Uma comissão deste saque está em conferência na Stripe. Tente de novo em instantes."
 
 
 class SaqueOrfao(ValueError):
@@ -64,6 +74,12 @@ def _generate_code() -> str:
 
 # ─── Afiliado ─────────────────────────────────────────────────────────────────
 
+def _validar_bps(bps) -> int:
+    if not (0 <= int(bps) <= 10_000):
+        raise ValueError("commission_bps deve estar entre 0 e 10000.")
+    return int(bps)
+
+
 def create_affiliate(user_id: int, code: str | None = None,
                      commission_bps: int = DEFAULT_COMMISSION_BPS) -> dict:
     """Cria (ou retorna, se já existe) o afiliado do user_id."""
@@ -71,8 +87,7 @@ def create_affiliate(user_id: int, code: str | None = None,
         code = _normalize_code(code)
         if not _CODE_RE.match(code):
             raise ValueError("Código inválido: use 4-20 letras/números.")
-    if not (0 <= int(commission_bps) <= 10_000):
-        raise ValueError("commission_bps deve estar entre 0 e 10000.")
+    commission_bps = _validar_bps(commission_bps)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -142,6 +157,23 @@ def set_affiliate_status(affiliate_id: int, status: str) -> bool:
             return cur.rowcount > 0
 
 
+def set_affiliate_commission(affiliate_id: int, bps: int) -> int | None:
+    """Troca o percentual (só o admin chama). Devolve o anterior, ou None se o afiliado não existe.
+    Vale para a próxima primeira cobrança: comissão já registrada não muda."""
+    bps = _validar_bps(bps)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # `no key update`: não bloqueia a FK do insert da comissão no webhook.
+            cur.execute("select commission_bps from affiliates where id = %s for no key update",
+                        (int(affiliate_id),))
+            antes = cur.fetchone()
+            if not antes:
+                return None
+            cur.execute("update affiliates set commission_bps = %s where id = %s", (bps, int(affiliate_id)))
+            conn.commit()
+            return int(antes["commission_bps"])
+
+
 def set_affiliate_pix_key(affiliate_id: int, pix_key_hash: str | None,
                           pix_key_enc: str | None) -> None:
     with get_conn() as conn:
@@ -184,8 +216,10 @@ def record_referral(code: str, referred_user_id: int) -> bool:
 def get_referral_for_user(referred_user_id: int) -> dict | None:
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Colunas nomeadas, como no insert da comissão: `*` muda de tipo quando uma coluna é refeita.
             cur.execute(
-                "select * from affiliate_referrals where referred_user_id = %s",
+                "select id, affiliate_id, referred_user_id, code_used, created_at, first_charge_ref"
+                " from affiliate_referrals where referred_user_id = %s",
                 (int(referred_user_id),),
             )
             return cur.fetchone()
@@ -193,75 +227,128 @@ def get_referral_for_user(referred_user_id: int) -> dict | None:
 
 # ─── Comissão ─────────────────────────────────────────────────────────────────
 
-def record_commission_for_invoice(referred_user_id: int, stripe_invoice_id: str,
-                                  invoice_amount_cents: int) -> dict | None:
-    """Gera a comissão da PRIMEIRA cobrança paga do usuário indicado.
+# Nomeadas, nunca `returning *`: com a conexão do pool já preparada, uma coluna refeita (migração com
+# processo vivo no deploy) muda o tipo do resultado e o Postgres recusa o plano em cache
+# ("cached plan must not change result type"), e a comissão não nasceria.
+COLUNAS_DA_COMISSAO = ("id, affiliate_id, referred_user_id, stripe_invoice_id, invoice_amount_cents, amount_cents,"
+                       " status, available_at, payout_id, created_at, payment_check_pending, commission_bps, paid_months")
 
-    Retorna a linha criada, ou None se: usuário não tem afiliado, afiliado
-    desativado, valor <= 0, fatura já comissionada (idempotência), ou o
-    indicado já gerou comissão antes (renovação — só a 1ª cobrança conta).
-    """
-    if not stripe_invoice_id or int(invoice_amount_cents) <= 0:
-        return None
+
+def valor_da_comissao(base_cents: int, bps: int, meses: int) -> int:
+    """base × bps / 10000 / meses, numa conta só, arredondada para o centavo (meio sobe)."""
+    return int((Decimal(int(base_cents)) * int(bps) / (Decimal(10_000) * int(meses)))
+               .quantize(Decimal(1), ROUND_HALF_UP))
+
+
+def _comissao_da_primeira(referred_user_id: int, chave: str, base_cents: int, paid_months: int,
+                          paid_at: datetime, conferir: bool) -> dict | None:
+    """A regra única da primeira cobrança paga (cartão e Pix). Devolve a comissão criada ou None.
+
+    Quem decide grava `first_charge_ref`, gerando ou não (0%, desativado, valor 0): depois
+    dele nenhum pagamento do cliente gera. Sem o marcador, o histórico decide: comissão de
+    outra chave, ou pagamento ANTERIOR a este (de qualquer origem), encerra sem marcar.
+    Travas: fatura, depois indicado. A referral não é travada antes do insert, e o marcador vem
+    depois dele: segurá-la antes formaria ciclo com a exclusão de conta (FK `set null`)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            trava_fatura(cur, stripe_invoice_id)
+            trava_fatura(cur, chave)
+            trava_indicado(cur, referred_user_id)
             cur.execute(
                 """
-                select r.affiliate_id, a.commission_bps
+                select r.id, r.affiliate_id, r.first_charge_ref, a.commission_bps, a.status
                   from affiliate_referrals r
                   join affiliates a on a.id = r.affiliate_id
                  where r.referred_user_id = %s
-                   and a.status = 'active'
                 """,
                 (int(referred_user_id),),
             )
-            row = cur.fetchone()
-            if not row:
+            ref = cur.fetchone()
+            if not ref or ref["first_charge_ref"]:
                 return None
-            # Comissão SÓ na primeira cobrança paga do indicado (decisão do Lucas
-            # em 2026-07-23 — antes era recorrente em toda fatura). Se já existe
-            # qualquer comissão desse usuário, as renovações não geram mais nada.
-            # Conta inclusive comissão estornada: se a 1ª foi reembolsada, a
-            # renovação seguinte não deve virar uma nova comissão.
+            fonte, pagamento = origem_da_chave(chave)
             cur.execute(
-                "select 1 from affiliate_commissions where referred_user_id = %s limit 1",
-                (int(referred_user_id),),
+                """
+                select 1 from affiliate_commissions
+                 where referred_user_id = %s and stripe_invoice_id <> %s
+                union all
+                select 1 from affiliate_referral_payments
+                 where referral_id = %s and paid_at < %s
+                   and not (source = %s and payment_ref = %s)
+                limit 1
+                """,
+                (int(referred_user_id), chave, ref["id"], paid_at, fonte, pagamento),
             )
             if cur.fetchone():
                 return None
-            amount_cents = int(invoice_amount_cents) * int(row["commission_bps"]) // 10_000
-            if amount_cents <= 0:
-                return None
-            # Sem linha da fatura, ninguém viu reembolso dela, e a linha pode ter sido limpa (A5): a
-            # comissão nasce marcada, fora do disponível, até `conferir_comissao` olhar a Stripe. Com
-            # linha, `promover` decide. Nenhuma chamada HTTP nesta transação.
-            cur.execute("select 1 from affiliate_refund_reviews where stripe_invoice_id = %s", (stripe_invoice_id,))
-            sem_linha = cur.fetchone() is None
-            cur.execute(
-                """
-                insert into affiliate_commissions(
-                    affiliate_id, referred_user_id, stripe_invoice_id,
-                    invoice_amount_cents, amount_cents, available_at, payment_check_pending)
-                values (%s, %s, %s, %s, %s, %s, %s)
-                on conflict (stripe_invoice_id) do nothing
-                returning *
-                """,
-                (
-                    int(row["affiliate_id"]),
-                    int(referred_user_id),
-                    stripe_invoice_id,
-                    int(invoice_amount_cents),
-                    amount_cents,
-                    _now() + timedelta(days=COMMISSION_HOLD_DAYS),
-                    sem_linha,
-                ),
-            )
-            created = cur.fetchone()
-            if created:
-                promover(cur, created)
+            created = None
+            bps = int(ref["commission_bps"])
+            amount_cents = valor_da_comissao(base_cents, bps, paid_months) if ref["status"] == "active" else 0
+            if amount_cents > 0:
+                # Sem linha da fatura, ninguém viu reembolso dela, e a linha pode ter sido limpa (A5): a
+                # comissão do cartão nasce marcada, fora do disponível, até `conferir_comissao` olhar a
+                # Stripe. Com linha, `promover` decide. Nenhuma chamada HTTP nesta transação.
+                cur.execute("select 1 from affiliate_refund_reviews where stripe_invoice_id = %s", (chave,))
+                pendente = conferir and cur.fetchone() is None
+                cur.execute(
+                    f"""
+                    insert into affiliate_commissions(
+                        affiliate_id, referred_user_id, stripe_invoice_id, invoice_amount_cents,
+                        amount_cents, commission_bps, paid_months, available_at, payment_check_pending)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    on conflict (stripe_invoice_id) do nothing
+                    returning {COLUNAS_DA_COMISSAO}
+                    """,
+                    (int(ref["affiliate_id"]), int(referred_user_id), chave, int(base_cents), amount_cents,
+                     bps, int(paid_months), _now() + timedelta(days=COMMISSION_HOLD_DAYS), pendente),
+                )
+                created = cur.fetchone()
+                if created:
+                    promover(cur, created)
+            cur.execute("update affiliate_referrals set first_charge_ref = %s"
+                        " where id = %s and first_charge_ref is null", (chave, ref["id"]))
             conn.commit()
             return created
+
+
+def record_commission_for_invoice(referred_user_id: int, stripe_invoice_id: str,
+                                  invoice_amount_cents: int, paid_at: datetime | None = None,
+                                  paid_months: int = 1) -> dict | None:
+    """Comissão da fatura Stripe paga, pela regra da primeira cobrança.
+
+    Fatura zerada (trial, extras que cobrem tudo) não decide nada: nem comissão, nem marcador.
+    `paid_months` = 12 no plano anual. Passa pela conferência A5 quando não há linha da fatura.
+    """
+    if not stripe_invoice_id or int(invoice_amount_cents) <= 0:
+        return None
+    return _comissao_da_primeira(referred_user_id, stripe_invoice_id, int(invoice_amount_cents),
+                                 paid_months, paid_at or _now(), conferir=True)
+
+
+def record_commission_for_pix(cobranca: dict, meses: int) -> dict | None:
+    """Comissão da cobrança Pix paga (o efeito `afiliado` do dreno), pela mesma regra da primeira cobrança.
+
+    Chave `pix:<id>` (`external_reference`), base `amount_cents` (o pago, já com campanha e crédito,
+    sem os cadernos) e `meses` (`MESES_DO_PIX`: o Pix só vende o anual). Sem conferência A5: a
+    cobrança já está paga e o estorno chega pelo dreno. Falha levanta, e o dreno tenta de novo."""
+    if not cobranca["user_id"] or int(cobranca["amount_cents"]) <= 0:
+        return None
+    return _comissao_da_primeira(cobranca["user_id"], cobranca["external_reference"], int(cobranca["amount_cents"]),
+                                 meses, cobranca["paid_at"] or _now(), conferir=False)
+
+
+def precisa_do_acumulado(chave: str) -> bool:
+    """O devolvido de um reembolso parcial muda algo? Só com comissão não estornada da chave, ou com a que
+    saiu com o afiliado e `_aplicar` ainda refaz (`_comissao_que_saiu`: paga, N1, ou num saque órfão aberto).
+    Sem elas `_aplicar` ignora o valor."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select status from affiliate_commissions where stripe_invoice_id = %s", (chave,))
+        c = cur.fetchone()
+        if c:
+            return c["status"] != "reversed"
+        cur.execute("select paid_cents, orphan_payout_id, commission_cents from affiliate_refund_reviews"
+                    " where stripe_invoice_id = %s", (chave,))
+        a = cur.fetchone()
+        return a is not None and _comissao_que_saiu(cur, a) is not None
 
 
 def get_affiliate_stats(affiliate_id: int) -> dict:
@@ -321,12 +408,12 @@ def list_affiliate_commissions(affiliate_id: int, limit: int = 50) -> list[dict]
             cur.execute(
                 f"""
                 select c.id, c.invoice_amount_cents, c.amount_cents, c.status,
-                       c.available_at, c.payout_id, c.created_at,
+                       c.available_at, c.payout_id, c.created_at, c.paid_months,
                        coalesce((select p.refund_status
                                    from affiliate_referral_payments p
                                    join affiliate_referrals r on r.id = p.referral_id
-                                  where r.affiliate_id = c.affiliate_id and p.source = 'stripe'
-                                    and p.payment_ref = c.stripe_invoice_id), 'none') as payment_refund,
+                                  where r.affiliate_id = c.affiliate_id
+                                    and {PAGAMENTO_DA_COMISSAO_SQL.format(c="c", p="p")}), 'none') as payment_refund,
                        c.status = 'pending' and c.payout_id is null
                          and {PENDENCIA_ABERTA_SQL.format(c="c")} as in_review,
                        c.status = 'pending' and c.payment_check_pending as checking,
@@ -482,9 +569,11 @@ def mark_payout_paid(payout_id: int, note: str | None = None) -> bool:
                     raise SaqueOrfao("O afiliado excluiu a conta: registre o pagamento já realizado ou rejeite.")
                 return False
             cur.execute("select id from affiliate_commissions where payout_id = %s for update", (int(payout_id),))
-            if saque_bloqueado(cur, payout_id):
+            bloqueio = saque_bloqueado(cur, payout_id)
+            if bloqueio["pendencia"] or bloqueio["conferencia"]:
                 conn.rollback()
-                raise SaqueComPendencia("Este saque tem reembolso de cliente em análise. Resolva a pendência antes.")
+                raise SaqueComPendencia("Este saque tem reembolso de cliente em análise. Resolva a pendência antes."
+                                        if bloqueio["pendencia"] else EM_CONFERENCIA)
             cur.execute(
                 "update affiliate_commissions set status = 'paid' where payout_id = %s",
                 (int(payout_id),),
@@ -574,7 +663,7 @@ def reject_payout(payout_id: int, note: str | None = None, revisor: str = "admin
             )
             abertas = abertas_do_saque(cur, payout_id)
             cur.execute(
-                """
+                f"""
                 update affiliate_commissions c
                    set payout_id = null,
                        status = case when c.status = 'pending' and (exists (
@@ -582,7 +671,7 @@ def reject_payout(payout_id: int, note: str | None = None, revisor: str = "admin
                            from affiliate_referral_payments p
                            join affiliate_referrals r on r.id = p.referral_id
                           where r.affiliate_id = c.affiliate_id
-                            and p.source = 'stripe' and p.payment_ref = c.stripe_invoice_id
+                            and {PAGAMENTO_DA_COMISSAO_SQL.format(c="c", p="p")}
                             and p.refund_status = 'total'
                        ) or exists (
                          select 1 from affiliate_refund_reviews v
@@ -644,12 +733,13 @@ _DONO = "coalesce(a.code, p.affiliate_code)"
 
 def get_payout(payout_id: int) -> dict | None:
     """Um saque específico (mesmas colunas do admin_list_payouts). Usado pra
-    montar o Pix copia e cola / QR do pagamento no admin."""
+    montar o Pix copia e cola / QR do pagamento no admin. `checking`: comissão do saque em conferência."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                select p.*, {_DONO} as code, a.user_id, aa.email_enc, {_BLOQUEADO} as blocked, {_ORFAO} as orphan
+                select p.*, {_DONO} as code, a.user_id, aa.email_enc, {_BLOQUEADO} as blocked, {_ORFAO} as orphan,
+                       {SAQUE_EM_CONFERENCIA_SQL.format(saque='p.id')} as checking
                   from affiliate_payouts p
                   left join affiliates a on a.id = p.affiliate_id
                   left join auth_accounts aa on aa.user_id = a.user_id

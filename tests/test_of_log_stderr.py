@@ -6,9 +6,12 @@ sem texto cru de exceção, e o rastro do teto estourado diz QUAL item.
    ocupado, infra) dizia o item.
 2. Os três avisos locais (`of_reconnect_lock_retry`, `of_reconnect_lock_timeout`,
    `of_item_registry_failed`) eram `logging.warning`, que o `_DashboardHandler`
-   espelha com INSERT SÍNCRONO no event loop: com `system_event_logs` travada o
+   espelhava com INSERT SÍNCRONO no event loop: com `system_event_logs` travada o
    prazo dobrava. Molde: `test_of_log_teto_e_status.py::
-   test_teto_vale_com_o_espelho_do_logging_lento`.
+   test_teto_vale_com_o_espelho_do_logging_lento`. Desde o PR-10a a produção
+   grava pela fila (`core/log_fila.py`); o controle "voltar para
+   `logging.warning`" vale na suíte, onde o espelho grava na thread de quem loga
+   (`tests/conftest.py`).
 3. O `print` do tick de refresh não leva o `claimed` (uid dos donos), e os
    prints de falha do `pluggy_sync` e do tick não levam `str(exc)`. O
    `db/connection.py` já redige o DETAIL das violações de constraint (classe 23),
@@ -195,12 +198,13 @@ def test_aviso_do_registry_vai_ao_stderr_sem_espelho_e_sem_uid(
 
 # ── 3. prints do tick de refresh e de falha ───────────────────────────────────
 
-def _uma_volta_do_tick(monkeypatch, tiques: int = 1) -> None:
+def _uma_volta_do_tick(monkeypatch, tiques: int = 1, log=None) -> None:
     """Roda o `_open_finance_refresh` de verdade por `tiques` voltas e corta na
-    espera seguinte. O PATCH periódico só roda do 2º tique em diante."""
+    espera seguinte. O PATCH periódico só roda do 2º tique em diante. `log`: o
+    `log_system_event` no lugar do neutro (um gravador)."""
     async def _log(*a, **kw):
         return None
-    monkeypatch.setattr(admin_dashboard, "log_system_event", _log)
+    monkeypatch.setattr(admin_dashboard, "log_system_event", log or _log)
     monkeypatch.setattr(dashboard, "_aquece_catalogo", sem_catalogo)
 
     async def _sem_retentativa(**kw):   # varreria as conexões de outros testes

@@ -48,8 +48,9 @@ export const hide = (d: HTMLDialogElement | null) => {
 // primeiro controle, Esc no fallback, Tab preso no nativo, Cancel/clique no fundo fecham.
 // O chamador espalha `props` no <dialog> e, sem NATIVE, põe o scrim `lanc-scrim` ao lado, com `onClick={fundo}`.
 // O 2º clique de um duplo clique no botão que abriu o diálogo cai no fundo dele (::backdrop ou o scrim) e o
-// fecharia na hora; o clique no fundo só vale passada esta janela.
-const JANELA_DO_FUNDO = 400;
+// fecharia na hora; o clique no fundo só vale passada esta janela. O `Confirma` usa a mesma para os botões (#1411), e o
+// /app (`frontend/dashboard.js`) e o `frontend/modals.js` têm cópia dela: tests/frontend/confirma_duplo_clique_app.test.mjs compara.
+export const JANELA_DO_DUPLO_CLIQUE = 400;
 export const FOCUS = 'input:not(:disabled), select:not(:disabled), button:not(:disabled), [tabindex="-1"]';
 // `travado`: enquanto devolver true, Esc, Cancelar, Fechar e clique no fundo não fecham (uma escrita em voo).
 export function useDialogo(fechar: () => void, travado?: () => boolean) {
@@ -68,7 +69,7 @@ export function useDialogo(fechar: () => void, travado?: () => boolean) {
     return () => { window.removeEventListener("keydown", esc); if (isOpen(d)) hide(d); else untrap(); };
   }, []);
   const fecharDialog = () => { if (travado?.()) return; hide(dlg.current); fechar(); };
-  const fundo = () => { if (performance.now() - abertoEm.current > JANELA_DO_FUNDO) fecharDialog(); };
+  const fundo = () => { if (performance.now() - abertoEm.current > JANELA_DO_DUPLO_CLIQUE) fecharDialog(); };
   const props = {
     ref: dlg,
     role: NATIVE ? undefined : "dialog",

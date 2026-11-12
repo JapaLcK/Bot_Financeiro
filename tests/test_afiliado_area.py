@@ -68,7 +68,7 @@ def _conta(plano=True):
 
 def _afiliado(plano=True):
     c = _conta(plano)
-    c.aff = create_affiliate(c.uid)
+    c.aff = create_affiliate(c.uid, commission_bps=1000)  # 10%: os valores destes testes contam com ele
     return c
 
 

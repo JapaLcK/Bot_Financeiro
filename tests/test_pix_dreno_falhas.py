@@ -172,6 +172,30 @@ def test_stripe_fora_do_ar_seis_vezes_concede_assim_mesmo(
         externo["alerta"]
 
 
+def test_stripe_fora_do_ar_cinco_vezes_ainda_nao_desiste(user_id, externo, stripe_falso):
+    """O limiar de baixo, com o número escrito: na 5ª falha ainda retenta. Mudar
+    `TENTATIVAS_ATE_TRAVAR` sem decidir deixa este teste vermelho."""
+    conta(user_id, "free", None)
+    stripe_falso["erro"] = RuntimeError("stripe fora do ar")
+    cobranca = nova_cobranca(user_id, stripe_subscription_id="sub_out4",
+                             stripe_period_end_at=datetime.now(timezone.utc) + timedelta(days=12))
+    event_id = entregar("PAYMENT_RECEIVED", cobranca, tentativas=4)
+    assert "grant" not in efeitos(cobranca["asaas_payment_id"])
+    assert (evento(event_id)["attempts"], evento(event_id)["processed_at"]) == (5, None)
+    assert not any("cancelamento no Stripe" in m for m in externo["alerta"])
+
+
+@pytest.mark.parametrize("antes,travado", [(4, False), (5, True)])
+def test_evento_travado_so_depois_da_sexta_falha(user_id, externo, antes, travado):
+    """O alerta "evento travado" sai quando `attempts` passa de 5, com o número escrito."""
+    conta(user_id, "free", None)
+    externo["email_ok"] = False  # o efeito `email` levanta
+    cobranca = nova_cobranca(user_id)
+    event_id = entregar("PAYMENT_RECEIVED", cobranca, tentativas=antes)
+    assert evento(event_id)["attempts"] == antes + 1
+    assert any("evento travado" in m for m in externo["alerta"]) is travado
+
+
 def test_fallback_sem_periodo_gravado_comeca_agora(user_id, externo, stripe_falso):
     """O `coalesce` do §8.2: `stripe_period_end_at` NULO é alcançável
     exatamente quando o fallback age (o Stripe já estava fora no checkout).
