@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Confirma } from "../conta/Confirma";
 import { money } from "../lib/format.js";
@@ -6,16 +6,17 @@ import { deSaida } from "../lib/sessao";
 import { afiliadoQuery, falhaSaque, solicitarSaque, type Afiliado } from "./api";
 
 // A troca de conta recarrega a página (lib/sessao.ts) e a confirmação some sem aviso (#1412). Enquanto ela está aberta, uma marca em
-// sessionStorage diz em que etapa o saque estava; a recarga não roda o desmonte, então ela sobrevive e a página nova explica. Só a etapa
-// e a hora: a chave Pix NUNCA vai para o storage.
+// sessionStorage diz em que etapa o saque estava; a recarga não roda o desmonte, então ela sobrevive e a página nova explica (`Topo`, em
+// Afiliado.tsx). Só a etapa e a hora: a chave Pix NUNCA vai para o storage. `etapa`: a última marcada, para regravar a hora na saída.
 const MARCA = "pb_saque_interrompido";
 const AVISO: Record<string, string> = {
   confirmando: "Sua sessão mudou e a página foi recarregada. Esta solicitação de saque não foi enviada. Confira a conta antes de tentar novamente.",
   enviando: "Sua sessão mudou durante a solicitação de saque. Não foi possível confirmar o resultado. Acesse a conta usada na solicitação e confira o histórico de saques antes de tentar novamente.",
 };
-const marcar = (etapa: string) => { try { sessionStorage.setItem(MARCA, JSON.stringify({ etapa, em: Date.now() })); } catch { /* sem storage, sem aviso */ } };
+let etapa = "";
+const marcar = (e: string) => { etapa = e; try { sessionStorage.setItem(MARCA, JSON.stringify({ etapa, em: Date.now() })); } catch { /* sem storage, sem aviso */ } };
 const desmarcar = () => { try { sessionStorage.removeItem(MARCA); } catch { /* sem storage */ } };
-function avisoDaRecarga() {
+export function avisoDaRecarga() {
   try {
     const m = JSON.parse(sessionStorage.getItem(MARCA) ?? "null") as { etapa?: string; em?: number } | null;
     sessionStorage.removeItem(MARCA);
@@ -37,22 +38,13 @@ export function Saque({ d, velho }: { d: Afiliado; velho: boolean }) {
   const limpa = chave.trim();
   // Depois do sucesso a releitura trava o botão que tinha o foco, e ele cairia no body: vai ao título desta seção, à vista da confirmação.
   useEffect(() => { if (feito && !pode) document.getElementById("afil-saque")?.focus(); }, [feito, pode]);
-  // O aviso da recarga fica no pé da página: no celular, abaixo da dobra. Mostrado, a tela vai até ele e o foco, ao título da seção.
-  const alerta = useRef<HTMLParagraphElement>(null);
-  const daRecarga = useRef(false);
-  useEffect(() => { const aviso = avisoDaRecarga(); if (aviso) { daRecarga.current = true; setFalha(aviso); } }, []);
-  useEffect(() => {
-    if (!falha || !daRecarga.current) return;
-    daRecarga.current = false;
-    document.getElementById("afil-saque")?.focus({ preventScroll: true });
-    alerta.current?.scrollIntoView({ block: "center" });
-  }, [falha]);
   // A recarga da troca deixa a página velha viva até a nova chegar: o `catch` de `agir` fecha o diálogo e este desmonte roda nela. Saindo
-  // (`deSaida`), a marca fica para a página nova. Recarga ou saída por outro motivo (F5) não é troca de sessão: o `pagehide` a tira.
+  // (`deSaida`), a marca é regravada com a hora de agora: a confirmação aberta ou o POST preso há mais de 60 s ainda avisam. Recarga ou
+  // saída por outro motivo (F5) não é troca de sessão: o `pagehide` a tira. O vigia de 1 s recarrega sem desmontar: aí só o `pagehide` roda.
   useEffect(() => {
     if (!confirmando) return;
     marcar("confirmando");
-    const solta = () => { if (!deSaida()) desmarcar(); };
+    const solta = () => { if (deSaida()) marcar(etapa); else desmarcar(); };
     window.addEventListener("pagehide", solta);
     return () => { window.removeEventListener("pagehide", solta); solta(); };
   }, [confirmando]);
@@ -82,7 +74,7 @@ export function Saque({ d, velho }: { d: Afiliado; velho: boolean }) {
       <button type="submit" className="btn btn-primary" disabled={!pode}>Sacar {money(d.stats.available)}</button>
     </form>
     {aberto ? <p className="faint">Você já tem um saque em análise.</p> : abaixo && <p className="faint">Você ainda não chegou ao mínimo de {money(d.min_payout)}.</p>}
-    {falha && <p ref={alerta} role="alert" className="warn">{falha}</p>}
+    {falha && <p role="alert" className="warn">{falha}</p>}
     <p role="status" className="gain afil-status">{feito ? "Saque solicitado. Acompanhe no histórico." : ""}</p>
     {confirmando && <Confirma titulo="Confirmar saque?" texto={`Saque de ${money(d.stats.available)} para a chave Pix ${limpa}. Confira a chave: é para ela que o pagamento vai.`} botao="Confirmar saque" pendente="Solicitando…" fechar={() => setConfirmando(false)} agir={agir} />}
   </section>;
