@@ -210,14 +210,15 @@ def _fato(item: dict) -> tuple[str, int] | None:
 
 def projetar(itens: list[dict], *, acoes_ok: bool,
              dispensadas: Mapping[str, tuple[str, Decimal | None]] | None = None,
-             recursos_ok: Mapping[str, bool] | None = None, limite: int = LIMITE) -> list[dict]:
+             recursos_ok: Mapping[str, bool] | None = None, limite: int | None = LIMITE) -> list[dict]:
     """O que o usuário recebe do cache, nesta ordem: sem o tipo cujo recurso (`RECURSO_POR_TIPO`) não está em
     `recursos_ok` (ausente = sem acesso); sem a conta do OF (`of_bill_increase`) do comerciante que tem reajuste de
     assinatura do MESMO fato entre os que sobraram, mesmo comerciante e mesmo valor novo (B5: um fato, um item; outro
     serviço do comerciante ou um aumento que o Recurring Payments ainda não viu saem os dois, nunca um aviso a menos;
     quem perdeu o recurso volta a ver a conta); sem o dispensado
     que não piorou (chave -> referência da dispensa, `db.insight_estado.dispensadas`), depois da absorção, para que
-    dispensar o reajuste não ressuscite a conta; sem `impacto`/`acoes` fora do Pro; e só então cortado em `limite`."""
+    dispensar o reajuste não ressuscite a conta; sem `impacto`/`acoes` fora do Pro; e só então cortado em `limite`
+    (`None`: sem corte, para o envio por e-mail, que deduplica antes de cortar)."""
     d, r = dispensadas or {}, recursos_ok or {}
     out = [it for it in itens if it.get("type") not in RECURSO_POR_TIPO or r.get(RECURSO_POR_TIPO[it["type"]])]
     reajustados = {_fato(it) for it in out if it.get("type") == "subscription_increase"} - {None}

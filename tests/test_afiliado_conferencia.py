@@ -244,8 +244,9 @@ def test_worker_confere_e_limpa():
         "limpa": "db.affiliate_reviews_manutencao:limpar_sem_comissao",
         "confere": "core.services.afiliado_reembolso:conferir_pendentes",
         "aviso": "core.services.afiliado_reembolso:reenviar_pendentes",
+        "reconcilia": "core.services.afiliado_reconciliacao:reconciliar_pagas",
     })
-    assert resultado == {"limpa": True, "confere": True, "aviso": True, "do_disco": []}, diagnostico
+    assert resultado == {"limpa": True, "confere": True, "aviso": True, "reconcilia": True, "do_disco": []}, diagnostico
 
 
 # ── N2: falha de uma comissão não prende a fila; queda geral para a varredura ──

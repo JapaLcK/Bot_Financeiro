@@ -127,7 +127,8 @@ RESYNC_LEGACY_GRANT_USER_SQL = _RESYNC_LEGACY_GRANTS_SQL.format(filtro="and a.us
 
 # Pagamentos de indicado anteriores a `affiliate_referral_payments`: a 1ª fatura de quem
 # gerou comissão (também a estornada: a fatura foi paga) e o Pix pago. Fatura Stripe sem
-# comissão não tem histórico aqui. Roda em todo boot, e `do nothing` não mexe no que
+# comissão não tem histórico aqui. Comissão do Pix (`pix:<id>`) fica fora do 1º ramo: ela
+# não é fatura, e o 2º ramo já traz a cobrança. Roda em todo boot, e `do nothing` não mexe no que
 # o webhook e o dreno já gravaram. Fora de `ddl_statements`: ver `_run_ddl`.
 BACKFILL_AFILIADO_PAGAMENTOS_SQL = """
 insert into affiliate_referral_payments (referral_id, source, payment_ref, amount_cents,
@@ -136,7 +137,7 @@ select r.id, 'stripe', c.stripe_invoice_id, c.invoice_amount_cents, c.created_at
   from affiliate_commissions c
   join affiliate_referrals r on r.referred_user_id = c.referred_user_id
                             and r.affiliate_id = c.affiliate_id
- where c.invoice_amount_cents > 0
+ where c.invoice_amount_cents > 0 and left(c.stripe_invoice_id, 4) <> 'pix:'
 union all
 select r.id, 'pix', p.id::text, p.amount_cents, coalesce(p.paid_at, p.created_at),
        case p.status when 'paid' then 'none' when 'refunded_partial' then 'partial' else 'total' end,
@@ -735,6 +736,14 @@ def init_db():
         """,
         """
         alter table daily_report_prefs add column if not exists monthly_enabled boolean not null default true;
+        """,
+        # PL-06 B6 (envio): o claim do dia do aviso de insight por e-mail e as chaves do e-mail montado
+        # cujo envio falhou (só elas voltam nas rodadas de pendentes). Dono, reset, export e merge: os da tabela.
+        """
+        alter table daily_report_prefs add column if not exists last_insight_email_date date;
+        """,
+        """
+        alter table daily_report_prefs add column if not exists insight_email_pendente text[];
         """,
 
         # -----------------------------
@@ -2045,6 +2054,13 @@ def init_db():
           check ((dispensado_em is null) = (dispensado_severidade is null))
         )
         """,
+        # PL-06 B6 (envio): a última gravidade avisada por e-mail (ou coberta por outro canal) de cada chave.
+        """
+        alter table insight_estado add column if not exists notificado_em timestamptz
+        """,
+        """
+        alter table insight_estado add column if not exists notificado_severidade text
+        """,
 
         # ─── Refresh tokens (auth: access curto 15min + refresh longo 14d) ─────
         # Sessão (auth_sessions) hospeda o jti. Refresh token é o "permite trocar
@@ -2293,6 +2309,8 @@ def init_db():
           created_at timestamptz not null default now(),
           -- Conferência na Stripe pendente (A5): fora do disponível até `conferir_comissao` liberar.
           payment_check_pending boolean not null default false,
+          payment_check_tried_at timestamptz,       -- última conferência adiada pelo worker (#1497); nulo = nunca
+          payment_check_reason text,                -- motivo dela: disputa_aberta, forma_inesperada, sem_cobranca
           commission_bps integer,                   -- % vigente quando a comissão nasceu
           paid_months smallint not null default 1   -- 12 no anual: amount = base × bps / 10000 / meses
         )
@@ -2321,13 +2339,18 @@ def init_db():
         # afiliado e grava a referral. Qualquer ordem de `lock table` na fila fecha ciclo com um dos
         # dois (medido: dois webhooks em voo, ou um cadastro). Sem as tabelas livres em ~8 s, o boot
         # falha com erro claro: o código novo depende das colunas, então pular não é opção. O teto cabe
-        # no `STARTUP_STEP_TIMEOUT` (12 s) que o lifespan põe em volta do `init_db`.
+        # no `STARTUP_STEP_TIMEOUT` (12 s) que o lifespan põe em volta do `init_db`. Também a última
+        # tentativa da conferência e o motivo dela (#1497), no mesmo lock: uma migração só.
         """
         do $$ begin
           if not exists (select 1 from pg_attribute where attrelid = 'affiliate_commissions'::regclass
                             and attname = 'commission_bps' and not attisdropped)
              or not exists (select 1 from pg_attribute where attrelid = 'affiliate_referrals'::regclass
-                            and attname = 'first_charge_ref' and not attisdropped) then
+                            and attname = 'first_charge_ref' and not attisdropped)
+             or not exists (select 1 from pg_attribute where attrelid = 'affiliate_commissions'::regclass
+                            and attname = 'payment_check_tried_at' and not attisdropped)
+             or not exists (select 1 from pg_attribute where attrelid = 'affiliate_commissions'::regclass
+                            and attname = 'payment_check_reason' and not attisdropped) then
             for tentativa in 1..160 loop
               begin
                 lock table affiliates, affiliate_referrals, affiliate_commissions in access exclusive mode nowait;
@@ -2353,6 +2376,14 @@ def init_db():
           if not exists (select 1 from pg_attribute where attrelid = 'affiliate_referrals'::regclass
                             and attname = 'first_charge_ref' and not attisdropped) then
             alter table affiliate_referrals add column first_charge_ref text;
+          end if;
+          if not exists (select 1 from pg_attribute where attrelid = 'affiliate_commissions'::regclass
+                            and attname = 'payment_check_tried_at' and not attisdropped) then
+            alter table affiliate_commissions add column payment_check_tried_at timestamptz;
+          end if;
+          if not exists (select 1 from pg_attribute where attrelid = 'affiliate_commissions'::regclass
+                            and attname = 'payment_check_reason' and not attisdropped) then
+            alter table affiliate_commissions add column payment_check_reason text;
           end if;
         end $$
         """,
@@ -2443,6 +2474,15 @@ def init_db():
         """
         create index if not exists idx_affiliate_refund_review_events_review
           on affiliate_refund_review_events (review_id, id)
+        """,
+        # Reconciliação de comissão paga (#1501): última consulta por fatura. Sem FK de propósito: criar
+        # uma pediria lock em `affiliate_commissions`, e a linha do afiliado que excluiu a conta não tem
+        # comissão. Sem pessoa: fatura e data. `limpar_conferidas` apaga o que saiu da janela.
+        """
+        create table if not exists affiliate_paid_refund_checks (
+          stripe_invoice_id text primary key,
+          checked_at timestamptz not null
+        )
         """,
 
         # ─── Prospecção (lead engine do Instagram) ───────────────────────────────

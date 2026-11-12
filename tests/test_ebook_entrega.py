@@ -25,6 +25,7 @@ import pytest
 
 from _billing_grants_helpers import garantir_system_event_logs
 from _lifespan_probe import sondar
+from _stripe_cliente_falso import instalar
 from core.crypto import encrypt_pii_optional, hash_pii_optional
 from core.services import email_service as es
 from core.services.ebook_entrega import entregar_pendentes
@@ -128,6 +129,7 @@ def mundo(monkeypatch):
         PaymentIntent=SimpleNamespace(retrieve=_payment_intent))
     m.no = lambda fake: vars(fake).update(vars(m.stripe))
     monkeypatch.setitem(sys.modules, "stripe", m.stripe)
+    instalar(monkeypatch)  # o `cliente_stripe` de produção (#1499) cai neste falso
     monkeypatch.setattr(es, "send_email", _send_email)
     m.pendencia = lambda uid, sid, url="_": (m.sessoes.setdefault(sid, ["price_plano", _PRECO]),
                                              registrar(uid, sid, [(_PRECO, _url(uid) if url == "_" else url)]))

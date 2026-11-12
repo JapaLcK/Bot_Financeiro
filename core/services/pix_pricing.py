@@ -23,6 +23,7 @@ from core.services.billing_access import _tier_do_stored
 # (§7). Crédito NUNCA vira tempo — quem compra upgrade recebe desconto em
 # dinheiro, não meses a mais.
 DURACAO_DIAS = 365
+MESES_DO_PIX = 12  # divisor da comissão de afiliado: o Pix só vende o anual
 
 # Preço CHEIO do anual, em centavos, por valor LEGADO de `auth_accounts.plan`.
 # **Constante em CÓDIGO, não env** (dono, 2026-09-09): o número já existe no

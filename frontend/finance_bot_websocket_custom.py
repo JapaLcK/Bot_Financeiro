@@ -129,6 +129,7 @@ from db import reauth_codes
 from db.accounts import MENSAGEM_CAIXINHA_COM_MOVIMENTO
 from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, falha_de_tarefa, get_logger
+from core import log_fila
 from core.pg_text import causa_segura, detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
@@ -2022,6 +2023,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             falha_de_tarefa("[patrimonio_foto]", exc)
 
+    async def _insight_email():
+        try:
+            await asyncio.sleep(1)
+            from core.services.insights_notificacao import run_insight_email_loop  # noqa: PLC0415
+            await run_insight_email_loop()
+        except Exception as exc:
+            falha_de_tarefa("[insight_email]", exc)
+
     async def _recurring_charger():
         try:
             await asyncio.sleep(5)
@@ -2190,14 +2199,16 @@ async def lifespan(app: FastAPI):
     async def _afiliado_alerta_worker():
         """Manutenção das pendências de reembolso de afiliado, a cada 5 min, a 1ª volta sem
         delay (a retomada depois de reinício): limpa `no_commission` antiga, confere na Stripe a
-        comissão marcada (inerte sem `STRIPE_SECRET_KEY`) e reenvia ao admin o aviso pendente
+        comissão marcada (inerte sem `STRIPE_SECRET_KEY`), reconcilia comissão paga com reembolso
+        perdido (#1501) e reenvia ao admin o aviso pendente, o da recuperação achada na mesma volta
         (inerte sem `ADMIN_NOTIFY_WEBHOOK_URL`). Ver `core/services/afiliado_reembolso.py`."""
-        from core.services import afiliado_reembolso  # noqa: PLC0415
+        from core.services import afiliado_reconciliacao, afiliado_reembolso  # noqa: PLC0415
         from db import affiliate_reviews_manutencao  # noqa: PLC0415
         while True:
             try:
                 await asyncio.to_thread(affiliate_reviews_manutencao.limpar_sem_comissao)
                 await asyncio.to_thread(afiliado_reembolso.conferir_pendentes)
+                await asyncio.to_thread(afiliado_reconciliacao.reconciliar_pagas)
                 n = await asyncio.to_thread(afiliado_reembolso.reenviar_pendentes)
                 if n:
                     print(f"[afiliado] {n} aviso(s) de reembolso entregue(s).", flush=True)
@@ -2320,6 +2331,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_engagement(), name="engagement"),
                 asyncio.create_task(_investment_accrual(), name="investment_accrual"),
                 asyncio.create_task(_patrimonio_foto(), name="patrimonio_foto"),
+                asyncio.create_task(_insight_email(), name="insight_email"),
                 asyncio.create_task(_account_deletion_worker(), name="account_deletion"),
                 asyncio.create_task(_recurring_charger(), name="recurring_charger"),
                 asyncio.create_task(_proactive_ai(), name="proactive_ai"),
@@ -2350,6 +2362,8 @@ async def lifespan(app: FastAPI):
     for t in tasks:
         if not t.done():
             print(f"[lifespan] task '{t.get_name()}' não encerrou a tempo.", file=sys.stderr)
+    # Por último: o uvicorn re-levanta o SIGTERM e o processo morre sem `atexit` (core/log_fila.py).
+    log_fila.esvazia_na_saida()
 
 app = FastAPI(
     title="Finance Dashboard",

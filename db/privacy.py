@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from core.crypto import PiiAccessContext, decrypt_pii_optional, encrypt_pii_optional
+from core.crypto import ATOR_TITULAR, PiiAccessContext, decrypt_pii_optional, encrypt_pii_optional
 from core.pg_text import causa_segura, tem_veneno
 
 from .connection import get_conn
@@ -402,6 +402,23 @@ def _fetch_rows(cur, name: str, sql: str, params: tuple) -> tuple[str, list[dict
 _DETAILS_FORA_DA_EXPORTACAO = frozenset({"traceback"})
 
 
+_CHAVE_INDECIFRAVEL = "(indecifrável)"
+
+
+def _chave_pix_em_claro(rows: list[dict], user_id: int) -> None:
+    """Troca `pix_key_enc` por `chave_pix` em claro: o cifrado nunca chega ao ZIP. O token de uso
+    único já foi consumido, então uma linha indecifrável vira marcador em vez de derrubar a exportação."""
+    for row in rows:
+        enc = row.pop("pix_key_enc")
+        try:
+            row["chave_pix"] = decrypt_pii_optional(enc, ctx=PiiAccessContext(
+                purpose="data_export", actor=ATOR_TITULAR, subject_user_id=user_id, field="pix_key"))
+        except Exception:
+            row["chave_pix"] = _CHAVE_INDECIFRAVEL
+            logger.warning("PII indecifrável na exportação: user_id=%s field=pix_key", user_id,
+                           extra={"user_id": user_id})
+
+
 def build_user_export_zip(user_id: int) -> bytes:
     datasets: dict[str, list[dict]] = {}
 
@@ -522,6 +539,61 @@ def build_user_export_zip(user_id: int) -> bytes:
                 """,
                 (user_id,),
             ),
+            # Programa de afiliados (#1415): colunas NOMEADAS e só do titular. Ficam de fora
+            # `referred_user_id` e `stripe_invoice_id` (identificam o indicado e a fatura dele),
+            # o `pix_key_hash`, as pendências e eventos de reembolso e os pagamentos do indicado.
+            # `pix_key_enc` sai daqui só para virar `chave_pix` em claro logo abaixo.
+            # `count(r.id)` e não `count(*)`: o left join daria 1 a quem não tem indicado; conta
+            # também a indicação de quem excluiu a conta, igual a `get_affiliate_stats`.
+            # `original_amount_cents` só equivale ao de `list_affiliate_commissions` com a revisão da mesma
+            # fatura (o join a exige; por construção ela nasce pela fatura da comissão; unique: no máximo uma).
+            (
+                "afiliado",
+                """
+                select a.code, a.status, a.commission_bps, a.created_at, a.pix_key_enc,
+                       count(r.id) as indicacoes
+                from affiliates a
+                left join affiliate_referrals r on r.affiliate_id = a.id
+                where a.user_id = %s
+                group by a.id
+                """,
+                (user_id,),
+            ),
+            (
+                "afiliado_comissoes",
+                """
+                select c.id, c.invoice_amount_cents, c.amount_cents, c.commission_bps, c.paid_months,
+                       c.status, c.available_at, c.payout_id, c.payment_check_pending, c.created_at,
+                       v.amount_cents as original_amount_cents
+                from affiliate_commissions c
+                join affiliates a on a.id = c.affiliate_id
+                left join affiliate_refund_reviews v
+                  on v.stripe_invoice_id = c.stripe_invoice_id
+                 and v.commission_id = c.id
+                 and v.amount_cents <> c.amount_cents
+                where a.user_id = %s
+                """,
+                (user_id,),
+            ),
+            (
+                "afiliado_saques",
+                """
+                select p.id, p.amount_cents, p.status, p.requested_at, p.paid_at, p.note, p.pix_key_enc
+                from affiliate_payouts p
+                join affiliates a on a.id = p.affiliate_id
+                where a.user_id = %s
+                """,
+                (user_id,),
+            ),
+            (
+                "indicacao_recebida",
+                """
+                select code_used, created_at
+                from affiliate_referrals
+                where referred_user_id = %s
+                """,
+                (user_id,),
+            ),
         ]
 
         for name, sql, params in queries:
@@ -569,6 +641,10 @@ def build_user_export_zip(user_id: int) -> bytes:
             if _table_exists(cur, table_name):
                 datasets[name] = _fetch_rows(cur, name, sql, params)[1]
 
+    # O saque decifra o próprio snapshot: a chave usada naquele pedido, não a cadastrada hoje.
+    for name in ("afiliado", "afiliado_saques"):
+        _chave_pix_em_claro(datasets[name], user_id)
+
     for evento in datasets.get("eventos_sistema", []):
         if isinstance(evento["details"], dict):
             evento["details"] = {k: v for k, v in evento["details"].items()
@@ -582,6 +658,9 @@ def build_user_export_zip(user_id: int) -> bytes:
         "notes": [
             "Hashes de senha não são exportados.",
             "Arquivos CSV são cópias tabulares; dados aninhados também aparecem no JSON completo.",
+            "Do programa de afiliados saem só os dados do titular, com a chave Pix em claro (a cadastrada"
+            " e a usada em cada saque); as pessoas indicadas não são identificadas, e de quem você indicou"
+            " sai só a contagem.",
         ],
     }
     payload = {"manifesto": manifest, "dados": datasets}
@@ -1254,6 +1333,8 @@ def delete_user_data(
                 _lock_user(cur, user_id)
                 # Afiliado que exclui a conta: saques, pendências e histórico ficam, desvinculados do
                 # usuário (A3, D8). Antes do laço, que apaga `affiliates` e leva as comissões.
+                # Também trava, em ordem de id, os afiliados ligados ao usuário, inclusive quando ele
+                # não é afiliado: é a ordem global entre exclusões ligadas por indicação (#1414).
                 from .affiliate_reviews_manutencao import desvincular_afiliado
                 desvincular_afiliado(cur, user_id)
                 from .family_grants import release_user

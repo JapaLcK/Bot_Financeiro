@@ -198,7 +198,9 @@ def test_a2_sem_trial_alerta_e_a_fatura_nao_materializa_nem_comissiona(cena, use
     assert _post(c.client, c.fake, _fatura(c.uid, "sub_a2", 4990)).status_code == 200
     assert _grants(c.uid, "stripe") == []
     assert c.vistos["charged"] == []
-    assert _sql("select 1 from affiliate_commissions where referred_user_id = %s", (c.uid,)) == []
+    # A comissão é a do Pix, que foi a primeira cobrança paga; a fatura recusada não comissiona.
+    assert _sql("select 1 from affiliate_commissions where referred_user_id = %s"
+                " and left(stripe_invoice_id, 4) <> 'pix:'", (c.uid,)) == []
     assert len(c.fake.cancelados) == 1
     _conta_pix_intacta(c.uid)
 

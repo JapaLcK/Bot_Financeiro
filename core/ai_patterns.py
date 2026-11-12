@@ -524,14 +524,25 @@ def generate_ai_patterns(user_id: int, *, force: bool = False) -> list[dict]:
     return items
 
 
-def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
+class GeracaoIncompleta(RuntimeError):
+    """Um detector falhou e quem pediu `estrito=True` não aceita a lista parcial; `itens` é a projeção dela."""
+
+    def __init__(self, itens: list[dict]):
+        super().__init__("detector em falha")
+        self.itens = itens
+
+
+def generate_ai_insights(user_id: int, *, force: bool = False, estrito: bool = False,
+                         sem_corte: bool = False) -> list[dict]:
     """Insights do PigBank (contrato v1, `core/services/insights_contrato.py`). Cache: `_ttl_insights`.
 
     Gate de plano -> cache (até o TTL ou até a próxima escrita financeira do usuário, `invalidar_insights`) -> (miss)
     fatos dos detectores, com o texto deles -> cache completo -> projeção por plano. Sem LLM (D12 do PL-06); o nome
     ficou pelos chamadores (rota, agendador, card, testes).
     Detector em falha: os itens dos outros saem, mas o cache NÃO é gravado e o anterior é apagado (uma lista
-    incompleta não pode valer 6 h como "nada a apontar"); o próximo pedido recalcula.
+    incompleta não pode valer 6 h como "nada a apontar"); o próximo pedido recalcula. `estrito=True` levanta
+    `GeracaoIncompleta` nesse caso, e `sem_corte=True` devolve a projeção sem o corte de `LIMITE`: os dois são do
+    envio do aviso por e-mail (PL-06 B6), que deduplica a lista inteira; o feed, a rota e o card seguem como estão.
     """
     from core.services.plan_service import plan_gate_ok
     if not plan_gate_ok(user_id, "insights"):
@@ -547,8 +558,10 @@ def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
         with _INSIGHTS_LOCKS.setdefault(user_id, threading.Lock()):
             itens = None if force else _cache_insights(user_id)
             if itens is None:
-                itens = _gerar_insights(user_id, kind)
-    return _projetar(user_id, itens)
+                itens, falhas = _gerar_insights(user_id, kind)
+                if estrito and falhas:
+                    raise GeracaoIncompleta(_projetar(user_id, itens, sem_corte))
+    return _projetar(user_id, itens, sem_corte)
 
 
 _INSIGHTS_LOCKS: dict[int, threading.Lock] = {}
@@ -592,8 +605,8 @@ async def invalidar_insights(conn, user_ids: list[int]) -> tuple[set[int], set[i
     return {uid for uid, gravou in linhas if gravou}, {uid for uid, gravou in linhas if not gravou}
 
 
-def _gerar_insights(user_id: int, kind: str) -> list[dict]:
-    """Os fatos dos detectores, carimbados; o cache só é gravado se nenhum detector falhou (senão, é apagado)."""
+def _gerar_insights(user_id: int, kind: str) -> tuple[list[dict], list[str]]:
+    """(fatos dos detectores, carimbados; detectores em falha). O cache só é gravado se nenhum falhou (senão, é apagado)."""
     from db import compute_active_insights
     from db.insight_estado import registrar
     from db.connection import get_conn
@@ -615,7 +628,7 @@ def _gerar_insights(user_id: int, kind: str) -> list[dict]:
                 conn.commit()
         except Exception as e:
             logger.warning("ai_patterns: cache delete falhou: %s", type(e).__name__, extra={"user_id": user_id})
-    return itens
+    return itens, falhas
 
 
 def motivo_vazio(user_id: int) -> str | None:
@@ -640,7 +653,7 @@ def ler_insights(user_id: int) -> list[dict] | None:
     return None if itens is None else _projetar(user_id, itens)
 
 
-def _projetar(user_id: int, itens: list[dict]) -> list[dict]:
+def _projetar(user_id: int, itens: list[dict], sem_corte: bool = False) -> list[dict]:
     # O plano e as dispensas valem na LEITURA: o cache guarda `impacto`/`acoes` e os tipos de `RECURSO_POR_TIPO`, e
     # quem caiu do Pro (ou perdeu o recurso) dentro do TTL não os vê; dispensar não invalida o cache.
     from core.services.insights_contrato import projetar
@@ -648,7 +661,7 @@ def _projetar(user_id: int, itens: list[dict]) -> list[dict]:
     from db.insight_estado import dispensadas
     return projetar(itens, acoes_ok=plan_gate_ok(user_id, "insights_acoes"),
                     dispensadas=dispensadas(user_id, [it.get("key") for it in itens]),
-                    recursos_ok=_recursos_ok(user_id, itens))
+                    recursos_ok=_recursos_ok(user_id, itens), **({"limite": None} if sem_corte else {}))
 
 
 def _recursos_ok(user_id: int, itens: list[dict]) -> dict[str, bool]:

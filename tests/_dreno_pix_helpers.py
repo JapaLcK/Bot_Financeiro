@@ -133,7 +133,10 @@ def mundo_externo(monkeypatch) -> dict:
               # rodarem de verdade. `fundador_erro` liga uma exceção nele.
               "fundador": 0, "fundador_erro": None,
               # `GET /v3/payments/{id}` (#1267): status que o Asaas devolve; `get_erro` o faz levantar.
-              "get_status": "PENDING", "get_erro": None}
+              "get_status": "PENDING", "get_erro": None,
+              # `refunds[]` do mesmo GET: o acumulado do estorno parcial (afiliado e alerta). Vazio: quem
+              # testa parcial COM comissão põe o estorno concluído (soma zero vira retentativa).
+              "refunds": []}
 
     import core.services.admin_notify as an
     import core.services.email_service as es
@@ -168,7 +171,7 @@ def mundo_externo(monkeypatch) -> dict:
     def _get(payment_id):
         if contas["get_erro"]:
             raise contas["get_erro"]
-        return {"id": payment_id, "status": contas["get_status"]}
+        return {"id": payment_id, "status": contas["get_status"], "refunds": contas["refunds"]}
 
     monkeypatch.setattr(asaas, "buscar_pagamento", _get)
     monkeypatch.setattr(an, "notify_pix_alerta",

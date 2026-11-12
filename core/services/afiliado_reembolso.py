@@ -20,7 +20,7 @@ from core.pg_text import limpa_para_pg
 from core.services import admin_notify
 from core.services.extras_assinar import _ler
 from db.affiliate_reviews import faturas_do_saque, marcar_avisada, registrar_reembolso, reivindicar
-from db.affiliate_reviews_manutencao import comissoes_a_conferir, liberar_conferencia, marcar_conferencia
+from db.affiliate_reviews_manutencao import adiar_conferencia, comissoes_a_conferir, liberar_conferencia, marcar_conferencia
 
 _FUSO = ZoneInfo("America/Sao_Paulo")
 _DATA = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
@@ -76,7 +76,7 @@ def _registrar_tentativa(r: dict, entregue: bool, event_id: str | None = None) -
     """`error` quando o aviso não sai: a pendência segura o dinheiro, mas o admin ainda não sabe.
     `event_id` só do webhook; o worker não tem evento."""
     detalhes = {"commission_id": r["commission_id"], "payout_id": r.get("payout_id"), "tipo": r["tipo"],
-                "alerta_entregue": entregue}
+                "alerta_entregue": entregue, "review_id": r["id"]}  # a linha, também sem comissão nem evento (Pix)
     if event_id is not None:
         detalhes["event_id"] = event_id
     log_system_event_sync(
@@ -163,15 +163,21 @@ def tratar_evento(event) -> None:
             details={"event_type": event["type"], "event_id": event["id"]},
         )
         return
-    linha = registrar_reembolso(fatura, tipo, devolvido, datetime.fromtimestamp(event["created"], timezone.utc))
+    avisar_pendencia(registrar_reembolso(fatura, tipo, devolvido, datetime.fromtimestamp(event["created"], timezone.utc)),
+                     event["id"])
+
+
+def avisar_pendencia(linha, event_id: str | None = None) -> None:
+    """Avisa o admin da pendência que o reembolso abriu (Stripe e Pix). Falha fica para `reenviar_pendentes`.
+    `event_id` só vem do webhook da Stripe; o dreno do Pix chama sem ele."""
     if not linha or linha["status"] not in ("open", "recovery") or linha["notified_at"]:
         return
     if not admin_notify.canal_configurado():
-        _registrar_tentativa(linha, False, event["id"])
+        _registrar_tentativa(linha, False, event_id)
         return
     r = reivindicar(linha["id"])
     if r:
-        _enviar(r, event["id"])
+        _enviar(r, event_id)
 
 
 class SemConfirmacao(Exception):
@@ -182,9 +188,7 @@ class SemConfirmacao(Exception):
 def devolvido_na_stripe(fatura: str, chave: str) -> tuple[str | None, int, list]:
     """O tipo, o devolvido e as cobranças da fatura. Regra única da conferência e do script (A6):
     disputa perdida conta como devolvida, ganha não conta, aberta não confirma nada."""
-    import stripe  # noqa: PLC0415
-
-    from core.services.ebook_entrega import cobrancas_da_fatura  # noqa: PLC0415
+    from core.services.ebook_entrega import cliente_stripe, cobrancas_da_fatura  # noqa: PLC0415
 
     try:
         cobrancas = list(cobrancas_da_fatura(fatura, chave))
@@ -196,7 +200,7 @@ def devolvido_na_stripe(fatura: str, chave: str) -> tuple[str | None, int, list]
     for c in cobrancas:
         perdida = 0
         if c["disputed"]:
-            disputas = stripe.Dispute.list(charge=c["id"], limit=10, api_key=chave)["data"]
+            disputas = cliente_stripe(chave).v1.disputes.list(params={"charge": c["id"], "limit": 10})["data"]
             if any(d["status"] not in ("won", "lost", "warning_closed") for d in disputas):
                 raise SemConfirmacao("disputa_aberta")
             perdida = sum(d["amount"] for d in disputas if d["status"] == "lost")
@@ -214,20 +218,28 @@ def _adiada(commission_id: int, motivo: str) -> None:
     )
 
 
-def conferir_comissao(commission_id: int, fatura: str) -> bool | None:
+def conferir_comissao(commission_id: int, fatura: str, *, adiar: bool = False) -> bool | None:
     """Confere na Stripe a comissão que nasceu sem linha da fatura (A5). True se a marca saiu.
 
     Fora de transação. Reembolso vira pendência pela mesma máquina do webhook; sem reembolso a
-    comissão segue o fluxo normal. A marca fica, e o worker tenta de novo, sem prazo, em dois casos:
-    False quando a fatura ainda não permite concluir (`SemConfirmacao`), e None quando a Stripe
-    falhou ou não há chave, o que vale para todas. Erro de banco sobe para quem chamou."""
+    comissão segue o fluxo normal. A marca fica, e o worker tenta de novo, em dois casos:
+    False quando a fatura ainda não permite concluir (`SemConfirmacao`, ou 4xx da própria fatura: 400,
+    403, 404), e None quando a Stripe falhou para todas (conexão, prazo, chave, limite, 5xx) ou não há
+    chave. Erro de banco sobe para quem chamou.
+    `adiar`, só do worker: o False grava a hora e o motivo, e a comissão espera 1 h (#1497)."""
+    import stripe  # noqa: PLC0415
+
     chave = os.getenv("STRIPE_SECRET_KEY")
     if not chave:
         return None
     try:
         tipo, devolvido, _ = devolvido_na_stripe(fatura, chave)
-    except SemConfirmacao as exc:
-        _adiada(commission_id, str(exc))
+    except (SemConfirmacao, stripe.InvalidRequestError, stripe.PermissionError) as exc:
+        # O texto da Stripe pode trazer a fatura: no motivo vai só o status.
+        motivo = str(exc) if isinstance(exc, SemConfirmacao) else f"stripe_{exc.http_status}"
+        _adiada(commission_id, motivo)
+        if adiar:
+            adiar_conferencia(commission_id, motivo)
         return False
     except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer a fatura
         _adiada(commission_id, type(exc).__name__)
@@ -239,13 +251,13 @@ def conferir_comissao(commission_id: int, fatura: str) -> bool | None:
 
 
 def conferir_pendentes(limite: int = 20) -> int:
-    """Passada do `_afiliado_alerta_worker`. Fatura que ainda não permite concluir fica para a próxima
-    volta e não segura as seguintes; queda da Stripe para a passada, que as outras bateriam nela."""
+    """Passada do `_afiliado_alerta_worker`. Fatura que ainda não permite concluir espera 1 h e não segura
+    as seguintes; queda da Stripe para a passada sem gravar nada, que as outras bateriam nela."""
     if not os.getenv("STRIPE_SECRET_KEY"):
         return 0
     conferidas = 0
     for c in comissoes_a_conferir(limite):
-        feita = conferir_comissao(c["id"], c["stripe_invoice_id"])
+        feita = conferir_comissao(c["id"], c["stripe_invoice_id"], adiar=True)
         if feita is None:
             break
         conferidas += feita
@@ -275,10 +287,12 @@ def conferir_saque(payout_id: int) -> dict:
     regra de bloqueio que já existe. Fatura sem confirmação (disputa aberta) marca a comissão (D10).
     Devolve `{"reembolso", "disputa"}`; sem chave ou com erro da Stripe, levanta `StripeIndisponivel`,
     depois de gravar o que achou."""
+    faturas = faturas_do_saque(payout_id)
+    if not faturas:  # só comissão Pix: nada a perguntar à Stripe, nem chave
+        return {"reembolso": False, "disputa": False}
     chave = os.getenv("STRIPE_SECRET_KEY")
     if not chave:
         raise StripeIndisponivel("sem_chave")
-    faturas = faturas_do_saque(payout_id)
     with ThreadPoolExecutor(4) as pool:
         lidas = list(zip(faturas, pool.map(lambda f: _consultar(f["fatura"], chave), faturas)))
     agora = datetime.now(timezone.utc)
