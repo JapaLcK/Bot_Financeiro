@@ -232,8 +232,9 @@ def _sem_ratelimit_no_banco(record: logging.LogRecord) -> bool:
     É o "laço quente logando por requisição" que o docstring do
     `_DashboardHandler` nomeia como o que assusta: o slowapi loga um
     `warning("ratelimit ... exceeded")` por requisição BARRADA, e cada record
-    vira um `psycopg.connect()` + INSERT bloqueante. MEDIDO: 40 GETs anônimos em
-    `/d/{code}` com teto de 30/min → 10 × 429 e **10 linhas** em
+    vira uma linha no banco (em produção, gravada pelo ouvinte de `core/log_fila.py`):
+    uma rajada enche a fila e faz descartar os avisos que importam. MEDIDO: 40 GETs
+    anônimos em `/d/{code}` com teto de 30/min → 10 × 429 e **10 linhas** em
     `system_event_logs`. Ou seja, o teto trocava 200 DELETEs baratos por uma
     inundação de log pior que a do #321 — e vale para os tetos que já existiam
     (um brute-force em `/auth/login` gravava uma linha por tentativa barrada).

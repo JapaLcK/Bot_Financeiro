@@ -255,15 +255,15 @@ async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
     "[admin] failed to record" de `log_system_event`). Vale para todo chamador,
     num lugar só.
 
-    NÃO use `logging.warning` como canal "local" antes desta chamada: o
-    `_DashboardHandler` (`core/observability.py`) o espelha com INSERT SÍNCRONO
-    dentro do event loop, e com `system_event_logs` travada isso DOBRA o prazo e
-    para o processo (issue #541; quem prende é
+    Canal local: `print(..., file=sys.stderr)`, sem texto de exceção nem uid (issue
+    #657, D4). Até o PR-10a um `logging.warning` aqui era INSERT síncrono no event
+    loop e dobrava o prazo com `system_event_logs` travada (#541). Em produção ele
+    agora passa pela fila (`core/log_fila.py`), mas na suíte o espelho ainda grava
+    na thread, e é aí que
     `tests/test_of_log_teto_e_status.py::test_teto_vale_com_o_espelho_do_logging_lento`
     e, para os três avisos locais que existem — `of_reconnect_lock_retry`,
     `of_reconnect_lock_timeout` e `of_item_registry_failed` do `/pluggy-item` —,
-    `tests/test_of_log_stderr.py`). O canal local é `print(..., file=sys.stderr)`,
-    sem texto de exceção nem uid (issue #657, D4).
+    `tests/test_of_log_stderr.py` prendem o canal.
 
     Só `asyncio.TimeoutError` é engolido. `CancelledError` de fora (cliente
     desistiu, shutdown) continua subindo — o `wait_for` só converte em

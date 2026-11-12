@@ -164,8 +164,8 @@ def _sonda(montar: Callable[[], dict]) -> None:
     e contagens: nunca IP, user agent ou path."""
     try:
         # Thread daemon e `log_system_event_sync` (que já engole a falha do
-        # banco), nunca `logging`: um warning aqui reentraria no
-        # `_DashboardHandler`. O except amplo cobre o que sobra — montar os
+        # banco), nunca `logging`: a sonda é `info`, e o espelho do `logging`
+        # só leva WARNING+ ao painel. O except amplo cobre o que sobra — montar os
         # details ou a thread não subir —, porque a sonda é medição e não pode
         # derrubar o login.
         details = montar()

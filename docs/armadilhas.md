@@ -429,3 +429,16 @@ fixo de toda mudança de layout.
   destinatário inteiro: `mask_phone` na mesma linha não adianta nada. Em log e em `details`, use
   `mask_wamid` (`utils_phone.py`), que dá um digest e mantém a correlação entre linhas. O id real fica
   só onde é dado: dedupe, envio, typing. A guarda é a classe `LOG_WAMID` de `tests/test_log_d4_guarda.py`.
+- **Log no event loop: `logging.*` pode, gravação direta não.** Desde o PR-10a (#1542) o
+  espelho do root (`FilaDoPainel`, `core/log_fila.py`) grava `system_event_logs` numa thread
+  própria: `logger.warning`/`_log_falha` numa rota `async` custa o `prepare` da fila, não um
+  INSERT (prova: grupo 1 de `tests/test_log_fila_painel.py`). A pilha é a exceção: com
+  `exc_info` ou `com_traceback=True`, quem loga formata o traceback dentro do loop, alguns ms
+  por chamada. Não espalhe `exc_info=True` em caminho quente. `log_system_event_sync` e
+  `recent_event_exists` chamados DIRETO continuam connect + INSERT/SELECT síncronos, com teto
+  de segundos: em `async def` eles param o loop, e o caminho é `asyncio.to_thread` (as
+  chamadas diretas que ainda existem estão na issue #1546). Na suíte o espelho grava na
+  thread de quem loga (`tests/conftest.py`, `_espelho_na_thread_de_quem_loga`): teste que
+  mede parada do loop causada por log precisa da fila real (`raiz_de_producao`) e de
+  `log_fila.esvazia(...)` antes de ler a tabela. O `esvazia` espera pelo lock da fila: não
+  chame de handler de sinal.

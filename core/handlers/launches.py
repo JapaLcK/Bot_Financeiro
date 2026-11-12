@@ -1846,8 +1846,9 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
         return decl.msg_misto(user_id)
     declara = decl.declara(user_id, decisao)
     cartao = declara and decl.tem_cartao(split_financial_transactions(text))  # cartão nunca declara (despesa ou receita): T8
-    if declara and not cartao and (recusa := decl.recusa_valor(text)):  # grava sem confirmar: leitor estrito (#1404)
+    if declara and not cartao and (recusa := decl.recusa_valor(text)):  # leitor estrito, antes da confirmação (#1315)
         return recusa
+    digitado = text  # o fallback abaixo confere o valor contra o texto COM a forma: "1,5k,pix" sem ela é "1,5k," (#1404)
     if declarada == fp.DINHEIRO or declara:  # a forma dita não entra no alvo
         text = fp.limpar(text, banco=declara)
     parts = split_financial_transactions(text)
@@ -1973,7 +1974,7 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
     valor = float(entities.get("valor", 0))
     if pergunta and valor > 0:
         return _pergunta(tipo, valor)
-    if declara and (recusa := decl.recusa_valor(text, valor)):  # o valor do classificador/LLM, conferido como o do parser
+    if declara and (recusa := decl.recusa_valor(digitado, valor)):  # o valor do classificador/LLM, conferido como o do parser
         return recusa
     return add_from_entities(
         user_id,

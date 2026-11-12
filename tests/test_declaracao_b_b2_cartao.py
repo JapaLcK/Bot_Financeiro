@@ -238,10 +238,14 @@ LONGO = "gastei 1,5k no mercado e 30 na padaria" + " e aí eu fui andando pela r
 
 
 # Item 3: com cartão o B1 pula o T16, mas não a recusa do VALOR (T10/T11; o T15 na rodada 10): sem ela a fatura lia
-# "1,5k" como R$ 1,50 e "2 reais e 50" como R$ 2 + R$ 50 (a main recusava). Controle negativo: com cartão pular toda a recusa (`if not cartao`)
+# "1,5k" como R$ 1,50 e "2 reais e 50" como R$ 2 + R$ 50 (a main recusava). Desde o #1395 a fatura lê "1,5k" como
+# R$ 1.500,00, mas aqui a fatura grava sem confirmação, e o "anel 18k" viraria R$ 18.000,00: dígito + "k" segue T10 neste
+# ramo (1-B do dono, #1404). Controle negativo: com cartão pular toda a recusa (`if not cartao`)
 # deixa vermelho o caso com cartão manual. Positivo: os `test_audio_respondido_com_cartao_*` (T8 / fatura do B1).
 @pytest.mark.parametrize("manual", [False, True])
 @pytest.mark.parametrize("frase,recusa", [("gastei 1,5k no mercado e paguei o aluguel", "você mandou 1,5k"),
+                                          ("comprei um anel 18k e paguei o aluguel", "você mandou 18k"),
+                                          ("gastei 1.500k no mercado e paguei o aluguel", "você mandou 1.500k"),
                                           ("gastei 2 reais e 50 no mercado e paguei o aluguel", "*2 reais e 50*"),
                                           (LONGO, "a mensagem ficou longa demais")])  # M4, rodada 10
 def test_valor_ambiguo_respondido_com_cartao_recusa(ana, liga, monkeypatch, frase, recusa, manual):

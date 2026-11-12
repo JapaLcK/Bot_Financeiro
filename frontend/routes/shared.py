@@ -555,16 +555,11 @@ _ERROR_DEFAULT_5XX = ("Algo deu errado do nosso lado", "Já registramos o proble
 _ERROR_DEFAULT_ACTIONS = (("← Página inicial", "/"),)
 
 _error_template: str | None = None
-# Já logamos a queda pro fallback? Sem isto o warning sai POR REQUISIÇÃO, e no
-# processo web o root logger carrega o _DashboardHandler (core/observability.py:23)
-# — instalado no import de frontend/finance_bot_websocket_custom.py, então vale
-# também com RUN_BACKGROUND_TASKS=0 —,
-# que faz psycopg.connect() + INSERT bloqueante dentro do event loop — um connect
-# por registro. Medido aqui, chamando logging.warning() em série com e sem o
-# handler, contra o Postgres em localhost: 11,3 ms na 1ª chamada, 3,7 ms/chamada
-# em 10 e 2,1 ms/chamada em 25, contra 0,02 ms com o handler fora. Cada connect
-# paga o RTT até o banco, então com Postgres remoto (produção) a conta é maior —
-# quanto, não dá pra medir daqui (CLAUDE.md §6: produção inacessível). Loga na
+# Já logamos a queda pro fallback? Sem isto o warning sai POR REQUISIÇÃO, e o espelho
+# do root (instalado no import de frontend/finance_bot_websocket_custom.py, vale também
+# com RUN_BACKGROUND_TASKS=0) grava cada um em `system_event_logs`. Em produção, desde
+# o PR-10a, ele grava fora do event loop (`core/log_fila.py`), e o custo que sobra é
+# volume: uma varredura de bot enche a fila e o excedente é descartado. Loga na
 # transição pro estado degradado e cala enquanto ele durar.
 _error_degraded = False
 
@@ -714,8 +709,9 @@ def error_page_response(status_code: int, headers: dict | None = None,
             # a próxima requisição tenta de novo em vez de degradar até o restart.
             # Um log por TRANSIÇÃO, não por requisição (ver _error_degraded acima):
             # como nada é cacheado aqui, logar sempre transformaria um bot varrendo
-            # URL em um INSERT síncrono por 404. Sem exc_info: ~25 linhas de
-            # traceback não dizem mais que o repr (tipo + caminho).
+            # URL em uma linha de log no banco por 404 (e a fila do espelho
+            # cheia). Sem exc_info: ~25 linhas de traceback não dizem mais que
+            # o repr (tipo + caminho).
             if not _error_degraded:
                 _error_degraded = True
                 logging.getLogger(__name__).warning(

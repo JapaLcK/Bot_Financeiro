@@ -311,7 +311,7 @@ def test_tentativa_unica_o_payload_identico_depois_do_t9_nao_grava(ana_ia, monke
     assert valores(ana_ia) == []
 
 
-# ── L-b20: a IA não passa pelo leitor estrito; o roteador recusa a mesma frase ──────────────────────────────────────
+# ── L-b20: a IA não passa pelo leitor estrito; o roteador confirma a mesma frase com R$ 1.500,00 (#1404) ──────────────
 
 FRASE_K = "gastei 1,5k no mercado pelo banco"
 
@@ -326,6 +326,9 @@ def test_l_b20_a_confirmacao_mostra_o_valor_do_modelo_e_o_sim_grava_ele(ana_ia, 
     assert valores(ana_ia) == [float(valor)]
 
 
-def test_l_b20_o_roteador_do_whatsapp_recusa_a_mesma_frase_com_t10(ana, liga):  # noqa: F811
-    assert manda_wamid(ana, FRASE_K) == [tx.valor_abreviado("1,5k")]
+def test_l_b20_o_roteador_do_whatsapp_confirma_a_mesma_frase_com_1500(ana, liga):  # noqa: F811
+    assert manda_wamid(ana, FRASE_K) == [
+        "🐷 Só confirmando: registrar *despesa de R$ 1.500,00 em mercado, hoje, pelo banco*? Responde *sim* ou *não*."]
     assert declaracoes(ana) == [] and n_lancamentos(ana) == 0
+    assert "registrada pelo banco" in manda_wamid(ana, "sim")[0]
+    assert [float(d["valor"]) for d in declaracoes(ana)] == [1500.0]

@@ -38,7 +38,8 @@ _INICIO_RE = re.compile(r"^\s*(?:(?:👍[\U0001F3FB-\U0001F3FF️]*|(?:" + decl.
 _ABRE_RE = re.compile(r"^\s*(?:" + "|".join(_padrao(f) for f in ABREM) + r")(?!\w)", re.IGNORECASE)
 _MUDA_RE = re.compile(r"(?<!\w)(?:" + "|".join(_padrao(f) for f in ABREM + DUVIDAS) + r")(?!\w)", re.IGNORECASE)
 _LANCAMENTO_RE = re.compile(r"\b(?:gastei|paguei|recebi|comprei|ganhei)\b")
-_DIGITOS_RE = re.compile(r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?")
+# "1,5k", "1.5k", "1,500k" (#1404, DP-k-2 A e 2-A): com "k" quem julga o número é o leitor estrito, como na mensagem original
+_DIGITOS_RE = re.compile(r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?|\d[\d.,]*k")
 _COMECA_POR_VALOR_RE = re.compile(r"^\s*(?:r\$\s*)?\d", re.IGNORECASE)
 _ENCHE = frozenset(w for f in ABREM + ENCHIMENTO for w in f.split()) | {"verdade"}
 
@@ -82,13 +83,14 @@ def correcao(texto: str) -> str | None:
 def so_valor(trecho: str) -> float | None:
     """O valor de uma correção que é só um valor, lido com certeza (leitor estrito, 2 casas, teto); senão None. "Só um
     valor": tirando o vocabulário de `ABREM` e `ENCHIMENTO`, sobra um número só, em dígitos ("60", "60,50", "1.500") ou
-    por extenso ("sessenta e cinco", "2 mil"). Qualquer outra palavra ("ontem", "na padaria", "em dinheiro", "uns",
-    "ou", "-60", "1,5k", "6o") não é."""
+    por extenso ("sessenta e cinco", "2 mil"), ou com "k" ("1,5k", "1,5 k", "1.5k", #1404). Qualquer outra palavra
+    ("ontem", "na padaria", "em dinheiro", "uns", "ou", "-60", "1,5kk", "6o") não é."""
     from utils_text import valor_valido
     from core.handlers import declaracao_valor
     from core.services.ai_chat.tools.declaracao_ia import _cabe
     from parsers import _extract_valor
-    toques = [t.strip(",.;:!?") for t in (trecho or "").lower().replace("r$", " r$ ").split()]
+    junto = re.sub(r"(\d)\s+k(?!\w)", r"\1k", (trecho or "").lower())  # "1,5 k" é "1,5k" (2-A)
+    toques = [t.strip(",.;:!?") for t in junto.replace("r$", " r$ ").split()]
     sobra = [t for t in toques if t and t not in _ENCHE]
     digitos = [t for t in sobra if _DIGITOS_RE.fullmatch(t)]
     extenso = [t for t in sobra

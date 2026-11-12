@@ -132,7 +132,10 @@ def instala(espelho: logging.Handler) -> FilaDoPainel:
 
 
 def esvazia(prazo_s: float) -> bool:
-    """Espera tudo o que entrou ser gravado. `False` no prazo; nunca pendura (o `join` pendura)."""
+    """Espera tudo o que entrou ser gravado. `False` no prazo; nunca pendura (o `join` pendura).
+
+    Espera pelo lock da fila: não chame de handler de sinal (deadlock se o sinal interromper um
+    `put` com o lock na mão)."""
     if _fila is None:
         return True
     q = _fila.queue

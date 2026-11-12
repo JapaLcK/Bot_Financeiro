@@ -275,15 +275,13 @@ async def delete_card_route(request: Request, user_id: int, card_id: int):
         # `HTTPException` na `main`, o middleware nunca as viu, e ligar o
         # traceback LÁ criaria persistência nova de `DETAIL: Key (…)`. Aqui
         # mantê-la não persiste nada novo.
-        # `to_thread`: a rota é async e o `_DashboardHandler` grava com
-        # `psycopg.connect()` bloqueante (ver `core/system_event_log.py`).
         # `rota=`: na `main` o middleware gravava a rota no `source` do evento
         # (`f"{method} {path}"`, `core/admin_dashboard.py`). O `_log_falha` grava
         # o nome do LOGGER dele (`core.observability`) nesse campo, igual para
         # toda porta — sem isto o operador vê a falha e não sabe qual rota é.
-        await asyncio.to_thread(_log_falha, "delete_card", user_id, exc,
-                                com_traceback=True, card_id=card_id,
-                                rota=f"{request.method} {request.url.path}")
+        _log_falha("delete_card", user_id, exc,
+                   com_traceback=True, card_id=card_id,
+                   rota=f"{request.method} {request.url.path}")
         raise HTTPException(
             status_code=500,
             detail="Não consegui excluir o cartão agora — deu erro do meu lado. Tenta de novo em alguns minutos.",
@@ -383,9 +381,9 @@ async def installment_delete_route(request: Request, user_id: int, group_id: str
         # e a queda de banco nestas duas rotas passa a dar 500 sempre, nunca mais
         # 503 (`core/admin_dashboard.py`) — nenhum consumidor lê 503
         # (`grep 503 frontend/dashboard.js` → zero), é sinal de ops, não produto.
-        await asyncio.to_thread(_log_falha, "undo_installment_group", user_id, exc,
-                                com_traceback=True, group_id=group_id,
-                                rota=f"{request.method} {request.url.path}")
+        _log_falha("undo_installment_group", user_id, exc,
+                   com_traceback=True, group_id=group_id,
+                   rota=f"{request.method} {request.url.path}")
         raise HTTPException(
             status_code=500,
             detail="Não consegui excluir o parcelamento agora — deu erro do meu lado. Tenta de novo em alguns minutos.",

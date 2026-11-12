@@ -4,7 +4,9 @@ Na suíte o espelho grava na thread de quem loga (`tests/conftest.py`, P1 = B); 
 VERDADE é instalada pela própria `_configure_root_logger` (`raiz_de_producao`) ou roda num
 subprocesso com a configuração de produção. Controles por grupo (CLAUDE.md §3), registrados no
 relato do PR-10a:
-  1. o loop não para: negativo = `_DashboardHandler` direto no root (T1/T2 veem ~1 s);
+  1. o loop não para: negativo = `_DashboardHandler` direto no root (T1/T2 veem ~1 s); PR-10b, as
+     portas que tiraram o `to_thread`: negativo A = o `to_thread` de volta (a marca "dentro do
+     loop" fica vermelha) e negativo B = `_DashboardHandler` ao lado da fila (o tempo fica vermelho);
   2. as linhas saem iguais: negativo = o `prepare` da stdlib (o caso `exc_info` fica vermelho);
   3. reentrada: negativo = sem `_fora_do_ouvinte` (≥ 2 conexões); positivo = outra thread grava;
   4. fila cheia / ouvinte que não morre: negativo = `enqueue` da stdlib; `handle` sem `try`;
@@ -25,12 +27,14 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 import core.observability as observability
+import db
 from conftest import usuario_pagante
 from core import log_fila
 from db.connection import get_conn
@@ -138,6 +142,151 @@ def test_rota_que_loga_warning_responde_com_a_tabela_travada(raiz_de_producao, m
     assert log_fila.esvazia(10)
     depois = [r for r in _linhas(source="frontend.routes.analytics") if r[2] == msg]
     assert len(depois) == len(antes) + 1
+
+
+class _MarcaLoop(logging.Handler):
+    """Registra, por linha de log, se ela foi emitida DENTRO do event loop."""
+
+    def __init__(self):
+        super().__init__()
+        self.dentro_do_loop: list[tuple[str, bool]] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            asyncio.get_running_loop()
+            dentro = True
+        except RuntimeError:
+            dentro = False
+        self.dentro_do_loop.append((record.getMessage(), dentro))
+
+
+class _ErroStripe(Exception):
+    pass
+
+
+# (método, url, status, começo da linha do `_log_falha`). `{u}` é o dono da requisição.
+_PORTAS_SEM_TO_THREAD = {
+    "launch_tecnico": ("delete", "/launches/{u}/424242", 500, "delete_launch: falha"),
+    "launch_dominio": ("delete", "/launches/{u}/400400", 400, "delete_launch: falha"),
+    "credito": ("delete", "/credit-transactions/{u}/9", 500, "undo_credit_transaction: falha"),
+    "cartao": ("delete", "/cards/{u}/9", 500, "delete_card: falha"),
+    "parcelamento": ("delete", "/installments/{u}/PC12345678", 500, "undo_installment_group: falha"),
+    "portal": ("post", "/billing/portal", 502, "billing_portal: falha"),
+}
+
+
+@pytest.mark.parametrize("caso", list(_PORTAS_SEM_TO_THREAD))
+def test_rota_que_logava_por_to_thread_loga_no_loop_sem_travar(caso, raiz_de_producao, user_id, monkeypatch):
+    """PR-10b: estas portas chamavam `_log_falha` por `asyncio.to_thread` porque o espelho gravava na
+    thread de quem loga. Com a fila, logam no loop e a rota responde com a tabela travada.
+
+    A marca "dentro do loop" é o que discrimina a retirada: com a fila, o `to_thread` também é rápido."""
+    import db.cards as cards_mod
+    import frontend.finance_bot_websocket_custom as dashboard
+    from db.accounts import LaunchUnsafeRollback
+    from test_log_falha_traceback import _SEGREDO, _client
+
+    def explode(uid, lid):
+        if lid == 400400:  # ramo de DOMÍNIO da `/launches`: WARNING + 400
+            raise LaunchUnsafeRollback("efeitos desconhecidos", "chave_desconhecida")
+        raise RuntimeError(_SEGREDO)
+
+    def stripe_cai(**kw):
+        raise _ErroStripe("portal fora")
+
+    monkeypatch.setattr(dashboard, "delete_launch_and_rollback", explode)
+    monkeypatch.setattr(dashboard, "undo_credit_transaction", explode)
+    monkeypatch.setattr(cards_mod, "get_card_by_id", lambda uid, cid: {"id": cid, "name": "Nubank"})
+    monkeypatch.setattr(cards_mod, "delete_card", explode)
+    monkeypatch.setattr(cards_mod, "undo_installment_group", explode)
+    monkeypatch.setitem(sys.modules, "stripe", SimpleNamespace(
+        api_key=None, error=SimpleNamespace(StripeError=_ErroStripe),
+        billing_portal=SimpleNamespace(Session=SimpleNamespace(create=stripe_cai))))
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_pr10b_fake")
+    monkeypatch.setenv("SYSTEM_EVENT_LOG_TIMEOUT_MS", "3000")  # trava de 2 s < teto: a linha grava depois
+    dashboard.limiter._storage.reset()  # `/billing/portal` tem 30/hora
+    if caso == "portal":  # o portal exige credencial e cliente Stripe (molde: tests/test_billing_portal.py)
+        user_id = int(db.register_auth_user(f"pr10b-{uuid.uuid4().hex}@example.com",
+                                            "senha-teste-123")["user_id"])
+        db.set_stripe_customer(user_id, f"cus_pr10b_{uuid.uuid4().hex}")
+
+    metodo, url, esperado, prefixo = _PORTAS_SEM_TO_THREAD[caso]
+    cli = _client(user_id)
+    pede = getattr(cli, metodo)
+    url, cab = url.format(u=user_id), {dashboard.CSRF_HEADER_NAME: "test-csrf-token"}
+    assert pede(url, headers=cab).status_code == esperado  # aquece (imports, 1ª conexão)
+    assert log_fila.esvazia(10)
+    antes = [r for r in _linhas(user_id=user_id) if r[2].startswith(prefixo)]
+
+    marca, lg = _MarcaLoop(), logging.getLogger("core.observability")
+    lg.addHandler(marca)
+    try:
+        with tabela_travada(2.0):  # o negativo (espelho síncrono) para ~2 s: margem de 2× sobre o limite
+            t0 = time.perf_counter()
+            r = pede(url, headers=cab)
+            gasto = time.perf_counter() - t0
+    finally:
+        lg.removeHandler(marca)
+    assert r.status_code == esperado, r.text
+    assert [d for m, d in marca.dentro_do_loop if m.startswith(prefixo)] == [True], marca.dentro_do_loop
+    assert gasto < 1.0, f"a rota levou {gasto * 1000:.0f} ms: o log pagou o INSERT no loop"
+    assert log_fila.esvazia(10)
+    depois = [r for r in _linhas(user_id=user_id) if r[2].startswith(prefixo)]
+    assert len(depois) == len(antes) + 1, (antes, depois)
+
+
+def test_poda_que_levanta_loga_no_loop_sem_travar(raiz_de_producao, monkeypatch):
+    """PR-10b, a 7ª porta: o `except` de `run_table_cleanup_loop` loga no loop, sem `to_thread`."""
+    import core.services.table_cleanup as tc
+
+    marcador = uuid.uuid4().hex
+    espera_real = asyncio.sleep
+    monkeypatch.setenv("TABLE_CLEANUP_INTERVAL_HOURS", "24")
+    monkeypatch.setenv("SYSTEM_EVENT_LOG_TIMEOUT_MS", "3000")
+
+    def _poda(**kw):
+        os.environ["TABLE_CLEANUP_INTERVAL_HOURS"] = "0"  # 2ª volta encerra
+        raise RuntimeError(f"poda quebrou {marcador}")
+
+    async def _sem_esperar(_segundos):
+        await espera_real(0)  # sem os 120 s do boot nem as 24 h
+
+    monkeypatch.setattr(tc, "run_table_cleanup", _poda)
+    monkeypatch.setattr(asyncio, "sleep", _sem_esperar)
+
+    async def cenario() -> float:
+        maior, parar = 0.0, False
+
+        async def batida():
+            nonlocal maior
+            ult = time.perf_counter()
+            while not parar:
+                await espera_real(0.005)
+                agora = time.perf_counter()
+                maior, ult = max(maior, agora - ult), agora
+
+        t = asyncio.create_task(batida())
+        await espera_real(0.05)
+        await asyncio.wait_for(tc.run_table_cleanup_loop(), timeout=10)
+        await espera_real(0.05)
+        parar = True
+        await t
+        return maior
+
+    def nossas() -> list[tuple]:
+        return [r for r in _linhas(source="core.services.table_cleanup") if marcador in r[2]]
+
+    marca, lg = _MarcaLoop(), logging.getLogger("core.services.table_cleanup")
+    lg.addHandler(marca)
+    try:
+        with tabela_travada(2.0):
+            maior = asyncio.run(cenario())
+    finally:
+        lg.removeHandler(marca)
+    assert [d for m, d in marca.dentro_do_loop if marcador in m] == [True], marca.dentro_do_loop
+    assert maior < 1.0, f"o loop parou {maior * 1000:.0f} ms: o log pagou o INSERT no loop"
+    assert log_fila.esvazia(10)
+    assert len(nossas()) == 1
 
 
 # ── Grupo 2: as linhas saem iguais ───────────────────────────────────────────

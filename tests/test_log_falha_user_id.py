@@ -20,14 +20,15 @@ Três camadas, porque texto de arquivo não mede comportamento (§3):
      portas de entrada que existem.
 
      DIRIGIDOS (8) — medidos, não deduzidos: os 4 primeiros por instrumentação
-     do `logging` durante a própria suíte, os 4 de `to_thread` por serem o
+     do `logging` durante a própria suíte, os 4 das rotas HTTP por serem o
      único call site daquela `op` no arquivo (o do `delete_launch` por HTTP,
      que tem dois, pelo ramo `except Exception` — é o que devolve o 500 que
      `_http` asseria; o irmão é o ramo de erro de DOMÍNIO, que devolve 400):
      `core/handlers/pending.py:214`, `core/handlers/credit.py:1584`,
      `core/services/ai_chat/tools/launches.py:471` e `:537`,
-     `frontend/finance_bot_websocket_custom.py:5519` e `:5610`,
-     `frontend/routes/cards.py:353` e `:448`.
+     `frontend/finance_bot_websocket_custom.py` (`delete_launch_route` e
+     `delete_credit_transaction_route`), `frontend/routes/cards.py`
+     (`delete_card_route` e `installment_delete_route`).
 
      SEM DIRIGIR (16), de propósito: `core/handlers/pending.py:183`, `:195`,
      `:206`, `:240`, `:245`, `:282`, `:285`, `:315`, `:318`;
@@ -39,8 +40,8 @@ Três camadas, porque texto de arquivo não mede comportamento (§3):
      que não fecha com o total afirma exaustividade sem ter — foi assim que
      este parágrafo já reprovou uma vez, com 8 + 13 = 21 escrito como se fosse
      24. Quem reusar estes números, remeça: a enumeração exata é a varredura da
-     camada C (`_varre_repo` + `_e_log_falha`), a única que enxerga também o
-     `asyncio.to_thread(_log_falha, …)` das 5 chamadas de `frontend/`.
+     camada C (`_varre_repo` + `_e_log_falha`), a única que enxerga também
+     `_log_falha` passado como valor ao `asyncio.to_thread`.
 
      8 bastam porque o MECANISMO é único: o `user_id` sai de `_log_falha` pelo
      `extra=` e chega na coluna pelo `getattr(record, "user_id", None)` do

@@ -205,7 +205,8 @@ from frontend.routes.static_pages import router as static_pages_router
 
 load_app_env()
 
-# Instala o `_DashboardHandler` no logger RAIZ deste processo — é o que leva
+# Instala o espelho do painel (a `FilaDoPainel`, que grava pelo `_DashboardHandler`,
+# `core/observability.py`) no logger RAIZ deste processo — é o que leva
 # WARNING/ERROR (inclusive os `_log_falha` das rotas destrutivas) ao
 # `system_event_logs` e ao `backend_errors_24h` do admin. Aqui e não em
 # `core/observability.py` porque aquele é módulo de BIBLIOTECA: 23 módulos de
@@ -2799,14 +2800,13 @@ async def validation_exception_page_handler(request: Request, exc: RequestValida
         # (medido), e um ataque de veneno em massa — que antes gerava 500 mais
         # uma linha em `system_event_logs` — passaria a sair como 422 sem
         # rastro nenhum.
-        # `info` e não `warning` DE PROPÓSITO: o `_DashboardHandler`
-        # (core/observability.py:24) está no root logger e espelha WARNING+ com
-        # um `psycopg.connect()` + INSERT BLOQUEANTE por registro, dentro do
-        # event loop — num caminho anônimo e barato de disparar isso é o vetor
-        # de DoS, não o conserto. Mesmo motivo do `_admin_log.info` do
-        # ClientDisconnect e do `_error_degraded` de `frontend/routes/shared.py`
-        # ("um bot varrendo URL vira um INSERT por 404"). Fica no stderr, que é
-        # onde o `[unhandled]` também aparece.
+        # `info` e não `warning` DE PROPÓSITO: o espelho do root grava WARNING+
+        # em `system_event_logs`, uma linha por registro. Num caminho anônimo e
+        # barato de disparar, isso enche a fila (`core/log_fila.py`) e faz
+        # descartar os avisos que importam: é o vetor, não o conserto. Mesmo
+        # motivo do `_admin_log.info` do ClientDisconnect e do `_error_degraded`
+        # de `frontend/routes/shared.py`. Fica no stderr, que é onde o
+        # `[unhandled]` também aparece.
         logging.getLogger(__name__).info(
             "422 sem input (%s): %s %s",
             veneno.__class__.__name__, request.method, request.url.path,
@@ -7647,10 +7647,8 @@ async def _create_billing_portal(user_id: int, customer_id: str, return_path: st
             return_url=f"{DASHBOARD_URL}{return_path}",
         )
     except stripe.error.StripeError as exc:
-        await asyncio.to_thread(
-            _log_falha, "billing_portal", user_id, exc,
-            route=route, request_id=getattr(exc, "request_id", None),
-        )
+        _log_falha("billing_portal", user_id, exc,
+                   route=route, request_id=getattr(exc, "request_id", None))
         raise HTTPException(
             status_code=502,
             detail="Não foi possível abrir o gerenciamento da assinatura agora. Tente novamente em instantes.",
@@ -8510,11 +8508,8 @@ async def delete_launch_route(
         # divergir. Condição de DOMÍNIO: frase própria, sem `str(exc)`. O `detail` é
         # renderizado pro usuário (`frontend/dashboard.js`), e o `str(exc)`
         # daqui mostrava "lançamento sem 'efeitos'" cru no modal do app.
-        # `to_thread` igual ao ramo técnico abaixo: WARNING também é espelhado
-        # em `system_event_logs` pelo `_DashboardHandler`, com o mesmo
-        # `psycopg.connect()` bloqueante — o nível não muda quem paga a conta.
-        await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
-                                nivel=logging.WARNING, launch_id=int(launch_id))
+        _log_falha("delete_launch", user_id, exc,
+                   nivel=logging.WARNING, launch_id=int(launch_id))
         # `[type(exc)]` casaria por tipo EXATO dentro de um `except` que casa por
         # `isinstance`: uma subclasse futura entraria aqui e levantaria KeyError
         # (medido: 500 com `detail=None`). O `next(...)` usa a mesma regra do `except`.
@@ -8531,10 +8526,8 @@ async def delete_launch_route(
         # nunca viu esta falha, nunca gravou pilha nenhuma. Ligar
         # `com_traceback=True` aqui não restaura rastro: CRIA persistência nova
         # do `DETAIL: Key (…)=(…)` em `system_event_logs`.
-        # `to_thread`: a rota é async e o `_DashboardHandler` grava com
-        # `psycopg.connect()` bloqueante (ver `core/system_event_log.py`).
-        await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
-                                launch_id=int(launch_id))
+        _log_falha("delete_launch", user_id, exc,
+                   launch_id=int(launch_id))
         raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     _invalidate_dashboard_current_cache(user_id)
@@ -8629,8 +8622,8 @@ async def delete_credit_transaction_route(
         # Sem traceback, mesma medição da `/launches` acima: na `main` esta rota
         # também era `HTTPException(500, f"Erro ao apagar compra: {exc}")`, que o
         # middleware deixa passar — nunca houve pilha gravada aqui para manter.
-        await asyncio.to_thread(_log_falha, "undo_credit_transaction", user_id, exc,
-                                credit_tx_id=int(tx_id))
+        _log_falha("undo_credit_transaction", user_id, exc,
+                   credit_tx_id=int(tx_id))
         raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     if result is None:

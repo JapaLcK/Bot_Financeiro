@@ -10,9 +10,10 @@ caminhos passou com 8 testes verdes e a suíte inteira idêntica (8153 passed na
 duas colunas), porque `caplog` registra CONTEÚDO e não instante. Teste que fica
 verde com e sem o conserto não mede nada (CLAUDE.md §3).
 
-O QUE ESTÁ EM JOGO: o WARNING passa pelo `_DashboardHandler`
-(`core/observability.py`), que grava com `psycopg.connect` + INSERT — 2006,3 ms com
-o host inalcançável (o `connect_timeout=2` de `core/system_event_log.py`), que é
+O QUE ESTÁ EM JOGO: na suíte (e em produção até o PR-10a) o WARNING passa pelo
+`_DashboardHandler` (`core/observability.py`) na thread de quem loga, que grava com
+`psycopg.connect` + INSERT — 2006,3 ms com o host inalcançável (o
+`connect_timeout=2` de `core/system_event_log.py`), que é
 exatamente a situação em que estes dois `except` disparam. Logar com a vaga na mão
 somava esses 2 s a UMA das 8 vagas do `_lock_slots()`, num caminho que existe para
 não pendurar ninguém.

@@ -3272,7 +3272,8 @@ queimar cota (toda fonte nova precisa de timeout próprio); `buscar` que levanta
 `CancelledError` vira 500 sem backoff (não acontece nas fontes planejadas);
 `SystemExit`/`KeyboardInterrupt` propagam (correto); texto de 600 caracteres sem espaço
 estouraria o layout (inalcançável: as mensagens vêm da tabela fixa); o WARNING persistido
-pelo `_DashboardHandler` faz um INSERT síncrono no loop (uma falha por backoff); `async def
+pelo `_DashboardHandler` vai pela fila de `core/log_fila.py` desde o PR-10a e não trava o
+loop (uma linha por backoff); `async def
 buscar` com corpo bloqueante trava o loop.
 **Fonte Clarity** (`core/funil_fonte_clarity.py`, cartão "8c. Clarity"): Microsoft Clarity Data Export
 API (`GET https://www.clarity.ms/export-data/api/v1/project-live-insights`, `numOfDays=3`,

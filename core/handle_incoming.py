@@ -300,9 +300,11 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
     # D8: com cartão nenhum pedaço declara (T8 ou fatura), nem o sem valor. A resposta "cartão de débito" (rodada 10) não
     # marca os pedaços (`resolver`), mas também é cartão.
     cartao = declarando and (resposta_cartao or tem_cartao(parts))
-    if declarando and (recusa := recusa_valor(reunir([p for p in parts if not is_comparative_question(p)]))):
+    if declarando and (recusa := recusa_valor(reunir([p for p in parts if not is_comparative_question(p)]),
+                                              cartao=cartao)):
         # "2 reais e 50" partido em dois: não grava nenhum pedaço (T10/T11). Com cartão (B1) só o T10/T11/T15 recusa, antes
-        # da fatura gravar sem confirmar: "1,5 mi" o parser lê 1,5 (#1404); o T16 de dois gastos não, esses vão para T8 ou fatura.
+        # da fatura gravar sem confirmar: "1,5 mi" o parser lê 1,5, e "1,5k"/"anel 18k" seguem T10 aqui (1-B, #1404); o
+        # T16 de dois gastos não, esses vão para T8 ou fatura.
         # Prefixo antes do "{": T10/T11 levam o trecho; o T15 não tem campo, o prefixo é o texto inteiro.
         if not cartao or str(recusa).startswith(tuple(t.split("{")[0] for t in (tx.VALOR_ABREVIADO, tx.VALOR_AMBIGUO,
                                                                                     tx.LONGA))):

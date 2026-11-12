@@ -8,8 +8,9 @@ módulo não pode importar nada de lá.
 
 **Nada de `logging` neste arquivo, e não é estilo.** O desfecho de falha aqui é
 `print` no stderr, de propósito: um `logging.warning()` deste módulo é captado
-pelo `_DashboardHandler` (que fica no ROOT logger, nível WARNING) e volta para
-`log_system_event_sync`, que é a função que acabou de falhar. Preso por
+pelo espelho do ROOT logger (nível WARNING) e volta para `log_system_event_sync`,
+que é a função que acabou de falhar: na suíte na mesma thread (`tests/conftest.py`),
+em produção pela fila de `core/log_fila.py`. Preso por
 `tests/test_log_falha_traceback.py`.
 """
 from __future__ import annotations
@@ -31,9 +32,10 @@ load_app_env()
 # Teto de EXECUÇÃO das duas conexões deste módulo. O `connect_timeout` do libpq
 # limita só o handshake: com a `system_event_logs` travada (`access exclusive`
 # de um `alter table`/`vacuum full`), o INSERT esperava o lock inteiro — medido
-# nesta sessão, 3,00s de espera para um lock de 3s, sem teto nenhum. Como o
-# `_DashboardHandler` está no root logger, essa espera é paga por QUALQUER
-# `warning()`/`error()` do processo, inclusive dentro do event loop.
+# nesta sessão, 3,00s de espera para um lock de 3s, sem teto nenhum. Essa espera
+# é paga por quem chama este módulo direto (há chamadas diretas em `async def`,
+# issue #1546) e, no espelho do `logging`, pela thread do ouvinte de
+# `core/log_fila.py` (na suíte, por quem loga).
 # Com `-c statement_timeout=1500ms` e lock de 8s: cancelado em 1,50s,
 # `QueryCanceled` sqlstate 57014; com a tabela livre, 0,004s.
 #
@@ -126,6 +128,9 @@ def _reentrou(o_que: str) -> bool:
     (o único filtro que existe lá, `_sem_ratelimit_no_banco`, só exclui o
     `slowapi`) e chama `log_system_event_sync` de novo — connect novo na MESMA
     tabela travada, cada volta custando um TCP connect mais o teto inteiro.
+    Em produção o espelho passa pela fila: o record nascido no ouvinte é
+    descartado por `_fora_do_ouvinte` (`core/log_fila.py`), e esta guarda vale
+    para a suíte e para qualquer handler síncrono posto no root.
 
     A guarda fica no ponto de estrangulamento (as duas funções deste módulo)
     e não num filtro por `record.name == "psycopg"`: toda volta do ciclo passa

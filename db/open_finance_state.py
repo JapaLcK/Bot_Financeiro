@@ -1383,7 +1383,9 @@ def pluggy_items_lock(item_ids: list[str]):
         #
         # A VAGA VOLTA ANTES DO LOG, e a ordem é conserto, não estilo: este
         # WARNING passa pelo `_DashboardHandler` (`core/observability.py`), que
-        # grava abrindo `psycopg.connect` + INSERT — o log é uma ida ao banco.
+        # grava abrindo `psycopg.connect` + INSERT — o log é uma ida ao banco: na
+        # suíte na thread de quem loga, em produção (desde o PR-10a) na thread do
+        # ouvinte de `core/log_fila.py`.
         # Com o banco bom ela custa milissegundos: a medição dessa grandeza é o
         # `ponytail:` do docstring de `_DashboardHandler`, e com `exc_info=True`
         # a 1ª chamada sai no mesmo intervalo (remedido 2026-09-16) — traceback
@@ -1404,10 +1406,9 @@ def pluggy_items_lock(item_ids: list[str]):
         # `reset_user_data` enfileiravam atrás do log de um 503 — num caminho que
         # existe para não pendurar ninguém. Logar continua obrigatório (503 mudo
         # é o que `935b2a7` fechou); segurar a vaga para logar, não.
-        # ponytail: os 2 s continuam na conta de QUEM PEDIU (o log roda antes do
-        # `yield`, na mesma thread) — o que deixa de ser compartilhado é a vaga.
-        # Tirar os 2 s do requisitante exigiria log fora da thread; se um dia
-        # importar, é lá, não aqui.
+        # ponytail: desde o PR-10a o log saiu da thread em produção
+        # (`core/log_fila.py`) e o requisitante não paga mais os 2 s. A ordem
+        # fica: na suíte o espelho ainda grava na thread, e ela não custa nada.
         _lock_slots().release()
         logger.warning(
             "pluggy_items_lock: conexão dedicada falhou, devolvendo 503 (itens=%d)",
@@ -1503,16 +1504,17 @@ def pluggy_items_lock(item_ids: list[str]):
             # aqui o WARNING sai mesmo quando o `close()` levanta — e `close()`
             # que levanta é a mesma infra morrendo que este log existe para
             # contar. Ordem: `close()` → `release()` → log.
-            # `logger.warning` PODE levantar — a versão anterior deste comentário
-            # dizia que o `logging` segurava, e estava errada: `Handler.handle`
-            # chama `self.emit(record)` SEM try/except, e o `handleError` só roda
-            # dentro do `emit` de quem se dá ao trabalho de chamá-lo (o
-            # `_DashboardHandler.emit` de `core/observability.py` não tem
-            # try/except próprio). Quem segura de verdade é o `except Exception`
-            # amplo de `log_system_event_sync` (`core/system_event_log.py`), que é
-            # o que aquele `emit` chama. Se ele sumir, o WARNING sobe DAQUI e
-            # mascara a exceção do `close()` (ela vira `__context__`) — e mesmo
-            # nesse caso a vaga JÁ VOLTOU, porque o `release()` vem antes
+            # `logger.warning` PODE levantar na suíte — a versão anterior deste
+            # comentário dizia que o `logging` segurava, e estava errada:
+            # `Handler.handle` chama `self.emit(record)` SEM try/except, e o
+            # espelho da suíte é o `_DashboardHandler.emit` chamado na thread
+            # (`tests/conftest.py`), sem try/except próprio. Quem segura ali é o
+            # `except Exception` amplo de `log_system_event_sync`
+            # (`core/system_event_log.py`). Em produção a `FilaDoPainel` captura
+            # (`QueueHandler.emit` → `handleError`). Se aquele except sumir, o
+            # WARNING sobe DAQUI e mascara a exceção do `close()` (ela vira
+            # `__context__`) — e mesmo nesse caso a vaga JÁ VOLTOU, porque o
+            # `release()` vem antes
             # (medido: 8 vagas livres → 8). É o que esta ordem garante, e é o que
             # `tests/test_of_items_lock_ordem.py` prende.
             if nao_rotineiro is not None:
