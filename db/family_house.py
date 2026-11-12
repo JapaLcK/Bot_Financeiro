@@ -14,6 +14,9 @@ from .connection import get_conn
 from .family import FamilyError, _lock_member_group
 from .family_views import _REF, _primeiro_nome
 
+# As tabelas da casa por nome, para quem só precisa classificá-las (a exportação LGPD as deixa de fora).
+TABELAS_DA_CASA = ("family_goals", "family_budgets")
+
 # gasto do mês corrente (o primeiro lançamento num mês novo zera e soma)
 _GASTO = "(case when gasto_mes = %(mes)s then gasto_cents else 0 end)"
 
