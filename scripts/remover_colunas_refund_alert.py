@@ -8,7 +8,10 @@ o aviso?) só existe ali, e a Q2 abaixo é a consulta que o drop destrói. Por i
 
 1. Este script sem flag em produção. Na thread `afiliado_reembolso.py:104` do #1508 (repositório público),
    cole só a última linha, `Resumo para a thread:` (contagens de Q1-Q4, conclusão da Q2, modo e resultado,
-   sem id, valor nem data). Guarde a saída inteira em local restrito, fora do repositório.
+   sem id, valor nem data). Guarde a saída inteira em local restrito, fora do repositório. Faça este
+   passo antes de ~08/02/2027: a Q3 lê `system_event_logs` na janela de 10 a 11/11/2026, e a poda (piso
+   de 90 dias, `RETENCAO_MINIMA_DIAS` em `core/services/log_retention.py`) pode esvaziá-la depois disso.
+   Q3 vazia nessa altura não prova nada.
 2. Q1 com caso: `scripts/backfill_afiliado_pagamentos.py`, e este script de novo, até a Q1 zerar.
 3. Este script com `--aplicar`. Staging antes, como ensaio.
 
@@ -129,9 +132,10 @@ def _ler(aplicar: bool, resumo: dict) -> int | None:
               f" avisado {r['refund_alert_sent_at']} · pendência {r['pendencia']} avisada {r['notified_at']}")
     soltas = [r["comissao"] for r in linhas if r["pendencia"] is None and r["status"] != "reversed"]
     n, com = len(linhas), sum(r["pendencia"] is not None for r in linhas)
-    resumo["Q2"] = f"{n} registros" + ("" if not n else ", todos com pendência correspondente" if com == n else
-                                       f": {com} com pendência correspondente, {len(soltas)} sem pendência,"
-                                       f" {n - com - len(soltas)} estornados sem pendência")
+    resumo["Q2"] = f"{n} registro{'' if n == 1 else 's'}" + (
+        "" if not n else ", todos com pendência correspondente" if com == n else
+        f": {com} com pendência correspondente, {len(soltas)} sem pendência,"
+        f" {n - com - len(soltas)} estornados sem pendência")
     if soltas:
         print(f"alerta do #1418 sem pendência: comissões {', '.join(map(str, soltas))}. Rode"
               " scripts/backfill_afiliado_pagamentos.py e este script de novo até a Q1 zerar. Nada removido.")

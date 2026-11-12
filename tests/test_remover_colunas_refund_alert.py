@@ -39,10 +39,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from remover_colunas_refund_alert import main  # noqa: E402
 
 COLUNAS = ["refund_alert", "refund_alert_sent_at"]
-RESUMO = re.compile(r"Resumo para a thread: Q1: (\d+); Q2: (colunas ausentes|\d+ registros(?:, todos com pendência"
-                    r" correspondente|: \d+ com pendência correspondente, \d+ sem pendência, \d+ estornados sem"
-                    r" pendência)?); Q3: (\d+|tabela ausente); Q4: (\d+)\. Modo: (simulação|aplicação)\."
-                    r" Resultado: ([^\d]+)\.")
+RESUMO = re.compile(r"Resumo para a thread: Q1: (\d+); Q2: (colunas ausentes|(?:1 registro|(?!1 )\d+ registros)"
+                    r"(?:, todos com pendência correspondente"
+                    r"|: \d+ com pendência correspondente, \d+ sem pendência, \d+ estornados sem pendência)?);"
+                    r" Q3: (\d+|tabela ausente); Q4: (\d+)\. Modo: (simulação|aplicação)\. Resultado: ([^\d]+)\.")
 
 
 def _existentes():
@@ -189,7 +189,7 @@ def test_recusa_alerta_sem_pendencia(colunas, capsys, status, avisado):
     _alerta(a, status, avisado)
     codigo, saida = _rodar(capsys, "--aplicar")
     assert codigo == 3 and f"sem pendência: comissões {a.id}." in saida
-    assert _resumo(saida)[1::3] == ("1 registros: 0 com pendência correspondente, 1 sem pendência, 0 estornados"
+    assert _resumo(saida)[1::3] == ("1 registro: 0 com pendência correspondente, 1 sem pendência, 0 estornados"
                                     " sem pendência", "aplicação")
     assert _resumo(saida)[5] == "recusa, alerta sem pendência, nada removido"
     assert _existentes() == COLUNAS
@@ -200,7 +200,7 @@ def test_estornada_sem_pendencia_nao_prende(colunas, capsys):
     _alerta(a, "reversed")
     codigo, saida = _rodar(capsys, "--aplicar")
     assert (codigo, _existentes()) == (0, []), saida
-    assert _resumo(saida)[1::4] == ("1 registros: 0 com pendência correspondente, 0 sem pendência, 1 estornados"
+    assert _resumo(saida)[1::4] == ("1 registro: 0 com pendência correspondente, 0 sem pendência, 1 estornados"
                                     " sem pendência", "colunas removidas")
 
 
@@ -210,7 +210,7 @@ def test_simulacao_nao_remove(colunas, mundo, capsys):  # noqa: F811
     _alerta(a)
     codigo, saida = _rodar(capsys)
     assert codigo == 0 and "\nsimulação: nada removido\nResumo para a thread: " in saida
-    assert _resumo(saida)[1::3] == ("1 registros, todos com pendência correspondente", "simulação")
+    assert _resumo(saida)[1::3] == ("1 registro, todos com pendência correspondente", "simulação")
     assert _resumo(saida)[5] == "nada removido"
     assert f"comissão {a.id} · pending · saque None · alerta total avisado 2026-11-10" in saida
     assert "pendência open avisada" in saida
@@ -273,7 +273,7 @@ def test_aplicar_remove_e_imprime_a_evidencia(colunas, mundo, capsys):  # noqa: 
     codigo, saida = _rodar(capsys, "--aplicar")
     assert codigo == 0
     assert saida.index(f"comissão {a.id} ·") < saida.index("removidas: refund_alert, refund_alert_sent_at")
-    assert _resumo(saida)[1::4] == ("1 registros, todos com pendência correspondente", "colunas removidas")
+    assert _resumo(saida)[1::4] == ("1 registro, todos com pendência correspondente", "colunas removidas")
     assert _existentes() == []
     codigo, saida = _rodar(capsys, "--aplicar")
     assert codigo == 0 and _resumo(saida)[5] == "nada a remover"

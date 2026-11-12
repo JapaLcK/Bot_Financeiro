@@ -60,6 +60,8 @@ LEITORES_SQL: dict[tuple[str, str], tuple[str, ...] | None] = {
     ("core/admin_dashboard.py", "_fetch_admin_overview_inner"): None,
     ("core/admin_dashboard.py", "fetch_admin_user_detail"): None,  # últimos 15
     ("db/privacy.py", "build_user_export_zip"): None,  # exportação: 90 d + permanentes
+    # Evidência do #1507 (Q3): janela fixa de 10 a 11/11/2026; a poda (piso 90 d) a esvazia, e vazia não prova nada.
+    ("scripts/remover_colunas_refund_alert.py", "<módulo>"): None,
 }
 
 
