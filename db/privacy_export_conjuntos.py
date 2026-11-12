@@ -62,7 +62,7 @@ EXPORTADAS: dict[str, tuple[str, str]] = {
     # Sem `code`: é o link mágico `/d/{code}`, que vale 2 h e abre a conta.
     "sessoes_dashboard": ("dashboard_sessions",
                           "select user_id, expires_at, created_at from dashboard_sessions where user_id = %(uid)s"),
-    # O `raw` sai sem `webhookUrl` (pode levar o token do webhook): `db/privacy_export.py`.
+    # O `raw` sai sem string com `token=` (o `webhookUrl` leva o do webhook): `_sem_token`, `db/privacy_export.py`.
     "conexoes_open_finance": ("open_finance_connections",
                               "select * from open_finance_connections where user_id = %(uid)s"),
     "contas_open_finance": ("open_finance_accounts", """
@@ -202,7 +202,13 @@ NAO_EXPORTADAS: dict[str, str] = {
     **dict.fromkeys(TABELAS_DA_CASA, "item do grupo, não da pessoa (docs/CLAUDE.md, Plano Família)"),
 }
 
-# (tabela, coluna) que casa o padrão de segredo da guarda e não é segredo, com o motivo.
+# (dataset, coluna que a SQL devolve) que casa o padrão de segredo da guarda e não é segredo, com o motivo.
+_VIRA_CHAVE_PIX = "sai da SQL só para virar `chave_pix` em claro (`_chave_pix_em_claro`); o cifrado não chega ao ZIP"
 COLUNAS_SEM_SEGREDO: dict[tuple[str, str], str] = {
-    ("ofx_imports", "file_hash"): "hash do arquivo importado, para deduplicar; não é credencial",
+    ("importacoes_ofx", "file_hash"): "hash do arquivo importado, para deduplicar; não é credencial",
+    ("afiliado", "code"): "código público do link de indicação `/r/{code}`, feito para ser divulgado",
+    ("afiliado", "pix_key_enc"): _VIRA_CHAVE_PIX,
+    ("afiliado_saques", "pix_key_enc"): _VIRA_CHAVE_PIX,
+    ("cobrancas_pix", "public_token"): "id do poll da cobrança, que também filtra por `user_id`"
+                                       " (`buscar_por_public_token`, db/pix_charges.py): sem a sessão não abre nada",
 }

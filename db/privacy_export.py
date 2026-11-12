@@ -9,6 +9,7 @@ import csv
 import io
 import json
 import logging
+import re
 import zipfile
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -53,6 +54,20 @@ _DETAILS_FORA_DA_EXPORTACAO = frozenset({"traceback"})
 
 
 _CHAVE_INDECIFRAVEL = "(indecifrável)"
+_TOKEN = re.compile(r"token(=|%3d)", re.I)
+
+
+def _sem_token(valor: Any) -> Any:
+    """Troca, em qualquer nível, a string com `token=` (ou `token%3D`) por um marcador. O `webhookUrl` que mandamos
+    à Pluggy leva `?token=<PLUGGY_WEBHOOK_SECRET>` (frontend/routes/open_finance.py), e o `raw` da conexão é o item
+    ou o corpo do webhook `item/deleted` (db/open_finance.py), com a URL em chave e nível que não controlamos."""
+    if isinstance(valor, str):
+        return "(removido: continha token)" if _TOKEN.search(valor) else valor
+    if isinstance(valor, dict):
+        return {k: _sem_token(v) for k, v in valor.items()}
+    if isinstance(valor, list):
+        return [_sem_token(v) for v in valor]
+    return valor
 
 
 def _chave_pix_em_claro(rows: list[dict], user_id: int) -> None:
@@ -80,10 +95,8 @@ def build_user_export_zip(user_id: int) -> bytes:
     for name in ("afiliado", "afiliado_saques"):
         _chave_pix_em_claro(datasets[name], user_id)
 
-    # O `webhookUrl` do item da Pluggy pode levar `?token=<PLUGGY_WEBHOOK_SECRET>` (frontend/routes/open_finance.py).
     for conexao in datasets["conexoes_open_finance"]:
-        if isinstance(conexao["raw"], dict):
-            conexao["raw"].pop("webhookUrl", None)
+        conexao["raw"] = _sem_token(conexao["raw"])
 
     for evento in datasets["eventos_sistema"]:
         if isinstance(evento["details"], dict):

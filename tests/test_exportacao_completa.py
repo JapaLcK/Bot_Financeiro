@@ -2,21 +2,25 @@
 
 T1 completude: toda tabela do fecho de FK até `users` é tabela principal de `EXPORTADAS` ou chave de
    `NAO_EXPORTADAS`; nome sem tabela (órfão) e tabela nas duas listas reprovam.
-T2 estrutura: toda SQL filtra por `%(uid)s` e nenhuma usa `%s`; tabela exportada com `select *`/`alias.*`
-   não tem coluna com cara de segredo, salvo `COLUNAS_SEM_SEGREDO`.
-T3 isolamento: o ZIP de A não tem nada semeado em B.
-T4 segredo semeado: o `code` do link mágico, o hash e o cifrado das identidades, o `webhookUrl` com token
-   e os hashes e cifrados da conta não aparecem em nenhum membro do ZIP; a linha legítima continua lá.
+T2 estrutura: toda SQL filtra por `%(uid)s` e nenhuma usa `%s`; nenhuma coluna que a SQL DEVOLVE
+   (`cur.description`, não o texto da SQL) tem cara de segredo, salvo `COLUNAS_SEM_SEGREDO`.
+T3 isolamento: A e B com uma linha marcada em cada tabela exportada (`tests/_semeia_exportacao.py`); todo
+   dataset de A tem linha, e semear B não muda nada no ZIP de A nem põe a marca de B nele.
+T4 segredo semeado: o `code` do link mágico, o hash e o cifrado das identidades, a URL com token do webhook
+   (em 6 formas do `raw`) e os hashes e cifrados da conta não aparecem em nenhum membro do ZIP; a linha
+   legítima continua lá.
 T5 formato: os membros do ZIP e as colunas de cada dataset são os da `main` de 2026-11-12, salvo `MUDARAM`.
 
 CONTROLES rodados à mão (CLAUDE.md §3), cada um num caso verde:
 - T1: tirar "lancamentos" de `EXPORTADAS` no arquivo de produção deixa `test_t1_registro_real` vermelho.
-- T4: voltar `sessoes_dashboard` para `select code, ...` e `identidades` para `select *`, ou tirar o
-  `pop("webhookUrl")` de `db/privacy_export.py`, deixa `test_t4_segredo_semeado_nao_sai` vermelho.
+- T3: `or true` depois do `%(uid)s` de `cartoes`, `transacoes_open_finance` ou `eventos_login` deixa
+  `test_t3_zip_de_a_nao_tem_nada_de_b` vermelho.
+- T4: voltar `sessoes_dashboard` para `select code, ...` e `identidades` para `select *`, ou trocar o
+  `_sem_token` pelo `pop("webhookUrl")` só do topo, deixa `test_t4_segredo_semeado_nao_sai` vermelho.
 
-CLASSES CEGAS: segredo dentro de coluna JSON de tabela `select *` (`raw`, `payload`, `details`) que não seja
-o `webhookUrl`; tabela ligada à pessoa por e-mail ou telefone, fora do fecho de FK (#1557); tabela que só
-existe em produção (DP9); coluna nomeada nova com segredo (T2 só olha `select *`; T4 só o que semeia).
+CLASSES CEGAS: segredo sem `token=` dentro de coluna JSON (`raw`, `payload`, `details`); tabela ligada à
+pessoa por e-mail ou telefone, fora do fecho de FK (#1557); tabela que só existe em produção (DP9); tabela
+que o semeador não consegue preencher (o T3 reprova, não passa calado).
 """
 from __future__ import annotations
 
@@ -31,8 +35,10 @@ import pytest
 
 from core.admin_dashboard import ensure_admin_tables
 from db import ensure_user, get_conn
+from db.open_finance import update_pluggy_open_finance_item_status
 from db.privacy_export import build_user_export_zip
 from db.privacy_export_conjuntos import COLUNAS_SEM_SEGREDO, EXPORTADAS, NAO_EXPORTADAS
+from tests._semeia_exportacao import semeia
 
 # Isenção nomeada da guarda de órfãos: os 3 datasets legados apontam para tabelas que não existem no
 # schema e saem sempre vazios. Tirar daqui (e de EXPORTADAS) quando o dono rodar a Q-DP9.
@@ -49,7 +55,6 @@ _FECHO = """
     select relname from pg_class where oid in (select oid from fecho)
 """
 _SEGREDO = re.compile(r"hash|token|secret|_enc$|password|^code$|jti|challenge|webhook")
-_ESTRELA = re.compile(r"select\s+(?:\w+\.)?\*", re.I)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -97,30 +102,70 @@ def _sql_ruim(exportadas) -> list[str]:
     return [nome for nome, (_, sql) in exportadas.items() if "%(uid)s" not in sql or "%s" in sql]
 
 
+def _colunas(sql: str) -> list[str]:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, {"uid": -1})
+        return [d.name for d in cur.description]
+
+
 def _colunas_secretas(exportadas) -> list[tuple[str, str]]:
-    achadas = []
-    for tabela, sql in exportadas.values():
-        if not _ESTRELA.search(sql):
-            continue
-        for r in _q("select attname from pg_attribute where attrelid = to_regclass(%s) and attnum > 0"
-                    " and not attisdropped", (tabela,), fetch=True):
-            if _SEGREDO.search(r["attname"]) and (tabela, r["attname"]) not in COLUNAS_SEM_SEGREDO:
-                achadas.append((tabela, r["attname"]))
-    return achadas
+    existem = {t for t, _ in exportadas.values()} - set(ORFAS_PENDENTES_DP9)
+    return [(nome, c) for nome, (tabela, sql) in exportadas.items() if tabela in existem
+            for c in _colunas(sql) if _SEGREDO.search(c) and (nome, c) not in COLUNAS_SEM_SEGREDO]
 
 
 def test_t2_estrutura_do_registro_real():
     assert _sql_ruim(EXPORTADAS) == []
     assert _colunas_secretas(EXPORTADAS) == []
-    assert _colunas_secretas({"x": ("ofx_imports", "select * from ofx_imports")}) == []  # a isenção não é morta
+    for nome, coluna in COLUNAS_SEM_SEGREDO:  # nenhuma isenção morta
+        assert coluna in _colunas(EXPORTADAS[nome][1]), (nome, coluna)
 
 
-def test_t2_guarda_acusa_posicional_e_select_estrela_com_segredo():
+def test_t2_guarda_acusa_posicional_estrela_e_coluna_nomeada_com_segredo():
     assert _sql_ruim({"x": ("users", "select * from users where id = %s")}) == ["x"]
-    assert _colunas_secretas({"x": ("user_mfa", "select * from user_mfa where user_id = %(uid)s")}) \
-        == [("user_mfa", "secret_encrypted")]
-    assert set(_colunas_secretas({"x": ("user_identities", "select * from user_identities")})) \
-        == {("user_identities", "external_id_hash"), ("user_identities", "external_id_enc")}
+    assert _colunas_secretas({"x": ("user_mfa", "select m.user_id, m.* from user_mfa m where user_id = %(uid)s")}) \
+        == [("x", "secret_encrypted")]
+    assert _colunas_secretas({"x": ("users", "select id, 'a' as secret from users where id = %(uid)s")}) \
+        == [("x", "secret")]
+    assert set(_colunas_secretas({"identidades": ("user_identities", "select * from user_identities")})) \
+        == {("identidades", "external_id_hash"), ("identidades", "external_id_enc")}
+
+
+def _zip(uid: int) -> tuple[dict, str, list[str]]:
+    z = zipfile.ZipFile(io.BytesIO(build_user_export_zip(uid)))
+    texto = "".join(z.read(n).decode("utf-8") for n in z.namelist())
+    return json.loads(z.read("dados.json"))["dados"], texto, z.namelist()
+
+
+def test_t3_zip_de_a_nao_tem_nada_de_b():
+    tabelas = {t for t, _ in EXPORTADAS.values()} - set(ORFAS_PENDENTES_DP9)
+    a, marca_a, set_null_a = semeia("ISOA", tabelas)
+    b, set_null_b = a, []
+    try:
+        antes, texto_antes, _ = _zip(a)
+        dp9 = {d for d, (t, _) in EXPORTADAS.items() if t in ORFAS_PENDENTES_DP9}
+        assert [d for d, linhas in antes.items() if not linhas and d not in dp9] == []  # nada vazio por construção
+        assert marca_a in texto_antes
+        b, marca_b, set_null_b = semeia("ISOB", tabelas)
+        depois, texto, _ = _zip(a)
+        assert {d: len(v) for d, v in depois.items()} == {d: len(v) for d, v in antes.items()}
+        assert marca_b not in texto
+        assert marca_b in _zip(b)[1]  # positivo: B foi semeado de verdade
+    finally:  # `set null` para `users`: a limpeza do conftest deixaria essas linhas sem dono
+        for tabela, coluna in set(set_null_a) | set(set_null_b):
+            _q(f"delete from {tabela} where {coluna} = any(%s)", ([a, b],))
+
+
+_URL = "https://pigbank.app/open-finance/pluggy/webhook?token=SEG_SEGREDO_WEBHOOK"
+# As formas que o `raw` da conexão pode ter: o item da Pluggy, o corpo do webhook `item/deleted`
+# (`update_pluggy_open_finance_item_status`), e o que mais não controlamos.
+_RAW_COM_TOKEN = {
+    "topo": {"webhookUrl": _URL, "clientUserId": "SEG_client"},
+    "snake": {"webhook_url": _URL},
+    "lista": {"history": [{"webhookUrl": _URL}]},
+    "string": _URL,
+    "outra_chave": {"parameter": {"callbackUrl": _URL.replace("token=", "TOKEN%3D")}},
+}
 
 
 def _pessoa(marca: str) -> int:
@@ -134,33 +179,16 @@ def _pessoa(marca: str) -> int:
        " values ('whatsapp', %s, %s, %s, %s)", (f"{marca}_ext", uid, f"{marca}_ext_hash", f"{marca}_ext_enc"))
     _q("insert into dashboard_sessions (code, user_id, expires_at, code_challenge)"
        " values (%s, %s, now() + interval '2 hours', %s)", (f"{marca}_codigo_magico", uid, f"{marca}_challenge"))
-    raw = {"webhookUrl": f"https://x/open-finance/pluggy/webhook?token={marca}_SEGREDO_WEBHOOK",
-           "clientUserId": f"{marca}_client"}
-    con = _q("insert into open_finance_connections (user_id, provider, provider_item_id, status, institution_id,"
-             " institution_name, raw) values (%s, 'pluggy', %s, 'UPDATED', '1', 'Banco', %s::jsonb) returning id",
-             (uid, f"{marca}_item", json.dumps(raw)), fetch=True)[0]["id"]
-    _q("insert into open_finance_accounts (connection_id, provider_account_id, name, type)"
-       " values (%s, %s, %s, 'BANK')", (con, f"{marca}_conta_of", f"{marca}_nome_conta_of"))
-    _q("insert into launches (user_id, tipo, valor, nota) values (%s, 'despesa', 10, %s)", (uid, f"{marca}_nota"))
-    _q("insert into system_event_logs (level, event_type, message, user_id) values ('info', 'x', %s, %s)",
-       (f"{marca}_evento", uid))
+    for forma, raw in _RAW_COM_TOKEN.items():
+        _q("insert into open_finance_connections (user_id, provider, provider_item_id, status, institution_id,"
+           " institution_name, raw) values (%s, 'pluggy', %s, 'UPDATED', '1', %s, %s::jsonb)",
+           (uid, f"{marca}_{forma}_{uid}", forma, json.dumps(raw)))
+    # O caminho real que regrava o `raw` com outro formato: o corpo do webhook `item/deleted`.
+    _q("insert into open_finance_connections (user_id, provider, provider_item_id, status, institution_id,"
+       " institution_name) values (%s, 'pluggy', %s, 'UPDATED', '1', 'aninhado')", (uid, f"{marca}_del_{uid}"))
+    update_pluggy_open_finance_item_status(f"{marca}_del_{uid}", "DELETED", {
+        "event": "item/deleted", "itemId": f"{marca}_del_{uid}", "item": {"webhookUrl": _URL}})
     return uid
-
-
-def _zip(uid: int) -> tuple[dict, str, list[str]]:
-    z = zipfile.ZipFile(io.BytesIO(build_user_export_zip(uid)))
-    texto = "".join(z.read(n).decode("utf-8") for n in z.namelist())
-    return json.loads(z.read("dados.json"))["dados"], texto, z.namelist()
-
-
-def test_t3_zip_de_a_nao_tem_nada_de_b():
-    a = _pessoa("MARCA_A")
-    _pessoa("MARCA_B")
-    dados, texto, _ = _zip(a)
-    for semeado in ("email", "nome", "ext", "nome_conta_of", "nota", "evento", "client"):
-        assert f"MARCA_A_{semeado}" in texto  # positivo: o de A está lá
-    assert "MARCA_B" not in texto
-    assert dados["contas_open_finance"][0]["name"] == "MARCA_A_nome_conta_of"  # o join chega ao dono
 
 
 def test_t4_segredo_semeado_nao_sai():
@@ -173,7 +201,9 @@ def test_t4_segredo_semeado_nao_sai():
     assert dados["sessoes_dashboard"][0]["expires_at"]
     assert dados["identidades"] == [{"provider": "whatsapp", "external_id": "SEG_ext",
                                      "created_at": dados["identidades"][0]["created_at"]}]
-    assert dados["conexoes_open_finance"][0]["raw"] == {"clientUserId": "SEG_client"}
+    raws = {c["institution_name"]: c["raw"] for c in dados["conexoes_open_finance"]}
+    assert raws["topo"] == {"webhookUrl": "(removido: continha token)", "clientUserId": "SEG_client"}
+    assert raws["aninhado"]["item"] == {"webhookUrl": "(removido: continha token)"}
     assert dados["conta_login"][0]["display_name"] == "SEG_nome"
 
 
@@ -202,12 +232,6 @@ MUDARAM = {
     "identidades": (set(), {"user_id", "external_id_hash", "external_id_enc"}),
     "sessoes_dashboard": (set(), {"code"}),
 }
-
-
-def _colunas(sql: str) -> list[str]:
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(sql, {"uid": -1})
-        return [d.name for d in cur.description]
 
 
 def test_t5_membros_e_colunas_preservados():
