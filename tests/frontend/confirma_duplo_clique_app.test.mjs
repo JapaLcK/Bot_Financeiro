@@ -196,6 +196,8 @@ test("passada a janela, arrastar seleciona o texto do saque", async () => {
   try {
     await page.locator("#affiliate-payout-btn").click();
     await page.waitForTimeout(JANELA);
+    // a caixa medida parada: a entrada do modal anima, e com a máquina carregada ainda pode estar no meio
+    await page.waitForFunction(() => document.getElementById("generic-confirm-overlay").getAnimations({ subtree: true }).length === 0);
     const b = await page.locator("#generic-confirm-body").boundingBox();
     await page.mouse.move(b.x + 2, b.y + 5);
     await page.mouse.down();

@@ -58,12 +58,16 @@ async function naSettings() {
 const pigAberto = (page) => page.locator(".pig-modal-overlay").count();
 
 // Os casos dentro da janela valem pelo intervalo que a página viu (_janela.mjs): fora dela, são pulados. Defeito à parte, de produção:
-// o overlay do modals.js só aparece no `requestAnimationFrame` seguinte e o foco vai ao primário aos 50 ms, sem esperar por ele. Com a
-// máquina carregada o quadro atrasa, o foco se perde e um 2º clique antes do quadro cai no botão de baixo (com 0 ms, abre um 2º modal).
-// Esses casos são pulados com o motivo, e o clique de 0 ms fica de fora.
-/** Anota quanto o 1º overlay do modals.js levou para ganhar `.open`, a contar de quando entrou na página. */
+// o overlay do modals.js só aparece (`.open`) no `requestAnimationFrame` seguinte, e o foco vai ao primário aos 50 ms sem esperar por
+// ele. Com a máquina carregada o quadro atrasa: o 2º clique antes dele atravessa o overlay invisível (no primário cai no botão de baixo e,
+// com 0 ms, abre um 2º modal; no fundo cai na página e não mede nada), e o foco se perde. Esses casos são pulados com o motivo escrito,
+// nunca dados por bons, e o clique de 0 ms fica de fora.
+/** Anota quanto o 1º overlay do modals.js levou para ganhar `.open`, a contar de quando entrou na página, e se ele estava à vista em
+ *  cada mousedown. */
 const medirOverlay = (page) => page.evaluate(() => {
   window.__atraso = null;
+  window.__visivel = [];
+  addEventListener("mousedown", () => window.__visivel.push(!!document.querySelector(".pig-modal-overlay.open")), true);
   const vigia = new MutationObserver((ms) => {
     const n = ms.flatMap((m) => [...m.addedNodes]).find((e) => e.classList?.contains("pig-modal-overlay"));
     if (!n) return;
@@ -73,10 +77,12 @@ const medirOverlay = (page) => page.evaluate(() => {
   });
   vigia.observe(document.body, { childList: true });
 });
-/** O motivo para pular, se o overlay apareceu perto ou depois do foco dos 50 ms (40: o `t0` sai depois do `setTimeout` do foco). */
-const overlayAtrasado = async (page) => {
-  const a = await page.evaluate(() => window.__atraso);
-  if (a !== null && a < 40) return undefined;
+/** O motivo para pular: o 2º clique chegou com o overlay ainda invisível, ou (`foco`) o overlay apareceu perto ou depois do foco dos
+ *  50 ms (40: o `t0` sai depois do `setTimeout` do foco). */
+const overlayAtrasado = async (page, { foco = true } = {}) => {
+  const [a, visivel] = await page.evaluate(() => [window.__atraso, window.__visivel]);
+  if (visivel.length >= 2 && !visivel[1]) return "o 2º clique chegou com o overlay ainda invisível (requestAnimationFrame do modals.js): defeito à parte";
+  if (!foco || (a !== null && a < 40)) return undefined;
   return `o overlay levou ${a === null ? "mais que a espera" : `${Math.round(a)} ms`} para aparecer, e o foco é dado aos 50 ms (modals.js): defeito à parte`;
 };
 for (const ms of [60, 120]) {
@@ -100,11 +106,13 @@ for (const ms of [60, 120]) {
   test(`settings 390x844: 'Encerrar todas as outras' e o 2º clique no fundo (${ms} ms) não fecha`, async (t) => {
     const { ctx, page, deletes, x, y } = await naSettings();
     try {
+      await medirOverlay(page);
       if (!await dentroDaJanela(t, page, "click", "clique", async () => {
         await page.mouse.click(x, y);
         await page.waitForTimeout(ms);
         await page.mouse.click(5, 5);
         await page.waitForTimeout(300);
+        return overlayAtrasado(page, { foco: false });
       })) return;
       assert.equal(await pigAberto(page), 1, "o 2º clique no fundo");
       assert.deepEqual(deletes, []);
@@ -199,6 +207,8 @@ test("settings 390x844: passada a janela, arrastar seleciona o texto da confirma
   try {
     await page.locator("#sessions-revoke-others-btn").click();
     await page.waitForTimeout(JANELA);
+    // a caixa medida parada: a entrada do modal anima, e com a máquina carregada ainda pode estar no meio
+    await page.waitForFunction(() => document.querySelector(".pig-modal-overlay.open")?.getAnimations({ subtree: true }).length === 0);
     const b = await page.locator(".pig-modal-body").boundingBox();
     await page.mouse.move(b.x + 2, b.y + 5);
     await page.mouse.down();

@@ -155,6 +155,9 @@ export const naArea = async (page) => {
   await page.waitForFunction(() => document.getElementById("sidenav-affiliate")?.style.display !== "none", null, { timeout: 10000 });
   await page.evaluate(() => window.navigateTo("affiliate"));
   await page.locator("#affiliate-link-input").waitFor();
+  // A área pinta o cache e refaz com o /api/affiliate/me novo, e a refeita apaga o que já se digitou: espera o pedido em curso
+  // (o `run` sem `force` devolve o que está no canal) e, com ele, a re-renderização, que roda antes desta continuação.
+  await page.evaluate(() => _affiliateChannel.run(async () => undefined));
 };
 /** Responde o POST do saque (anotando o corpo em `posts`), entra na área, digita a chave e abre a confirmação. */
 export async function pedirApp(page, ctx, posts) {
