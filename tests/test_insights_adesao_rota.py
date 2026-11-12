@@ -14,6 +14,7 @@ import io
 import json
 import zipfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -55,9 +56,11 @@ def test_D2_cortado_com_adesao_ve_a_flag_e_desliga_com_resposta_minima():
     uid = _cortado_com_adesao()
     r = cliente(uid).get(f"/settings/{uid}/notifications")
     assert r.status_code == 402 and r.json()["detail"] == {"error": "subscription_required",
-                                                           "insight_alert_email_enabled": True}
+                                                           "insight_alert_email_enabled": True,
+                                                           "insight_alert_email_lapsed_notice": notif.AVISO_SEM_PLANO}
     r = patch(uid, **DESLIGA)
-    assert r.status_code == 200 and r.json() == {"ok": True, "insight_alert_email_enabled": False}
+    # A curta é a do app (`app_aviso_desligado_curta.json`, lida pelo jest): mudar uma sem a outra deixa um dos dois vermelho.
+    assert r.status_code == 200 and r.json() == json.loads((Path(__file__).parent / "fixtures" / "app_aviso_desligado_curta.json").read_text(encoding="utf-8"))
     assert not insight_aviso_aderiu(uid) and eventos(uid)[-1]["event"] == AuditEvent.INSIGHT_AVISO_RETIRADA
     assert eventos(uid)[-1]["ip"] and eventos(uid)[-1]["user_agent"]
     r = cliente(uid).get(f"/settings/{uid}/notifications")

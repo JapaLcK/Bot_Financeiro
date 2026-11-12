@@ -7,12 +7,13 @@ import { ErroDeApi, SessaoExpirada, conferirLinhagem } from "@/api/client";
 import type { Notificacoes } from "@/api/schemas/conta";
 import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
 import { semSenha, telefoneBR } from "@/features/conta/contato";
-import { algumResumo, corpoDaHora, hhmm, semanalNaTela, semanalTravado, textoDaEscrita } from "@/features/conta/notificacoes";
+import { BlocoSemPlano, Desligou, NotaDaLinha, type EventoDesligou } from "@/features/conta/AvisoInsight";
+import { DESLIGADOS, DESLIGADOS_D5, FALHA_CARREGAR, TITULO_AVISO, algumResumo, avisoSemPlano, corpoDaHora, hhmm, linhaDoAviso, semanalNaTela, semanalTravado, textoDaEscrita } from "@/features/conta/notificacoes";
 import { usePermissaoPush } from "@/features/push/usePermissaoPush";
 import { useFalha } from "@/features/seguranca/falha";
 import { useVoltaDoFundo } from "@/features/seguranca/voltaDoFundo";
 import { perfil } from "@/services/auth";
-import { lerNotificacoes, salvarNotificacoes, type CorpoNotificacoes } from "@/services/conta";
+import { desligarAviso, lerNotificacoes, salvarNotificacoes, type CorpoNotificacoes } from "@/services/conta";
 import { lerCredenciais } from "@/storage/secure";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
@@ -26,12 +27,12 @@ import { espaco } from "@/ui/tokens";
 type Estado =
   | { fase: "carregando" }
   | { fase: "erro" }
-  | { fase: "plano" }
+  | { fase: "plano"; aviso: { uid: number; texto: string } | null } // `aviso`: cortada com adesão viva (D2), só desligar
   | { fase: "exclusao" }
   | { fase: "senha"; email: string | null }
   | { fase: "pronto"; uid: number; dados: Notificacoes; emailDaConta: string | null };
 
-type CampoBool = "tip_email_enabled" | "insight_email_enabled" | "whatsapp_updates_enabled" | "daily_report_enabled" | "weekly_report_enabled" | "monthly_report_enabled" | "push_bank_reconnect_enabled";
+type CampoBool = "tip_email_enabled" | "insight_email_enabled" | "whatsapp_updates_enabled" | "daily_report_enabled" | "weekly_report_enabled" | "monthly_report_enabled" | "push_bank_reconnect_enabled" | "insight_alert_email_enabled";
 
 const dataDaHora = (h: number, m: number) => {
   const d = new Date();
@@ -64,6 +65,7 @@ export default function NotificacoesTela() {
   const [previa, setPrevia] = useState<Partial<Notificacoes>>({}); // o valor tocado, só na tela, até a resposta
   const [aviso, setAviso] = useState<string | null>(null);
   const [gravando, setGravando] = useState(false);
+  const [desligou, setDesligou] = useState<EventoDesligou | null>(null); // "Avisos ... desligados.": um evento; visível até a próxima escrita ou a troca de conta
   const geracao = useRef(0); // só a ÚLTIMA carga escreve estado; toda escrita invalida a leitura que estava em voo
   const voando = useRef(false); // trava síncrona: dois toques no mesmo tick não passam
   const releitura = useRef(false); // leitura pedida durante a escrita (foco, volta do fundo, falha): roda quando ela termina
@@ -71,12 +73,21 @@ export default function NotificacoesTela() {
   const agora = useRef(estado); // o estado ATUAL: callbacks que o nativo guarda (seletor do Android) nascem num render e confirmam em outro
   agora.current = estado;
 
+  /** Leitura que muda a fase leva o banner de erro da escrita (ele é da fase em que ela falhou); "desligados" fica, calado. */
+  const entrar = (novo: Estado) => {
+    if (novo.fase !== agora.current.fase) setAviso(null);
+    setEstado(novo);
+  };
+
   /** Fases que valem para leitura e escrita. `true` = a tela já mudou de fase. */
-  const fase = (e: unknown, email: string | null) => {
+  const fase = (e: unknown, email: string | null, uid: number | null) => {
     if (!(e instanceof ErroDeApi)) return false;
-    if (e.status === 402) setEstado({ fase: "plano" });
-    else if (e.status === 403 && /exclus/i.test(e.detalhe)) setEstado({ fase: "exclusao" });
-    else if (semSenha(e)) setEstado({ fase: "senha", email });
+    if (e.status === 402) {
+      const texto = avisoSemPlano(e);
+      entrar({ fase: "plano", aviso: texto && uid !== null ? { uid, texto } : null });
+    }
+    else if (e.status === 403 && /exclus/i.test(e.detalhe)) entrar({ fase: "exclusao" });
+    else if (semSenha(e)) entrar({ fase: "senha", email });
     else return false;
     return true;
   };
@@ -84,26 +95,29 @@ export default function NotificacoesTela() {
   const carregar = async () => {
     if (voando.current) return void (releitura.current = true);
     const minha = ++geracao.current;
-    let emailDaConta: string | null = null;
+    let emailDaConta: string | null = null, uid: number | null = null;
     try {
       const esperada = await lerCredenciais();
       const conta = await perfil();
       emailDaConta = conta.email?.trim() || null;
+      uid = conta.user_id;
       // A conta trocada ENTRE as duas leituras faz a 2ª sair com o token novo e o uid antigo: o 403 de uid alheio vira RequisicaoSuperada.
       const dados = await lerNotificacoes(conta.user_id).catch(async (e: unknown) => {
         if (!(e instanceof SessaoExpirada)) await conferirLinhagem(esperada);
         throw e;
       });
       if (minha !== geracao.current) return;
-      setEstado({ fase: "pronto", uid: conta.user_id, dados, emailDaConta });
+      entrar({ fase: "pronto", uid: conta.user_id, dados, emailDaConta });
     } catch (e) {
       if (e instanceof SessaoExpirada) return void falha(e); // sessão expirada vale de qualquer geração
-      if (minha !== geracao.current || fase(e, emailDaConta)) return;
+      if (minha !== geracao.current || fase(e, emailDaConta, uid)) return;
       if (falha(e) === null) { // RequisicaoSuperada: a conta trocou no meio; some o dado da anterior e relê (como na escrita)
-        setEstado({ fase: "carregando" });
+        setDesligou(null);
+        entrar({ fase: "carregando" });
         return void carregar();
       }
       // Recarga com dados na tela mantém a tela: trocar por erro desmontaria o que está sendo usado.
+      if (agora.current.fase !== "pronto") setAviso(null);
       setEstado((atual) => (atual.fase === "pronto" ? atual : { fase: "erro" }));
     }
   };
@@ -113,18 +127,40 @@ export default function NotificacoesTela() {
   useVoltaDoFundo(() => { void carregar(); push.ler(); });
 
   const escrever = async (corpo: CorpoNotificacoes, adiantar: Partial<Notificacoes>) => {
-    if (voando.current || agora.current.fase !== "pronto") return;
-    const { uid, emailDaConta } = agora.current;
+    const a = agora.current; // a última RESPOSTA do servidor, nunca a prévia
+    const uid = a.fase === "pronto" ? a.uid : a.fase === "plano" ? a.aviso?.uid : undefined;
+    if (voando.current || uid === undefined) return;
+    const emailDaConta = a.fase === "pronto" ? a.emailDaConta : null;
     voando.current = true;
     geracao.current++;
     setGravando(true);
     setAviso(null);
+    setDesligou(null);
     setPrevia(adiantar);
     try {
-      setEstado({ fase: "pronto", uid, dados: await salvarNotificacoes(uid, corpo), emailDaConta });
+      if (corpo.insight_alert_email_enabled === false) {
+        // D2: desligar a adesão vai SEMPRE com o corpo exato; a resposta pode ser a curta (cortada entre a leitura e o toque). Relê.
+        const r = await desligarAviso(uid);
+        releitura.current = true;
+        if (a.fase === "pronto" && !("ok" in r)) setEstado({ fase: "pronto", uid, dados: r, emailDaConta }); // completa: notas e carência novas também
+        else { // botão da fase `plano`, ou resposta curta (conta cortada ou sem senha): a tela de antes não vale; como o 402 da escrita, sai dela
+          setEstado(a.fase === "plano" ? { fase: "plano", aviso: null } : { fase: "carregando" });
+          setDesligou({ texto: DESLIGADOS, focar: true }); // o controle que levou até aqui sumiu
+        }
+      } else {
+        const dados = await salvarNotificacoes(uid, corpo);
+        setEstado({ fase: "pronto", uid, dados, emailDaConta });
+        // D5: outra chave (o `false` da própria linha foi pelo ramo de cima) levou a adesão junto: desligar "Insights financeiros".
+        if (a.fase === "pronto" && a.dados.insight_alert_email_enabled && !dados.insight_alert_email_enabled) setDesligou({ texto: DESLIGADOS_D5, focar: false });
+      }
     } catch (e) {
       if (e instanceof SessaoExpirada) return void falha(e);
-      if (fase(e, emailDaConta)) return;
+      if (e instanceof ErroDeApi && e.status === 402) { // o 402 da escrita não traz a adesão; só o GET diz se há o que desligar
+        setEstado({ fase: "carregando" });
+        releitura.current = true;
+        return;
+      }
+      if (fase(e, emailDaConta, uid)) return;
       if (falha(e) === null) { // RequisicaoSuperada: a conta trocou no meio; some o dado da anterior e relê (o /auth/me reaprende o uid)
         setEstado({ fase: "carregando" });
         releitura.current = true;
@@ -155,15 +191,17 @@ export default function NotificacoesTela() {
   const v = estado.fase === "pronto" ? { ...estado.dados, ...previa } : null;
 
   /** Um Switch = um PATCH com SÓ o campo tocado, montado aqui com o valor do toque (nunca a partir do estado da tela). */
-  const chave = (campo: CampoBool, rotulo: string, valor: boolean, opcoes: { travado?: boolean; selo?: string; adiantar?: (novo: boolean) => Partial<Notificacoes>; aoTrocar?: (novo: boolean) => void } = {}) => (
+  const chave = (campo: CampoBool, rotulo: string, valor: boolean, opcoes: { travado?: boolean; selo?: string; dica?: string; adiantar?: (novo: boolean) => Partial<Notificacoes>; aoTrocar?: (novo: boolean) => void } = {}) => (
     <ListRow
       titulo={rotulo}
       desativado={opcoes.travado}
       trailing={
         <View style={{ flexDirection: "row", alignItems: "center", gap: espaco.sm, flexShrink: 1 }}>
-          {opcoes.selo ? <Texto variante="legenda" tom="inkMuted" style={{ flexShrink: 1 }}>{opcoes.selo}</Texto> : null}
+          {/* Selo que já vai no hint (Avisos): visível, mas fora da árvore de acessibilidade, para o leitor não ler duas vezes. */}
+          {opcoes.selo ? <Texto variante="legenda" tom="inkMuted" style={{ flexShrink: 1 }} {...(opcoes.dica?.includes(opcoes.selo) && { accessibilityElementsHidden: true, importantForAccessibility: "no-hide-descendants" as const })}>{opcoes.selo}</Texto> : null}
           <Switch
             accessibilityLabel={rotulo}
+            accessibilityHint={opcoes.dica || undefined}
             value={valor}
             disabled={opcoes.travado || gravando}
             onValueChange={(novo) => {
@@ -183,11 +221,12 @@ export default function NotificacoesTela() {
       <View style={{ gap: espaco.lg, paddingVertical: espaco.xl }}>
         {estado.fase === "carregando" && <ActivityIndicator color={cores.brand} accessibilityLabel="Carregando" />}
         {estado.fase === "plano" && <Texto>Escolha um plano para ver suas notificações.</Texto>}
+        {estado.fase === "plano" && estado.aviso && <BlocoSemPlano texto={estado.aviso.texto} ocupado={gravando} aoDesligar={() => void escrever({ insight_alert_email_enabled: false }, {})} />}
         {estado.fase === "exclusao" && <Texto>Esta conta está agendada para exclusão.</Texto>}
         {estado.fase === "senha" && (estado.email ? <EsqueciSenha emailFixo={estado.email} /> : <Texto>Sua conta ainda não tem senha. Defina uma senha pelo site para ver suas notificações.</Texto>)}
         {estado.fase === "erro" && (
           <>
-            <Texto tom="danger">Não conseguimos carregar suas notificações.</Texto>
+            <Texto tom="danger">{FALHA_CARREGAR}</Texto>
             <Button
               rotulo="Tentar de novo"
               onPress={() => {
@@ -197,13 +236,23 @@ export default function NotificacoesTela() {
             />
           </>
         )}
+        {desligou && <Desligou evento={desligou} />}
+        {aviso && <Banner tom="danger" mensagem={aviso} />}
         {v && (
           <>
-            {aviso && <Banner tom="danger" mensagem={aviso} />}
             <Destino icone="Envelope" rotulo="E-mail" valor={v.email?.trim() || "—"} />
             <GrupoDeLinhas>
               {chave("tip_email_enabled", "Dicas de uso", v.tip_email_enabled, { travado: !v.email_notifications_available })}
-              {chave("insight_email_enabled", "Insights financeiros", v.insight_email_enabled, { travado: !v.email_notifications_available })}
+              <>
+                {chave("insight_email_enabled", "Insights financeiros", v.insight_email_enabled, { travado: !v.email_notifications_available, dica: v.insight_email_off_notice ?? undefined })}
+                <NotaDaLinha textos={[v.insight_email_off_notice]} />
+              </>
+              {v.insight_alert_email_notice && (
+                <>
+                  {chave("insight_alert_email_enabled", TITULO_AVISO, v.insight_alert_email_enabled, linhaDoAviso(v))}
+                  <NotaDaLinha textos={[v.insight_alert_email_notice, v.insight_alert_email_paused_notice]} />
+                </>
+              )}
             </GrupoDeLinhas>
             <Destino icone="WhatsappLogo" rotulo="WhatsApp" valor={telefoneBR(v.whatsapp_destination) || "—"}>
               {!v.whatsapp_updates_available && <Button rotulo="Conectar" variante="ghost" onPress={() => router.push("/perfil")} />}

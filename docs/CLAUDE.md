@@ -2573,11 +2573,16 @@ carência: `AVISO_PAUSADO`, que as duas telas mostram sem cópia). `PATCH` com `
 `INSIGHT_EMAIL_USERS` 403, sem plano 403 `pro_required` com `feature: insights`, sem e-mail 400, com opt-out 409; o campo é `StrictBool` (`"false"` e `0` dão 422). Telefone e hora
 são validados antes de qualquer escrita. **Desligar sem plano (D2):** só o corpo exato `{"insight_alert_email_enabled": false}` passa por `authorize_account_access` (cortado e sem
 credencial: 200 `{"ok": true, "insight_alert_email_enabled": false}`); conta em exclusão e quem nunca escolheu plano seguem barrados; qualquer outro corpo segue a regra normal.
-Sem plano, o 402 `subscription_required` do `GET` traz `insight_alert_email_enabled: true` só para quem tem adesão (o `plan_selection_required` fica como sempre), e só o
-`/settings` mostra "Desligar agora", sem interruptor, com o texto da margem (cópia de `AVISO_SEM_PLANO` no HTML, comparada por teste). O `/painel` não tem esse caminho: conta cortada é mandada para `/precos` pelo gate
-da página. O link "Cancelar inscrição" do e-mail continua desligando tudo.
+Sem plano, o 402 `subscription_required` do `GET` traz `insight_alert_email_enabled: true` e o texto da margem em `insight_alert_email_lapsed_notice` (`AVISO_SEM_PLANO`)
+só para quem tem adesão (o `plan_selection_required` fica como sempre). O `/settings` e o app Expo mostram "Desligar agora", sem interruptor, com o texto da margem (o
+`/settings` numa cópia de `AVISO_SEM_PLANO` no HTML, comparada por teste; o app lê o campo do 402). O `/painel` não tem esse caminho: conta cortada é mandada para `/precos` pelo gate
+da página. O link "Cancelar inscrição" do e-mail continua desligando tudo. **App Expo (PR 3):** `notificacoes.tsx` + `features/conta/AvisoInsight.tsx` mostram a
+linha (escondida com `notice` nulo), a nota de D5 antes e "Avisos do Piggy por e-mail desligados." depois, e o "Desligar agora" na fase `plano`; desligar a adesão vai
+sempre por `desligarAviso` (corpo exato; a resposta curta tira da tela os dados da conta com plano, como o 402 de uma escrita) e relê. A curta aceita chave a mais
+e só recusa `email`; uma completa sem `email` é lida como curta (perda declarada). `tests/fixtures/app_aviso_desligado_curta.json` vigia a curta (o pytest a compara
+com o servidor, o jest confere que o app a aceita). Os rótulos curtos são cópias do web vigiadas por `notificacoes_aviso_paridade.test.ts`.
 `INSIGHT_EMAIL_USERS` (`liberado`, lida a cada chamada): vazia ou ausente = ninguém, ids por vírgula comparados como texto; `*` não libera ninguém enquanto
-`AVISO_ABERTO_A_TODOS` for falsa (trava do app nativo, que ainda retira a adesão em silêncio; virar a constante exige o PR 3, e um teste cobra).
+`AVISO_ABERTO_A_TODOS` for falsa (trava do app nativo: os builds sem o PR 3 retiram a adesão em silêncio; virar a constante espera o build com o PR 3 distribuído, §22.5 do plano B6, e um teste cobra).
 Cancelar retira a adesão e nada a devolve sem o interruptor (P7 (b)): `set_engagement_opt_out(uid, True)` (chat "parar emails", `PATCH engagement_email_enabled`,
 `/unsubscribe`) e `set_insight_email_opt_out(uid, True)` apagam a coluna na mesma transação; "reativar emails" e religar os interruptores não a tocam. Chat e página do
 `/unsubscribe` dizem que os avisos só voltam ligando de novo, para quem pode religar (`orientacao_aviso`). **Perder o direito (D1, §12 a §15 do plano B6):** o gatilho `trg_insight_aviso_direito`
