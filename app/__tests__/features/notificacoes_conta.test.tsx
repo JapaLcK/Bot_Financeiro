@@ -130,14 +130,17 @@ describe("Notificações — conta e estado atual", () => {
 });
 
 describe("Notificações — lacunas da suíte", () => {
-  it("TODO booleano do contrato ausente é erro, nunca 'ligado'", async () => {
-    const campos = Object.keys(BASE).filter((k) => typeof BASE[k as keyof typeof BASE] === "boolean");
+  it("TODO booleano do contrato ausente é erro, nunca 'ligado' (e os 3 textos dos Avisos, presentes mesmo nulos)", async () => {
+    const campos = Object.keys(BASE).filter((k) => typeof BASE[k as keyof typeof BASE] === "boolean" || BASE[k as keyof typeof BASE] === null);
+    expect(campos).toEqual(expect.arrayContaining(["insight_alert_email_enabled", "insight_alert_email_available", "insight_alert_email_notice", "insight_email_off_notice", "insight_alert_email_paused_notice"]));
     for (const campo of campos) {
       const { [campo]: _fora, ...sem } = BASE as unknown as Record<string, unknown>;
       await abrirNotificacoes(servidor({}, { get: () => resposta(200, sem) }));
-      await waitFor(() => expect(screen.getByRole("button", { name: "Tentar de novo" })).toBeTruthy(), { timeout: 2000 }).catch(() => {
-        throw new Error(`campo ausente virou tela pronta: ${campo}`);
+      // Espera um estado FINAL (erro ou tela pronta) e só então julga: lentidão estoura aqui com o próprio nome, não como contrato.
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Tentar de novo" }) ?? screen.queryByLabelText("Resumo mensal")).toBeTruthy(), { timeout: 2000 }).catch(() => {
+        throw new Error(`nem erro nem tela pronta em 2 s (lentidão, não contrato): ${campo}`);
       });
+      if (screen.queryByLabelText("Resumo mensal")) throw new Error(`campo ausente virou tela pronta: ${campo}`);
       screen.unmount();
       preparar();
     }

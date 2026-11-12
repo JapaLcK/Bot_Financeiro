@@ -37,7 +37,27 @@ export const notificacoesSchema = z.object({
   weekly_report_stored_enabled: bool,
   weekly_report_available: bool,
   monthly_report_enabled: bool,
+  // Avisos do Piggy por e-mail (PL-06 B6). Os textos vêm do servidor, presentes e nulos quando não se aplicam (`null` no
+  // `notice` = a linha não aparece); ausentes = `ContratoInvalido`, como os booleanos.
+  insight_alert_email_enabled: bool,
+  insight_alert_email_available: bool,
+  insight_alert_email_notice: z.string().nullable(),
+  insight_email_off_notice: z.string().nullable(),
+  insight_alert_email_paused_notice: z.string().nullable(),
 });
+
+/**
+ * PATCH `{insight_alert_email_enabled: false}` (D2): com plano, o estado inteiro; conta cortada ou sem senha, a forma curta
+ * `{ok, insight_alert_email_enabled: false}` (`settings.py`; o par é `tests/fixtures/app_aviso_desligado_curta.json`).
+ * A curta TOLERA chave a mais (um campo novo compatível não transforma um desligamento gravado em erro na tela) e só recusa
+ * `email`: é o dado que ela nunca traz (não entrega dado ao cortado, #380) e que a completa sempre traz. Por isso a completa
+ * quebrada COM `email` é `ContratoInvalido`; a completa sem `email` passa como curta, e o efeito é "Avisos desligados." e uma
+ * releitura (verdade: `ok` e o `false` foram validados; a releitura mostra o estado real). Na tela, a curta é a que tem `ok`.
+ */
+export const avisoDesligadoSchema = z.union([
+  notificacoesSchema.extend({ insight_alert_email_enabled: z.literal(false) }),
+  z.object({ ok: z.literal(true), insight_alert_email_enabled: z.literal(false), email: z.never().optional() }),
+]);
 
 /** `POST /auth/account/reauth-code`: o código nunca vem na resposta, só o e-mail mascarado. */
 export const codigoEnviadoSchema = z.object({ email_mascarado: z.string() });

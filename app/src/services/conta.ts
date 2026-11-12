@@ -1,5 +1,5 @@
 import { chamar, comLimite } from "@/api/client";
-import { codigoEnviadoSchema, contatoSchema, exclusaoSchema, exportEnviadoSchema, linkCodeSchema, notificacoesSchema, type Notificacoes } from "@/api/schemas/conta";
+import { avisoDesligadoSchema, codigoEnviadoSchema, contatoSchema, exclusaoSchema, exportEnviadoSchema, linkCodeSchema, notificacoesSchema, type Notificacoes } from "@/api/schemas/conta";
 
 /** Contato da conta (Perfil). Só leitura. */
 export const lerContato = (uid: number) => chamar(`/settings/${uid}/security`, contatoSchema, { sinal: comLimite() });
@@ -20,6 +20,7 @@ export type CorpoNotificacoes = Partial<
     | "daily_report_minute"
     | "weekly_report_enabled"
     | "monthly_report_enabled"
+    | "insight_alert_email_enabled"
   >
 >;
 
@@ -28,6 +29,13 @@ export const lerNotificacoes = (uid: number) => chamar(`/settings/${uid}/notific
 /** PATCH devolve o estado inteiro (a verdade do servidor). Nunca é reenviado sozinho. */
 export const salvarNotificacoes = (uid: number, corpo: CorpoNotificacoes) =>
   chamar(`/settings/${uid}/notifications`, notificacoesSchema, { metodo: "PATCH", corpo, sinal: comLimite() });
+
+/**
+ * Desliga os Avisos do Piggy por e-mail com o ÚNICO corpo que o servidor isenta do plano e da credencial (D2):
+ * outro campo junto o tira da exceção. A resposta pode ser a curta (conta cortada); quem chama relê.
+ */
+export const desligarAviso = (uid: number) =>
+  chamar(`/settings/${uid}/notifications`, avisoDesligadoSchema, { metodo: "PATCH", corpo: { insight_alert_email_enabled: false }, sinal: comLimite() });
 
 /** Manda o código de exclusão ao e-mail da conta (3/h por conta, 5/h por IP). Corpo vazio: o destino é sempre o da sessão. */
 export const pedirCodigoReauth = () => chamar("/auth/account/reauth-code", codigoEnviadoSchema, { metodo: "POST", corpo: {}, sinal: comLimite() });

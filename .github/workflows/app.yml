@@ -25,6 +25,7 @@ on:
       - "tests/fixtures/app_gastos.json"
       - "tests/fixtures/app_gastos_campos_lidos.json"
       - "tests/fixtures/app_bancos.json"
+      - "tests/fixtures/app_aviso_desligado_curta.json"
       - "tests/frontend/api_v2_respostas.json"
       - "tests/frontend/total_renda_fixa.json"
       - "webapp/src/dashboard/styles/metas.css"
@@ -59,6 +60,8 @@ on:
       - "db/patrimonio.py"
       - "webapp/src/dashboard/lib/milhao.ts"
       - "webapp/src/dashboard/widgets/Agentes.tsx"
+      - "webapp/src/dashboard/conta/Notificacoes.tsx"
+      - "frontend/settings.html"
       - ".github/dependabot.yml"
   pull_request:
     paths:
@@ -72,6 +75,7 @@ on:
       - "tests/fixtures/app_gastos.json"
       - "tests/fixtures/app_gastos_campos_lidos.json"
       - "tests/fixtures/app_bancos.json"
+      - "tests/fixtures/app_aviso_desligado_curta.json"
       - "tests/frontend/api_v2_respostas.json"
       - "tests/frontend/total_renda_fixa.json"
       - "webapp/src/dashboard/styles/metas.css"
@@ -106,6 +110,8 @@ on:
       - "db/patrimonio.py"
       - "webapp/src/dashboard/lib/milhao.ts"
       - "webapp/src/dashboard/widgets/Agentes.tsx"
+      - "webapp/src/dashboard/conta/Notificacoes.tsx"
+      - "frontend/settings.html"
       - ".github/dependabot.yml"
 
 # A MESMA regra do `tests.yml`, e pelo mesmo motivo medido lá: na main o
