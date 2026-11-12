@@ -208,10 +208,11 @@ def recusa(exc: Exception, user_id: int, valor: float) -> str | None:
             }.get(codigo, lambda: None)()
 
 
-def recusa_valor(texto: str, valor: float | None = None) -> str | None:
+def recusa_valor(texto: str, valor: float | None = None, cartao: bool = False) -> str | None:
     """A recusa do leitor estrito (`declaracao_valor`) como `NaoGravou`, ou None. `valor`: o que o chamador grava quando
-    não é o parser por pedaço. Só a declaração recusa: a Carteira, o cartão e a flag desligada seguem como sempre."""
-    recusa = declaracao_valor.recusa(texto, valor)
+    não é o parser por pedaço; `cartao`: ver `declaracao_valor.recusa`. Só a declaração recusa: a Carteira, o cartão e a
+    flag desligada seguem como sempre."""
+    recusa = declaracao_valor.recusa(texto, valor, cartao)
     return NaoGravou(recusa) if recusa else None
 
 

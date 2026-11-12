@@ -30,7 +30,7 @@ def test_t6_recusa_nao_aprende_e_a_despesa_seguinte_nao_vira_investimento(ana, l
 @pytest.mark.parametrize("texto,marca", [
     ("gastei 50,123 #lazer no ifood pelo banco", "2 casas"),       # T4
     ("gastei 0 #lazer no ifood pelo banco", "valor"),              # valor zero, antes de qualquer gravação
-    ("gastei 2,2k #lazer no ifood pelo banco", "não tenho certeza"),  # T10
+    ("gastei 2kk #lazer no ifood pelo banco", "não tenho certeza"),  # T10
 ])
 def test_recusas_de_valor_nao_aprendem(ana, liga, texto, marca):
     assert marca in manda_wamid(ana, texto)[0]

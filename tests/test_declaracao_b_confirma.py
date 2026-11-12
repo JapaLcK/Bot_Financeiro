@@ -629,7 +629,7 @@ def test_alteracao_reentregue_repete_a_nova_e_depois_do_sim_e_t3(ana, liga):
 
 
 @pytest.mark.parametrize("frase", ["sim, mas foi uns 60", "sim mas foi mais", "sim, 60 ou 70", "não, foi 60,123",
-                                   "sim mas foi 1,5k", "sim, mas foi 60 ontem", "sim mas foi 60 na padaria",
+                                   "sim mas foi 1,5kk", "sim, mas foi 60 ontem", "sim mas foi 60 na padaria",
                                    "sim, mas foi 60 em dinheiro", "sim, mas foi 60 no débito", "sim mas foi -60",
                                    "sim mas foi 6o", "sim, mas foi 0", "sim mas foi 600 no mercado e 20 na padaria",
                                    "foi 60 ontem", "na verdade 60 na padaria"])

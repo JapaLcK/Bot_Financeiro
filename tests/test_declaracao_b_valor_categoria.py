@@ -131,21 +131,18 @@ def test_reentrega_no_teto_diz_ja_registrei_e_chave_nova_continua_barrada(ana, l
     assert len(declaracoes(ana)) == 1
 
 
-# --- A2: valor abreviado ("2,2k", "50 centavos") em declaração: recusa sem gravar (T10) ---
+# --- A2: valor abreviado ("2kk", "50 centavos") em declaração: recusa sem gravar (T10). Dígito + "k" vai para a
+# confirmação desde a #1404 (`test_declaracao_b_valor_k.py`) ---
 @pytest.mark.parametrize("texto,trecho", [
-    ("gastei 2,2k no mercado no pix", "2,2k"), ("gastei 2k no mercado pelo banco", "2k"),
-    ("gastei 2K no mercado no pix", "2K"), ("gastei 1.5k na padaria via pix", "1.5k"),
-    ("gastei 50 centavos na padaria no pix", "50 centavos"), ("paguei R$2,2k de aluguel no pix", "2,2k"),
+    ("gastei 50 centavos na padaria no pix", "50 centavos"),
     ("gastei 30 reais e 50 centavos no mercado no pix", "50 centavos"),
     ("gastei trinta reais e cinquenta centavos no mercado no pix", "cinquenta centavos"),
     ("gastei cinquenta centavos na padaria no pix", "cinquenta centavos"),
     ("gastei trinta e cinco reais e cinquenta centavos no mercado no pix", "cinquenta centavos"),
     ("gastei 1,5 mi no mercado no pix", "1,5 mi"), ("gastei 2kk no mercado no pix", "2kk"),
-    ("gastei 25 cents no mercado no pix", "25 cents"), ("gastei 2,2  k no mercado no pix", "2,2  k"),
+    ("gastei 25 cents no mercado no pix", "25 cents"),
     ("gastei dois k no mercado no pix", "dois k"),
-    ("gastei 10k na corrida no pix", "10k"), ("gastei 99 centavos na padaria no pix", "99 centavos"),  # falso positivo seguro
-    ("gastei 18k no anel no pix", "18k"),
-    ("gastei 2k no mercado e 30 na padaria no pix", "2k"),  # duas despesas: a mensagem inteira volta, nada grava
+    ("gastei 99 centavos na padaria no pix", "99 centavos"),  # falso positivo seguro
 ])
 def test_valor_abreviado_recusa_sem_gravar(ana, liga, texto, trecho):
     r = manda_wamid(ana, texto)[0]
@@ -154,15 +151,15 @@ def test_valor_abreviado_recusa_sem_gravar(ana, liga, texto, trecho):
 
 
 def test_valor_abreviado_na_resposta_a_pergunta_de_forma(ana, liga):
-    manda_wamid(ana, "gastei 2,2k no mercado")
+    manda_wamid(ana, "gastei 2kk no mercado")
     r = manda_wamid(ana, "pix")[0]
-    assert "você mandou 2,2k" in r and declaracoes(ana) == [] and n_lancamentos(ana) == 0
+    assert "você mandou 2kk" in r and declaracoes(ana) == [] and n_lancamentos(ana) == 0
 
 
 def test_valor_abreviado_no_audio(ana, liga, monkeypatch):
     from tests._declaracao_b import fala
-    r = fala(monkeypatch, ana, "gastei 2k no mercado no pix")
-    assert any("você mandou 2k" in x for x in r) and declaracoes(ana) == [] and n_lancamentos(ana) == 0
+    r = fala(monkeypatch, ana, "gastei 2kk no mercado no pix")
+    assert any("você mandou 2kk" in x for x in r) and declaracoes(ana) == [] and n_lancamentos(ana) == 0
 
 
 @pytest.mark.parametrize("texto,valor", [
