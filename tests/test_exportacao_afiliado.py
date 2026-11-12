@@ -221,7 +221,7 @@ def test_9_linha_indecifravel_vira_marcador_sem_derrubar_o_zip(caplog, cifrado):
     with get_conn() as conn:
         conn.execute("update affiliates set pix_key_enc = %s where id = %s", (cifrado, z_af.aff["id"]))
         conn.commit()
-    with caplog.at_level(logging.WARNING, logger="db.privacy"):
+    with caplog.at_level(logging.WARNING, logger="db.privacy_export"):
         z = _zip(z_af.uid)
     assert z.dados["afiliado"][0]["chave_pix"] == "(indecifrável)"
     assert cifrado not in z.texto
