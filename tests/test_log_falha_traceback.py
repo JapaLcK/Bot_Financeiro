@@ -35,7 +35,6 @@ handler quebrado.
 from __future__ import annotations
 
 import ast
-import asyncio
 import json
 import logging
 import os
@@ -172,8 +171,8 @@ def _apelidos(arvore: ast.Module, alvos=frozenset({"_log_falha"})) -> set[str]:
 def _e_log_falha(no: ast.Call, apelidos: set[str]) -> bool:
     """`_log_falha(...)` direto OU `asyncio.to_thread(_log_falha, ...)`.
 
-    As 4 rotas destrutivas são async e fazem o offload pra thread; sem este
-    segundo caso a varredura mediria ZERO e a guarda ficaria tautológica.
+    Nenhuma porta usa mais o `to_thread` (PR-10b); o ramo fica porque a forma
+    é válida e já existiu.
     Nas duas formas vale o nome qualificado (`observability._log_falha`) e o
     apelido do import.
     """
@@ -199,7 +198,7 @@ def _chamadas_com_traceback(fonte: str | bytes, rel: str) -> list[tuple[str, str
       - `partial(_log_falha, com_traceback=True)`, dentro ou fora do
         `to_thread`.
     Nenhum call site faz nenhuma delas (os 5 arquivos passam `**extra` só de
-    campos nomeados e usam `asyncio.to_thread` direto); cobrir exigiria seguir
+    campos nomeados e chamam `_log_falha` direto); cobrir exigiria seguir
     o valor pelo fluxo. Formas que a guarda PEGA, também medidas: chamada
     direta, `to_thread(_log_falha, …)`, `to_thread(observability._log_falha,
     …)`, `to_thread(lambda: _log_falha(…))`, `observability._log_falha(…)`,
@@ -405,8 +404,9 @@ def _arvore_do_system_event_log() -> ast.Module:
 
 def test_todo_connect_do_system_event_log_tem_timeout_e_teto():
     """A CLASSE, não a instância: as duas funções de `core/system_event_log.py`
-    abrem `psycopg.connect()` de forma bloqueante, e o `_DashboardHandler` é
-    root logger — logo o caller pode ser o event loop. São DOIS tetos, e cada um
+    abrem `psycopg.connect()` de forma bloqueante, e quem as chama direto pode
+    estar no event loop (há chamadas em `async def`); o espelho do `logging` as
+    chama da thread do ouvinte de `core/log_fila.py`. São DOIS tetos, e cada um
     cobre o que o outro não cobre:
 
       - `connect_timeout` (libpq) limita o ESTABELECIMENTO da conexão. Sem ele,
@@ -468,8 +468,9 @@ def test_system_event_log_nao_referencia_logging():
 
     O desfecho de falha deste módulo é `print` no stderr; um `logging.*` aqui
     reentra no `_DashboardHandler` — ele está no ROOT logger em nível WARNING, e
-    chamaria de volta `log_system_event_sync`, a função que acabou de falhar.
-    Com a tabela travada cada volta custa um TCP connect mais o teto inteiro.
+    chamaria de volta `log_system_event_sync`, a função que acabou de falhar (na
+    suíte; em produção volta pela fila). Com a tabela travada cada volta custa
+    um TCP connect mais o teto inteiro.
 
     A guarda de `threading.local` fecha o ciclo em tempo de execução; este
     portão fecha a porta de entrada — um `logger.warning` bem-intencionado
@@ -595,71 +596,3 @@ def test_rotas_do_dashboard_nao_persistem_o_traceback(user_id, monkeypatch, capl
     # e o que SOBRA continua sendo diagnóstico útil:
     assert "causa=RuntimeError" in gravados[0]["message"], gravados[0]["message"]
     assert f"launch_id=424242" in gravados[0]["message"], gravados[0]["message"]
-
-
-class _MarcaLoop(logging.Handler):
-    """Registra, por linha de log, se ela foi emitida DENTRO do event loop."""
-
-    def __init__(self):
-        super().__init__()
-        self.dentro_do_loop: list[tuple[str, bool]] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            asyncio.get_running_loop()
-            dentro = True
-        except RuntimeError:
-            dentro = False
-        self.dentro_do_loop.append((record.getMessage(), dentro))
-
-
-def test_rota_async_nao_loga_no_event_loop(user_id, monkeypatch):
-    """O `_DashboardHandler` grava com `psycopg.connect()` + INSERT
-    BLOQUEANTES, e as 4 rotas destrutivas são `async`: chamar `_log_falha`
-    direto trava o event loop inteiro enquanto o banco não responde (medido com
-    banco inalcançável: >30s antes do `connect_timeout`). Por isso o
-    `asyncio.to_thread`.
-
-    `asyncio.get_running_loop()` só devolve loop na thread do loop — é a prova
-    barata de que o log saiu de lá."""
-    import db.cards as cards_mod
-    import frontend.finance_bot_websocket_custom as dashboard
-    from db.accounts import LaunchUnsafeRollback
-
-    def explode(uid, lid):
-        # id 400400 = ramo de DOMÍNIO da `/launches` (WARNING + HTTP 400). O
-        # nível não muda quem paga a conta: o `_DashboardHandler` espelha
-        # WARNING em `system_event_logs` com o mesmo `psycopg.connect()`.
-        if lid == 400400:
-            raise LaunchUnsafeRollback("efeitos desconhecidos", "chave_desconhecida")
-        raise RuntimeError(_SEGREDO)
-
-    monkeypatch.setattr(dashboard, "delete_launch_and_rollback", explode)
-    monkeypatch.setattr(dashboard, "undo_credit_transaction", explode)
-    monkeypatch.setattr(cards_mod, "get_card_by_id",
-                        lambda uid, cid: {"id": cid, "name": "Nubank"})
-    monkeypatch.setattr(cards_mod, "delete_card", explode)
-    monkeypatch.setattr(cards_mod, "undo_installment_group", explode)
-
-    marca = _MarcaLoop()
-    logger = logging.getLogger("core.observability")
-    logger.addHandler(marca)
-    try:
-        cabecalho = {dashboard.CSRF_HEADER_NAME: "test-csrf-token"}
-        cli = _client(user_id)
-        for url, esperado in ((f"/launches/{user_id}/424242", 500),
-                              (f"/launches/{user_id}/400400", 400),
-                              (f"/credit-transactions/{user_id}/9", 500),
-                              (f"/cards/{user_id}/9", 500),
-                              (f"/installments/{user_id}/PC12345678", 500)):
-            assert cli.delete(url, headers=cabecalho).status_code == esperado, url
-    finally:
-        logger.removeHandler(marca)
-
-    falhas = [m for m in marca.dentro_do_loop if ": falha " in m[0]]
-    assert len(falhas) == 5, marca.dentro_do_loop
-    no_loop = [m for m, dentro in falhas if dentro]
-    assert not no_loop, (
-        "rota async logou DENTRO do event loop: o INSERT bloqueante do "
-        f"_DashboardHandler trava todas as conexões do processo — {no_loop}"
-    )

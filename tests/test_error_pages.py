@@ -633,15 +633,10 @@ def test_degradado_loga_uma_vez_por_transicao(monkeypatch, tmp_path, caplog):
     """Este teste NÃO mede tempo: ele conta registros de log — 2 transições ao
     longo de 35 páginas de erro degradadas, em vez de 35.
 
-    O motivo de contar é o custo por registro: o warning propaga pro root, que no
-    processo web carrega o _DashboardHandler (core/observability.py:23) →
-    psycopg.connect() + INSERT BLOQUEANTE no event loop, um connect por registro.
-    A medição está em core/observability.py e em shared.py:186 (logging.warning()
-    em série, com e sem o handler, contra Postgres em localhost: 11,3 ms na 1ª
-    chamada, 2,1–3,7 ms/chamada em série, contra 0,02 ms sem o handler). O número
-    que já esteve aqui — "539 ms em 10 páginas contra 5,7 ms em repouso" — não se
-    sustenta e foi removido: a remedição deu 36,71 ms em n=10 e 52,41 ms em n=25.
-    Sem o gate, um bot varrendo URL vira um INSERT síncrono por 404."""
+    O motivo de contar é volume: o warning propaga pro root, cujo espelho grava
+    cada registro em `system_event_logs` (em produção pela fila de
+    core/log_fila.py, desde o PR-10a; na suíte, na thread de quem loga). Sem o
+    gate, um bot varrendo URL vira uma linha por 404 e enche a fila."""
     real = (shared.FRONTEND_DIR / "error.html").read_text(encoding="utf-8")
     (tmp_path / "error.html").write_text("{{MESSAGE}}</html>", encoding="utf-8")
     monkeypatch.setattr(shared, "FRONTEND_DIR", tmp_path)
