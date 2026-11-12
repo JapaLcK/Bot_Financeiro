@@ -2995,6 +2995,10 @@ cobrindo pela `MARCA` na assinatura; assinatura já morta quando a recusa rodou 
 e o script conta a fatura. Fatura com `payment.type = payment_record` (`forma_inesperada`): nessa passada, o cliente inteiro sai em `clientes_com_falha`. É idempotente, e não imprime
 fatura, cliente nem indicado.
 
+`scripts/remover_colunas_refund_alert.py` (#1507) apaga `affiliate_commissions.refund_alert` e `refund_alert_sent_at`,
+órfãs do #1418. **`--aplicar` é irreversível**; sem ele é simulação. Roda o dono, depois das consultas que o próprio
+script imprime e do backfill acima. O manual (ordem, guardas, códigos de saída, limites) é o docstring do script.
+
 Conta excluída mantém cadastro, pagamentos e comissão: `affiliate_referrals` e
 `affiliate_commissions` estão em `_USER_FK_SET_NULL_TABLES`, com `referred_user_id` nulo. É a comissão
 que liga o reembolso ao saque: sem ela, reembolso depois da exclusão não acharia o que bloquear. Ela
