@@ -131,8 +131,8 @@ def test_nenhuma_resposta_expoe_o_codigo_do_escritor(ana, liga):
 
 
 def test_t10_valor_abreviado(ana, liga):
-    assert manda_wamid(ana, "gastei 2,2k no mercado no pix") == [
-        "🐷 Não registrei: não tenho certeza do valor (você mandou 2,2k). "
+    assert manda_wamid(ana, "gastei 2kk no mercado no pix") == [
+        "🐷 Não registrei: não tenho certeza do valor (você mandou 2kk). "
         "Manda de novo só com números, por exemplo: *gastei 2200 no mercado pelo banco*."]
 
 

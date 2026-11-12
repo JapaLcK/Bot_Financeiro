@@ -19,13 +19,15 @@ from utils_text import PT_NUM_ALT_NO_ARTICLE, _PT_NUM_WORDS, agrupamento_de_milh
 
 _LIMITE = 1000  # P0: despesa não tem 1000 caracteres; acima disso recusa (T15) em vez de analisar só uma parte
 
-# Valor abreviado ("2,2k", "dois k", "2kk", "1,5 mi", "50 centavos", "cinquenta centavos", "25 cents"): T10, porque a
-# declaração pelo roteador grava sem confirmação. Desde o #1395 o parser lê "2,2k" como 2200, mas segue lendo "dois k" e
-# "2kk" como 2, "1,5 mi" como 1,5, "50 centavos" como 50 (e "trinta reais e cinquenta centavos" vira R$ 80). Revisão junto
-# da #1315, na #1404. Recusa também o que parece abreviação mas não é ("anel 18k",
-# "99 centavos"): recusar não custa nada, gravar errado custa apagar e relançar.
-_ABREVIADO_RE = re.compile(r"(?<![\w.,])\d[\d.,]*\s*(?:kk?|mi)\b|(?<!\w)(?:\w+\s+)?kk?(?!\w)"
-                           r"|(?:\S+\s+)?\bcent(?:avos?|s)?\b", re.IGNORECASE)
+# Valor abreviado que o parser lê errado ("dois k" e "2kk" como 2, "1,5 mi" como 1,5, "50 centavos" como 50, e "trinta
+# reais e cinquenta centavos" vira R$ 80): T10. Recusa também o que parece abreviação mas não é ("99 centavos").
+# Dígito + "k" ("1,5k", "2 k", "R$ 1,5k") NÃO recusa desde a #1404 (DP-10 da #1315): o parser lê 1.500 desde o #1395 e a
+# declaração só grava depois do "sim" sobre o valor mostrado (#1315). Vira UM número solto em `_numeros`, conferido no
+# P11, salvo o "k" seguido de dígito ("nba 2k25", "2 k9": código, `k_dig`). Falso positivo aceito pelo dono: "comprei um
+# anel 18k" pergunta por R$ 18.000,00 (o "não" não grava; ADR 0006). O grupo `ok` consome o "<dígitos> k" para o "k"
+# dele não cair no ramo do "k" solto ("dois k", "uber k"), e é ele que segue T10 com `cartao` (1-B: a fatura não confirma).
+_ABREVIADO_RE = re.compile(r"(?<![\w.,])\d[\d.,]*\s*(?:kk|mi)\b|(?P<ok>(?<![\w.,])\d[\d.,]*\s*k(?!\w))"
+                           r"|(?<!\w)(?:\w+\s+)?kk?(?!\w)|(?:\S+\s+)?\bcent(?:avos?|s)?\b", re.IGNORECASE)
 
 # P3 parcelado (D5: compra dividida; o extrato mostra a parcela, não o total). Pagar "a parcela"/"o carnê" é UM débito
 # (o exemplo do T14), e "2 vezes por semana"/"fui 2x" é frequência; "parcela 1/3" recusa porque o parser leria a data 01/03.
@@ -141,7 +143,7 @@ def _sem_datas(texto: str) -> str:
 # P6: tokens da contagem (texto normalizado). O separador inicial fica no número (",50" é malformado, não 50).
 _TOKEN_RE = re.compile(r"[.,]?\d(?:[\d.,]*\d)?|[a-z$%]+")
 _UNIDADES = frozenset("x h hs hr hrs hora horas min minuto minutos kg g gr km m ml l lt litro litros un und unidade unidades %".split())
-_MULT = frozenset({"mil", "milhao", "milhoes"})
+_MULT = frozenset({"mil", "milhao", "milhoes", "k"})  # "2 mil", "1,5 k" (#1404): um número só
 _CIFRAO = frozenset({"r", "rs", "r$", "$", "us$", "us"})
 # "10reais", "R10", "30tão", "37r$", "10$", "US$10", "10reias": é o valor. "30no", "10cada" (preposição colada) também é
 # número: um nome próprio não termina assim.
@@ -157,9 +159,9 @@ def _malformado(num: str) -> bool:
 
 
 def _numeros(texto: str) -> list[list]:
-    """Os números soltos da contagem, [classe, trecho, início, fim] no texto normalizado: num (dígitos; "2 mil" é um) ou
-    ext (grupo por extenso). Ficam de fora a medida ("24h", "5 kg", "30%") e o número colado a letras ("99pop", "ps5",
-    "3x4"), que é palavra (E3); colado a moeda ("10reais", "R10") é o valor."""
+    """Os números soltos da contagem, [classe, trecho, início, fim] no texto normalizado: num (dígitos; "2 mil" e "1,5k"
+    são um) ou ext (grupo por extenso). Ficam de fora a medida ("24h", "5 kg", "30%") e o número colado a letras ("99pop",
+    "ps5", "3x4"), que é palavra (E3); colado a moeda ("10reais", "R10") é o valor."""
     t = _norm(texto)
     brutos = list(_TOKEN_RE.finditer(t))
     out: list[list] = []
@@ -174,9 +176,14 @@ def _numeros(texto: str) -> list[list]:
             antes, depois = re.search(r"[a-z$%]+\Z", t[:ini]), re.match(r"[a-z$%]+", t[fim:])
             if prox in _UNIDADES and t[fim:fim + 1 + len(prox)].strip() == prox:
                 continue  # medida
+            k_dig = re.match(r"\s*k\d", t[fim:])  # "nba 2k25", "4k7", "2 k9": código, o "k" não é o valor (como na base)
+            if depois and depois.group() == "k" and not k_dig and not (antes and antes.group() not in _CIFRAO):
+                out.append(["num", f"{w}k", ini, fim + 1])  # "1,5k" (#1404): o "k" colado é o valor, não palavra
+                pula = True
+                continue
             if (antes and antes.group() not in _CIFRAO) or (depois and depois.group() not in _MOEDA_COLADA | _LIGA_COLADA):
                 continue  # colado a letras: palavra ("99pop", "ps5")
-            if prox in _MULT:
+            if prox in _MULT and not k_dig:
                 out.append(["num", f"{w} {prox}", ini, brutos[i + 1].end()])
                 pula = True
             else:
@@ -217,13 +224,18 @@ def _aproximado(conta: str, ini: int, fim: int) -> bool:
     return False
 
 
-def _pedaco(conta: str, lido: float) -> str | None:
-    """O pedaço com o valor que será gravado (`lido` > 0); `conta` é o texto normalizado sem data e hora."""
+def _pedaco(conta: str, lido: float, bruto: str) -> str | None:
+    """O pedaço com o valor que será gravado (`lido` > 0); `conta` é o texto normalizado sem data e hora, `bruto` a
+    mensagem normalizada como o usuário mandou, com a data e a forma dita, sem os pedaços de pergunta comparativa (o
+    guarda da 3-A olha esta: sem a data "1,5k,05/11" vira "1,5k,", sem a forma "2k,pix,5 de maio" vira "2k,,5 de
+    maio")."""
     nums = _numeros(conta)
     if re.search(r"(?<![a-z])cada\b", conta):  # "R$ 30 cada", "7,50cada", "a cada coxinha": preço da unidade (rodada 6:
         return tx.VALOR_INCERTO  # qualquer "cada", como na r4; "pago cada mês" recusa, falso positivo no ADR)
     if ruim := next((k[1] for k in nums if k[0] == "num" and _malformado(k[1])), None):
         return tx.valor_abreviado(ruim)
+    if re.search(r"\d\s*k[.,][^\W_]", bruto):  # 3-A e B': letra ou número colado ao separador ("1,5k,50", "2k,5 de
+        return tx.VALOR_INCERTO  # maio", "1,5k,pix"); "1,5k...", "1,5k,🙂", "1,5k._" não; depois do T10/T11/T14/T16
     if len(nums) != 1:  # nenhum ("30 min", "um real") ou mais de um número solto (E3: "R$ 80 no 99 pop", "foi 60")
         return tx.VALOR_INCERTO
     ini = nums[0][2]
@@ -234,16 +246,18 @@ def _pedaco(conta: str, lido: float) -> str | None:
     return None
 
 
-def recusa(texto: str, valor: float | None = None) -> str | None:
+def recusa(texto: str, valor: float | None = None, cartao: bool = False) -> str | None:
     """O texto da recusa (T10-T12, T14-T17) se o valor da declaração não foi lido de forma inequívoca, senão None.
-    `valor`: o número que o chamador grava (fila, classificador); sem ele, o que o parser lê."""
+    `valor`: o número que o chamador grava (fila, classificador); sem ele, o que o parser lê. `cartao`: o áudio de
+    vários gastos que cita cartão ou é respondido com "cartão", que grava na fatura sem confirmação: dígito + "k" segue
+    T10 (1-B, #1404)."""
     from core.intent_classifier import is_comparative_question
     from parsers import (_extract_target_after_amount, _extract_valor, split_financial_transactions, texto_base,
                          tipo_do_texto)
     texto = texto or ""
     if len(texto) > _LIMITE:  # P0
         return tx.LONGA
-    if m := _ABREVIADO_RE.search(texto):  # P1
+    if m := next((m for m in _ABREVIADO_RE.finditer(texto) if cartao or not m.group("ok")), None):  # P1
         return tx.valor_abreviado(m.group(0))
     limpo = fp.limpar(texto, banco=True)  # sem a forma dita: "e 30 pelo banco" termina em "e 30"
     if _PARCELADO_RE.search(_norm(limpo)):  # P3
@@ -269,10 +283,13 @@ def recusa(texto: str, valor: float | None = None) -> str | None:
         return tx.UM_POR_MENSAGEM  # E1: um gasto por mensagem
     if valor is not None and not any(x > 0 for x in lidos):
         return tx.VALOR_INCERTO  # o classificador trouxe um valor que não está no texto
+    # o guarda da 3-A lê o que o usuário mandou (com a data e a forma dita), sem as perguntas comparativas cortadas
+    # no texto cru; o P2 corta no `limpo`, e os dois cortes podem diferir (N1 no ADR 0006)
+    bruto = _norm(" ".join(p for p in split_financial_transactions(texto) if not is_comparative_question(p)))
     for b, x in zip(bases, lidos):
         if x <= 0 or (valor is None and not tipo_do_texto(b)):
             continue  # sem valor (a fila pergunta) ou o parser não grava (o fallback confere o valor do classificador)
-        if r := _pedaco(_norm(_sem_datas(b)), valor if valor is not None else x):  # P5: data e hora fora
+        if r := _pedaco(_norm(_sem_datas(b)), valor if valor is not None else x, bruto):  # P5: data e hora fora
             return r
     return None
 
