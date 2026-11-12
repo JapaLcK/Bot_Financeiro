@@ -19,7 +19,8 @@ import core.admin_dashboard as admin_dashboard
 import core.services.afiliado_reembolso as servico
 from core.services.afiliado_reembolso import conferir_pendentes, tratar_evento
 from db.affiliate_reviews import SaqueAberto, registrar_reembolso, resolver_parcial
-from db.affiliates import reject_payout, request_payout
+from db.affiliate_reviews_manutencao import marcar_conferencia
+from db.affiliates import EM_CONFERENCIA, reject_payout, request_payout
 from db.connection import get_conn
 from test_afiliado_area import _afiliado, _esperando_lock, _painel_aberto  # noqa: F401
 from test_afiliado_exclusao import _excluir, _saque_com_pix
@@ -39,6 +40,7 @@ from test_afiliado_reembolso import _evento, _logs, _segura, mundo  # noqa: F401
 
 PIX = "/admin/api/affiliates/payouts/{}/pix"
 FORA = "Não foi possível conferir reembolsos na Stripe agora. Tente de novo em instantes."
+PENDENCIA = "Este saque tem reembolso de cliente em análise. Resolva a pendência antes."
 DISPUTA = ("Uma comissão deste saque tem disputa aberta na Stripe. Rejeite o saque para liberar as outras; "
            "ela volta quando a disputa fechar.")
 
@@ -239,6 +241,21 @@ def test_disputa_aberta(adm, mundo):
     assert _quadros(c)["held"] == 100
 
 
+def test_webhook_com_disputa_aberta_marca_e_o_qr_segue_recusando(adm, mundo):
+    """#1498, P1 = A, com a comissão em saque: o webhook não confirma, marca e responde 200; o QR recusa."""
+    from test_afiliado_reembolso import _cobranca, _enviar
+    c = _afiliado()
+    a, b, saque = _dois(c)
+    objeto = _cobranca(a.fatura, devolvido=30_000)
+    mundo.stripe.cobra(a.fatura, devolvido=30_000, disputed=True)
+    mundo.stripe.disputas[a.fatura] = [{"status": "needs_response", "amount": 70_000}]
+    assert _enviar("charge.refunded", objeto).status_code == 200
+    assert _marcada(a) and not _marcada(b) and _rev(a.fatura) is None
+    r = _pix(adm, saque)
+    assert (r.status_code, r.json()["detail"]) == (409, DISPUTA) and "brcode" not in r.text
+    assert _saque(saque)["status"] == "requested"
+
+
 # ── Corrida e conexão ────────────────────────────────────────────────────────
 
 def _rejeita_durante(saque):
@@ -318,6 +335,90 @@ def test_corrida_webhook_entre_consulta_e_trava(adm, mundo, monkeypatch):
     assert webhook[0].exception(timeout=15) is None
     pool.shutdown()
     assert resposta[0].status_code == 409 and _saque(saque)["status"] == "requested"
+    assert resposta[0].json()["detail"] == PENDENCIA  # pendência real: o texto de sempre (#1498)
+
+
+def _sem_confirmacao_agora(mundo, fatura, como):
+    """A Stripe, no instante do webhook, ainda não confirma o reembolso que o evento traz."""
+    if como == "disputa_aberta":
+        mundo.stripe.cobra(fatura, devolvido=30_000, disputed=True)
+        mundo.stripe.disputas[fatura] = [{"status": "needs_response", "amount": 70_000}]
+    else:
+        mundo.stripe.cobra(fatura, devolvido=0)
+
+
+@pytest.mark.parametrize("como", ["disputa_aberta", "stripe_zero"])
+def test_corrida_webhook_sem_confirmacao_entre_consulta_e_trava(adm, mundo, monkeypatch, como):
+    """#1498: a consulta não acha nada; o webhook que a Stripe ainda não confirma só marca, antes da trava.
+    A marca segura o "Marcar pago" como a pendência seguraria (na main o evento gravava a pendência)."""
+    c = _afiliado()
+    a, _, saque = _dois(c)
+    real = servico.conferir_saque
+    pool = ThreadPoolExecutor(1)
+    webhook = []
+
+    with get_conn() as segura:
+        _segura(segura, a)
+
+        def consulta_e_webhook(payout_id):
+            resultado = real(payout_id)
+            evento = _evento(a.fatura)
+            _sem_confirmacao_agora(mundo, a.fatura, como)
+            webhook.append(pool.submit(tratar_evento, evento))
+            assert _esperando_lock(1)
+            return resultado
+
+        monkeypatch.setattr(servico, "conferir_saque", consulta_e_webhook)
+        resposta = []
+        t = threading.Thread(target=lambda: resposta.append(_pagar(adm, saque)))
+        t.start()
+        assert _esperando_lock(2)
+        segura.commit()
+        t.join(30)
+    assert webhook[0].exception(timeout=15) is None
+    pool.shutdown()
+    assert resposta[0].status_code == 409 and _saque(saque)["status"] == "requested"
+    assert resposta[0].json()["detail"] == EM_CONFERENCIA  # sem pendência: o texto diz tentar de novo
+    assert _marcada(a) and _rev(a.fatura) is None
+
+
+@pytest.mark.parametrize("stripe_agora,texto", [
+    ("stripe_zero", EM_CONFERENCIA),
+    ("confirmada", "Reembolso de cliente achado na Stripe: o saque ficou bloqueado para revisão.")])
+def test_corrida_webhook_no_meio_da_consulta_do_qr(adm, mundo, monkeypatch, stripe_agora, texto):
+    """#1498: comissão já marcada (D10, disputa que fechou) e o webhook chega no meio da consulta do QR.
+    Sem confirmação ele remarca: a consulta só tira a marca que leu antes, a nova fica, e o QR relido recusa
+    com o texto da conferência. Confirmado, grava a pendência, e o texto é o do bloqueio de sempre."""
+    c = _afiliado()
+    a, _, saque = _dois(c)
+    marcar_conferencia([a.id])
+    real = servico._consultar
+
+    def consulta_e_webhook(fatura, chave):
+        resultado = real(fatura, chave)
+        if fatura == a.fatura:
+            evento = _evento(a.fatura)
+            if stripe_agora == "stripe_zero":
+                _sem_confirmacao_agora(mundo, a.fatura, "stripe_zero")
+            tratar_evento(evento)
+        return resultado
+
+    monkeypatch.setattr(servico, "_consultar", consulta_e_webhook)
+    r = _pix(adm, saque)
+    assert (r.status_code, r.json()["detail"]) == (409, texto) and "brcode" not in r.text
+    assert _marcada(a) == (stripe_agora == "stripe_zero") and _saque(saque)["status"] == "requested"
+
+
+def test_marca_antiga_com_a_stripe_limpa_paga(adm, mundo):
+    """Positivo das corridas: marca do D10 de antes da consulta (a disputa fechou ganha), Stripe limpa.
+    A consulta tira a marca e o QR e o "Marcar pago" saem, como antes do #1498."""
+    c = _afiliado()
+    a, b, saque = _dois(c)
+    marcar_conferencia([a.id])
+    assert _pix(adm, saque).status_code == 200 and not _marcada(a)
+    marcar_conferencia([a.id])
+    assert _pagar(adm, saque).status_code == 200 and _saque(saque)["status"] == "paid"
+    assert not _marcada(a) and not _marcada(b)
 
 
 def test_consulta_nao_segura_transacao(adm, mundo):

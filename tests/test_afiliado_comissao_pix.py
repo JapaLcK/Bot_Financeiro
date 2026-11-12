@@ -889,7 +889,7 @@ def test_p23_parcial_de_comissao_em_saque_orfao_abre_e_bloqueia(externo):
     rev = _revisao(cobranca["external_reference"])
     assert (rev["status"], rev["refunded_cents"]) == ("open", 5000)
     with get_conn() as conn, conn.cursor() as cur:
-        assert saque_bloqueado(cur, saque["id"]) is True
+        assert saque_bloqueado(cur, saque["id"]) == {"pendencia": True, "conferencia": False}
 
 
 def _so_cartao(c, fatura):

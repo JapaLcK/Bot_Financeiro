@@ -26,6 +26,7 @@ from .affiliate_payments import PAGAMENTO_DA_COMISSAO_SQL, origem_da_chave, resu
 from .affiliate_reviews import (
     PENDENCIA_ABERTA_SQL,
     SAQUE_BLOQUEADO_SQL,
+    SAQUE_EM_CONFERENCIA_SQL,
     _comissao_que_saiu,
     abertas_do_saque,
     promover,
@@ -49,6 +50,10 @@ _FUSO = ZoneInfo("America/Sao_Paulo")
 
 class SaqueComPendencia(ValueError):
     """Saque com reembolso de cliente em análise: a rota responde 409."""
+
+
+# Só a marca, sem pendência (#1498): não há o que resolver, e a próxima consulta relê a Stripe. "Marcar pago" e QR.
+EM_CONFERENCIA = "Uma comissão deste saque está em conferência na Stripe. Tente de novo em instantes."
 
 
 class SaqueOrfao(ValueError):
@@ -564,9 +569,11 @@ def mark_payout_paid(payout_id: int, note: str | None = None) -> bool:
                     raise SaqueOrfao("O afiliado excluiu a conta: registre o pagamento já realizado ou rejeite.")
                 return False
             cur.execute("select id from affiliate_commissions where payout_id = %s for update", (int(payout_id),))
-            if saque_bloqueado(cur, payout_id):
+            bloqueio = saque_bloqueado(cur, payout_id)
+            if bloqueio["pendencia"] or bloqueio["conferencia"]:
                 conn.rollback()
-                raise SaqueComPendencia("Este saque tem reembolso de cliente em análise. Resolva a pendência antes.")
+                raise SaqueComPendencia("Este saque tem reembolso de cliente em análise. Resolva a pendência antes."
+                                        if bloqueio["pendencia"] else EM_CONFERENCIA)
             cur.execute(
                 "update affiliate_commissions set status = 'paid' where payout_id = %s",
                 (int(payout_id),),
@@ -726,12 +733,13 @@ _DONO = "coalesce(a.code, p.affiliate_code)"
 
 def get_payout(payout_id: int) -> dict | None:
     """Um saque específico (mesmas colunas do admin_list_payouts). Usado pra
-    montar o Pix copia e cola / QR do pagamento no admin."""
+    montar o Pix copia e cola / QR do pagamento no admin. `checking`: comissão do saque em conferência."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                select p.*, {_DONO} as code, a.user_id, aa.email_enc, {_BLOQUEADO} as blocked, {_ORFAO} as orphan
+                select p.*, {_DONO} as code, a.user_id, aa.email_enc, {_BLOQUEADO} as blocked, {_ORFAO} as orphan,
+                       {SAQUE_EM_CONFERENCIA_SQL.format(saque='p.id')} as checking
                   from affiliate_payouts p
                   left join affiliates a on a.id = p.affiliate_id
                   left join auth_accounts aa on aa.user_id = a.user_id

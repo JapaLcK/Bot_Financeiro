@@ -2774,7 +2774,10 @@ Stripe; sem isso nenhum chega e nenhuma pendência nasce, com todos os testes ve
 de `charge.invoice` ou, sem ele, de `InvoicePayment.list(payment=...)`: o formato do evento segue a
 versão de API do endpoint, e o caminho inverso não foi conferido contra a Stripe real.
 `fatura_da_cobranca` devolvendo None vira só log, sem pendência: conferir na Stripe real antes de
-ligar. `total` se o devolvido (ou a disputa) cobre a cobrança, senão `partial`.
+ligar. O evento só aponta a fatura: tipo e valor saem de `devolvido_na_stripe`, a regra da conferência, do
+script e da reconciliação (soma das cobranças pagas da fatura, reembolso mais disputa perdida; `total` só
+com todas devolvidas por inteiro). Disputa fechada sem perda não consulta. Hipótese não verificada:
+`charge.amount_refunded` não inclui disputa; conferir com disputa real no modo de teste.
 
 Quem protege o dinheiro é a **pendência no banco** (`db/affiliate_reviews.py`), não o aviso.
 `affiliate_refund_reviews` tem uma linha por fatura reembolsada, sem `user_id` nem dado do indicado. A
@@ -2815,7 +2818,7 @@ rejeitar o saque (estorna pelo rótulo **ou** pela pendência, e fecha com `payo
 "Pagamento já realizado". Nota sozinha não fecha. Rejeição é do admin, nunca do webhook: rejeitar
 sozinho com o Pix já feito devolveria as outras comissões ao saldo. Rejeitar com pendência `partial`
 mantém a pendência, e a comissão volta para "Em revisão", salvo se o rótulo `total` a estornou (fatura
-com mais de uma cobrança): aí a pendência fecha junto, com `payout_rejected`. O QR só sai de saque
+com mais de uma cobrança rotulada antes do #1498): aí a pendência fecha junto, com `payout_rejected`. O QR só sai de saque
 `requested`: pago, rejeitado ou registrado dá 409. `reverse_commission` fecha a pendência
 aberta com `commission_reversed`.
 
@@ -2842,20 +2845,20 @@ e referência) ou `waived` (sem elas), e repetir dá 409, sem novo evento.
 `_afiliado_alerta_worker` do `lifespan` repete a cada 300 s, a 1ª volta sem espera, parando na 1ª
 falha. `marcar_avisada` só marca se `refunded_cents` e `status` seguem os do envio: fato novo ou
 "Pagamento já realizado" durante o HTTP deixam o aviso novo pendente. Concorrência por claim com prazo (`reivindicar`, 2 minutos, HTTP fora da transação): processo
-que morre deixa a linha voltar; repetição é possível, perda não. Falha de aviso responde 200; 5xx só
-por banco ou API da Stripe. Log `affiliate_refund_commission_kept` com `alerta_entregue`, nível `error` quando o aviso não sai, e `event_id` quando vem do webhook.
+que morre deixa a linha voltar; repetição é possível, perda não. Falha de aviso responde 200. 5xx por
+banco ou queda da Stripe (conexão, prazo de 8 s, 401, 429, 5xx) e por erro ao achar a fatura
+(`fatura_da_cobranca`, `Charge.retrieve`, ainda no cliente global: #1533). Fatura que ainda não confirma
+(disputa aberta, `payment_record`, sem cobrança paga, 4xx da fatura) ou em que a Stripe ainda mostra zero
+responde 200 e marca a comissão da fatura (`payment_check_pending`) para o worker do A5, com o log
+`affiliate_commission_check_pending` com `event_id` (sem comissão viva, `affiliate_refund_check_pending`,
+com `event_id` e motivo). Log `affiliate_refund_commission_kept` com `alerta_entregue`, nível `error` quando o aviso não sai, e `event_id` quando vem do webhook.
 
 Limites do reembolso: (1) reembolso antes do `invoice.paid` fica coberto por `no_commission` enquanto
 a linha existe; depois da limpeza de 30 dias, quem o pega é a conferência na Stripe (abaixo). (2) Reembolso só do caderno rotula `partial`, sem
 distinguir. (3) Plano inteiro devolvido com o caderno mantido também vira `partial`: a comissão vai
 para revisão. (4) Só o rótulo depende da linha no registro: a pendência não. (5) Sem
 `ADMIN_NOTIFY_WEBHOOK_URL` a notificação fica pendente e a pendência, no admin.
-(6) Valor maior reabre a pendência. Disputa perdida seguida de reembolso não soma: o `charge.refunded`
-só olha `amount_refunded`, então disputa parcial de R$ 30 e reembolso dos R$ 70 restantes fica
-`partial` com R$ 70, e não `total`; e disputa de R$ 70 seguida de reembolso de R$ 30 não é fato novo
-(30 < 70) e fica como a disputa deixou. A comissão fica em revisão nos dois casos, sem estorno
-sozinho. Hipótese não verificada por trás disso e do cálculo da disputa: `charge.amount_refunded` não
-inclui disputa. Conferir com disputa real no modo de teste da Stripe. (7) Pix por fora: o sistema não alcança QR já aberto nem Pix digitado à mão.
+(6) Valor maior reabre a pendência. (7) Pix por fora: o sistema não alcança QR já aberto nem Pix digitado à mão.
 Revisão com valor menor com QR antigo aberto deixa o admin pagar o valor velho; a tela avisa, e o
 caminho é "Pagamento já realizado" antes da revisão. (8) Comissão apagada pela cascata antes do deploy
 de `affiliate_commissions` em `_USER_FK_SET_NULL_TABLES` não volta, e o saque `requested` que a incluía
@@ -2863,10 +2866,8 @@ segue sem ligação. Conferir antes do deploy, só leitura: saques `requested` c
 da soma das comissões deles. (9) Reembolso parcial maior sobre recuperação ainda aberta troca a
 `recovery` por `open`: a recuperação sai da lista "Recuperações" até a nova revisão, que a recalcula
 pelo valor aprovado (atribuído, nunca somado), e o evento `reopened` guarda o anterior. (10) O webhook
-decide por cobrança, e a fatura pela soma não é vista: fatura com duas cobranças pagas, uma devolvida
-pela metade e a outra inteira, fica com rótulo `total` (o da 2ª cobrança) e pendência `partial`
-(os 40 devolvidos da 2ª não são maiores que os 50 da 1ª). A rejeição do saque estorna pelo rótulo e fecha a pendência; o
-produto não gera fatura de plano com duas cobranças pagas hoje.
+lê a Stripe na hora: o valor é o de agora e a data (`refunded_at`) é a do evento; evento velho reentregue
+depois de um reembolso maior grava o valor maior com a data velha.
 
 **Conferência na Stripe antes de liberar (A5).** Comissão que nasce sem linha da fatura (o caso comum,
 e também o da linha `no_commission` já limpa) nasce com `payment_check_pending = true`: conta como
@@ -2883,8 +2884,12 @@ permite concluir (disputa aberta, `payment_record`, sem cobrança paga) grava a 
 (`ESPERA_CONFERENCIA_S`), sem segurar as seguintes. Erro 4xx da própria fatura (400, 403 e 404, como
 "No such invoice") vale o mesmo, com o motivo `stripe_<status>`, e a marca fica. A queda da Stripe
 (conexão, prazo, 401, 429, 5xx) para a passada sem gravar nada. Só o
-worker espera e grava: webhook, QR, "Marcar pago" e "Pagamento já realizado" conferem na hora. Liberar
-zera a tentativa e o motivo (#1497). Toda adiada deixa o log
+worker espera e grava a tentativa e o motivo: webhook, QR, "Marcar pago" e "Pagamento já realizado" conferem
+na hora (o webhook e o D10 podem marcar, mas não gravam tentativa). Liberar
+zera a tentativa e o motivo (#1497). Toda marca (webhook, D10) grava `payment_check_marked_at` e zera a
+tentativa (entra como nunca tentada); quem libera (`conferir_comissao` e `conferir_saque`) e o adiamento do
+worker comparam o instante lido antes da Stripe: a marca posta durante a consulta fica, sem herdar a espera
+de 1 h (#1498). Toda adiada deixa o log
 `affiliate_commission_check_pending` com o motivo, sem a fatura. Na lista do afiliado, a marcada
 aparece "em conferência" (`commissions[].checking`), no `/painel` e no `/app`. Comissão antiga nasce `false` na
 migração, sem conferência em massa. O overview do admin mostra quantas aguardam e a mais antiga
@@ -2900,7 +2905,13 @@ lista) e "Marcar pago" 409 ("Reembolso achado na Stripe: o saque ficou bloqueado
 Pagamento já realizado."). Disputa aberta (D10 = A): 409 ("Uma comissão deste saque tem disputa aberta na
 Stripe. Rejeite o saque para liberar as outras; ela volta quando a disputa fechar."), e a comissão ganha
 `payment_check_pending`: rejeitado o saque, ela fica "Em carência" até o worker do A5 liberar ou abrir
-pendência, e o novo pedido sai sem ela. Erro da Stripe ou falta de `STRIPE_SECRET_KEY`: 503 ("Não foi
+pendência, e o novo pedido sai sem ela. A comissão do saque marcada segura o dinheiro como a pendência: a
+consulta tira a marca que leu e confirmou limpa, e a que o webhook pôs durante ela faz o QR relido e o "Marcar
+pago" recusarem com 409 "Uma comissão deste saque está em conferência na Stripe. Tente de novo em instantes."
+(`EM_CONFERENCIA`, `db/affiliates.py`), sem aparecer como "bloqueado" na lista (#1498). Esse texto só sai com
+a marca e sem pendência; com pendência real, os textos são os de sempre ("Reembolso de cliente achado na
+Stripe..." no QR, "Este saque tem reembolso de cliente em análise. Resolva a pendência antes." no "Marcar
+pago"). Erro da Stripe ou falta de `STRIPE_SECRET_KEY`: 503 ("Não foi
 possível conferir reembolsos na Stripe agora. Tente de novo em instantes."; no "Marcar pago", mais "Se o
 Pix já saiu, use Pagamento já realizado."), sem recarregar, e o log `affiliate_payout_check_failed` com o
 saque e o tipo do erro, sem a fatura. Prazo total de 20 s (`PRAZO_CONFERENCIA_S`): estouro é 503, nunca
@@ -2975,12 +2986,13 @@ paga), `sem_confirmacao` (erro da API, `forma_inesperada` como `payment_record`,
 total que o webhook perdeu é fato novo. O `--aplicar` não confia na classificação: chama
 `registrar_reembolso`, a mesma função do webhook, com ator `script`, e a categoria e a linha impressa
 são o desfecho relido depois, não a previsão. `sem_confirmacao` faz o script sair com 1. A segunda
-passada completa o registro (fatura de plano sem comissão, webhook perdido, reembolso antigo): fatura
-com cobrança contestada não é rotulada, só contada em `contestadas_para_conferir`: o rótulo dela vem
-da primeira passada, junto da pendência, quando a disputa se resolve; e não recupera conta excluída. Pula o cartão recusado com Pix
+passada completa o registro (fatura de plano sem comissão, webhook perdido, reembolso antigo): o rótulo
+segue a regra da primeira passada (`devolvido_na_stripe`, lida uma vez por fatura na rodada, sem consulta
+repetida na fatura de comissão): disputa perdida conta, ganha não, e só a fatura com disputa aberta fica
+sem rótulo, contada em `contestadas_para_conferir`. Disputa perdida sem reembolso rotula `total`/`partial` com
+`refunded_at` nulo (sem `Refund` não há data); e não recupera conta excluída. Pula o cartão recusado com Pix
 cobrindo pela `MARCA` na assinatura; assinatura já morta quando a recusa rodou não grava a `MARCA`,
-e o script conta a fatura. Fatura com `payment.type = payment_record` faz `cobrancas_da_fatura`
-levantar: nessa passada, o cliente inteiro sai em `clientes_com_falha`. É idempotente, e não imprime
+e o script conta a fatura. Fatura com `payment.type = payment_record` (`forma_inesperada`): nessa passada, o cliente inteiro sai em `clientes_com_falha`. É idempotente, e não imprime
 fatura, cliente nem indicado.
 
 Conta excluída mantém cadastro, pagamentos e comissão: `affiliate_referrals` e

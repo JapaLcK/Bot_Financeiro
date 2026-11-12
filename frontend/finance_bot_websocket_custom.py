@@ -7629,7 +7629,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
 
     elif event["type"] in ("charge.refunded", "charge.dispute.closed"):
         # Reembolso de indicado de afiliado. Sem try: nada aqui segura grant nem comissão de
-        # outro evento, tudo é idempotente, e falha de banco ou da Stripe vira 5xx e reentrega.
+        # outro evento, é idempotente; banco ou Stripe fora vira 5xx e reentrega (fatura sem confirmação: 200).
         from core.services.afiliado_reembolso import tratar_evento
         await asyncio.to_thread(tratar_evento, event)
 

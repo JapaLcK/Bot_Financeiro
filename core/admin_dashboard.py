@@ -2408,15 +2408,19 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         sem digitar chave nem valor (que é onde mora o erro).
         """
         from core.services.pix_brcode import build_pix_brcode, qr_svg_data_url
-        from db.affiliates import get_payout
+        from db.affiliates import EM_CONFERENCIA, get_payout
 
-        def aberto(row: dict | None, bloqueado: str) -> dict:
+        def aberto(row: dict | None, bloqueado: str, relido: bool = False) -> dict:
             if not row:
                 raise HTTPException(status_code=404, detail="Saque não encontrado.")
             if row["status"] != "requested":  # pago, rejeitado ou registrado: um QR aqui pagaria de novo
                 raise HTTPException(status_code=409, detail="Este saque não está aberto.")
             if row["blocked"]:
                 raise HTTPException(status_code=409, detail=bloqueado)
+            # Relido: marca que o webhook pôs durante a consulta também segura (#1498). Antes da consulta, não:
+            # a disputa do D10 tem resposta própria, e a consulta decide.
+            if relido and row["checking"]:
+                raise HTTPException(status_code=409, detail=EM_CONFERENCIA)
             if not row.get("pix_key_enc"):  # órfão (D9) ou saque sem chave
                 raise HTTPException(status_code=422, detail="Este saque não tem chave Pix registrada.")
             return row
@@ -2430,7 +2434,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             raise HTTPException(status_code=409, detail=_DISPUTA_ABERTA)
         # Relê o saque inteiro: outro admin pode ter rejeitado, pago ou revisado durante a consulta.
         row = aberto(await asyncio.to_thread(get_payout, payout_id),
-                     "Reembolso de cliente achado na Stripe: o saque ficou bloqueado para revisão.")
+                     "Reembolso de cliente achado na Stripe: o saque ficou bloqueado para revisão.", relido=True)
         payout = _decrypt_affiliate_row(row, username)  # registra o acesso à PII
         pix_key = (payout.get("pix_key") or "").strip()
         if not pix_key:

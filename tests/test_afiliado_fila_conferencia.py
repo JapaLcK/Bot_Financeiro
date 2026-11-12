@@ -72,7 +72,7 @@ def formas(fonte, monkeypatch):
 
 def _linha(com):
     with get_conn() as conn:
-        return conn.execute("select payment_check_pending, payment_check_tried_at, payment_check_reason"
+        return conn.execute("select payment_check_pending, payment_check_tried_at, payment_check_reason, payment_check_marked_at"
                             " from affiliate_commissions where id = %s", (com.id,)).fetchone()
 
 
@@ -187,9 +187,9 @@ def test_conferencia_inline_ignora_a_espera(fonte, monkeypatch):
 def test_liberar_zera_a_tentativa(fonte):
     c = _afiliado()
     com = _marcada(c)
-    manutencao.adiar_conferencia(com.id, "disputa_aberta")
+    manutencao.adiar_conferencia(com.id, "disputa_aberta", _linha(com)["payment_check_marked_at"])
     assert _linha(com)["payment_check_reason"] == "disputa_aberta"
-    manutencao.liberar_conferencia(com.id)
+    assert manutencao.liberar_conferencia(com.id, _linha(com)["payment_check_marked_at"])
     assert (_linha(com)["payment_check_tried_at"], _linha(com)["payment_check_reason"]) == (None, None)
     manutencao.marcar_conferencia([com.id])  # remarcada (D10): entra como nunca tentada
     fonte.cobra(com.fatura)
@@ -238,17 +238,22 @@ def test_dois_workers(fonte):
 
 # ── Migração ─────────────────────────────────────────────────────────────────
 
-def _sem_as_colunas():
+TODAS = ("payment_check_tried_at", "payment_check_reason", "payment_check_marked_at")
+# O banco da main antes do #1498: só falta o instante da marca. É o caminho do deploy deste PR.
+COLUNAS = pytest.mark.parametrize("colunas", [TODAS, ("payment_check_marked_at",)], ids=["tres", "so_marked_at"])
+
+
+def _sem_as_colunas(colunas=TODAS):
     with get_conn() as conn:
-        conn.execute("alter table affiliate_commissions drop column payment_check_tried_at,"
-                     " drop column payment_check_reason")
+        conn.execute("alter table affiliate_commissions " + ", ".join(f"drop column {c}" for c in colunas))
         conn.commit()
 
 
-def test_init_db_migra_banco_sem_a_coluna(fonte):
+@COLUNAS
+def test_init_db_migra_banco_sem_a_coluna(fonte, colunas):
     c = _afiliado()
     com = _comissao(c, 100)
-    _sem_as_colunas()
+    _sem_as_colunas(colunas)
     try:
         with get_conn() as conn:
             conn.execute("update affiliate_commissions set payment_check_pending = true where id = %s", (com.id,))
@@ -259,7 +264,8 @@ def test_init_db_migra_banco_sem_a_coluna(fonte):
             colunas = conn.execute("select column_name, is_nullable, column_default from information_schema.columns"
                                    " where table_name = 'affiliate_commissions' and column_name like 'payment_check_%%'"
                                    " order by column_name").fetchall()
-        assert [tuple(x.values()) for x in colunas] == [("payment_check_pending", "NO", "false"),
+        assert [tuple(x.values()) for x in colunas] == [("payment_check_marked_at", "YES", None),
+                                                        ("payment_check_pending", "NO", "false"),
                                                         ("payment_check_reason", "YES", None),
                                                         ("payment_check_tried_at", "YES", None)]
         assert (_linha(com)["payment_check_pending"], _linha(com)["payment_check_tried_at"]) == (True, None)
@@ -270,13 +276,14 @@ def test_init_db_migra_banco_sem_a_coluna(fonte):
         db.init_db()
 
 
-def test_migracao_com_tabela_ocupada():
+@COLUNAS
+def test_migracao_com_tabela_ocupada(colunas):
     """O mesmo bloco guardado de `commission_bps`, com 3 tentativas: tabela ocupada derruba o boot com erro
     claro, sem entrar na fila de locks, e nada fica gravado."""
     bloco = next(b for b in re.findall(r'"""(\s*do \$\$ begin.*?end \$\$\s*)"""', Path(schema.__file__).read_text(), re.S)
                  if "lock table affiliates" in b)
     teto = re.search(r"for tentativa in 1\.\.(\d+) loop", bloco).group(1)
-    _sem_as_colunas()
+    _sem_as_colunas(colunas)
     try:
         with get_conn() as leitor, get_conn() as boot:
             leitor.execute("select 1 from affiliate_commissions limit 1")
@@ -289,9 +296,9 @@ def test_migracao_com_tabela_ocupada():
             boot.rollback()
             leitor.rollback()
         with get_conn() as conn:
-            colunas = conn.execute("select attname from pg_attribute where attrelid = 'affiliate_commissions'::regclass"
+            ficaram = conn.execute("select attname from pg_attribute where attrelid = 'affiliate_commissions'::regclass"
                                    " and attname like 'payment_check_%%' and not attisdropped").fetchall()
-        assert [x["attname"] for x in colunas] == ["payment_check_pending"]
+        assert sorted(x["attname"] for x in ficaram) == sorted({"payment_check_pending", *TODAS} - set(colunas))
     finally:
         db.init_db()
 
@@ -354,9 +361,10 @@ def test_adiamento_atrasado_nao_regrava_comissao_ja_liberada(fonte, monkeypatch)
     ganha) e libera; só então A grava o adiamento. A liberada fica com hora e motivo nulos."""
     c = _afiliado()
     com = _marcada(c)
+    marca = _linha(com)["payment_check_marked_at"]
 
     def devolvido(fatura, chave):
-        manutencao.liberar_conferencia(com.id)  # B termina no meio da consulta de A
+        manutencao.liberar_conferencia(com.id, marca)  # B termina no meio da consulta de A
         raise servico.SemConfirmacao("disputa_aberta")
 
     monkeypatch.setattr(servico, "devolvido_na_stripe", devolvido)
@@ -364,3 +372,23 @@ def test_adiamento_atrasado_nao_regrava_comissao_ja_liberada(fonte, monkeypatch)
     linha = _linha(com)
     assert (linha["payment_check_pending"], linha["payment_check_tried_at"], linha["payment_check_reason"]) == (
         False, None, None)
+
+
+def test_adiamento_nao_apaga_a_marca_nova_que_chegou_durante_a_consulta(fonte, monkeypatch):
+    """O-1 (#1498): o worker lê a marca e consulta; no meio, o webhook remarca (nunca tentada). O adiamento
+    do worker compara a marca lida e não grava a espera de 1 h por cima: a próxima passada já confere."""
+    c = _afiliado()
+    com = _marcada(c)
+
+    def devolvido(fatura, chave):
+        manutencao.marcar_conferencia_da_fatura(fatura)  # o webhook marca no meio da consulta do worker
+        raise servico.SemConfirmacao("disputa_aberta")
+
+    with monkeypatch.context() as m:
+        m.setattr(servico, "devolvido_na_stripe", devolvido)
+        assert servico.conferir_pendentes() == 0
+    linha = _linha(com)
+    assert (linha["payment_check_pending"], linha["payment_check_tried_at"], linha["payment_check_reason"]) == (
+        True, None, None)
+    fonte.cobra(com.fatura)
+    assert servico.conferir_pendentes() == 1 and _linha(com)["payment_check_pending"] is False

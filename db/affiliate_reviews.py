@@ -24,6 +24,10 @@ SAQUE_BLOQUEADO_SQL = """exists (select 1 from affiliate_refund_reviews v
                                    left join affiliate_commissions vc on vc.id = v.commission_id
                                   where v.status = 'open'
                                     and (vc.payout_id = {saque} or v.orphan_payout_id = {saque}))"""
+# Comissão do saque "em conferência": o webhook ou o D10 marcou e a Stripe ainda não confirmou. Não aparece
+# como bloqueio no admin, mas o dinheiro não sai por ela: QR relido e "Marcar pago" recusam (#1498).
+SAQUE_EM_CONFERENCIA_SQL = """exists (select 1 from affiliate_commissions mc
+                                       where mc.payout_id = {saque} and mc.payment_check_pending)"""
 
 
 class PendenciaMudou(Exception):
@@ -192,10 +196,11 @@ def faturas_do_saque(payout_id: int) -> list[dict]:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select c.id as commission_id, c.stripe_invoice_id as fatura from affiliate_commissions c
+            select c.id as commission_id, c.stripe_invoice_id as fatura, c.payment_check_pending as marcada,
+                   c.payment_check_marked_at as marcada_em from affiliate_commissions c
              where c.payout_id = %s and left(c.stripe_invoice_id, 4) <> 'pix:'
             union all
-            select null, r.stripe_invoice_id from affiliate_refund_reviews r
+            select null, r.stripe_invoice_id, false, null from affiliate_refund_reviews r
              where r.orphan_payout_id = %s and r.commission_id is null and left(r.stripe_invoice_id, 4) <> 'pix:'
             """,
             (int(payout_id), int(payout_id)),
@@ -203,11 +208,13 @@ def faturas_do_saque(payout_id: int) -> list[dict]:
         return cur.fetchall()
 
 
-def saque_bloqueado(cur, payout_id: int) -> bool:
+def saque_bloqueado(cur, payout_id: int) -> dict:
     """Comando próprio, depois da trava das comissões: em READ COMMITTED é ele que enxerga o commit
-    do webhook que a trava esperou. Aviso entregue não libera."""
-    cur.execute(f"select {SAQUE_BLOQUEADO_SQL.format(saque='%(saque)s')} as bloqueado", {"saque": int(payout_id)})
-    return cur.fetchone()["bloqueado"]
+    do webhook que a trava esperou. Aviso entregue não libera. `{pendencia, conferencia}`: qualquer um segura."""
+    saque = "%(saque)s"
+    cur.execute(f"select {SAQUE_BLOQUEADO_SQL.format(saque=saque)} as pendencia,"
+                f" {SAQUE_EM_CONFERENCIA_SQL.format(saque=saque)} as conferencia", {"saque": int(payout_id)})
+    return cur.fetchone()
 
 
 def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: str, visto_cents: int) -> bool:
