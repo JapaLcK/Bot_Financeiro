@@ -108,6 +108,9 @@ def limpar_sem_comissao(dias: int = 30, limite: int = 500) -> int:
 
 
 ESPERA_CONFERENCIA_S = 3600  # a adiada (fatura que ainda não confirma) volta à fila do worker depois disto
+# Toda marca grava o instante dela; quem libera compara o que leu antes da Stripe, para não apagar a marca
+# posta depois da leitura (#1498). E entra como nunca tentada: não herda a espera de 1 h de um adiamento antigo.
+_MARCA = "payment_check_pending = true, payment_check_marked_at = clock_timestamp(), payment_check_tried_at = null"
 
 
 def comissoes_a_conferir(limite: int = 20) -> list[dict]:
@@ -116,7 +119,7 @@ def comissoes_a_conferir(limite: int = 20) -> list[dict]:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select id, stripe_invoice_id from affiliate_commissions
+            select id, stripe_invoice_id, payment_check_marked_at from affiliate_commissions
              where payment_check_pending
                and (payment_check_tried_at is null
                     or payment_check_tried_at < now() - make_interval(secs => %(espera)s))
@@ -128,12 +131,14 @@ def comissoes_a_conferir(limite: int = 20) -> list[dict]:
         return cur.fetchall()
 
 
-def adiar_conferencia(commission_id: int, motivo: str) -> None:
+def adiar_conferencia(commission_id: int, motivo: str, lido) -> None:
     """Só o worker: a fatura ainda não confirma. Grava a hora e o motivo, depois do HTTP e numa transação
-    curta; a marca, e com ela o bloqueio financeiro, fica."""
+    curta; a marca, e com ela o bloqueio financeiro, fica. Marca posta durante o HTTP (`lido`, como em
+    `liberar_conferencia`) não herda a espera: segue nunca tentada (#1498)."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("update affiliate_commissions set payment_check_tried_at = now(), payment_check_reason = %s"
-                    " where id = %s and payment_check_pending", (motivo, int(commission_id)))
+                    " where id = %s and payment_check_pending and payment_check_marked_at is not distinct from %s",
+                    (motivo, int(commission_id), lido))
         conn.commit()
 
 
@@ -142,16 +147,30 @@ def marcar_conferencia(commission_ids: list[int]) -> None:
     if not commission_ids:
         return
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("update affiliate_commissions set payment_check_pending = true where id = any(%s)",
+        cur.execute(f"update affiliate_commissions set {_MARCA} where id = any(%s)",
                     ([int(i) for i in commission_ids],))
         conn.commit()
 
 
-def liberar_conferencia(commission_id: int) -> None:
+def marcar_conferencia_da_fatura(fatura: str) -> int | None:
+    """A do webhook, que só sabe a fatura (#1498): o id da comissão marcada, ou None sem comissão viva."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"update affiliate_commissions set {_MARCA}"
+                    " where stripe_invoice_id = %s and status <> 'reversed' returning id", (fatura,))
+        linha = cur.fetchone()
+        conn.commit()
+    return linha["id"] if linha else None
+
+
+def liberar_conferencia(commission_id: int, lido) -> bool:
+    """Tira a marca só se ela segue a que quem confere leu antes da Stripe (`lido` = `payment_check_marked_at`,
+    None na que nasceu marcada). False = outra marca chegou no meio: fica para o worker."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("update affiliate_commissions set payment_check_pending = false, payment_check_tried_at = null,"
-                    " payment_check_reason = null where id = %s", (int(commission_id),))
+                    " payment_check_reason = null, payment_check_marked_at = null"
+                    " where id = %s and payment_check_marked_at is not distinct from %s", (int(commission_id), lido))
         conn.commit()
+        return cur.rowcount == 1
 
 
 def resumo_da_conferencia() -> dict:
