@@ -9,6 +9,7 @@ import csv
 import io
 import json
 import logging
+import os
 import re
 import zipfile
 from datetime import datetime, timezone
@@ -55,18 +56,26 @@ _DETAILS_FORA_DA_EXPORTACAO = frozenset({"traceback"})
 
 _CHAVE_INDECIFRAVEL = "(indecifrável)"
 _TOKEN = re.compile(r"token(=|%3d)", re.I)
+_SEGREDO_MINIMO = 16  # abaixo disso o valor do segredo casaria com texto comum
 
 
-def _sem_token(valor: Any) -> Any:
-    """Troca, em qualquer nível, a string com `token=` (ou `token%3D`) por um marcador. O `webhookUrl` que mandamos
-    à Pluggy leva `?token=<PLUGGY_WEBHOOK_SECRET>` (frontend/routes/open_finance.py), e o `raw` da conexão é o item
-    ou o corpo do webhook `item/deleted` (db/open_finance.py), com a URL em chave e nível que não controlamos."""
+def _segredo_do_webhook() -> str | None:
+    segredo = (os.getenv("PLUGGY_WEBHOOK_SECRET") or "").strip()
+    return segredo if len(segredo) >= _SEGREDO_MINIMO else None
+
+
+def _sem_token(valor: Any, segredo: str | None) -> Any:
+    """Troca, em qualquer nível e também na chave, a string com `token=` (ou `token%3D`) ou com o próprio valor do
+    `PLUGGY_WEBHOOK_SECRET` por um marcador. O `webhookUrl` que mandamos à Pluggy leva `?token=<segredo>`
+    (frontend/routes/open_finance.py), e o `raw` da conexão é o item ou o corpo do webhook `item/deleted`
+    (db/open_finance.py), com a URL em chave, nível e forma que não controlamos."""
     if isinstance(valor, str):
-        return "(removido: continha token)" if _TOKEN.search(valor) else valor
+        vaza = _TOKEN.search(valor) or (segredo and segredo in valor)
+        return "(removido: continha token)" if vaza else valor
     if isinstance(valor, dict):
-        return {k: _sem_token(v) for k, v in valor.items()}
+        return {_sem_token(k, segredo): _sem_token(v, segredo) for k, v in valor.items()}
     if isinstance(valor, list):
-        return [_sem_token(v) for v in valor]
+        return [_sem_token(v, segredo) for v in valor]
     return valor
 
 
@@ -95,8 +104,9 @@ def build_user_export_zip(user_id: int) -> bytes:
     for name in ("afiliado", "afiliado_saques"):
         _chave_pix_em_claro(datasets[name], user_id)
 
+    segredo = _segredo_do_webhook()
     for conexao in datasets["conexoes_open_finance"]:
-        conexao["raw"] = _sem_token(conexao["raw"])
+        conexao["raw"] = _sem_token(conexao["raw"], segredo)
 
     for evento in datasets["eventos_sistema"]:
         if isinstance(evento["details"], dict):

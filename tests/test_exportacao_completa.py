@@ -5,10 +5,10 @@ T1 completude: toda tabela do fecho de FK até `users` é tabela principal de `E
 T2 estrutura: toda SQL filtra por `%(uid)s` e nenhuma usa `%s`; nenhuma coluna que a SQL DEVOLVE
    (`cur.description`, não o texto da SQL) tem cara de segredo, salvo `COLUNAS_SEM_SEGREDO`.
 T3 isolamento: A e B com uma linha marcada em cada tabela exportada (`tests/_semeia_exportacao.py`); todo
-   dataset de A tem linha, e semear B não muda nada no ZIP de A nem põe a marca de B nele.
+   dataset de A e de B tem linha, e semear B não muda nada no ZIP de A nem põe a marca de B nele.
 T4 segredo semeado: o `code` do link mágico, o hash e o cifrado das identidades, a URL com token do webhook
-   (em 6 formas do `raw`) e os hashes e cifrados da conta não aparecem em nenhum membro do ZIP; a linha
-   legítima continua lá.
+   (em 6 formas do `raw`), o valor do `PLUGGY_WEBHOOK_SECRET` em qualquer forma e os hashes e cifrados da
+   conta não aparecem em nenhum membro do ZIP; a linha legítima continua lá.
 T5 formato: os membros do ZIP e as colunas de cada dataset são os da `main` de 2026-11-12, salvo `MUDARAM`.
 
 CONTROLES rodados à mão (CLAUDE.md §3), cada um num caso verde:
@@ -17,8 +17,11 @@ CONTROLES rodados à mão (CLAUDE.md §3), cada um num caso verde:
   `test_t3_zip_de_a_nao_tem_nada_de_b` vermelho.
 - T4: voltar `sessoes_dashboard` para `select code, ...` e `identidades` para `select *`, ou trocar o
   `_sem_token` pelo `pop("webhookUrl")` só do topo, deixa `test_t4_segredo_semeado_nao_sai` vermelho.
+- T4: tirar de `_sem_token` o teste do valor do segredo, ou a troca na chave do dict, ou o tamanho mínimo,
+  deixa `test_t4_valor_do_segredo_do_webhook_nao_sai_em_forma_nenhuma` vermelho.
 
-CLASSES CEGAS: segredo sem `token=` dentro de coluna JSON (`raw`, `payload`, `details`); tabela ligada à
+CLASSES CEGAS: outro segredo, sem `token=`, dentro de coluna JSON (`raw`, `payload`, `details`); o segredo
+do webhook com menos de 16 caracteres, fora de `token=`; tabela ligada à
 pessoa por e-mail ou telefone, fora do fecho de FK (#1557); tabela que só existe em produção (DP9); tabela
 que o semeador não consegue preencher (o T3 reprova, não passa calado).
 """
@@ -36,7 +39,7 @@ import pytest
 from core.admin_dashboard import ensure_admin_tables
 from db import ensure_user, get_conn
 from db.open_finance import update_pluggy_open_finance_item_status
-from db.privacy_export import build_user_export_zip
+from db.privacy_export import _segredo_do_webhook, build_user_export_zip
 from db.privacy_export_conjuntos import COLUNAS_SEM_SEGREDO, EXPORTADAS, NAO_EXPORTADAS
 from tests._semeia_exportacao import semeia
 
@@ -54,7 +57,8 @@ _FECHO = """
     )
     select relname from pg_class where oid in (select oid from fecho)
 """
-_SEGREDO = re.compile(r"hash|token|secret|_enc$|password|^code$|jti|challenge|webhook")
+_SEGREDO = re.compile(r"hash|token|secret|_enc$|password|^code$|jti|challenge|webhook"
+                      r"|(^|_)(otp|cvv|salt|api_key|nonce|signature|private)(_|$)")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -129,6 +133,10 @@ def test_t2_guarda_acusa_posicional_estrela_e_coluna_nomeada_com_segredo():
         == [("x", "secret")]
     assert set(_colunas_secretas({"identidades": ("user_identities", "select * from user_identities")})) \
         == {("identidades", "external_id_hash"), ("identidades", "external_id_enc")}
+    # os termos curtos só casam como palavra do snake_case: `basalt` e `notpin` não são `salt` nem `pin`
+    assert _colunas_secretas({"x": ("users", "select 1 as otp_code, 1 as card_cvv, 1 as basalt, 1 as private"
+                                              " from users where id = %(uid)s")}) \
+        == [("x", "otp_code"), ("x", "card_cvv"), ("x", "private")]
 
 
 def _zip(uid: int) -> tuple[dict, str, list[str]]:
@@ -137,23 +145,29 @@ def _zip(uid: int) -> tuple[dict, str, list[str]]:
     return json.loads(z.read("dados.json"))["dados"], texto, z.namelist()
 
 
+def _vazios(dados: dict, erros: dict) -> list[tuple[str, str | None]]:
+    """Datasets sem linha (menos os da DP9), com o erro do banco que impediu semear a tabela principal."""
+    return [(d, erros.get(EXPORTADAS[d][0])) for d, linhas in dados.items()
+            if not linhas and EXPORTADAS[d][0] not in ORFAS_PENDENTES_DP9]
+
+
 def test_t3_zip_de_a_nao_tem_nada_de_b():
     tabelas = {t for t, _ in EXPORTADAS.values()} - set(ORFAS_PENDENTES_DP9)
-    a, marca_a, set_null_a = semeia("ISOA", tabelas)
-    b, set_null_b = a, []
+    a, marca_a, soltas_a, erros_a = semeia("ISOA", tabelas)
+    soltas_b = []
     try:
         antes, texto_antes, _ = _zip(a)
-        dp9 = {d for d, (t, _) in EXPORTADAS.items() if t in ORFAS_PENDENTES_DP9}
-        assert [d for d, linhas in antes.items() if not linhas and d not in dp9] == []  # nada vazio por construção
+        assert _vazios(antes, erros_a) == []  # nada vazio por construção
         assert marca_a in texto_antes
-        b, marca_b, set_null_b = semeia("ISOB", tabelas)
+        b, marca_b, soltas_b, erros_b = semeia("ISOB", tabelas)
         depois, texto, _ = _zip(a)
         assert {d: len(v) for d, v in depois.items()} == {d: len(v) for d, v in antes.items()}
         assert marca_b not in texto
-        assert marca_b in _zip(b)[1]  # positivo: B foi semeado de verdade
-    finally:  # `set null` para `users`: a limpeza do conftest deixaria essas linhas sem dono
-        for tabela, coluna in set(set_null_a) | set(set_null_b):
-            _q(f"delete from {tabela} where {coluna} = any(%s)", ([a, b],))
+        dados_b, texto_b, _ = _zip(b)  # positivo: B foi semeado de verdade, em todo dataset
+        assert _vazios(dados_b, erros_b) == [] and marca_b in texto_b
+    finally:  # FK `set null`: a cascata do conftest deixaria essas linhas soltas, com a marca
+        for tabela, coluna, valor in soltas_a + soltas_b:
+            _q(f"delete from {tabela} where {coluna} = %s", (valor,))
 
 
 _URL = "https://pigbank.app/open-finance/pluggy/webhook?token=SEG_SEGREDO_WEBHOOK"
@@ -205,6 +219,23 @@ def test_t4_segredo_semeado_nao_sai():
     assert raws["topo"] == {"webhookUrl": "(removido: continha token)", "clientUserId": "SEG_client"}
     assert raws["aninhado"]["item"] == {"webhookUrl": "(removido: continha token)"}
     assert dados["conta_login"][0]["display_name"] == "SEG_nome"
+
+
+def test_t4_valor_do_segredo_do_webhook_nao_sai_em_forma_nenhuma(monkeypatch):
+    """Além de `token=`: o próprio valor de `PLUGGY_WEBHOOK_SECRET`, em outro parâmetro, sozinho ou como chave."""
+    segredo = "SEG_CRU_0123456789abcdef"
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", segredo)
+    uid = int(uuid.uuid4().int % 900_000_000) + 1
+    ensure_user(uid)
+    raw = {"cb": f"https://x/hook?t={segredo}", "valor": segredo, segredo: 1, "clientUserId": "SEG_client"}
+    _q("insert into open_finance_connections (user_id, provider, provider_item_id, status, institution_id,"
+       " institution_name, raw) values (%s, 'pluggy', %s, 'UPDATED', '1', 'Banco', %s::jsonb)",
+       (uid, f"cru_{uid}", json.dumps(raw)))
+    dados, texto, _ = _zip(uid)
+    assert segredo not in texto
+    assert dados["conexoes_open_finance"][0]["raw"]["clientUserId"] == "SEG_client"
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "curto")  # segredo curto casaria com texto comum: desligado
+    assert _segredo_do_webhook() is None
 
 
 # Datasets da `main` (51e2e861), na ordem. Os três de categoria seguem até a DP9.

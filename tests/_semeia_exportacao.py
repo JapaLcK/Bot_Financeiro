@@ -5,7 +5,7 @@ recebe o uid, FK para outra tabela recebe a linha DESTA pessoa já semeada (nunc
 `<marca>_<coluna>`, jsonb `{"m": ...}`, e o resto o mínimo que o tipo aceita. Coluna `*_enc` fica nula: um
 cifrado falso viraria aviso de "indecifrável" no log, e o aviso vira linha de `eventos_sistema`.
 Primeiro tenta com todo texto/jsonb preenchido; se o banco recusar, só com o obrigatório. `_FIXOS` cobre os CHECK.
-Tabela que não entra fica de fora em silêncio: quem cobra é o teste ("todo dataset tem linha").
+Tabela que não entra volta com o erro do banco; quem cobra é o teste ("todo dataset tem linha").
 """
 from __future__ import annotations
 
@@ -77,24 +77,31 @@ def _linha(tabela, colunas, fks, minhas, uid, marca, so_obrig):
     return {k: v for k, v in linha.items() if v is not None or k not in obrig}
 
 
-def _insere(tabela, colunas, fks, minhas, uid, marca) -> None:
+def _insere(tabela, colunas, fks, minhas, uid, marca) -> str | None:
+    """Insere e guarda a linha em `minhas`; devolve o erro do banco na última tentativa, se nenhuma entrou."""
+    erro = None
     for so_obrig in (False, True):
         linha = _linha(tabela, colunas, fks, minhas, uid, marca, so_obrig)
         with get_conn() as conn, conn.cursor() as cur:
             try:
                 cur.execute(f"insert into {tabela} ({', '.join(linha)}) values ({', '.join(['%s'] * len(linha))})"
                             " returning *", list(linha.values()))
-            except Exception:
+            except Exception as exc:
                 conn.rollback()
+                erro = f"{type(exc).__name__}: {str(exc).splitlines()[0]}"
                 continue
             minhas[tabela] = dict(cur.fetchone())
             conn.commit()
-            return
+            return None
+    return erro
 
 
-def semeia(prefixo: str, tabelas: set[str]) -> tuple[int, str, list[tuple[str, str]]]:
-    """Cria a pessoa e semeia `tabelas` e os pais delas. Devolve (uid, marca = prefixo + uid, [(tabela, coluna)] das
-    FK `set null` para `users` que tocou: a limpeza do conftest apaga o usuário, e essas linhas sobrariam sem dono)."""
+def semeia(prefixo: str, tabelas: set[str]) -> tuple[int, str, list[tuple[str, str, object]], dict[str, str]]:
+    """Cria a pessoa e semeia `tabelas` e os pais delas. Devolve:
+    - uid e marca (= prefixo + uid);
+    - [(tabela, coluna, valor)] de toda FK `set null` (para `users` ou para outra tabela) das linhas semeadas: a
+      limpeza do conftest apaga o usuário em cascata, e essas linhas sobrariam soltas. Apague-as antes;
+    - {tabela: erro do banco} do que não entrou."""
     uid = int(uuid.uuid4().int % 900_000_000) + 1
     marca = f"{prefixo}{uid}"
     ensure_user(uid)
@@ -114,12 +121,14 @@ def semeia(prefixo: str, tabelas: set[str]) -> tuple[int, str, list[tuple[str, s
             cur.execute(_COLUNAS, (t,))
             colunas[t] = cur.fetchall()
     minhas: dict[str, dict] = {}
+    erros: dict[str, str] = {}
     tentadas: set[str] = set()
     while faltam := sorted(pendentes - tentadas):  # o pai antes da filha: FK opcional sem pai ficaria nula
         prontas = [t for t in faltam if {fk["pai"] for fk in fks.get(t, [])} & pendentes <= tentadas | {t}] or faltam
         for t in prontas:
-            _insere(t, colunas[t], fks, minhas, uid, marca)
+            if erro := _insere(t, colunas[t], fks, minhas, uid, marca):
+                erros[t] = erro
             tentadas.add(t)
-    set_null = [(t, c) for t in minhas for fk in fks.get(t, []) if fk["pai"] == "users" and fk["regra"] == "n"
-                for c in fk["cols"]]
-    return uid, marca, set_null
+    soltas = [(t, c, minhas[t][c]) for t in minhas for fk in fks.get(t, []) if fk["regra"] == "n"
+              for c in fk["cols"] if minhas[t][c] is not None]
+    return uid, marca, soltas, erros
