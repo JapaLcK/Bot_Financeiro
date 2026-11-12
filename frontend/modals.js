@@ -139,6 +139,20 @@
     return escapeHtml(message).replace(/\n/g, "<br>");
   }
 
+  // O 2º clique do duplo clique que abriu o modal cai onde estava o botão de baixo; ali pode estar o primário (#1411). Na janela os
+  // botões não recebem ponteiro, o fundo não fecha e o Enter/Espaço não confirma. Cópia do `JANELA_DO_DUPLO_CLIQUE` do /painel
+  // (webapp/src/dashboard/parts/dialog.ts). Devolve "ainda na janela?".
+  const JANELA_DO_DUPLO_CLIQUE = 400;
+  function travarDuploClique(overlay, acoes) {
+    const abertoEm = performance.now();
+    const cedo = () => performance.now() - abertoEm < JANELA_DO_DUPLO_CLIQUE;
+    acoes.style.pointerEvents = "none";
+    setTimeout(() => { acoes.style.pointerEvents = ""; }, JANELA_DO_DUPLO_CLIQUE);
+    // Na janela o 2º clique cai no cartão e levaria o foco do primário para o body. Só na janela: depois dela, dá para selecionar o texto.
+    overlay.addEventListener("mousedown", (e) => { if (cedo()) e.preventDefault(); });
+    return cedo;
+  }
+
   function openModal({ kind, message, opts }) {
     ensureStyles();
     const o = opts || {};
@@ -166,6 +180,7 @@
       `;
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
+      const cedo = travarDuploClique(overlay, modal.querySelector(".pig-modal-actions"));
       // Trigger animation on next frame
       requestAnimationFrame(() => overlay.classList.add("open"));
 
@@ -183,13 +198,12 @@
       };
 
       const btnPrimary = modal.querySelector(".pig-modal-btn-primary, .pig-modal-btn-destructive");
-      const btnCancel = modal.querySelector(".pig-modal-btn-cancel");
       btnPrimary.addEventListener("click", () => close(isConfirm ? true : undefined));
-      if (btnCancel) btnCancel.addEventListener("click", () => close(false));
+      modal.querySelector(".pig-modal-btn-cancel")?.addEventListener("click", () => close(false));
 
       // Click no overlay = cancela (so em confirm; alert exige clique no OK)
       overlay.addEventListener("click", (e) => {
-        if (e.target === overlay && isConfirm) close(false);
+        if (e.target === overlay && isConfirm && !cedo()) close(false);
       });
 
       /* O modal declara role="dialog" + aria-modal="true" logo acima, o que
@@ -207,6 +221,8 @@
           if (isConfirm) close(false);
           return;
         }
+        // Enter/Espaço segurado, ou o 2º de um aperto duplo rápido no botão que abriu o modal: só o primeiro vale
+        if ((e.key === "Enter" || e.key === " ") && (e.repeat || cedo())) { e.preventDefault(); return; }
         if (e.key === "Enter") {
           e.preventDefault();
           close(isConfirm ? true : undefined);

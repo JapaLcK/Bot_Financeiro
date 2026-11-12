@@ -1,5 +1,5 @@
 /**
- * O que os testes da área do afiliado (dashboard_v2_afiliado*.test.mjs, afiliado_app.test.mjs) compartilham: as contas de fixture e o servidor de mentira
+ * O que os testes da área do afiliado (dashboard_v2_afiliado*.test.mjs, afiliado_app*.test.mjs) compartilham: as contas de fixture e o servidor de mentira
  * das rotas de frontend/routes/affiliates.py (mesmos campos e status). O `afiliado` do /api/v2/me é sobrescrito aqui e não em api_v2_respostas.json:
  * tests/test_api_v2_contrato.py exige que as chaves de `me` sejam as de `plan_tier`. O relógio do painel é fixo em 2026-10-02 (`abrirPainel`).
  * Não é `*.test.mjs` de propósito: o `node --test tests/frontend/*.test.mjs` não o roda.
@@ -80,13 +80,14 @@ export function servidor(corpo = ATIVA) {
 
 const SEM_RELEVANCIA = 1; // o `marca` do pb_conta é o uid do perfil do harness
 
-/** O /painel em `rota` para quem tem `afiliado` no /me ("ausente" = servidor antigo, sem o campo). */
-export async function abrirAfiliado(browser, { width = 1280, height = 800, afiliado = true, corpo = ATIVA, rota = "/afiliado", s = servidor(corpo), espera = "#page-title", clipboard } = {}) {
-  const p = await abrirPainel(browser, { width, espera: null, perfil: "padrao", marca: String(SEM_RELEVANCIA) });
+/** O /painel em `rota` para quem tem `afiliado` no /me ("ausente" = servidor antigo, sem o campo). `init`: script antes da página; `contexto`: o do `abrirPainel`. */
+export async function abrirAfiliado(browser, { width = 1280, height = 800, afiliado = true, corpo = ATIVA, rota = "/afiliado", s = servidor(corpo), espera = "#page-title", clipboard, init, contexto } = {}) {
+  const p = await abrirPainel(browser, { width, espera: null, perfil: "padrao", marca: String(SEM_RELEVANCIA), contexto });
   await p.page.setViewportSize({ width, height });
   await s.antes(p.ctx);
   await p.ctx.route((u) => u.pathname === "/api/v2/me", (r) => r.fulfill({ json: afiliado === "ausente" ? RESPOSTAS.me.pro : { ...RESPOSTAS.me.pro, afiliado } }));
   if (clipboard) await p.ctx.addInitScript(clipboard);
+  if (init) await p.ctx.addInitScript(init);
   await p.ir(rota);
   if (espera) await p.page.locator(espera).first().waitFor();
   return { ...p, s };
@@ -127,4 +128,42 @@ export const confirmar = (page) => page.getByRole("dialog").getByRole("button", 
 export async function ate(cond, ms = 8000) {
   const fim = Date.now() + ms;
   while (!cond()) { if (Date.now() > fim) throw new Error("tempo esgotado: " + cond); await new Promise((r) => setTimeout(r, 50)); }
+}
+
+// ── O /app (frontend/dashboard.js): é o que o WebView do iOS abre. ──
+const respJson = (body, status = 200) => (r) => r.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+export const CHAVE = "ana@pix.com";
+
+/** O /app logado como o uid 42. `sessao.uid`: quem o /auth/validate diz ser o dono da sessão agora (a troca de conta noutra aba muda isto). `contexto`: opções a mais do `newContext` (toque). */
+export async function abrirApp(browser, origin, { corpo = ATIVA, url = "/dashboard.html", width = 1280, height = 800, clipboard, marca, contexto } = {}) {
+  const ctx = await browser.newContext({ viewport: { width, height }, ...contexto });
+  const sessao = { uid: 42 };
+  if (marca) await ctx.addCookies([{ name: "pb_conta", value: marca, url: origin }]);
+  await ctx.route("**/auth/validate", (r) => respJson({ ok: true, user_id: sessao.uid })(r));
+  await ctx.route("**/auth/me", respJson({ app_access: true, plan_tier: "pro", dashboard_v2_enabled: true }));
+  await ctx.route("**/auth/dashboard-profile", respJson({ email: "ana@x.com", plan: "pro", feature_gates: {} }));
+  await ctx.route("**/api/affiliate/me", corpo ? respJson(corpo) : respJson({ detail: "x" }, 404));
+  await ctx.route("**cdnjs.cloudflare.com/**", (r) => r.abort());
+  const page = await ctx.newPage();
+  await page.addInitScript(() => { window.WebSocket = class { constructor() { this.readyState = 0; } send() {} close() {} }; });
+  if (clipboard) await page.addInitScript(clipboard);
+  await page.goto(`${origin}${url}`);
+  await page.waitForFunction(() => typeof window.PBRefresh === "function", null, { timeout: 15000 });
+  return { ctx, page, sessao };
+}
+export const naArea = async (page) => {
+  await page.waitForFunction(() => document.getElementById("sidenav-affiliate")?.style.display !== "none", null, { timeout: 10000 });
+  await page.evaluate(() => window.navigateTo("affiliate"));
+  await page.locator("#affiliate-link-input").waitFor();
+  // A área pinta o cache e refaz com o /api/affiliate/me novo, e a refeita apaga o que já se digitou: espera o pedido em curso
+  // (o `run` sem `force` devolve o que está no canal) e, com ele, a re-renderização, que roda antes desta continuação.
+  await page.evaluate(() => _affiliateChannel.run(async () => undefined));
+};
+/** Responde o POST do saque (anotando o corpo em `posts`), entra na área, digita a chave e abre a confirmação. */
+export async function pedirApp(page, ctx, posts) {
+  await ctx.route("**/api/affiliate/payout", (r) => { posts.push(r.request().postData()); return r.fulfill({ json: { ok: true, payout: { id: 9 } } }); });
+  await naArea(page);
+  await page.locator("#affiliate-pix-input").fill(CHAVE);
+  await page.locator("#affiliate-payout-btn").click();
+  await page.locator("#generic-confirm-overlay.open").waitFor();
 }

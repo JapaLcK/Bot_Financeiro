@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { copiar } from "../lib/copiar";
 import { money } from "../lib/format.js";
@@ -7,21 +7,29 @@ import { href, route } from "../router";
 import { useDonoDaTela } from "../familia/escrita";
 import { afiliadoQuery, falhaLeitura, type Afiliado as Dados } from "./api";
 import { Comissoes, Saques } from "./Historico";
-import { Saque } from "./Saque";
+import { Saque, avisoDaRecarga } from "./Saque";
 
-const Cabeca = () => <header className="page-head"><h1 id="page-title" tabIndex={-1}>{route("/afiliado").title}</h1></header>;
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
 
 // No /painel: a rota existe para todos (nasce antes do /me), então é aqui que a tela decide. Sem cadastro a API nem é chamada; quem protege de verdade é o 404 dela.
 export function PaginaAfiliado() {
-  return useAfiliado() ? <AreaAfiliado /> : <SoParaAfiliados />;
+  return <Topo>{useAfiliado() ? <AreaAfiliado /> : <SoParaAfiliados />}</Topo>;
+}
+
+// O título e, logo abaixo, o aviso do saque que a troca de conta interrompeu (#1412, a marca é do Saque.tsx). Fica acima dos ramos: a
+// conta nova pode não ser afiliada, nem ter o Saque, nem ter carregado. Lido uma vez por página (a leitura apaga a marca); no topo, à
+// vista sem rolar. O foco não muda: a primeira carga não o põe em lugar nenhum, e o `role=alert` é anunciado.
+export function Topo({ children }: { children: ReactNode }) {
+  const [aviso] = useState(avisoDaRecarga);
+  return <>
+    <header className="page-head"><h1 id="page-title" tabIndex={-1}>{route("/afiliado").title}</h1></header>
+    {aviso && <p role="alert" className="afil-aviso warn">{aviso}</p>}
+    {children}
+  </>;
 }
 
 function SoParaAfiliados() {
-  return <>
-    <Cabeca />
-    <section className="panel afiliado afil-fora"><p>Esta área é só para afiliados.</p><a className="btn btn-ghost" href={href("/")}>Voltar ao Resumo</a></section>
-  </>;
+  return <section className="panel afiliado afil-fora"><p>Esta área é só para afiliados.</p><a className="btn btn-ghost" href={href("/")}>Voltar ao Resumo</a></section>;
 }
 
 // `useDonoDaTela` relê o perfil ao voltar à aba: é essa leitura que, com a conta trocada, faz o main.tsx zerar a query. Sem dado, `Area` desmonta e a chave Pix digitada vai junto.
@@ -30,15 +38,12 @@ export function AreaAfiliado() {
   const q = useQuery(afiliadoQuery);
   if (q.data === null) return <SoParaAfiliados />;
   if (q.data) return <Area d={q.data} falhou={q.isError} tentar={() => void q.refetch()} sessao={q.error instanceof ErroApi && q.error.status === 401} />;
-  return <>
-    <Cabeca />
-    <section className="panel afiliado">
-      {q.isPending ? <p role="status" className="faint">Carregando…</p> : <div className="empty" role="alert">
-        <p>{falhaLeitura(q.error)}</p>
-        <button type="button" className="btn btn-ghost retry" onClick={() => void q.refetch()}>Tentar de novo</button>
-      </div>}
-    </section>
-  </>;
+  return <section className="panel afiliado">
+    {q.isPending ? <p role="status" className="faint">Carregando…</p> : <div className="empty" role="alert">
+      <p>{falhaLeitura(q.error)}</p>
+      <button type="button" className="btn btn-ghost retry" onClick={() => void q.refetch()}>Tentar de novo</button>
+    </div>}
+  </section>;
 }
 
 function Area({ d, falhou, tentar, sessao }: { d: Dados; falhou: boolean; tentar: () => void; sessao: boolean }) {
@@ -55,7 +60,6 @@ function Area({ d, falhou, tentar, sessao }: { d: Dados; falhou: boolean; tentar
     ["Já pago", money(s.paid), "enviado por Pix"],
   ];
   return <>
-    <Cabeca />
     {d.status === "disabled" && <p role="status" className="afil-aviso warn"><i className="ph ph-warning" aria-hidden="true" /> Seu cadastro de afiliado está desativado. O link não gera novas comissões, mas seus saldos, o histórico e o saque continuam aqui.</p>}
     {falhou && <div role="alert" className="afil-aviso warn"><p>{sessao ? "Sua sessão terminou." : "Não foi possível atualizar. Os valores abaixo podem estar velhos."}</p>
       {sessao ? <button type="button" className="btn btn-ghost" onClick={() => location.reload()}>Recarregar</button> : <button type="button" className="btn btn-ghost" onClick={tentar}>Tentar de novo</button>}</div>}

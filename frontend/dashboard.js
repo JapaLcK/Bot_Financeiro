@@ -3694,6 +3694,11 @@ async function saveHouseholdBudgetMetas() {
 
 let _genericModalResolver = null;
 let _genericModalLastFocus = null;
+// O 2º clique do duplo clique que abriu o modal cai onde estava o botão de baixo; ali pode estar o OK (#1411). Nesta janela os botões
+// não recebem ponteiro e o clique no fundo não fecha. Cópia do `JANELA_DO_DUPLO_CLIQUE` do /painel (webapp/src/dashboard/parts/dialog.ts).
+const JANELA_DO_DUPLO_CLIQUE = 400;
+let _genericModalAbertoEm = 0;
+let _genericModalTrava = null;
 
 function _ensureGenericConfirmModal() {
   if (document.getElementById("generic-confirm-overlay")) return;
@@ -3712,7 +3717,11 @@ function _ensureGenericConfirmModal() {
   `;
   document.body.insertAdjacentHTML("beforeend", html);
   document.getElementById("generic-confirm-overlay").addEventListener("click", e => {
-    if (e.target === e.currentTarget) _genericModalClose(false);
+    if (e.target === e.currentTarget && performance.now() - _genericModalAbertoEm >= JANELA_DO_DUPLO_CLIQUE) _genericModalClose(false);
+  });
+  // Na janela, o 2º clique cai no cartão (os botões não recebem ponteiro) e levaria o foco do OK para o body, fora do diálogo.
+  document.getElementById("generic-confirm-overlay").addEventListener("mousedown", e => {
+    if (performance.now() - _genericModalAbertoEm < JANELA_DO_DUPLO_CLIQUE) e.preventDefault();
   });
   document.getElementById("generic-confirm-cancel").addEventListener("click", () => _genericModalClose(false));
   document.getElementById("generic-confirm-ok").addEventListener("click", () => _genericModalClose(true));
@@ -3739,6 +3748,10 @@ function _ensureGenericConfirmModal() {
   document.addEventListener("keydown", (e) => {
     const ov = document.getElementById("generic-confirm-overlay");
     if (!ov || !ov.classList.contains("open")) return;
+    // O OK nasce focado: o 2º aperto de um Enter-Enter rápido no botão que abriu o modal o confirmaria, e o Enter/Espaço segurado
+    // repete a tecla. Na janela, ou repetida, a tecla não vale (o Esc nunca trava).
+    const cedo = performance.now() - _genericModalAbertoEm < JANELA_DO_DUPLO_CLIQUE;
+    if ((e.key === "Enter" || e.key === " ") && (e.repeat || cedo)) { e.preventDefault(); return; }
     if (e.key === "Escape") {
       e.stopPropagation();
       _genericModalClose(false);
@@ -3763,12 +3776,25 @@ function _genericModalClose(value) {
   }
 }
 
+// O que confirmModal e alertModal fazem igual ao abrir.
+function _genericModalAbrir(okBtn) {
+  _genericModalLastFocus = document.activeElement;
+  _genericModalAbertoEm = performance.now();
+  const acts = document.querySelector("#generic-confirm-overlay .modal-acts");
+  acts.style.pointerEvents = "none";
+  clearTimeout(_genericModalTrava);
+  _genericModalTrava = setTimeout(() => { acts.style.pointerEvents = ""; }, JANELA_DO_DUPLO_CLIQUE);
+  document.getElementById("generic-confirm-overlay").classList.add("open");
+  okBtn.focus();
+}
+
 function confirmModal(message, opts = {}) {
   _ensureGenericConfirmModal();
   const title = opts.title || "Confirmar";
-  const okText = opts.okText || "OK";
+  // `confirmText`/`destructive` são os nomes do modals.js, que vários chamadores daqui usam.
+  const okText = opts.okText || opts.confirmText || "OK";
   const cancelText = opts.cancelText || "Cancelar";
-  const danger = !!opts.danger;
+  const danger = !!(opts.danger || opts.destructive);
   document.getElementById("generic-confirm-title").textContent = title;
   document.getElementById("generic-confirm-body").textContent = message || "";
   const cancelBtn = document.getElementById("generic-confirm-cancel");
@@ -3782,9 +3808,7 @@ function confirmModal(message, opts = {}) {
   altBtn.style.display = opts.altText ? "" : "none";
   okBtn.textContent = okText;
   okBtn.className = danger ? "inst-delete-btn" : "btn-save";
-  _genericModalLastFocus = document.activeElement;
-  document.getElementById("generic-confirm-overlay").classList.add("open");
-  okBtn.focus();
+  _genericModalAbrir(okBtn);
   return new Promise(resolve => { _genericModalResolver = resolve; });
 }
 
@@ -3800,9 +3824,7 @@ function alertModal(message, opts = {}) {
   document.getElementById("generic-confirm-alt").style.display = "none";
   okBtn.textContent = okText;
   okBtn.className = "btn-save";
-  _genericModalLastFocus = document.activeElement;
-  document.getElementById("generic-confirm-overlay").classList.add("open");
-  okBtn.focus();
+  _genericModalAbrir(okBtn);
   return new Promise(resolve => { _genericModalResolver = () => resolve(undefined); _genericModalResolver = resolve; });
 }
 
@@ -11808,7 +11830,6 @@ function render(d) {
    PROGRAMA DE AFILIADOS — aba só aparece pra quem é afiliado
 ═══════════════════════════════════════════════════════════════════════ */
 let _affiliateCache = null;
-let _contaDaCarga = null; // o marcador de troca de conta (`webapp/src/dashboard/lib/sessao.ts`), lido no init
 const _affiliateChannel = makeFetchChannel(); // dedup + abort + geração
 
 async function _fetchAffiliate({ force = false } = {}) {
@@ -11823,7 +11844,6 @@ async function _fetchAffiliate({ force = false } = {}) {
 // Chamado no init: se o user é afiliado, mostra o item "Afiliados" no sidenav.
 async function initAffiliateNav() {
   try {
-    _contaDaCarga = getCookie("pb_conta");
     const res = await fetch(`${API}/api/affiliate/me`, { credentials: "same-origin" });
     if (!res.ok) return; // 404 = não é afiliado
     _affiliateCache = await res.json();
@@ -12089,11 +12109,25 @@ async function requestAffiliatePayout() {
   const valor = fmt(_affiliateCache?.stats?.available || 0);
   // O botão só desliga depois: o modal guarda o foco nele, e o Esc volta para lá.
   if (!await confirmModal(`Saque de ${valor} para a chave Pix ${pixKey}. Confira a chave: é para ela que o pagamento vai.`, { title: "Confirmar saque", okText: "Confirmar saque" })) return;
-  // A conta trocou noutra aba: a chave digitada aqui não vira saque da conta nova.
-  if (getCookie("pb_conta") !== _contaDaCarga) { location.reload(); return; }
   const btn = document.getElementById("affiliate-payout-btn");
   if (btn) btn.disabled = true;
   try {
+    // A conta pode ter trocado noutra aba (#1412): o servidor diz de quem é a sessão agora, e a chave digitada aqui não vira saque de outra
+    // conta. O 401 da sessão divergente é do auth-refresh.js (vai ao /login sem POST); falha de rede ou status ruim chega aqui e nada sai.
+    let dono;
+    try {
+      const v = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
+      if (!v.ok) throw new Error(String(v.status));
+      dono = (await v.json()).user_id;
+    } catch (_e) {
+      await alertModal("Não conseguimos verificar sua sessão. Esta solicitação de saque não foi enviada. Tente novamente.", { title: "Saque" });
+      return;
+    }
+    if (Number(dono) !== Number(USER_ID)) {
+      await alertModal("A conta conectada mudou. Esta solicitação de saque não foi enviada. A página será recarregada; confira a conta antes de tentar novamente.", { title: "Saque" });
+      location.reload();
+      return;
+    }
     const res = await fetch(`${API}/api/affiliate/payout`, {
       method: "POST",
       credentials: "same-origin",
