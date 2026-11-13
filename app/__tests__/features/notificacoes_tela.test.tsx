@@ -324,13 +324,17 @@ describe("Notificações — estados", () => {
     expect(patches()).toHaveLength(1);
   });
 
-  it.each([
-    ["402", resposta(402, { detail: { error: "subscription_required" } }), "Escolha um plano para ver suas notificações."],
-    ["403 password_required", resposta(403, { detail: { error: "password_required" } }), "Definir senha"],
-  ])("escrita com %s: muda de fase", async (_n, r, texto) => {
-    await abrir({}, { gancho: () => r });
+  it("escrita com 403 password_required: muda de fase", async () => {
+    await abrir({}, { gancho: () => resposta(403, { detail: { error: "password_required" } }) });
     await trocar("Resumo mensal", false);
-    await waitFor(() => expect(screen.getByText(texto)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Definir senha")).toBeTruthy());
+  });
+
+  it("escrita com 402 (conta cortada entre a leitura e o toque): relê e muda de fase", async () => {
+    const srv = await abrir();
+    srv.conta.cortada = true;
+    await trocar("Resumo mensal", false);
+    await waitFor(() => expect(screen.getByText("Escolha um plano para ver suas notificações.")).toBeTruthy());
   });
 });
 

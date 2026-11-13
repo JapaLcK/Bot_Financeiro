@@ -14,7 +14,7 @@ from pydantic import BaseModel, StrictBool
 from core.audit import AuditEvent, list_audit_events, record_audit_event
 from core.crypto import encrypt_pii_optional, hash_pii_optional
 from core.pg_text import detalhe_seguro
-from core.services.insights_notificacao import AVISO_AO_DESLIGAR_INSIGHTS, AVISO_PAUSADO, liberado, texto_adesao
+from core.services.insights_notificacao import AVISO_AO_DESLIGAR_INSIGHTS, AVISO_PAUSADO, AVISO_SEM_PLANO, liberado, texto_adesao
 from core.sessions import (
     device_label,
     list_user_sessions,
@@ -555,7 +555,8 @@ async def notification_settings_route(request: Request, user_id: int):
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         if (exc.status_code == 402 and detail.get("error") == "subscription_required"
                 and await asyncio.to_thread(insight_aviso_aderiu, user_id)):
-            raise HTTPException(status_code=402, detail={**detail, "insight_alert_email_enabled": True}) from exc
+            raise HTTPException(status_code=402, detail={**detail, "insight_alert_email_enabled": True,
+                                                         "insight_alert_email_lapsed_notice": AVISO_SEM_PLANO}) from exc
         raise
     return await _get_notification_settings(user_id)
 

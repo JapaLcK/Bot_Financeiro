@@ -10,10 +10,12 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 import requests
 
+from core.services import admin_notify
 from core.services.afiliado_reembolso import reenviar_pendentes
 from db.affiliates import request_payout
 from db.connection import get_conn
@@ -84,6 +86,19 @@ def test_canal_falha_e_marcar_pago_recusa(canal, adm, monkeypatch, modo, tipo):
     assert _reembolso(a, tipo).status_code == 200
     assert _pagar(adm, saque).status_code == 409
     assert dict(_status(a)) == {"status": "pending", "payout_id": saque}
+
+
+@pytest.mark.parametrize("valor, enviada", [(URL, URL), (f"  {URL}\n", URL), (f"{URL}\r\n", URL),
+                                            (" \n\t", None)])
+def test_url_do_canal_sem_espacos(monkeypatch, valor, enviada):
+    """O `_send` real (sem `mundo`): valor colado com espaço ou quebra de linha no painel (#1507)."""
+    urls = []
+    monkeypatch.setattr(requests, "post",
+                        lambda url, json, timeout: urls.append(url) or SimpleNamespace(status_code=204, text=""))
+    monkeypatch.setenv("ADMIN_NOTIFY_WEBHOOK_URL", valor)
+    assert admin_notify.canal_configurado() is (enviada is not None)
+    assert admin_notify._send("x") is (enviada is not None)
+    assert urls == ([enviada] if enviada else [])
 
 
 # ── Worker: parada, lote, concorrência ──────────────────────────────────────

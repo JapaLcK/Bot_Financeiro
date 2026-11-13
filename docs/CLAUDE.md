@@ -2247,7 +2247,7 @@ vira 30 com 30 pago), porque o pago do banco das compras que saem fica no limite
 corrente do cartão do banco: pagamento manual acima do total que sobra depois que uma compra some é aparado ao total, como o
 `rebuild_bill_totals` já faz. Limite: se o `billId` de uma compra
 passa a apontar para fatura do banco que não está no `/bills` (a aberta), a fatura antiga do Pig mantém o pago anterior até a
-do banco fechar e voltar no `/bills`. (também o export LGPD, `db/privacy.py`, lê a tabela.)
+do banco fechar e voltar no `/bills`. (também o export LGPD, `db/privacy_export_conjuntos.py`, lê a tabela.)
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com
@@ -2573,11 +2573,16 @@ carência: `AVISO_PAUSADO`, que as duas telas mostram sem cópia). `PATCH` com `
 `INSIGHT_EMAIL_USERS` 403, sem plano 403 `pro_required` com `feature: insights`, sem e-mail 400, com opt-out 409; o campo é `StrictBool` (`"false"` e `0` dão 422). Telefone e hora
 são validados antes de qualquer escrita. **Desligar sem plano (D2):** só o corpo exato `{"insight_alert_email_enabled": false}` passa por `authorize_account_access` (cortado e sem
 credencial: 200 `{"ok": true, "insight_alert_email_enabled": false}`); conta em exclusão e quem nunca escolheu plano seguem barrados; qualquer outro corpo segue a regra normal.
-Sem plano, o 402 `subscription_required` do `GET` traz `insight_alert_email_enabled: true` só para quem tem adesão (o `plan_selection_required` fica como sempre), e só o
-`/settings` mostra "Desligar agora", sem interruptor, com o texto da margem (cópia de `AVISO_SEM_PLANO` no HTML, comparada por teste). O `/painel` não tem esse caminho: conta cortada é mandada para `/precos` pelo gate
-da página. O link "Cancelar inscrição" do e-mail continua desligando tudo.
+Sem plano, o 402 `subscription_required` do `GET` traz `insight_alert_email_enabled: true` e o texto da margem em `insight_alert_email_lapsed_notice` (`AVISO_SEM_PLANO`)
+só para quem tem adesão (o `plan_selection_required` fica como sempre). O `/settings` e o app Expo mostram "Desligar agora", sem interruptor, com o texto da margem (o
+`/settings` numa cópia de `AVISO_SEM_PLANO` no HTML, comparada por teste; o app lê o campo do 402). O `/painel` não tem esse caminho: conta cortada é mandada para `/precos` pelo gate
+da página. O link "Cancelar inscrição" do e-mail continua desligando tudo. **App Expo (PR 3):** `notificacoes.tsx` + `features/conta/AvisoInsight.tsx` mostram a
+linha (escondida com `notice` nulo), a nota de D5 antes e "Avisos do Piggy por e-mail desligados." depois, e o "Desligar agora" na fase `plano`; desligar a adesão vai
+sempre por `desligarAviso` (corpo exato; a resposta curta tira da tela os dados da conta com plano, como o 402 de uma escrita) e relê. A curta aceita chave a mais
+e só recusa `email`; uma completa sem `email` é lida como curta (perda declarada). `tests/fixtures/app_aviso_desligado_curta.json` vigia a curta (o pytest a compara
+com o servidor, o jest confere que o app a aceita). Os rótulos curtos são cópias do web vigiadas por `notificacoes_aviso_paridade.test.ts`.
 `INSIGHT_EMAIL_USERS` (`liberado`, lida a cada chamada): vazia ou ausente = ninguém, ids por vírgula comparados como texto; `*` não libera ninguém enquanto
-`AVISO_ABERTO_A_TODOS` for falsa (trava do app nativo, que ainda retira a adesão em silêncio; virar a constante exige o PR 3, e um teste cobra).
+`AVISO_ABERTO_A_TODOS` for falsa (trava do app nativo: os builds sem o PR 3 retiram a adesão em silêncio; virar a constante espera o build com o PR 3 distribuído, §22.5 do plano B6, e um teste cobra).
 Cancelar retira a adesão e nada a devolve sem o interruptor (P7 (b)): `set_engagement_opt_out(uid, True)` (chat "parar emails", `PATCH engagement_email_enabled`,
 `/unsubscribe`) e `set_insight_email_opt_out(uid, True)` apagam a coluna na mesma transação; "reativar emails" e religar os interruptores não a tocam. Chat e página do
 `/unsubscribe` dizem que os avisos só voltam ligando de novo, para quem pode religar (`orientacao_aviso`). **Perder o direito (D1, §12 a §15 do plano B6):** o gatilho `trg_insight_aviso_direito`
@@ -2746,7 +2751,7 @@ em revisão" (`owed_cents`) soma toda comissão `pending`, inclusive a em revis�
 saque aberto: dois pedidos simultâneos dão um saque, e a FK do webhook que grava comissão
 não espera essa trava. Ele lê as comissões duas vezes: `for update` nas elegíveis e nova leitura
 excluindo pendência aberta, porque o webhook parcial não altera a linha da comissão, e o Postgres
-não reavalia o filtro nesse caso. Na exportação LGPD (`db/privacy.py`): `afiliado` (com `indicacoes`,
+não reavalia o filtro nesse caso. Na exportação LGPD (`db/privacy_export.py`): `afiliado` (com `indicacoes`,
 a mesma contagem de `stats.referrals`, e `chave_pix` decifrada, auditada em `pii_access_log` com
 `ATOR_TITULAR`), `afiliado_comissoes` (com `original_amount_cents`), `afiliado_saques` (com `chave_pix`
 do pedido) e `indicacao_recebida`; nunca `referred_user_id`, `stripe_invoice_id`,
@@ -2994,6 +2999,10 @@ sem rótulo, contada em `contestadas_para_conferir`. Disputa perdida sem reembol
 cobrindo pela `MARCA` na assinatura; assinatura já morta quando a recusa rodou não grava a `MARCA`,
 e o script conta a fatura. Fatura com `payment.type = payment_record` (`forma_inesperada`): nessa passada, o cliente inteiro sai em `clientes_com_falha`. É idempotente, e não imprime
 fatura, cliente nem indicado.
+
+`scripts/remover_colunas_refund_alert.py` (#1507) apaga `affiliate_commissions.refund_alert` e `refund_alert_sent_at`,
+órfãs do #1418. **`--aplicar` é irreversível**; sem ele é simulação. Roda o dono, depois das consultas que o próprio
+script imprime e do backfill acima. O manual (ordem, guardas, códigos de saída, limites) é o docstring do script.
 
 Conta excluída mantém cadastro, pagamentos e comissão: `affiliate_referrals` e
 `affiliate_commissions` estão em `_USER_FK_SET_NULL_TABLES`, com `referred_user_id` nulo. É a comissão
@@ -3566,6 +3575,10 @@ grep -ohiE "create table if not exists ([a-z_]+)" db/*.py | awk '{print $NF}' | 
 
 Exceção: os índices de FK nascem em `db/schema_repairs.py::ensure_fk_indexes_once`,
 fora do `init_db` (que segue a fonte do resto do DDL) — ver "Tarefas de fundo".
+
+**Tabela nova com FK para `users` (direta ou por join) → classificar na exportação LGPD**, em
+`db/privacy_export_conjuntos.py`: `EXPORTADAS` (dataset e SQL com `%(uid)s`) ou `NAO_EXPORTADAS`
+(com o motivo). A guarda é `tests/test_exportacao_completa.py`, que lê o fecho de FK no banco.
 
 **Toda coluna `numeric`/`double precision`/`real` do schema `public` tem um CHECK
 `finito_<coluna>` = `abs(col) <= utils_text.VALOR_MAX` (10**13, limite técnico do banco; NULL

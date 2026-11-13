@@ -139,11 +139,13 @@ MARCAS_PERMITIDAS: dict[str, tuple[str, ...]] = {
     "db/schema.py": TABELAS_NOVAS,            # o DDL das quatro tabelas
     "db/schema_repairs.py": ("pix_charges",),  # a linha do _USER_FK_SET_NULL_TABLES
     # `db/privacy.py` fala de UMA tabela e só dela: a exclusão de conta zera o
-    # rastreio/QR/customer de `pix_charges` e o export leva a cobrança (§13.2,
-    # caso 43). Entrada mínima de propósito — `pix_webhook_events` e
-    # `pix_payment_effects` NÃO são alcançáveis por `user_id` e não têm o que
-    # fazer aqui, então deixá-las de fora mantém o portão medindo.
+    # rastreio/QR/customer de `pix_charges`, e o export (`db/privacy_export_conjuntos.py`)
+    # leva a cobrança (§13.2, caso 43). Entrada mínima de propósito —
+    # `pix_webhook_events` e `pix_payment_effects` NÃO são alcançáveis por
+    # `user_id` e não têm o que fazer aqui, então deixá-las de fora mantém o
+    # portão medindo.
     "db/privacy.py": ("pix_charges",),
+    "db/privacy_export_conjuntos.py": ("pix_charges",),
     # A junção de contas (#635) passa a cobrança da origem ao destino num
     # `update ... set user_id`; a origem é apagada logo depois.
     "db/users.py": ("pix_charges",),
