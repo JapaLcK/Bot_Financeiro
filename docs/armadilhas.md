@@ -343,6 +343,15 @@ usuário no fallback genérico e ele recomeça o fluxo.
 `parse_money` aceita quase qualquer coisa e devolve um número (`132 50` → 13250,
 `132,50.` → 13250, `1"*400` → `inf`). É a raiz de três apontamentos seguidos e é chamado
 por dezenas de fluxos: valide **antes** de entregar a ele, não mexa nele sem PR próprio.
+Caractere de formato invisível (Unicode Cf: ZWSP, soft hyphen, BOM…) também o corta
+(`1<ZWSP>500` → 1): ele sai antes, na entrada da mensagem (`utils_text.sem_invisiveis`,
+primeira linha do `wa_runtime.process_message` e do `handle_incoming`, #1553). Quem
+chama o `parse_money` fora desses dois caminhos (o chat do app, #1560; a transcrição do
+áudio; o recibo por OCR; os cogs legados do Discord) não está coberto. E a limpeza tira
+**só a Cf**, não todo caractere que parece invisível: U+3164 (Hangul filler), U+2800
+(Braille em branco), U+FE0F solto, U+034F e o keycap `1️⃣500` (U+FE0F + U+20E3) ficam e
+ainda cortam o valor, gravando R$ 1,00 na Carteira sem confirmação (#1562, prioridade; a
+lista é a medida, não é exaustiva).
 
 ### Componentes fragmentados
 

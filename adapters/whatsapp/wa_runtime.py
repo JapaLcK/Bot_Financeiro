@@ -58,6 +58,7 @@ from db import (
     update_launch_category,
 )
 from utils_phone import mask_phone, mask_wamid
+from utils_text import sem_invisiveis
 
 logger = logging.getLogger(__name__)
 
@@ -818,6 +819,8 @@ def process_message(message: InboundMessage) -> None:
     pid = ancora = None
     mantem_pergunta = False
     try:
+        # Antes de todo ramo, inclusive os que respondem sem o núcleo (porta 4 do "Já paguei"): #1553.
+        message.text = sem_invisiveis(message.text)
         reply_to = message.wa_id
         logger.info(
             "WA process_message from=%s reply_to=%s chars=%s attachments=%s",
