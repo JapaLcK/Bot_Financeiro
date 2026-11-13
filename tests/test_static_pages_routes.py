@@ -914,8 +914,8 @@ def test_demo_desligado_a_raiz_carrega_o_repasse_de_utm_dos_quatro_ctas(monkeypa
     rotulos = [re.sub(r"<[^>]+>|&nbsp;|→", "", a).strip() for a in ctas]
     assert rotulos == ["7 dias grátis", "Começar meus 7 dias grátis",
                        "Começar meus 7 dias grátis", "7 dias grátis"], rotulos
-    assert ("Conecte seu banco uma vez, só leitura, e o Piggy organiza cada gasto no WhatsApp"
-            " e num painel completo.") in html
+    assert ("Pergunta no WhatsApp quanto sobrou, quanto foi no delivery ou quando a fatura fecha, e o"
+            " Piggy responde na hora. Você conecta o banco uma vez, só leitura, e ele organiza o resto.") in html
     assert "Manda o gasto no WhatsApp" not in html
     assert '<section id="planos" data-ciclo="mensal"' in html
 
