@@ -305,7 +305,7 @@ def test_M17_exportacao_tem_as_colunas_exatas_sem_pii_cifrada():
     aderir(uid)
     linha = json.loads(zipfile.ZipFile(io.BytesIO(build_user_export_zip(uid))).read("dados.json"))["dados"]["conta_login"][0]
     assert set(linha) == {
-        "id", "user_id", "email", "phone_e164", "phone_status", "phone_confirmed_at", "whatsapp_verified_at",
+        "id", "user_id", "display_name", "email", "phone_e164", "phone_status", "phone_confirmed_at", "whatsapp_verified_at",
         "plan", "plan_expires_at", "created_at", "stripe_customer_id", "engagement_opt_out", "last_activity_at",
         "last_tip_sent_at", "tip_email_opt_out", "last_insight_sent_at", "insight_email_opt_out",
         "insight_aviso_aderiu_em", "insight_aviso_coberto_ate", "whatsapp_updates_opt_out",

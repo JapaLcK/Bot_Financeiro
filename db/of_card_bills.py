@@ -1,7 +1,7 @@
 """Faturas do cartão que o banco fechou (`of_card_bills`, vindas de `/bills` da Pluggy).
 
 Nenhuma tela lê a tabela; quem a lê é `quitar_pelo_banco` (abaixo), que grava em `credit_bills.paid_amount` do
-cartão do banco o que o banco já recebeu (o export LGPD, db/privacy.py, também). Sem user_id: o dono é conta ->
+cartão do banco o que o banco já recebeu (o export LGPD, db/privacy_export_conjuntos.py, também). Sem user_id: o dono é conta ->
 conexão, e quem ler filtra por `join open_finance_accounts a ... join open_finance_connections c ...
 where c.user_id = %s` (como `of_recurring_payments`, ver db/of_recurring.py).
 
