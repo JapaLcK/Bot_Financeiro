@@ -38,6 +38,17 @@ _FIXOS = {
     "subscription_marks": {"status": "assinatura"},
     "of_cash_links": {"kind": "saque", "origem": "auto", "status": "ativo"},
     "pix_charges": {"status": "pending", "external_reference": "pix:{uid}", "credit_cents": 0, "extras": "[]"},
+    "checkout_funnel_events": {"kind": "started"},
+    "household_budget_config": {"bucket": "conforto"},
+    "household_budget_income": {"month": "2026-11"},
+    "ia_declaracao_livro": {"papel": "sim", "estado": None},
+    "remarketing_envios": {"status": "enviado"},
+    "remarketing_regua": {"origem": "precos"},
+    "recurring_expenses": {"payment_type": "account"},
+    "family_members": {"role": "member"},
+    "family_access_log": {"scope": "aggregates"},
+    "family_consents": {"scope": "aggregates"},  # para o banco recusar só pelo CHECK member<>viewer
+    "family_seat_purchases": {"source": "pix", "status": "paid"},
 }
 
 

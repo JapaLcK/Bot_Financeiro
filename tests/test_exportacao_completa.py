@@ -5,25 +5,32 @@ T1 completude: toda tabela do fecho de FK até `users` é tabela principal de `E
 T2 estrutura: toda SQL filtra por `%(uid)s` e nenhuma usa `%s`; nenhuma coluna que a SQL DEVOLVE
    (`cur.description`, não o texto da SQL) tem cara de segredo, salvo `COLUNAS_SEM_SEGREDO`.
 T3 isolamento: A e B com uma linha marcada em cada tabela exportada (`tests/_semeia_exportacao.py`); todo
-   dataset de A e de B tem linha, e semear B não muda nada no ZIP de A nem põe a marca de B nele.
-T4 segredo semeado: o `code` do link mágico, o hash e o cifrado das identidades, a URL com token do webhook
-   (em 6 formas do `raw`), o valor do `PLUGGY_WEBHOOK_SECRET` em qualquer forma e os hashes e cifrados da
-   conta não aparecem em nenhum membro do ZIP; a linha legítima continua lá.
-T5 formato: os membros do ZIP e as colunas de cada dataset são os da `main` de 2026-11-12, salvo `MUDARAM`.
+   dataset de A e de B tem linha, e semear B não muda nada no ZIP de A nem põe a marca de B nele. A única
+   tabela que o semeador não alcança é `family_consents` (`SEMEADOR_NAO_ALCANCA`).
+T4 segredo semeado: o `code` do link mágico (também dentro da conversa com o Piggy, PB8), o hash e o cifrado
+   das identidades, a URL com token do webhook (em 6 formas do `raw`), o valor do `PLUGGY_WEBHOOK_SECRET` em
+   qualquer forma, os hashes e cifrados da conta e as credenciais das tabelas do PR-B (MFA, sessão, push,
+   Google/Apple, Open Finance, telefone do teste, chaves da declaração, sessão do checkout) não aparecem em
+   nenhum membro do ZIP; a linha legítima continua lá.
+T5 formato: os datasets da `main` de 2026-11-12 são o prefixo do ZIP, com as colunas de antes salvo `MUDARAM`,
+   e os do PR-B estão todos lá.
 
 CONTROLES rodados à mão (CLAUDE.md §3), cada um num caso verde:
 - T1: tirar "lancamentos" de `EXPORTADAS` no arquivo de produção deixa `test_t1_registro_real` vermelho.
-- T3: `or true` depois do `%(uid)s` de `cartoes`, `transacoes_open_finance` ou `eventos_login` deixa
-  `test_t3_zip_de_a_nao_tem_nada_de_b` vermelho.
+- T3: `or true` depois do `%(uid)s` de `cartoes`, `transacoes_open_finance`, `eventos_login` ou
+  `familia_leituras_dos_meus_dados` deixa `test_t3_zip_de_a_nao_tem_nada_de_b` vermelho.
 - T4: voltar `sessoes_dashboard` para `select code, ...` e `identidades` para `select *`, ou trocar o
   `_sem_token` pelo `pop("webhookUrl")` só do topo, deixa `test_t4_segredo_semeado_nao_sai` vermelho.
 - T4: tirar de `_sem_token` o teste do valor do segredo, ou a troca na chave do dict, ou o tamanho mínimo,
   deixa `test_t4_valor_do_segredo_do_webhook_nao_sai_em_forma_nenhuma` vermelho.
+- T4: `select *` em `sessoes_login` deixa o T2 e `test_t4_segredo_semeado_nao_sai` vermelhos. O controle do
+  PB8 está na suíte, no fim de `test_t4_segredo_semeado_nao_sai`.
 
 CLASSES CEGAS: outro segredo, sem `token=`, dentro de coluna JSON (`raw`, `payload`, `details`); o segredo
 do webhook com menos de 16 caracteres, fora de `token=`; tabela ligada à
 pessoa por e-mail ou telefone, fora do fecho de FK (#1557); tabela que só existe em produção (DP9); tabela
-que o semeador não consegue preencher (o T3 reprova, não passa calado).
+que o semeador não consegue preencher (o T3 reprova, não passa calado); SQL que filtra pela coluna de pessoa
+errada numa tabela com duas (o semeador põe o mesmo uid nas duas): é o `tests/test_exportacao_familia.py`.
 """
 from __future__ import annotations
 
@@ -37,7 +44,8 @@ import zipfile
 import pytest
 
 from core.admin_dashboard import ensure_admin_tables
-from db import ensure_user, get_conn
+from core.services.ai_chat import runner
+from db import ensure_user, get_conn, privacy_export
 from db.open_finance import update_pluggy_open_finance_item_status
 from db.privacy_export import _segredo_do_webhook, build_user_export_zip
 from db.privacy_export_conjuntos import COLUNAS_SEM_SEGREDO, EXPORTADAS, NAO_EXPORTADAS
@@ -48,6 +56,9 @@ from tests._semeia_exportacao import semeia
 ORFAS_PENDENTES_DP9 = dict.fromkeys(
     ("user_category_triggers", "user_trigger_candidates", "user_category_feedback"),
     "pendente DP9: existência em produção não confirmada")
+
+# Isenção nomeada do T3: `CHECK (member_user_id <> viewer_user_id)`, e o semeador põe o mesmo uid nas duas.
+SEMEADOR_NAO_ALCANCA = {"family_consents": "CHECK member<>viewer: coberto por tests/test_exportacao_familia.py"}
 
 _FECHO = """
     with recursive fecho(oid) as (
@@ -98,9 +109,9 @@ def test_t1_registro_real():
 
 def test_t1_guarda_acusa_falta_orfa_e_duplicada():
     fecho = _fecho()
-    sem_ai = {k: v for k, v in NAO_EXPORTADAS.items() if k != "ai_messages"}
+    sem_rt = {k: v for k, v in NAO_EXPORTADAS.items() if k != "auth_refresh_tokens"}
     sem_lanc = {k: v for k, v in EXPORTADAS.items() if k != "lancamentos"}
-    assert _nao_classificadas(EXPORTADAS, sem_ai, fecho)[0] == ["ai_messages"]
+    assert _nao_classificadas(EXPORTADAS, sem_rt, fecho)[0] == ["auth_refresh_tokens"]
     assert _nao_classificadas(sem_lanc, NAO_EXPORTADAS, fecho)[0] == ["launches"]
     assert _nao_classificadas(EXPORTADAS, {**NAO_EXPORTADAS, "tabela_fantasma": "x"}, fecho)[1] == ["tabela_fantasma"]
     assert _nao_classificadas(EXPORTADAS, {**NAO_EXPORTADAS, "pockets": "x"}, fecho)[2] == ["pockets"]
@@ -155,7 +166,7 @@ def _zip(uid: int) -> tuple[dict, str, list[str]]:
 def _vazios(dados: dict, erros: dict) -> list[tuple[str, str | None]]:
     """Datasets sem linha (menos os da DP9), com o erro do banco que impediu semear a tabela principal."""
     return [(d, erros.get(EXPORTADAS[d][0])) for d, linhas in dados.items()
-            if not linhas and EXPORTADAS[d][0] not in ORFAS_PENDENTES_DP9]
+            if not linhas and EXPORTADAS[d][0] not in {*ORFAS_PENDENTES_DP9, *SEMEADOR_NAO_ALCANCA}]
 
 
 def test_t3_zip_de_a_nao_tem_nada_de_b():
@@ -166,6 +177,9 @@ def test_t3_zip_de_a_nao_tem_nada_de_b():
     try:
         antes, texto_antes, _ = _zip(a)
         assert _vazios(antes, erros_a) == []  # nada vazio por construção
+        # a isenção é estreita: o semeador TENTA a tabela, e ela é a única que o banco recusa por CHECK, o de pessoa
+        assert {t: e for t, e in erros_a.items() if e.startswith("CheckViolation")} == {"family_consents": (
+            'CheckViolation: new row for relation "family_consents" violates check constraint "family_consents_check"')}
         assert marca_a in texto_antes
         b, marca_b, soltas_b, erros_b = semeia("ISOB", tabelas)
         depois, texto, _ = _zip(a)
@@ -210,14 +224,37 @@ def _pessoa(marca: str) -> int:
        " institution_name) values (%s, 'pluggy', %s, 'UPDATED', '1', 'aninhado')", (uid, f"{marca}_del_{uid}"))
     update_pluggy_open_finance_item_status(f"{marca}_del_{uid}", "DELETED", {
         "event": "item/deleted", "itemId": f"{marca}_del_{uid}", "item": {"webhookUrl": _URL}})
+    # As credenciais das tabelas do PR-B, cada uma com valor único.
+    _q("insert into user_mfa (user_id, secret_encrypted, enabled) values (%s, %s, true)", (uid, f"{marca}_mfa_secret"))
+    _q("insert into auth_sessions (jti, user_id, ip) values (%s, %s, '10.9.8.7')", (f"{marca}_jti_{uid}", uid))
+    _q("insert into push_tokens (user_id, token, session_jti) values (%s, %s, %s)",
+       (uid, f"{marca}_push_token_{uid}", f"{marca}_push_jti"))
+    _q("insert into auth_identities (user_id, provider, provider_sub, email, email_enc) values (%s, 'google', %s, %s, %s)",
+       (uid, f"sub_{uid}", f"{marca}_google@x.com", f"{marca}_google_email_enc"))
+    _q("insert into open_finance_item_registry (user_id, provider_item_id, connect_token_hash, origin)"
+       " values (%s, %s, %s, 'connect')", (uid, f"{marca}_item_{uid}", f"{marca}_connect_token_hash"))
+    _q("insert into plan_trials (phone_hash, user_id) values (%s, %s)", (f"{marca}_phone_hash_{uid}", uid))
+    _q("insert into ia_declaracao_livro (user_id, papel, chave, payload_hash) values (%s, 'sim', %s, %s)",
+       (uid, f"{marca}_chave_decl", f"{marca}_payload_hash"))
+    _q("insert into checkout_funnel_events (user_id, session_id, kind) values (%s, %s, 'started')",
+       (uid, f"{marca}_cs_session"))
     return uid
 
 
-def test_t4_segredo_semeado_nao_sai():
+def _link_magico_na_conversa(uid: int) -> str:
+    """O caminho real: "painel" no chat com o Piggy grava o link `/d/{code}` em `ai_messages`. Devolve o `code`."""
+    resposta = runner.chat(uid, "painel")
+    return re.search(r"/d/([A-Za-z0-9_-]+)", resposta)[1]
+
+
+def test_t4_segredo_semeado_nao_sai(monkeypatch):
     uid = _pessoa("SEG")
+    codigo = _link_magico_na_conversa(uid)
     dados, texto, _ = _zip(uid)
     for segredo in ("SEG_codigo_magico", "SEG_challenge", "SEG_ext_hash", "SEG_ext_enc", "SEG_SEGREDO_WEBHOOK",
-                    "SEG_password_hash", "SEG_email_hash", "SEG_display_name_enc"):
+                    "SEG_password_hash", "SEG_email_hash", "SEG_display_name_enc", "SEG_mfa_secret", "SEG_jti",
+                    "SEG_push_token", "SEG_push_jti", "SEG_google_email_enc", "SEG_connect_token_hash",
+                    "SEG_phone_hash", "SEG_chave_decl", "SEG_payload_hash", "SEG_cs_session", codigo):
         assert segredo not in texto, segredo
     # positivo: as linhas que guardavam o segredo continuam, com o que é da pessoa
     assert dados["sessoes_dashboard"][0]["expires_at"]
@@ -227,6 +264,19 @@ def test_t4_segredo_semeado_nao_sai():
     assert raws["topo"] == {"webhookUrl": "(removido: continha token)", "clientUserId": "SEG_client"}
     assert raws["aninhado"]["item"] == {"webhookUrl": "(removido: continha token)"}
     assert dados["conta_login"][0]["display_name"] == "SEG_nome"
+    assert dados["verificacao_em_duas_etapas"][0]["enabled"] is True
+    assert dados["sessoes_login"][0]["ip"] == "10.9.8.7"
+    assert dados["dispositivos_push"][0]["platform"] == "ios"
+    assert dados["logins_google_apple"][0]["email"] == "SEG_google@x.com"
+    assert dados["itens_open_finance"][0]["provider_item_id"] == f"SEG_item_{uid}"
+    assert dados["periodo_de_teste"][0]["started_at"]
+    assert dados["declaracoes_ia"][0]["papel"] == "sim"
+    assert dados["funil_assinatura"][0]["kind"] == "started"
+    assert any("Dashboard financeiro" in m["content"] and "/d/(removido)" in m["content"]
+               for m in dados["conversas_ia"]), dados["conversas_ia"]
+    # negativo do PB8, na suíte: sem a troca, o `code` vivo sai em `conversas_ia`
+    monkeypatch.setattr(privacy_export, "_sem_link_magico", lambda mensagens, codigos: None)
+    assert codigo in _zip(uid)[1]
 
 
 def test_t4_valor_do_segredo_do_webhook_nao_sai_em_forma_nenhuma(monkeypatch):
@@ -257,6 +307,17 @@ DATASETS_DA_MAIN = (
     " recorrencias_open_finance faturas_cartao_open_finance afiliado afiliado_comissoes afiliado_saques"
     " indicacao_recebida eventos_login eventos_sistema cobrancas_pix").split()
 
+# Os do PR-B (#637), na ordem do registro. Ficam no fim de `EXPORTADAS`; um dataset de PR futuro não muda o T5.
+DATASETS_DO_PR_B = (
+    "conversas_ia acoes_pendentes_ia perguntas_sem_resposta_ia insights_ia declaracoes_ia agentes alertas_agentes"
+    " despesas_fixas receitas_fixas cobrancas_despesas_fixas creditos_receitas_fixas sugestoes_fixas_dispensadas"
+    " contas_a_pagar lotes_caixinhas categorias espacos_financeiros orcamento_domestico_potes"
+    " orcamento_domestico_renda alertas_orcamento_enviados itens_open_finance indicacao_prospeccao"
+    " planos_concedidos periodo_de_teste funil_assinatura remarketing_envios remarketing_regua reconquista_teste"
+    " auditoria_conta logins_google_apple sessoes_login dispositivos_push verificacao_em_duas_etapas"
+    " acessos_dados_pessoais familia_participacao familia_permissoes familia_leituras_dos_meus_dados"
+    " familia_grupo familia_assentos").split()
+
 # Colunas dos datasets de colunas NOMEADAS na `main` (os de `select *` são as colunas da tabela).
 _CONTA_LOGIN_MAIN = (
     "id user_id email phone_e164 phone_status phone_confirmed_at whatsapp_verified_at plan plan_expires_at"
@@ -275,8 +336,11 @@ MUDARAM = {
 
 def test_t5_membros_e_colunas_preservados():
     _, _, membros = _zip(_pessoa("FMT"))
-    assert membros == ["dados.json", "manifesto.json", *(f"csv/{d}.csv" for d in DATASETS_DA_MAIN)]
-    assert list(EXPORTADAS) == DATASETS_DA_MAIN
+    assert membros[:2 + len(DATASETS_DA_MAIN)] == ["dados.json", "manifesto.json",
+                                                   *(f"csv/{d}.csv" for d in DATASETS_DA_MAIN)]
+    assert {f"csv/{d}.csv" for d in DATASETS_DO_PR_B} <= set(membros)
+    assert list(EXPORTADAS)[:len(DATASETS_DA_MAIN)] == DATASETS_DA_MAIN
+    assert set(DATASETS_DO_PR_B) <= set(EXPORTADAS)
     main = {"conta_login": _CONTA_LOGIN_MAIN,
             "identidades": _colunas("select * from user_identities"),
             "sessoes_dashboard": ["code", "user_id", "expires_at", "created_at"]}

@@ -93,12 +93,44 @@ def _chave_pix_em_claro(rows: list[dict], user_id: int) -> None:
                            extra={"user_id": user_id})
 
 
+_PALAVRA = re.compile(r"[A-Za-z0-9_-]+")  # o alfabeto do `token_urlsafe` do código do link mágico
+
+
+def _sem_link_magico(mensagens: list[dict], codigos: set[str]) -> None:
+    """PB8: no texto da conversa com o Piggy, todo `code` de `dashboard_sessions` da pessoa vira marcador. É o
+    link `/d/{code}` que a resposta do `open_dashboard` grava em `ai_messages.content`: a mesma credencial que
+    não sai em `sessoes_dashboard`. Código já consumido sumiu da tabela e fica no texto, mas está morto.
+    ponytail: só olha mensagem com `/d/` (o único formato em que o código chega ao texto); fora dele, sem o custo
+    de tokenizar dezenas de milhares de mensagens."""
+    for m in mensagens:
+        if codigos and m["content"] and "/d/" in m["content"]:
+            m["content"] = _PALAVRA.sub(lambda p: "(removido)" if p[0] in codigos else p[0], m["content"])
+
+
+# PB6: os 3 avisos de falha do Plano Família levam o uid de outra pessoa (`db/family.py`, `accept_invite`;
+# `core/services/family_access.py`, `sync_from_owner`; `db/family_grants.py`, `recompute_users`). O log interno
+# fica com a correlação; no ZIP sai só o uid do titular do ZIP, inclusive nas linhas já gravadas.
+_FAMILIA_COM_TERCEIRO = re.compile(
+    r"^(family: (?:grant do convidado|grant do membro|recompute do membro) )(\d+)( \(titular )(\d+)")
+
+
+def _sem_uid_de_terceiro(mensagem: str | None, user_id: int) -> str | None:
+    def so_o_titular(uid: str) -> str:
+        return uid if uid == str(user_id) else "(removido)"
+    return _FAMILIA_COM_TERCEIRO.sub(lambda m: m[1] + so_o_titular(m[2]) + m[3] + so_o_titular(m[4]),
+                                     mensagem) if mensagem else mensagem
+
+
 def build_user_export_zip(user_id: int) -> bytes:
     datasets: dict[str, list[dict]] = {}
 
     with get_conn() as conn, conn.cursor() as cur:
         for name, (tabela, sql) in EXPORTADAS.items():
             datasets[name] = _fetch_rows(cur, name, sql, {"uid": user_id})[1] if _table_exists(cur, tabela) else []
+        cur.execute("select code from dashboard_sessions where user_id = %(uid)s", {"uid": user_id})
+        codigos = {row["code"] for row in cur.fetchall()}
+
+    _sem_link_magico(datasets["conversas_ia"], codigos)
 
     # O saque decifra o próprio snapshot: a chave usada naquele pedido, não a cadastrada hoje.
     for name in ("afiliado", "afiliado_saques"):
@@ -109,6 +141,7 @@ def build_user_export_zip(user_id: int) -> bytes:
         conexao["raw"] = _sem_token(conexao["raw"], segredo)
 
     for evento in datasets["eventos_sistema"]:
+        evento["message"] = _sem_uid_de_terceiro(evento["message"], user_id)
         if isinstance(evento["details"], dict):
             evento["details"] = {k: v for k, v in evento["details"].items()
                                  if k not in _DETAILS_FORA_DA_EXPORTACAO}
@@ -119,11 +152,15 @@ def build_user_export_zip(user_id: int) -> bytes:
         "format": "json+csv",
         "datasets": {name: len(rows) for name, rows in datasets.items()},
         "notes": [
-            "Hashes de senha não são exportados.",
+            "Não exportamos credenciais: hashes de senha, códigos e links de acesso, tokens, o segredo da"
+            " verificação em duas etapas e os tokens de notificação.",
             "Arquivos CSV são cópias tabulares; dados aninhados também aparecem no JSON completo.",
             "Do programa de afiliados saem só os dados do titular, com a chave Pix em claro (a cadastrada"
             " e a usada em cada saque); as pessoas indicadas não são identificadas, e de quem você indicou"
             " sai só a contagem.",
+            "Do Plano Família sai a sua participação; quem leu os seus dados aparece como 'titular do grupo'.",
+            "Os acessos aos seus dados pessoais saem agregados por dia, por quem (você, sistema, equipe PigBank"
+            " ou não identificado), por finalidade e por dado; o nome de quem trabalha no PigBank não sai.",
         ],
     }
     payload = {"manifesto": manifest, "dados": datasets}

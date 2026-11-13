@@ -463,6 +463,8 @@ def test_account_export_requires_password_and_emails_single_use_link(user_id, mo
     with zipfile.ZipFile(BytesIO(response.content)) as archive:
         payload = json.loads(archive.read("dados.json"))
         assert "csv/lancamentos.csv" in archive.namelist()
+        assert "csv/acessos_dados_pessoais.csv" in archive.namelist()  # as SQL do PR-B rodam na rota real
+    assert "familia_participacao" in payload["manifesto"]["datasets"]
     assert payload["manifesto"]["user_id"] == user_id
     assert payload["manifesto"]["datasets"]["lancamentos"] >= 1
     assert payload["manifesto"]["datasets"]["transacoes_cartao"] >= 1

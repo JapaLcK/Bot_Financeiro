@@ -167,33 +167,107 @@ EXPORTADAS: dict[str, tuple[str, str]] = {
         from pix_charges
         where user_id = %(uid)s
     """),
+    # PR-B (#637), decisões do dono de 2026-11-12/13. As de `select *` não têm coluna de outra pessoa nem segredo.
+    "conversas_ia": ("ai_messages", "select * from ai_messages where user_id = %(uid)s"),  # sem o `/d/{code}`: PB8
+    "acoes_pendentes_ia": ("ai_pending_actions", "select * from ai_pending_actions where user_id = %(uid)s"),
+    "perguntas_sem_resposta_ia": ("ai_fallback_log", "select * from ai_fallback_log where user_id = %(uid)s"),
+    "insights_ia": ("ai_proactive_cache", "select * from ai_proactive_cache where user_id = %(uid)s"),
+    # Sem `chave` e `payload_hash`: chaves internas de idempotência.
+    "declaracoes_ia": ("ia_declaracao_livro", """
+        select id, user_id, papel, estado, acao, launch_id, user_seq, criado_em, mudou_em
+        from ia_declaracao_livro where user_id = %(uid)s
+    """),
+    "agentes": ("agents", "select * from agents where user_id = %(uid)s"),
+    "alertas_agentes": ("agent_events", "select * from agent_events where user_id = %(uid)s"),
+    "despesas_fixas": ("recurring_expenses", "select * from recurring_expenses where user_id = %(uid)s"),
+    "receitas_fixas": ("recurring_incomes", "select * from recurring_incomes where user_id = %(uid)s"),
+    "cobrancas_despesas_fixas": ("recurring_charges", "select * from recurring_charges where user_id = %(uid)s"),
+    "creditos_receitas_fixas": ("recurring_income_credits",
+                                "select * from recurring_income_credits where user_id = %(uid)s"),
+    "sugestoes_fixas_dispensadas": ("recurring_suggestion_dismissed",
+                                    "select * from recurring_suggestion_dismissed where user_id = %(uid)s"),
+    "contas_a_pagar": ("bill_instances", "select * from bill_instances where user_id = %(uid)s"),
+    "lotes_caixinhas": ("pocket_lots", "select * from pocket_lots where user_id = %(uid)s"),
+    "categorias": ("user_categories", "select * from user_categories where user_id = %(uid)s"),
+    "espacos_financeiros": ("financial_spaces", "select * from financial_spaces where user_id = %(uid)s"),
+    "orcamento_domestico_potes": ("household_budget_config",
+                                  "select * from household_budget_config where user_id = %(uid)s"),
+    "orcamento_domestico_renda": ("household_budget_income",
+                                  "select * from household_budget_income where user_id = %(uid)s"),
+    "alertas_orcamento_enviados": ("budget_alert_sent", "select * from budget_alert_sent where user_id = %(uid)s"),
+    # Sem `connect_token_hash`. Só por `user_id`: o mesmo `provider_item_id` pode ter linha de outro dono.
+    "itens_open_finance": ("open_finance_item_registry", """
+        select id, provider, provider_item_id, origin, status, last_event, created_at, updated_at, removal_tracked
+        from open_finance_item_registry where user_id = %(uid)s
+    """),
+    "indicacao_prospeccao": ("prospect_referrals",
+                             "select code, created_at from prospect_referrals where referred_user_id = %(uid)s"),
+    "planos_concedidos": ("plan_grants", "select * from plan_grants where user_id = %(uid)s"),
+    # Sem `phone_hash` (hash do telefone, a PK).
+    "periodo_de_teste": ("plan_trials", "select user_id, started_at, model_version from plan_trials"
+                                        " where user_id = %(uid)s"),
+    # Sem `session_id` do checkout do Stripe.
+    "funil_assinatura": ("checkout_funnel_events",
+                         "select kind, created_at from checkout_funnel_events where user_id = %(uid)s"),
+    "remarketing_envios": ("remarketing_envios", "select * from remarketing_envios where user_id = %(uid)s"),
+    "remarketing_regua": ("remarketing_regua", "select * from remarketing_regua where user_id = %(uid)s"),
+    "reconquista_teste": ("reconquista_trial", "select * from reconquista_trial where user_id = %(uid)s"),
+    "auditoria_conta": ("audit_events", "select * from audit_events where user_id = %(uid)s"),
+    # Sem `email_enc`, `jti`, `token`/`session_jti` e `secret_encrypted`: credenciais.
+    "logins_google_apple": ("auth_identities", "select provider, provider_sub, email, created_at"
+                                               " from auth_identities where user_id = %(uid)s"),
+    "sessoes_login": ("auth_sessions", "select ip, user_agent, created_at, last_seen_at, revoked_at"
+                                       " from auth_sessions where user_id = %(uid)s"),
+    "dispositivos_push": ("push_tokens", "select platform, environment, created_at, updated_at"
+                                         " from push_tokens where user_id = %(uid)s"),
+    "verificacao_em_duas_etapas": ("user_mfa", "select enabled, activated_at, last_used_at, created_at"
+                                               " from user_mfa where user_id = %(uid)s"),
+    # P2 (a): agregado. O ator vira categoria por lista explícita (PB3 c): prefixo novo de gravador entra aqui.
+    # Só a finalidade antes de `:` (PB4 a): `cli_inspect:<motivo>` traz texto livre do operador. Sem nome do
+    # operador, `endpoint` e `extra`. `split_part` e não `like 'x:%'`: com parâmetro o `%` vira `%%`.
+    "acessos_dados_pessoais": ("pii_access_log", """
+        select (created_at at time zone 'America/Sao_Paulo')::date as dia,
+               case split_part(actor, ':', 1) when 'user' then 'você'
+                    when 'system' then 'sistema' when 'webhook' then 'sistema'
+                    when 'admin' then 'equipe PigBank' when 'cli' then 'equipe PigBank'
+                    else 'não identificado' end as quem,
+               split_part(purpose, ':', 1) as finalidade, field as dado, count(*) as acessos
+        from pii_access_log where subject_user_id = %(uid)s
+        group by 1, 2, 3, 4 order by 1, 2, 3, 4
+    """),
+    # Plano Família (P1 a): cada um recebe a própria participação, sem id nem uid de outra pessoa. Duas colunas
+    # de pessoa na mesma tabela: o papel certo é provado em tests/test_exportacao_familia.py.
+    "familia_participacao": ("family_members",  # PB5 (a): toda linha da pessoa, em qualquer papel
+                             "select role, joined_at, left_at, left_reason from family_members where user_id = %(uid)s"),
+    "familia_permissoes": ("family_consents",  # o que ELA liberou; o viewer (titular do grupo) não sai
+                           "select scope, granted_at, revoked_at from family_consents where member_user_id = %(uid)s"),
+    # `log_read` só grava se o viewer for o titular do grupo (db/family_consents.py).
+    "familia_leituras_dos_meus_dados": ("family_access_log", """
+        select 'titular do grupo' as quem_leu, scope, recurso, at
+        from family_access_log where member_user_id = %(uid)s
+    """),
+    "familia_grupo": ("family_groups", "select tier, created_at, members_suspended_at from family_groups"
+                                       " where owner_user_id = %(uid)s"),
+    "familia_assentos": ("family_seat_purchases", """
+        select p.source, p.external_ref, p.amount_cents, p.status, p.valid_from, p.valid_until
+        from family_seat_purchases p join family_groups g on g.id = p.group_id
+        where g.owner_user_id = %(uid)s
+    """),
 }
 
-_PR_B = "pendente: entra no PR-B da exportação (#637), decisões do dono de 2026-11-12"
 _CREDENCIAL = ("credencial efêmera (código, token ou HMAC); o pedido de exportação já sai em"
                " eventos_sistema (data_export_requested)")
 
 # tabela -> por que não sai no ZIP.
 NAO_EXPORTADAS: dict[str, str] = {
     **dict.fromkeys((
-        "agents", "agent_events", "ai_messages", "ai_pending_actions", "ai_fallback_log", "ai_proactive_cache",
-        "ia_declaracao_livro", "recurring_expenses", "recurring_incomes", "recurring_charges",
-        "recurring_income_credits", "recurring_suggestion_dismissed", "bill_instances", "pocket_lots",
-        "user_categories", "financial_spaces", "household_budget_config", "household_budget_income",
-        "budget_alert_sent", "open_finance_item_registry", "prospect_referrals", "plan_grants", "plan_trials",
-        "checkout_funnel_events", "remarketing_envios", "remarketing_regua", "reconquista_trial",
-        "audit_events", "auth_identities", "auth_sessions", "push_tokens", "user_mfa",
-        "pii_access_log",  # P2: sai agregado
-        # P1: cada pessoa recebe só a própria participação
-        "family_groups", "family_members", "family_consents", "family_access_log", "family_invites",
-        "family_seat_purchases",
-    ), _PR_B),
-    **dict.fromkeys((
         "account_reauth_codes", "data_export_tokens", "link_codes", "mfa_login_challenges",
         "password_reset_tokens", "platform_onboarding_tokens",
     ), _CREDENCIAL),
     "auth_refresh_tokens": "só `token_hash` e o mesmo IP e aparelho que as sessões de login",
     "user_mfa_backup_codes": "só hashes dos códigos de recuperação",
+    "family_invites": ("convite do Plano Família: só o hash do token e as datas; a entrada no grupo sai em"
+                       " familia_participacao, e quem usou o convite de outra pessoa é dado de terceiro"),
     "ebook_entregas": "decidido fora (docs/CLAUDE.md, ebook)",
     "stripe_email_pendente": "decidido fora (docs/CLAUDE.md): só `versao`, sem dado pessoal",
     "affiliate_referral_payments": "decidido fora no #1532: pagamentos do indicado",
@@ -211,4 +285,6 @@ COLUNAS_SEM_SEGREDO: dict[tuple[str, str], str] = {
     ("afiliado_saques", "pix_key_enc"): _VIRA_CHAVE_PIX,
     ("cobrancas_pix", "public_token"): "id do poll da cobrança, que também filtra por `user_id`"
                                        " (`buscar_por_public_token`, db/pix_charges.py): sem a sessão não abre nada",
+    ("indicacao_prospeccao", "code"): "código do link /i/{code} do funil de prospecção que a pessoa usou;"
+                                      " não abre nada",
 }
