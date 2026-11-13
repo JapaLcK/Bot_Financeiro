@@ -20,6 +20,36 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
+
+def sem_cf(texto: str | None) -> str:
+    """Sem a categoria Unicode Cf (formato invisível), menos o ZWJ U+200D e o ZWNJ U+200C. Remove, não troca por espaço."""
+    return "".join(c for c in (texto or "") if c in "\u200c\u200d" or unicodedata.category(c) != "Cf")
+
+
+# ZWJ/ZWNJ sem dois vizinhos que não são ASCII, espaço nem dígito: nenhum valor em português tem isso dos dois lados.
+# O `(?<![\u200c\u200d])` só tenta casar no começo da corrida: sem ele, "😀" + ZWJ×65536 + "😀" custava minutos
+# (quadrático, #1553 r2) e travava o worker único do WhatsApp. O resultado é o mesmo da regra sem a âncora.
+_JUNTOR_SOLTO_RE = re.compile(
+    r"(?<![\u200c\u200d])(?:(?<![^\x00-\x7f\s\d])[\u200c\u200d]+|[\u200c\u200d]+(?![^\x00-\x7f\s\d]))")
+
+
+def sem_invisiveis(texto: str | None) -> str:
+    r"""O texto da mensagem sem a categoria Unicode Cf, antes de qualquer leitura (#1553): "1<U+200B>500" é 1500.
+    Remove (não troca por espaço) TODO caractere Cf menos ZWJ/ZWNJ, pelo `unicodedata` do Python que roda (sem lista
+    fixa; a lista do Unicode 15.1, inclusive Cf visível como U+0600-0605, está na ADR 0006, "Invisíveis na entrada").
+    Exemplos: ZWSP U+200B, soft hyphen U+00AD, WJ U+2060, BOM U+FEFF, LRM/RLM U+200E/F, bidi U+202A-202E e
+    U+2066-2069, tags U+E0001 e U+E0020-E007F (as bandeiras com tag perdem a composição e viram 🏴). Nada fora da Cf
+    sai: U+3164, U+2800, U+034F e U+FE0F solto ficam (#1562). ZWJ U+200D e ZWNJ U+200C, depois disso: cada corrida deles
+    (um ou mais seguidos, misturados ou não) sai inteira quando está no começo ou no fim do texto, ou quando o caractere
+    logo antes OU logo depois dela é qualquer ASCII (U+0000-U+007F: letra, dígito, pontuação, `$`, `-`, `*`, `_`,
+    `~`...), qualquer espaço `\s` do Unicode (inclusive NBSP, espaço fino e quebra de linha) ou qualquer dígito `\d` do
+    Unicode (Nd: inclusive o de largura total e o arábico-índico). Só fica intacta entre dois caracteres que não são
+    nada disso (emoji composto como a família, escrita persa; "¹<ZWJ>⁵" também, porque ¹ é No e não Nd). Assim nunca
+    fica colado a dígito ASCII ou Nd nem a letra ASCII ("1<ZWJ>500" é 1500, "1,5 mi<ZWJ>l" é "1,5 mil"). Ficam o NBSP
+    U+00A0 e os espaços finos U+2009/U+202F (Zs), o seletor U+FE0F (Mn) e o tom de pele (Sk)."""
+    return _JUNTOR_SOLTO_RE.sub("", sem_cf(texto))
+
+
 def contains_word(text: str, word: str) -> bool:
     # Palavra vazia não casa NADA: `\b\b` casa qualquer texto com uma palavra.
     # Guarda AQUI e não em cada chamador — nome de caixinha só-emoji, keyword de
