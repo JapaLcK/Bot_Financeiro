@@ -159,8 +159,11 @@ def build_user_export_zip(user_id: int) -> bytes:
             " e a usada em cada saque); as pessoas indicadas não são identificadas, e de quem você indicou"
             " sai só a contagem.",
             "Do Plano Família sai a sua participação; quem leu os seus dados aparece como 'titular do grupo'.",
-            "Os acessos aos seus dados pessoais saem agregados por dia, por quem (você, sistema, equipe PigBank"
-            " ou não identificado), por finalidade e por dado; o nome de quem trabalha no PigBank não sai.",
+            "Os acessos aos seus dados pessoais saem agregados por dia, por quem (sistema, equipe PigBank ou não"
+            " identificado), por finalidade e por dado; o nome de quem trabalha no PigBank não sai.",
+            "O registro de acessos ainda não distingue o acesso feito por você, o feito por outra pessoa autorizada"
+            " (como o titular do Plano Família) e o feito por uma tarefa automática: esses aparecem como 'Autor do"
+            " acesso não identificado no registro'.",
         ],
     }
     payload = {"manifesto": manifest, "dados": datasets}

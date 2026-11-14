@@ -223,11 +223,13 @@ EXPORTADAS: dict[str, tuple[str, str]] = {
     "verificacao_em_duas_etapas": ("user_mfa", "select enabled, activated_at, last_used_at, created_at"
                                                " from user_mfa where user_id = %(uid)s"),
     # P2 (a): agregado. O ator vira categoria por lista explícita (PB3 c): prefixo novo de gravador entra aqui.
+    # `user:*` é ambíguo (D1, dono, 2026-11-14): `get_auth_user` grava `user:self` para o próprio titular, para o
+    # titular da família lendo um integrante e para job. Até os gravadores separarem quem lê (#1572), não vira "você".
     # Só a finalidade antes de `:` (PB4 a): `cli_inspect:<motivo>` traz texto livre do operador. Sem nome do
     # operador, `endpoint` e `extra`. `split_part` e não `like 'x:%'`: com parâmetro o `%` vira `%%`.
     "acessos_dados_pessoais": ("pii_access_log", """
         select (created_at at time zone 'America/Sao_Paulo')::date as dia,
-               case split_part(actor, ':', 1) when 'user' then 'você'
+               case split_part(actor, ':', 1) when 'user' then 'Autor do acesso não identificado no registro'
                     when 'system' then 'sistema' when 'webhook' then 'sistema'
                     when 'admin' then 'equipe PigBank' when 'cli' then 'equipe PigBank'
                     else 'não identificado' end as quem,
