@@ -1,7 +1,7 @@
 """A9 do grupo D: o ZIP da exportação LGPD leva `eventos_sistema` sem `details.traceback`.
 
 A pilha é do NOSSO código, não dado do titular; o banco e o painel admin continuam com
-ela. Só a chave de topo sai (`db/privacy.py::_DETAILS_FORA_DA_EXPORTACAO`); o resto do
+ela. Só a chave de topo sai (`db/privacy_export.py::_DETAILS_FORA_DA_EXPORTACAO`); o resto do
 `details` e a linha inteira ficam. Conferido no `dados.json` E no `csv/eventos_sistema.csv`.
 
 CONTROLES (CLAUDE.md §3), rodados à mão no PR: lista vazia → vermelho; o arquivo contra a

@@ -2117,7 +2117,7 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
             # Tipo + `sqlstate`, e NÃO o `str(exc)[:200]` que os irmãos de coluna
             # NULL gravam: com o dono na coluna estes `details` passam a sair
             # INTEIROS na exportação LGPD do próprio titular (`build_user_export_zip`,
-            # `db/privacy.py`), e o texto cru do psycopg numa falha de conexão traz
+            # `db/privacy_export.py`), e o texto cru do psycopg numa falha de conexão traz
             # host e porta. Mesma lista branca que a PR #539 adotou para exceção; o
             # stderr local também só leva tipo + `sqlstate` (#657, D4).
             details={"item_id": new_item_id, "origin": "pluggy_item_route",

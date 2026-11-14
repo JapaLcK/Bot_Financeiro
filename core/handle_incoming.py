@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
 
 import db
 from core.types import IncomingMessage, OutgoingMessage
@@ -35,7 +36,7 @@ from core.pg_text import MSG_VALOR_WHATSAPP, quadros_da_cadeia, violacao_finito
 from core.services.fonte_unica import FonteUnicaOF
 from core.services.plan_limits import PlanLimitExceeded
 from core.services.ai_chat_commands import MANTEM, ENCERRA, aviso_de_cota, pergunta_no_turno
-from utils_text import fmt_brl
+from utils_text import fmt_brl, sem_invisiveis
 from ai_router import _internal_user_id
 
 logger = logging.getLogger(__name__)
@@ -1107,7 +1108,10 @@ def handle_incoming(msg: IncomingMessage, *,
                     de_botao: bool = False) -> list[OutgoingMessage]:
     """O turno inteiro (`_atende`) e, se ele tirou a confirmação de declaração viva para rodar outro comando
     (`declaracao_confirma.suspende`, #1315), o desfecho dela: o comando não ajudou, a mesma pergunta volta; ajudou, ela
-    se encerra e a resposta avisa (DP-6)."""
+    se encerra e a resposta avisa (DP-6). O texto entra sem a categoria Unicode Cf, menos o ZWJ/ZWNJ entre dois
+    caracteres que não são ASCII, espaço nem dígito, como no emoji composto (`sem_invisiveis`, #1553)."""
+    if (limpo := sem_invisiveis(msg.text)) != (msg.text or ""):
+        msg = replace(msg, text=limpo)
     from core.handlers import declaracao_suspensao as ds
     token = ds.SUSPENSA.set(None)
     try:
