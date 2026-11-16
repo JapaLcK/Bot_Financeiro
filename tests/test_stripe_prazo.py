@@ -10,6 +10,13 @@ Controles (rodados, ver o relato do PR):
   · `Dispute.list` de volta à API de módulo                   → disputa vermelho;
   · `list_line_items` de volta à API de módulo                → e-book vermelho;
   · `VAGAS_CONFERENCIA = 5`                                   → vagas vermelho.
+  #1533 (a passada do e-book):
+  · sem o `continue` da Stripe fora                          → T5 (e `test_j8` do Pix) vermelhos;
+  · sem o orçamento `PRAZO_PASSADA_S`                        → T11 vermelho;
+  · qualquer erro conta como Stripe fora / 403 conta como queda → T6 vermelho;
+  · só `APIConnectionError` conta como queda                  → T5 por status (401, 429, 500, 409) vermelho;
+  · `stripe_fora = (...)` sem o `or`                          → `test_j9` do Pix vermelho;
+  · `PRAZO_STRIPE_S`/`PRAZO_PASSADA_S` trocados               → constantes vermelho.
   Positivo: a Stripe que responde devolve o mesmo resultado de hoje, e o e-book entrega.
 """
 from __future__ import annotations
@@ -74,19 +81,28 @@ def pendurada():
 
 @pytest.fixture
 def local():
-    """Stripe local: `rotas[caminho]` é o JSON da resposta, ou "prende" (segura sem responder)."""
-    rotas, pedidos, solta = {}, [], threading.Event()
+    """Stripe local: `rotas[caminho]` é o JSON da resposta, "prende" (segura sem responder) ou um status HTTP de
+    erro (int, com o corpo de erro da Stripe: o SDK escolhe a classe pelo status). `atraso` (s)
+    atrasa só as rotas configuradas: o 404 das sobras de outros testes na tabela compartilhada segue imediato.
+    `versoes` guarda o `Stripe-Version` de cada pedido, na ordem de `pedidos`."""
+    rotas, pedidos, versoes, solta = {}, [], [], threading.Event()
+    s = SimpleNamespace(rotas=rotas, pedidos=pedidos, versoes=versoes, atraso=0.0)
 
     class Stripe(BaseHTTPRequestHandler):
         def do_GET(self):
             u = urlparse(self.path)
             pedidos.append((u.path, parse_qs(u.query)))
+            versoes.append(self.headers.get("Stripe-Version"))
             corpo = rotas.get(u.path)
             if corpo == "prende":
                 solta.wait(30)
                 return
-            status = 200 if corpo is not None else 404
-            dados = json.dumps(corpo or {"error": {"type": "invalid_request_error", "message": "?"}}).encode()
+            if corpo is not None and s.atraso:
+                time.sleep(s.atraso)
+            status = corpo if isinstance(corpo, int) else 200 if corpo is not None else 404
+            if status != 200:
+                corpo = {"error": {"type": "invalid_request_error", "message": "?"}}
+            dados = json.dumps(corpo).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(dados)))
@@ -99,23 +115,35 @@ def local():
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Stripe)
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    yield SimpleNamespace(url=f"http://127.0.0.1:{srv.server_port}", rotas=rotas, pedidos=pedidos)
+    s.url = f"http://127.0.0.1:{srv.server_port}"
+    yield s
     solta.set()
     srv.shutdown()
     srv.server_close()
 
 
 def _na_rede(monkeypatch, url):
-    """Só o endereço muda: o resto dos argumentos é o que a produção passa."""
+    """Só o endereço muda: o resto dos argumentos é o que a produção passa. Devolve a lista de (caminho, segundos)
+    de cada pedido HTTP do cliente: o tempo da chamada à Stripe, sem o banco da rota em volta (#1533)."""
     real = getattr(stripe.StripeClient, "_real", stripe.StripeClient)
 
     def cliente(*a, **k):
         return real(*a, **k, base_addresses={"api": url})
 
     cliente._real = real
+    duracoes = []
+
+    def medido(self, method, url, *a, **k):
+        t = time.monotonic()
+        try:
+            return _so_local(self, method, url, *a, **k)
+        finally:
+            duracoes.append((urlparse(url).path, time.monotonic() - t))
+
     monkeypatch.setattr(stripe, "StripeClient", cliente)
-    monkeypatch.setattr(requests.Session, "request", _so_local)
+    monkeypatch.setattr(requests.Session, "request", medido)
     monkeypatch.setattr(ebook_entrega, "PRAZO_STRIPE_S", PRAZO, raising=False)
+    return duracoes
 
 
 def _em_thread(funcao, limite=5):
@@ -220,44 +248,129 @@ def test_vagas_conferencia_fixadas():
 
 
 # ── E-book (decisão do dono: as duas chamadas próprias dele também) ──────────
+# #1533: a passada inteira tem tempo limitado. Stripe fora → as linhas de cartão seguintes nem são reivindicadas;
+# Stripe lenta → o orçamento `PRAZO_PASSADA_S` para a passada, e o resto vai para o próximo ciclo sem claim.
 
-def test_ebook_desiste_no_prazo_por_linha_nao_envia_e_tenta_de_novo(local, monkeypatch, _logs):  # noqa: F811
-    """Stripe que não responde: cada linha desiste no prazo, nada sai, a linha segue aberta com o claim, e o
-    próximo ciclo depois do claim vencido entrega com a Stripe de volta (positivo)."""
+def _ebook(local, monkeypatch, n):
+    """`n` linhas de cartão, na ordem de `abertas()`, e os e-mails espiados. Devolve [(sid, uid, email)]."""
     _na_rede(monkeypatch, local.url)
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_job")
     enviados = []
     monkeypatch.setattr(es, "send_email", lambda to, *a, **k: enviados.append(to) or True)
-    contas = {}
-    for n in range(2):
+    contas = []
+    for _ in range(n):
         uid, email = _conta(senha="hash")
         sid = f"cs_prazo_{uid}"
         registrar(uid, sid, [(_PRECO, _url(uid))])
-        contas[sid] = (uid, email)
-        local.rotas[f"/v1/checkout/sessions/{sid}/line_items"] = "prende"
+        contas.append((sid, uid, email))
+    return contas, enviados
+
+
+def _responde(local, sid):
+    """A Stripe que responde para a compra `sid`: as 4 chamadas da linha de cartão."""
+    local.rotas |= {
+        f"/v1/checkout/sessions/{sid}/line_items": _lista(f"/v1/checkout/sessions/{sid}/line_items", {
+            "object": "item", "id": "li_1", "description": "Caderno", "price": {"object": "price", "id": _PRECO}}),
+        f"/v1/checkout/sessions/{sid}": {"object": "checkout.session", "id": sid, "invoice": "in_eb"},
+        "/v1/invoice_payments": _lista("/v1/invoice_payments", _paga_por("pi_eb")),
+        "/v1/payment_intents/pi_eb": _intent("pi_eb"),
+    }
+
+
+def _linha(uid):
+    (linha,) = _sql("select fechada_em, reivindicada_ate, reivindicada_ate > now() as presa, tentativas"
+                    " from ebook_entregas where user_id = %s", (uid,))
+    return linha
+
+
+def _falhas(uid):
+    return _sql("select details->>'erro' as erro from system_event_logs"
+                " where event_type = 'ebook_entrega_falhou' and user_id = %s", (uid,))
+
+
+def _para(enviados, contas):
+    return sorted(e for e in enviados if e in {email for _, _, email in contas})
+
+
+def test_ebook_para_o_cartao_na_queda_e_tenta_de_novo(local, monkeypatch, _logs):  # noqa: F811
+    """T5. Stripe que não responde: a 1ª linha desiste no prazo e as outras de cartão nem são consultadas (a
+    passada fica em 1 × PRAZO, qualquer que seja o número de linhas). Recuperação: com a Stripe de volta e o
+    claim vencido, um e-mail por conta, e uma passada a mais não repete nenhum."""
+    contas, enviados = _ebook(local, monkeypatch, 3)
+    (sid1, uid1, _), *resto = contas
+    local.rotas[f"/v1/checkout/sessions/{sid1}/line_items"] = "prende"
 
     fim = _em_thread(ebook_entrega.entregar_pendentes)
-    assert fim.get("valor") == 0 and fim["s"] < 3, fim
-    for sid, (uid, email) in contas.items():
-        assert len(_so(local.pedidos, f"/v1/checkout/sessions/{sid}/line_items")) == 1  # sem retentativa
-        (linha,) = _sql("select fechada_em, reivindicada_ate > now() as presa, tentativas from ebook_entregas"
-                        " where user_id = %s", (uid,))
-        assert (linha["fechada_em"], linha["presa"], linha["tentativas"]) == (None, True, 1)
-        (log,) = _sql("select details->>'erro' as erro from system_event_logs"
-                      " where event_type = 'ebook_entrega_falhou' and user_id = %s", (uid,))
-        assert log["erro"] == "APIConnectionError"
-    assert [e for e in enviados if e in {email for _, email in contas.values()}] == []
+    assert fim.get("valor") == 0 and fim["s"] < PRAZO + 0.5, fim
+    assert len(_so(local.pedidos, f"/v1/checkout/sessions/{sid1}/line_items")) == 1  # sem retentativa
+    linha = _linha(uid1)
+    assert (linha["fechada_em"], linha["presa"], linha["tentativas"]) == (None, True, 1)
+    assert [x["erro"] for x in _falhas(uid1)] == ["APIConnectionError"]
+    for sid, uid, _ in resto:
+        assert [p for p, _ in local.pedidos if sid in p] == []
+        linha = _linha(uid)
+        assert (linha["reivindicada_ate"], linha["tentativas"], _falhas(uid)) == (None, 0, [])
+    assert _para(enviados, contas) == []
 
-    for sid, (uid, _) in contas.items():  # a Stripe volta, o claim vence
-        local.rotas |= {
-            f"/v1/checkout/sessions/{sid}/line_items": _lista(f"/v1/checkout/sessions/{sid}/line_items", {
-                "object": "item", "id": "li_1", "description": "Caderno", "price": {"object": "price", "id": _PRECO}}),
-            f"/v1/checkout/sessions/{sid}": {"object": "checkout.session", "id": sid, "invoice": f"in_{sid}"},
-            "/v1/invoice_payments": _lista("/v1/invoice_payments", _paga_por(f"pi_{sid}")),
-            f"/v1/payment_intents/pi_{sid}": _intent(f"pi_{sid}"),
-        }
-        _sql("update ebook_entregas set reivindicada_ate = now() - interval '1 minute' where user_id = %s", (uid,))
+    for sid, _, _ in contas:  # a Stripe volta, o claim da 1ª vence
+        _responde(local, sid)
+    _sql("update ebook_entregas set reivindicada_ate = now() - interval '1 minute' where user_id = %s", (uid1,))
     _em_thread(ebook_entrega.entregar_pendentes)
-    assert sorted(e for e in enviados if e in {email for _, email in contas.values()}) == sorted(
-        email for _, email in contas.values())
-    assert _so(local.pedidos, f"/v1/checkout/sessions/{next(iter(contas))}/line_items")[-1] == {"limit": ["100"]}
+    _em_thread(ebook_entrega.entregar_pendentes)
+    assert _para(enviados, contas) == sorted(email for _, _, email in contas)
+    assert _so(local.pedidos, f"/v1/checkout/sessions/{sid1}/line_items")[-1] == {"limit": ["100"]}
+
+
+@pytest.mark.parametrize("status", [400, 403, 404])
+def test_ebook_erro_da_linha_nao_para_a_passada(local, monkeypatch, _logs, status):  # noqa: F811
+    """T6, positivo: 400/403/404 são da linha (`InvalidRequestError`/`PermissionError`: a compra, não a Stripe).
+    A 2ª linha sai na mesma passada."""
+    contas, enviados = _ebook(local, monkeypatch, 2)
+    (sid1, uid1, _), (sid2, _, email2) = contas
+    local.rotas[f"/v1/checkout/sessions/{sid1}/line_items"] = status
+    _responde(local, sid2)
+    _em_thread(ebook_entrega.entregar_pendentes)
+    assert [x["erro"] for x in _falhas(uid1)] == ["PermissionError" if status == 403 else "InvalidRequestError"]
+    assert _para(enviados, contas) == [email2]
+
+
+@pytest.mark.parametrize("status,erro", [(401, "AuthenticationError"), (429, "RateLimitError"),
+                                         (500, "APIError"), (409, "APIError")])
+def test_ebook_queda_da_stripe_para_o_cartao(local, monkeypatch, _logs, status, erro):  # noqa: F811
+    """T5 por status: chave recusada, limite, 5xx e o resto que o SDK chama de `APIError` (409 incluso) são queda.
+    A 2ª linha de cartão nem é consultada nem reivindicada."""
+    contas, enviados = _ebook(local, monkeypatch, 2)
+    (sid1, uid1, _), (sid2, uid2, _) = contas
+    local.rotas[f"/v1/checkout/sessions/{sid1}/line_items"] = status
+    _responde(local, sid2)
+    _em_thread(ebook_entrega.entregar_pendentes)
+    assert [x["erro"] for x in _falhas(uid1)] == [erro]
+    assert [p for p, _ in local.pedidos if sid2 in p] == []
+    assert (_linha(uid2)["reivindicada_ate"], _para(enviados, contas)) == (None, [])
+
+
+def test_ebook_constantes_fixadas():
+    """As mutações que sobreviviam: 16 s por chamada, 600 s por passada."""
+    assert (ebook_entrega.PRAZO_STRIPE_S, ebook_entrega.PRAZO_PASSADA_S) == (8, 60)
+
+
+def test_ebook_orcamento_da_passada(local, monkeypatch, _logs):  # noqa: F811
+    """T11, tempo total com a Stripe lenta mas respondendo: 4 chamadas de 0,4 s por linha. Passado o orçamento,
+    a linha em curso termina e as seguintes ficam sem pedido nem claim; a passada seguinte as entrega."""
+    monkeypatch.setattr(ebook_entrega, "PRAZO_PASSADA_S", 1)
+    contas, enviados = _ebook(local, monkeypatch, 3)
+    for sid, _, _ in contas:
+        _responde(local, sid)
+    local.atraso = 0.4
+    (sid1, _, email1), *resto = contas
+
+    fim = _em_thread(ebook_entrega.entregar_pendentes)
+    assert fim["s"] < 1 + 4 * PRAZO + 0.5, fim
+    assert _para(enviados, contas) == [email1]
+    for sid, uid, _ in resto:
+        assert [p for p, _ in local.pedidos if sid in p] == []
+        assert (_linha(uid)["reivindicada_ate"], _linha(uid)["tentativas"]) == (None, 0)
+
+    local.atraso = 0.0
+    _em_thread(ebook_entrega.entregar_pendentes)
+    assert _para(enviados, contas) == sorted(email for _, _, email in contas)  # um e-mail cada

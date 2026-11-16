@@ -314,6 +314,43 @@ def test_j6_compra_stripe_nunca_chama_o_asaas(mundo, asaas_falso):
     assert len(mundo.para(email)) == 1 and asaas_falso["chamadas"] == []
 
 
+def test_j8_stripe_fora_pula_o_cartao_e_entrega_o_pix(user_id, externo, mundo, asaas_falso):
+    """#1533: cartão com a Stripe fora (`APIConnectionError`), depois Pix, depois cartão. O Pix não toca na
+    Stripe e sai na mesma passada; o 2º cartão nem é consultado (bateria na mesma queda)."""
+    import stripe
+    from test_ebook_entrega import _conta
+
+    primeiro, _ = _conta(senha="hash")
+    mundo.pendencia(primeiro, f"cs_j8a_{primeiro}")
+    _paga(user_id)
+    segundo, _ = _conta(senha="hash")
+    mundo.pendencia(segundo, f"cs_j8b_{segundo}")
+    mundo.explode = stripe.APIConnectionError("stripe fora")
+    entregar_pendentes()
+    assert {r["resultado"] for r in _pendencias(user_id).values()} == {"enviado"}
+    assert len(_emails(mundo, user_id)) == 2
+    assert f"cs_j8b_{segundo}" not in [sid for sid, _ in mundo.chamadas]
+
+
+def test_j9_erro_da_linha_depois_da_queda_nao_religa_o_cartao(user_id, externo, mundo, asaas_falso):
+    """#1533: depois da queda, o Pix que falha por erro dele (Asaas fora) não desliga o `stripe_fora`: o 2º cartão
+    segue sem consulta."""
+    import stripe
+    from test_ebook_entrega import _conta
+
+    primeiro, _ = _conta(senha="hash")
+    mundo.pendencia(primeiro, f"cs_j9a_{primeiro}")
+    _paga(user_id)
+    segundo, _ = _conta(senha="hash")
+    mundo.pendencia(segundo, f"cs_j9b_{segundo}")
+    mundo.explode = stripe.APIConnectionError("stripe fora")
+    asaas_falso["resposta"] = asaas.AsaasApiError("fora", status_code=503)
+    entregar_pendentes()
+    assert asaas_falso["chamadas"], "o Pix não chegou a falhar: o teste não mede nada"
+    assert {r["resultado"] for r in _pendencias(user_id).values()} == {None}
+    assert f"cs_j9b_{segundo}" not in [sid for sid, _ in mundo.chamadas]
+
+
 # ── M. DDL ───────────────────────────────────────────────────────────────────
 
 def test_m1_init_db_duas_vezes_e_check_recusa_nao_array(user_id):
