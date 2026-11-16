@@ -221,28 +221,14 @@ def test_agenda_reaberta_nao_duplica_e_lembra():
     assert [x["id"] for x in B.list_due_bill_reminders(uid, today_tz())] == [b["id"]]
 
 
-def test_pagamento_nao_abre_2a_conexao_com_a_transacao_aberta(monkeypatch):
+def test_pagamento_nao_abre_2a_conexao_com_a_transacao_aberta(niveis_de_conexao):
     """`add_launch_and_update_balance(cur=)` chamava `ensure_user` (2ª conexão) dentro da
     transação: N pagamentos simultâneos esgotavam o pool (PoolTimeout)."""
-    from contextlib import contextmanager
-    from psycopg_pool import ConnectionPool
     uid = usuario_pagante()
     c = conta_luz(uid)
-    real, nivel, aninhadas = ConnectionPool.connection, [0], []
-
-    @contextmanager
-    def conta(self, *a, **k):
-        aninhadas.append(nivel[0]) if nivel[0] else None
-        nivel[0] += 1
-        try:
-            with real(self, *a, **k) as conn:
-                yield conn
-        finally:
-            nivel[0] -= 1
-
-    monkeypatch.setattr(ConnectionPool, "connection", conta)
+    del niveis_de_conexao[:]
     B.mark_bill_paid(uid, c["id"], metodo="carteira")
-    assert not aninhadas, "get_conn com a transação do pagamento aberta"
+    assert not any(niveis_de_conexao), "get_conn com a transação do pagamento aberta"
 
 
 def test_lock_do_usuario_segura_o_pagamento_pausado(monkeypatch):

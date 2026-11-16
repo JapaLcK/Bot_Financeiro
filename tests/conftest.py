@@ -712,3 +712,52 @@ def sem_trava_do_turno(monkeypatch):
         yield True
 
     monkeypatch.setattr(runner, "trava_do_turno", passa)
+
+
+@pytest.fixture
+def pool_de(monkeypatch):
+    """Troca o pool por um pequeno, com timeout curto: conexão aninhada vira `PoolTimeout`."""
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    import db.connection as conexao
+
+    abertos = []
+    conninfo = conexao._get_pool().conninfo
+
+    def _pool(tamanho):
+        pool = ConnectionPool(conninfo, connection_class=conexao._Conn, min_size=1, max_size=tamanho,
+                              timeout=2, kwargs={"row_factory": dict_row}, open=True)
+        abertos.append(pool)
+        monkeypatch.setattr(conexao, "_get_pool", lambda: pool)
+        return pool
+
+    yield _pool
+    monkeypatch.undo()
+    for pool in abertos:
+        pool.close()
+
+
+@pytest.fixture
+def niveis_de_conexao(monkeypatch):
+    """Lista, por conexão pedida ao pool, quantas a MESMA chamada já segurava (0 = nenhuma).
+
+    Um contador por processo, não por thread: serve só para teste de uma thread.
+    """
+    from contextlib import contextmanager
+    from psycopg_pool import ConnectionPool
+
+    real, nivel, niveis = ConnectionPool.connection, [0], []
+
+    @contextmanager
+    def conta(self, *a, **k):
+        niveis.append(nivel[0])
+        nivel[0] += 1
+        try:
+            with real(self, *a, **k) as conn:
+                yield conn
+        finally:
+            nivel[0] -= 1
+
+    monkeypatch.setattr(ConnectionPool, "connection", conta)
+    return niveis
