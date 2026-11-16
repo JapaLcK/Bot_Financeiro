@@ -1912,8 +1912,8 @@ do negócio, até a retomada mais 7 dias. Os 7 dias depois da retomada são o pr
 que ficou; uma guarda só "enquanto ativa" o perderia se a purga diária rodasse entre a retomada e a varredura.
 Por isso a retomada é um `update`, e gatilhos (`trg_pausa_pix_sem_delete` e `_sem_truncate`) recusam o `delete` e o `truncate` da linha.
 **Aviso:** com a pausa ativa há 30 min, o dreno avisa o admin (`notify_pix_alerta`); depois, a cada 6 h e, no
-último dia antes dos 7 dias de pausa (e depois deles), de hora em hora. A cadência de 6 h é escolha do Coder,
-ainda não confirmada pelo dono. Canal fora tenta de novo na passada seguinte; o envio sai depois do commit da
+último dia antes dos 7 dias de pausa (e depois deles), de hora em hora. A cadência de 6 h foi confirmada pelo dono
+(2026-11-16). Canal fora tenta de novo na passada seguinte; o envio sai depois do commit da
 marca, sem travar a linha. O texto diz há quanto tempo está pausada, que o que a pausa segura fica guardado e
 quanto falta para os 7 dias. Nunca retoma sozinho. Nada disto foi executado em produção. Só os passos 1 e 4
 escrevem; o resto é leitura.
