@@ -6,8 +6,8 @@ já provou o e-mail (senha, Google ou Apple), confirma a compra pelas linhas da
 sessão no Stripe, segura a entrega se a cobrança foi estornada ou contestada
 (`_compra_estornada`) e manda o link para o e-mail ATUAL da conta. Os cadernos do
 Pix (`session_id` = `pix:<id>`) são conferidos por `pix_extras.conferir_entrega`. Cada produto é
-uma linha com claim, backoff e tentativas próprios: a falha de um não segura os
-outros.
+uma linha com claim, backoff e tentativas próprios: o erro de uma linha não segura as
+outras, mas com a Stripe fora as linhas de cartão seguintes esperam o próximo ciclo (#1533).
 
 Entrega "pelo menos uma vez": se o processo cair entre o envio e o `fechar`, o
 claim expira e o e-mail sai de novo. Nunca logar a `ebook_url` (é o acesso ao
@@ -17,6 +17,7 @@ PDF pago).
 from __future__ import annotations
 
 import os
+import time
 
 from core.observability import log_system_event_sync
 from core.services.email_service import send_ebook_email
@@ -27,7 +28,11 @@ from db.ebook_entregas import abertas, fechar, reivindicar
 from db.google_auth import conta_sem_credencial
 
 
-PRAZO_STRIPE_S = 8  # por chamada, sem retentativa: distingue lenta de pendurada (o mesmo do `funil_fonte_stripe`)
+# Por operação de socket, sem retentativa: distingue lenta de pendurada (o mesmo do `funil_fonte_stripe`).
+PRAZO_STRIPE_S = 8
+# Orçamento da passada; a linha em curso termina (até 4 chamadas; 8 s de silêncio por operação, sem teto se a
+# Stripe gotejar).
+PRAZO_PASSADA_S = 60
 
 
 def cliente_stripe(key: str):
@@ -114,15 +119,27 @@ def _entregar(uid: int, sid: str, preco: str, key: str) -> bool:
 
 def entregar_pendentes() -> int:
     """Uma passada. Devolve quantos e-books saíram. Inerte sem
-    `STRIPE_SECRET_KEY` (também impede a suíte de consumir pendências)."""
+    `STRIPE_SECRET_KEY` (também impede a suíte de consumir pendências).
+    Tempo limitado (#1533): passado o `PRAZO_PASSADA_S`, o resto fica para o próximo ciclo, sem claim;
+    com a Stripe fora (`StripeError` que não é 400/403/404 da linha), as linhas de cartão seguintes nem
+    são reivindicadas, e o Pix, que não toca na Stripe, segue."""
+    import stripe  # noqa: PLC0415
+
     key = os.getenv("STRIPE_SECRET_KEY")
     if not key:
         return 0
-    n = 0
+    fim = time.monotonic() + PRAZO_PASSADA_S
+    n, stripe_fora = 0, False
     for uid, sid, preco in abertas():
+        if time.monotonic() > fim:
+            break
+        if stripe_fora and not sid.startswith("pix:"):
+            continue
         try:
             n += _entregar(uid, sid, preco, key)
         except Exception as exc:          # uma linha não derruba a passada
+            stripe_fora = stripe_fora or (isinstance(exc, stripe.StripeError) and not isinstance(
+                exc, (stripe.InvalidRequestError, stripe.PermissionError)))
             log_system_event_sync(
                 "error", "ebook_entrega_falhou",
                 "Entrega do e-book falhou; o claim expira e o próximo ciclo tenta.",

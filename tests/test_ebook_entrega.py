@@ -22,6 +22,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+import stripe as _stripe_real  # as classes de erro reais, antes de o `mundo` trocar `sys.modules["stripe"]`
 
 from _billing_grants_helpers import garantir_system_event_logs
 from _lifespan_probe import sondar
@@ -82,7 +83,9 @@ def mundo(monkeypatch):
     `latest_charge`) vem de `cobranca[sid]`; o padrão é um pagamento pago, sem
     estorno nem contestação; `cobranca[sid]["latest_charge"]` troca a charge
     inteira (forma inesperada). `explode_cobranca` = "retrieve", "list" ou "pi"
-    derruba aquela chamada. `m.no(fake)` liga tudo isso a outro Stripe falso."""
+    derruba aquela chamada; `explode` = True (RuntimeError) ou a exceção a levantar.
+    As classes de erro são as reais: a passada separa a queda da Stripe do erro da
+    linha por elas (#1533). `m.no(fake)` liga tudo isso a outro Stripe falso."""
     import db_support
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_job")
     m = SimpleNamespace(sessoes={}, chamadas=[], enviados=[], envio_ok=True, explode=False,
@@ -91,7 +94,7 @@ def mundo(monkeypatch):
     def _list_line_items(sid, api_key=None, limit=10):
         m.chamadas.append((sid, api_key))
         if m.explode:
-            raise RuntimeError("stripe fora")
+            raise m.explode if isinstance(m.explode, Exception) else RuntimeError("stripe fora")
         return _pagina(m.sessoes[sid], limit)
 
     def _cob(sid):
@@ -126,7 +129,10 @@ def mundo(monkeypatch):
     m.stripe = SimpleNamespace(
         checkout=SimpleNamespace(Session=SimpleNamespace(list_line_items=_list_line_items, retrieve=_retrieve)),
         InvoicePayment=SimpleNamespace(list=_pagamentos),
-        PaymentIntent=SimpleNamespace(retrieve=_payment_intent))
+        PaymentIntent=SimpleNamespace(retrieve=_payment_intent),
+        **{nome: getattr(_stripe_real, nome) for nome in
+           ("StripeError", "InvalidRequestError", "PermissionError", "APIConnectionError", "RateLimitError",
+            "AuthenticationError", "APIError")})
     m.no = lambda fake: vars(fake).update(vars(m.stripe))
     monkeypatch.setitem(sys.modules, "stripe", m.stripe)
     instalar(monkeypatch)  # o `cliente_stripe` de produção (#1499) cai neste falso
