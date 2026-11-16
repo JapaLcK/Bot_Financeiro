@@ -59,7 +59,7 @@ MARCAS_DO_ASAAS = ("asaas.com", "ASAAS_")
 # Mora AQUI, e não lá, porque este arquivo não importa `pytest` nem `db` — a
 # direção do import é do módulo leve para o pesado.
 TABELAS_NOVAS = ("pix_charges", "pix_webhook_events", "pix_payment_effects",
-                 "pix_unmatched_payments")
+                 "pix_unmatched_payments", "pix_estornos_recebidos")
 
 
 # PROSA: documentação DEVE falar do Asaas, e `.md` não executa. É o ÚNICO falso
@@ -115,6 +115,11 @@ MARCAS_PERMITIDAS: dict[str, tuple[str, ...]] = {
     "db/webhook_outbox.py": ("pix_charges", "pix_webhook_events",
                              "pix_payment_effects"),
     "db/pix_effects.py": ("pix_webhook_events", "pix_payment_effects"),
+    # O marcador do estorno (#1437): lê `ASAAS_BASE_URL`/`ASAAS_CONTA` só para gravar a ORIGEM
+    # (ambiente e conta), nunca monta host; o SQL classifica pela `pix_charges` e lê o `revoke`.
+    "db/pix_estornos.py": ("ASAAS_", "pix_charges", "pix_payment_effects", "pix_estornos_recebidos"),
+    # O script do deploy do #1437: lê a outbox e cita as env `ASAAS_*` na prosa de como rodar.
+    "scripts/pix_estornos_pendentes.py": ("ASAAS_", "pix_webhook_events", "pix_estornos_recebidos"),
     # Os cadernos extras do Pix: a leitura por dono para o job de entrega e o
     # serviço (total, conferência no Asaas, oferta e seleção do checkout). Só o nome
     # da tabela — no serviço, dentro de `db.pix_charges_saga` (`buscar_ativa`).

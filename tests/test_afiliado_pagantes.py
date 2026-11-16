@@ -340,7 +340,7 @@ def test_pix_estorno_antes_do_pagamento_nao_cria_pagante(externo):
 
     def sem_pagante():
         assert _linhas(c) == [] and _grants_pix(ind) == []
-        assert ler(cobranca["id"])["status"] == "pending"
+        assert ler(cobranca["id"])["status"] == "canceled"  # #1437 R3.3: estornada antes do pagamento
 
     entregar("PAYMENT_REFUNDED", cobranca)
     sem_pagante()

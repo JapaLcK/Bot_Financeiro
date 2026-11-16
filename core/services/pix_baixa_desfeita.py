@@ -33,6 +33,7 @@ from core.services.pix_extras import _PAGO, total_cents
 from db.pix_charges import buscar_por_asaas_payment_id, transicionar
 from db.pix_charges_saga import reabrir_baixa
 from db.pix_effects import efeito_registrado, lock_efeito, registrar_efeito
+from db.pix_estornos import estorno_registrado
 
 log = logging.getLogger(__name__)
 TIPO = "PAYMENT_RECEIVED_IN_CASH_UNDONE"
@@ -53,7 +54,8 @@ def reconciliar_grant(cobranca, evt, payment_id: str) -> bool:
     """Morreu depois do `revoke` e antes de `reabrir_baixa`, e o Pix real veio antes da
     retentativa: cobrança `paid`, efeito `grant` registrado (o RECEIVED o pula) e grant
     revogado POR ESTE MOTIVO. Reconcede sem Purchase/e-mail (já registrados). Exige
-    marcador; revogado por estorno/admin não volta. True se reconcedeu (já logou e alertou)."""
+    marcador; revogado por estorno/admin não volta, nem com o estorno só recebido (#1437, relido sob o lock).
+    True se reconcedeu (já logou e alertou)."""
     from db.plan_grants import list_grants
 
     def _estado():  # "revoked" por este motivo, "active", ou None
@@ -70,7 +72,7 @@ def reconciliar_grant(cobranca, evt, payment_id: str) -> bool:
     with lock_efeito(payment_id, "grant"):
         atual = buscar_por_asaas_payment_id(payment_id) or cobranca  # estorno pode ter vindo antes do lock
         if not (atual["status"] in ("paid", "paid_orphan")
-                and efeito_registrado(payment_id, "grant")):
+                and efeito_registrado(payment_id, "grant")) or estorno_registrado(payment_id):
             return False
         estado = _estado()
         if estado == "active":

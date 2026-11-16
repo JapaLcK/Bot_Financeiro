@@ -57,6 +57,7 @@ from __future__ import annotations
 from psycopg.types.json import Jsonb
 
 from .connection import get_conn
+from .pix_estornos import ESTORNO_SQL
 
 # Estados em que a cobrança ocupa o índice parcial de "ativa" (§3.2). Fonte
 # única: o DDL de `db/schema.py` declara a MESMA lista, e o teste
@@ -184,6 +185,7 @@ def transicionar(
     access_starts_at=None,
     access_expires_at=None,
     apagar_qr: bool = False,
+    sem_estorno: bool = False,
 ) -> dict | None:
     """Transição CONDICIONAL da máquina de estados (§11). Devolve a linha nova
     quando a transição aplicou; **`None`** quando o status atual não é `de`.
@@ -233,6 +235,9 @@ def transicionar(
     `RECEIVED` concede a partir de `pending`, `canceling`, `canceled` e
     `expired` (pagamento tardio válido até 60 dias).
 
+    `sem_estorno` (#1437): só aplica sem estorno registrado para `asaas_payment_id`, na MESMA
+    instrução. Fecha o estorno drenado inteiro entre a D3 do `RECEIVED` e esta escrita.
+
     `apagar_qr` zera `qr_payload_enc` no destino terminal (§13.6): depois de
     `paid`/`canceled`/`expired` confirmado não há uso legítimo do instrumento
     de pagamento, e o que escapar é limpo pela varredura.
@@ -267,9 +272,11 @@ def transicionar(
                 "       qr_payload_enc = case when %s then null else qr_payload_enc end"
                 + carimbo
                 + " where id = %s and status = any(%s)"
-                f" returning {_COLUNAS}",
+                + (f" and not {ESTORNO_SQL}" if sem_estorno else "")
+                + f" returning {_COLUNAS}",
                 (para, asaas_payment_id, access_starts_at, access_expires_at,
-                 bool(apagar_qr), int(charge_id), list(estados)),
+                 bool(apagar_qr), int(charge_id), list(estados))
+                + ((asaas_payment_id,) if sem_estorno else ()),
             )
             row = cur.fetchone()
         conn.commit()

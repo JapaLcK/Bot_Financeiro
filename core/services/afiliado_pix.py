@@ -108,8 +108,9 @@ def marcar(cobranca, tipo: str, tentativas: int = 0) -> None:
 def estornar(cobranca, evt) -> None:
     """Efeito `afiliado_estorno`. `refunded` prova que houve `paid`; com o `afiliado` pendente, é
     aqui que o pagante nasce, porque depois do `revoke` a guarda D3 fecha a compra. Fora de
-    `refunded` (`chargeback`, que não transiciona, ou o estorno fora de ordem em `pending`) só
-    `marcar`: a máquina age sobre o que existir, rótulo e comissão."""
+    `refunded` (`chargeback`, que não transiciona; o estorno antes do pagamento, que deixa a cobrança
+    `canceled`, ou `creating`/`pending` quando ela não é cancelada, #1437) só `marcar`: a máquina age
+    sobre o que existir, rótulo e comissão."""
     if cobranca["status"] == "refunded":
         registrar(cobranca, evt)
     else:
