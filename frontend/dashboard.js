@@ -6812,9 +6812,26 @@ const _INSIGHT_VIEW_MAP = {
   analytics: "analytics",
 };
 
+// action_view que abre um modal em vez de trocar de tela: o convite "Informe seu saldo" (PL-06) abre o "Ajustar
+// carteira" com o campo vazio. O botão da lista e o CTA do card "Piggy notou" passam os dois por aqui.
+const _INSIGHT_MODAIS = {
+  carteira: () => openAdjustWalletModal({ vazio: true }),
+};
+
 function _switchToInsightView(view) {
+  if (Object.prototype.hasOwnProperty.call(_INSIGHT_MODAIS, view)) return _INSIGHT_MODAIS[view]();
   const target = _INSIGHT_VIEW_MAP[view] || view;
   if (typeof navigateTo === "function") navigateTo(target);
+}
+
+// O saldo acabou de ser informado: o convite some na hora. O cache do servidor só cai quando o ouvinte do
+// `pb_escrita` processa o aviso (assíncrono), então a próxima leitura ainda pode trazê-lo.
+function _esconderConviteSaldo() {
+  for (const i of (_analyticsCache && _analyticsCache.insights) || []) {
+    if (i.type === "wallet_balance_unknown") _dismissInsight(i.key);
+  }
+  const card = document.getElementById("piggy-insight-card");
+  if (card && card.dataset.tipo === "wallet_balance_unknown") card.style.display = "none";
 }
 
 function renderAnalyticsInsights(insights) {
@@ -10866,14 +10883,41 @@ function _updateAdjustWalletTotal() {
   document.getElementById("adjust-wallet-total").textContent = _fmtBRL(carteira + _adjustWalletState.banks);
 }
 
-function openAdjustWalletModal() {
+// Textos das duas variantes do modal (uma fonte só; o HTML deixa os elementos vazios). Sem banco é quem o convite
+// "Informe seu saldo" do Piggy manda para cá (PL-06, P14 do dono): sem linha de bancos, dica de banco nem total.
+const _ADJUST_WALLET_TEXTOS = {
+  banco: {
+    title: "Ajustar carteira",
+    sub: "A <b>Carteira</b> é o dinheiro <b>fora</b> dos bancos conectados: espécie e contas que você não ligou no Open Finance. O saldo dos bancos conectados entra sozinho; não digite ele aqui.",
+    label: '<i class="ph ph-wallet" aria-hidden="true"></i> Carteira (dinheiro fora do banco)',
+    vazio: "Digite um valor (use 0 se está tudo no banco).",
+  },
+  semBanco: {
+    title: "Saldo da Carteira",
+    sub: "Quanto você tem hoje? Some o dinheiro vivo e as contas que você acompanha aqui. O Piggy usa esse valor para prever o fim do mês.",
+    label: '<i class="ph ph-wallet" aria-hidden="true"></i> Saldo de hoje (R$)',
+    vazio: "Digite quanto você tem hoje (pode ser 0).",
+  },
+};
+
+function openAdjustWalletModal(opts = {}) {
   const d = lastData || {};
   const banks = Number(d.of_bank_balance || 0);
   const carteira = Number(d.balance || 0);
-  _adjustWalletState = { banks, submitting: false };
+  const semBanco = Number(d.of_bank_count || 0) === 0;
+  const t = _ADJUST_WALLET_TEXTOS[semBanco ? "semBanco" : "banco"];
+  _adjustWalletState = { banks, submitting: false, vazio: t.vazio };
+  document.getElementById("adjust-wallet-title").textContent = t.title;
+  document.getElementById("adjust-wallet-sub").innerHTML = t.sub;
+  document.getElementById("adjust-wallet-label").innerHTML = t.label;
+  for (const id of ["adjust-wallet-banks-line", "adjust-wallet-hint", "adjust-wallet-total-line"]) {
+    document.getElementById(id).style.display = semBanco ? "none" : "";
+  }
   document.getElementById("adjust-wallet-banks").textContent = _fmtBRL(banks);
   const inp = document.getElementById("adjust-wallet-input");
-  inp.value = carteira.toFixed(2);
+  // Sem banco, vazio pelo convite ou com a Carteira negativa (o campo recusa negativo): o zero de nascença somado
+  // aos gastos não é saldo para confirmar com um clique.
+  inp.value = semBanco && (opts.vazio || carteira < 0) ? "" : carteira.toFixed(2);
   _adjustWalletError("");  // texto E classe: só o textContent deixa a caixa vazia visível
   document.getElementById("adjust-wallet-overlay").classList.add("open");
   inp.oninput = _updateAdjustWalletTotal;
@@ -10895,7 +10939,7 @@ async function submitAdjustWallet() {
   if (_adjustWalletState.submitting) return;
   _adjustWalletError("");
   const raw = document.getElementById("adjust-wallet-input").value.trim();
-  if (raw === "") { _adjustWalletError("Digite um valor (use 0 se está tudo no banco)."); return; }
+  if (raw === "") { _adjustWalletError(_adjustWalletState.vazio); return; }
   const v = parseFloat(raw);
   if (isNaN(v) || v < 0) { _adjustWalletError("Digite um valor válido (zero ou positivo)."); return; }
   const btn = document.getElementById("adjust-wallet-submit");
@@ -10911,6 +10955,7 @@ async function submitAdjustWallet() {
     if (!resp.ok) throw new Error(await readApiError(resp));
     closeAdjustWalletModal();
     showToast("✓ Carteira ajustada");
+    _esconderConviteSaldo();
     sendRefresh();
   } catch (err) {
     _adjustWalletError(String(err.message || err));
@@ -11496,6 +11541,7 @@ async function loadPiggyInsight() {
 
     // Backend já prioriza por severidade — pega o primeiro
     const insight = list[0];
+    card.dataset.tipo = insight.type || "";
 
     document.getElementById("piggy-insight-title").textContent = (insight.icon ? insight.icon + " " : "") + (insight.title || "");
 
@@ -11520,7 +11566,7 @@ async function loadPiggyInsight() {
     if (insight.action_view && typeof navigateTo === "function") {
       cta.style.display = "";
       cta.textContent = `${insight.action_label || "Ajustar"} →`;
-      cta.onclick = () => navigateTo(insight.action_view);
+      cta.onclick = () => _switchToInsightView(insight.action_view);
     } else {
       cta.style.display = "none";
     }
@@ -11699,7 +11745,7 @@ function render(d) {
         ${hasBanks
           ? `<div class="ov-delta"><i class="ph ph-wallet" aria-hidden="true"></i> Carteira <b style="color:var(--text-2)">${fmt(carteira)}</b> · <i class="ph ph-bank" aria-hidden="true"></i> Bancos <b style="color:var(--text-2)">${fmt(ofBank)}</b> · <button type="button" class="ov-adjust-lnk" onclick="openAdjustWalletModal()">ajustar</button></div>
              <div class="ov-delta" style="opacity:.8">Patrimônio total <b style="color:var(--text-2)">${patrimonyHtml}</b></div>${recHtml}`
-          : `<div class="ov-delta">Patrimônio total <b style="color:var(--text-2)">${patrimonyHtml}</b></div>${recHtml}`}
+          : `<div class="ov-delta">Patrimônio total <b style="color:var(--text-2)">${patrimonyHtml}</b>${hist ? "" : ' · <button type="button" class="ov-adjust-lnk" onclick="openAdjustWalletModal()">ajustar</button>'}</div>${recHtml}`}
       </div>
       <div class="ov-stat ov-stat-clickable" style="animation-delay:60ms" role="button" tabindex="0" aria-label="${escapeHtmlSafe((savNeg?'Déficit do mês':'Sobrou este mês') + ': ' + fmt(sav) + '. ' + savDeltaTxt + '. Toque para ver como este valor foi calculado.')}" onclick="openSobrouDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSobrouDetail();}">
         <div class="ov-ico neon">${svgTrend}</div>

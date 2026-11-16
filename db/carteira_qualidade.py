@@ -61,12 +61,26 @@ def nao_confirmada(cur, user_id, balance):
 
 # Saldo inicial (onboarding), ajuste da tela (`adjust-balance` grava "ajuste") e o rótulo canônico do chat. Os três
 # escritores gravam interno; "ajuste" também é nome possível de categoria do usuário (`#ajuste`), que nasce não interna.
+# Confirmar o saldo sem lançar nada (zero no onboarding, o mesmo valor no ajuste) não grava categoria nenhuma: fica em
+# `accounts.saldo_confirmado_em` (`marcar_saldo_confirmado`).
 CATEGORIAS_SALDO_INFORMADO = ("saldo_inicial", "ajuste", "ajuste_saldo")
 
 
 def saldo_informado(cur, user_id) -> bool:
-    """O usuário já disse quanto tem na Carteira alguma vez (saldo inicial ou ajuste). Sem isso, o saldo é o zero de
-    nascença somado aos gastos, e "Seu saldo está no vermelho" seria alarme falso (PL-06 B3, emenda 1)."""
+    """O usuário já disse quanto tem na Carteira alguma vez: saldo inicial ou ajuste lançados, ou o saldo confirmado
+    sem lançamento (`accounts.saldo_confirmado_em`, P9 do convite). Sem isso, o saldo é o zero de nascença somado aos
+    gastos, e "Seu saldo está no vermelho" seria alarme falso (PL-06 B3, emenda 1)."""
     cur.execute("select exists(select 1 from launches where user_id = %s and categoria = any(%s) "
-                "and is_internal_movement) as sim", (user_id, list(CATEGORIAS_SALDO_INFORMADO)))
+                "and is_internal_movement) "
+                "or exists(select 1 from accounts where user_id = %s and saldo_confirmado_em is not null) as sim",
+                (user_id, list(CATEGORIAS_SALDO_INFORMADO), user_id))
     return cur.fetchone()["sim"]
+
+
+def marcar_saldo_confirmado(user_id) -> None:
+    """O usuário confirmou o saldo e nada precisou ser lançado. A linha ausente nasce com `balance` 0, que é o que ele
+    acabou de dizer. Escreve em `accounts`, que avisa o `pb_escrita` (o cache de insights cai, D13)."""
+    from .connection import get_conn
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("insert into accounts (user_id, saldo_confirmado_em) values (%s, now()) on conflict (user_id) "
+                    "do update set saldo_confirmado_em = excluded.saldo_confirmado_em", (user_id,))

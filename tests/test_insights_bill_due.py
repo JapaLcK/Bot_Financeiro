@@ -32,7 +32,7 @@ from core.handlers import forma_pagamento as fp
 from core.services import insights_detectores as detectores
 from db.bills import create_boleto, delete_boleto, ensure_bill_instance, list_bills
 from db.recurring import create_recurring_expense
-from test_insights_contrato import _usuario, llm  # noqa: F401
+from test_insights_contrato import _usuario, llm, saldo_de_sobra  # noqa: F401
 from test_api_app_sessao import completo
 from test_insights_estado import _put
 from tests._patrimonio_helpers import q
@@ -281,6 +281,7 @@ def test_11c_motivo_de_quem_perde_o_recurso_e_sem_destaques_e_nao_dispensados(ll
     monkeypatch.setenv("PLANS_V2_ENABLED", "0")
     caiu, dispensou = completo(usuario_pagante("pro")), completo(usuario_pagante("pro"))
     for uid in (caiu, dispensou):
+        saldo_de_sobra(uid)
         db.add_launch_and_update_balance(uid, "despesa", 30, "Padaria", None, categoria="mercado")
         create_boleto(uid, "Luz", 180, day_tz(now_tz()))
         ai_patterns.generate_ai_insights(uid, force=True)
@@ -319,6 +320,7 @@ def test_13_conversa_card_traz_a_conta_e_paguei_a_luz_a_tira(llm, monkeypatch):
     """Ponta a ponta pelo runner, no relógio real. O LLM é falso: isto NÃO prova a interpretação real de
     "paguei a luz", só que a quitação pelo chat tira o item do card no recálculo."""
     uid = _usuario("pro_max")
+    saldo_de_sobra(uid)
     create_boleto(uid, "Luz", 180, day_tz(now_tz()))
     ai_patterns.generate_ai_insights(uid)
 

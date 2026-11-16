@@ -2400,7 +2400,7 @@ já enviado antes do PUT não é desfeito.
 
 **PigBank Insights, contrato v1 (PL-06 PR A1).** `/insights/{uid}/current` e o card `piggy` do chat
 devolvem os fatos dos detectores de `db/insights.py` e `core/services/insights_detectores.py` (`budget_warning`,
-`category_spike`, `recurring_increase`, `of_bill_increase`, `salary_burn_fast`, `goal_behind`, `bill_due`, `month_projection`, `subscription_increase`, `positive_result`) no contrato de
+`category_spike`, `recurring_increase`, `of_bill_increase`, `salary_burn_fast`, `goal_behind`, `bill_due`, `month_projection`, `wallet_balance_unknown`, `subscription_increase`, `positive_result`) no contrato de
 `core/services/insights_contrato.py`: os campos legados (`key`, `type`, `icon`, `title`, `message`,
 `severity`, `action_*`) mais `explicacao` (versao 1: `tipo`, `familia`, `detector`, `calculado_em`,
 `periodo` com `rotulo` e `parcial`, `fonte`, `referencia`, `atual`, `diferenca`, `amostra`), com dinheiro
@@ -2450,9 +2450,20 @@ mês corrente que fecha negativo no pior caso do simulador lido no último dia d
 (`cashflow.fechamento_pior_caso`: a mesma janela de conferência do veredito, sem a estimativa do dia a dia nem as
 saídas duvidosas): warning com o saldo de hoje >= 0, critical com ele < 0, nada com fechamento >= 0; chave
 `month_projection:saldo:AAAA-MM`, gate `forecast` (Plus) na geração e na leitura, só para quem já informou o saldo
-(`carteira_qualidade.saldo_informado`: um lançamento INTERNO `saldo_inicial`, `ajuste` ou `ajuste_saldo`; a categoria
-própria `#ajuste`, que nasce não interna, não conta; a Carteira nasce em 0 e o primeiro gasto de quem nunca a informou
-não é alarme), `impacto {falta_valor}` só no Pro, logo depois do `bill_due` no laço. Fica calado onde o simulador não
+(`carteira_qualidade.saldo_informado`: um lançamento INTERNO `saldo_inicial`, `ajuste` ou `ajuste_saldo`, ou
+`accounts.saldo_confirmado_em`, que o `initial-balance` com 0 e o `adjust-balance` sem diferença gravam sem lançar
+nada e o "Recomeçar do zero" e o "apagar todos os lançamentos" do chat limpam; a categoria própria `#ajuste`, que
+nasce não interna, não conta; a Carteira nasce em
+0 e o primeiro gasto de quem nunca a informou não é alarme), `impacto {falta_valor}` só no Pro, logo depois do
+`bill_due` no laço. Quem nunca informou, no mesmo caso (o simulador conclui e o mês a partir do zero fecha negativo),
+recebe no lugar o convite `wallet_balance_unknown` (mesmo detector, família `projecao`, info, fora do e-mail, chave
+`wallet_balance_unknown:carteira:AAAA-MM`, gate `forecast`, botão "Informar saldo" com `action_view` `carteira`, que
+o painel antigo resolve em `_INSIGHT_MODAIS` abrindo o "Ajustar carteira" sem banco). O convite não leva número nenhum,
+nem no texto nem na `explicacao` (o card do chat a repassa ao modelo). Some quando o saldo é informado; dispensado,
+volta no mês seguinte. A junção de contas não leva `saldo_confirmado_em` da origem. A confirmação sem lançamento
+(`saldo_confirmado_em`) se comporta como um lançamento de saldo que não aparece no extrato: sai com o "apagar todos
+os lançamentos" e o "Recomeçar do zero", não sai quando se apaga um lançamento específico, e vale como o
+`saldo_inicial`, sem validade por data (decisão D1 do dono, 2026-11-16). Fica calado onde o simulador não
 conclui (banco conectado, fixo sem data, valor estimado, pedido pendente no chat). A receita fixa ainda não conferida,
 dentro da janela de conferência (`JANELA_CONFERENCIA_DIAS`), conta a favor e só cala o aviso quando cobre o déficit. O
 corpo termina sempre com a ressalva de que a Previsão mensal de Gastos fixos considera só recorrências e pode mostrar
