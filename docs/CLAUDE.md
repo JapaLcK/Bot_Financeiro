@@ -2753,6 +2753,15 @@ plano tem regra única, `destino_sem_plano` (`frontend/routes/shared.py`), chama
 (a API segue em 403 até lá); o `/afiliado` a devolveria ao `/app`, e seria um laço. A tela não fala com a `/api/v2`, que daria 402: `main.tsx` monta só a página, sem `Entrada`, `App`
 nem eventos.
 
+**Atribuição do indicado: um clique vale uma conta (decisão do dono, #1592).** `GET /r/{code}`
+grava o cookie `ref_code` (httponly, lax, 30 dias, sem `domain`: só vale no host do clique). Ele só
+é lido quando a conta nasce (`_sessao_de_conta_nova`, em `/auth/verify-email`, Google/Apple e
+`/auth/quiz/conta`), e `_apply_referral_attribution` o apaga num `finally`, mesmo quando a
+atribuição falha (código inválido, afiliado inativo, autoindicação). A compra, Pix ou cartão, só lê
+`affiliate_referrals` pelo `user_id`; o e-mail não entra. Por isso a 2ª conta criada no mesmo
+navegador nasce sem afiliado. Para testar, cada indicado precisa de navegador limpo (ou aba anônima
+nova) e clique novo em `/r/<código>`, no mesmo host do cadastro.
+
 A área do próprio afiliado é `GET /api/affiliate/me` e `POST /api/affiliate/payout`
 (`frontend/routes/affiliates.py`), sem gate de plano: o `affiliate_id` sai sempre de
 `get_affiliate_by_user` com o usuário da sessão, e o corpo do saque só tem `pix_key`.
