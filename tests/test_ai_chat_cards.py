@@ -18,7 +18,7 @@ from _cards_apoio import (CASOS, M, M0, _http, _numeros, _reais, mostrar, mundo,
 from conftest import usuario_pagante
 from core.services.ai_chat import cards
 from db.mes_detalhes import ler
-from tests._patrimonio_helpers import conexao, posicao
+from tests._patrimonio_helpers import conexao, posicao, q
 from tests.test_resumo_mes_regra import INICIO
 from utils_date import now_tz
 
@@ -125,6 +125,9 @@ def test_visao_do_modelo_esta_no_bloco(mundo, card):
     a, _ = mundo
     if card == "metas":  # a meta da fixture não tem banco (`atual` null, sem R$): dá dinheiro a ela
         posicao(conexao(a, "item-visao-metas", banco="Nubank"), "p1", "1234.567")
+    if card == "simulador":  # a estimativa só lê os últimos 30/60/90 dias a partir de hoje: o mês da fixture pode cair fora (#1588)
+        q("insert into launches (user_id, tipo, valor, criado_em) values (%s, 'despesa', 40, %s) returning id",
+          (a, now_tz() - timedelta(days=2)))
     args, _ = CASOS[card]
     r, (bloco,), _ = mostrar(a, card=card, **args)
     assert r["card"] == card and len(r["abas"]) == len(bloco["abas"])
