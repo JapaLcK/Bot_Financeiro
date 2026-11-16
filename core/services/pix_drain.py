@@ -69,6 +69,7 @@ from db.pix_charges import (
 )
 from db.pix_charges_saga import registrar_nao_casado
 from db.pix_effects import efeito_registrado, lock_efeito, registrar_efeito
+from db.pix_pausa import FALHA_PAUSA, falha_de
 from db.webhook_outbox import marcar_processado, registrar_falha, reservar_evento
 
 # `ponytail:` regex fixa, não env — o formato é escrito por nós, num lugar só
@@ -137,18 +138,16 @@ def drenar_evento(event_id: str) -> None:
         try:
             falha = _decidir(event_id, evt)
         except Exception as exc:  # noqa: BLE001 — a promessa do docstring é ESTA
-            # Só o laço de efeitos convertia exceção em `(tipo, code)`. Sem
-            # isto, decifrar o payload, buscar a cobrança, gravar
-            # `pix_unmatched_payments` ou transicionar subiam POR CIMA de
-            # `drenar_pendentes`: o evento mais velho abortava a passada inteira,
-            # com `attempts` parado em zero e sem alerta de travado.
-            falha = (type(exc).__name__, getattr(exc, "code", None))
+            # Só o laço de efeitos convertia exceção em `(tipo, code)`. Sem isto, decifrar o payload,
+            # buscar a cobrança, gravar `pix_unmatched_payments` ou transicionar subiam POR CIMA de
+            # `drenar_pendentes`: o evento mais velho abortava a passada inteira, sem alerta de travado.
+            falha = falha_de(exc)  # a recusa da pausa (#1574) vira `FALHA_PAUSA`, que não conta tentativa
     # Fora do `with` de propósito — ver o cabeçalho do módulo.
     if falha is None:
         marcar_processado(event_id)
         return
     tentativas = registrar_falha(event_id, *falha)
-    if tentativas > TENTATIVAS_ATE_TRAVAR:
+    if tentativas > TENTATIVAS_ATE_TRAVAR and falha[0] != FALHA_PAUSA:
         admin_notify.notify_pix_alerta(
             f"⚠️ **Pix: evento travado** `{event_id}` — {tentativas} tentativas, "
             f"último erro `{falha[0]}`."
@@ -255,7 +254,7 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
                 if efeito == "stripe_cancel" and int(evt["attempts"] or 0) >= TENTATIVAS_ATE_TRAVAR:
                     alertar_stripe_desistido(cobranca)
                     continue
-                return (type(exc).__name__, getattr(exc, "code", None))
+                return falha_de(exc)
             registrar_efeito(payment_id, efeito, event_id)
     # Depois do laço: um alerta por evento, na passada que conclui. Antes dele, cada retentativa (o
     # parcial com o Asaas fora) repetia o alerta; só na 1ª tentativa, a que morresse antes perdia o dela.

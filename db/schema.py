@@ -6,7 +6,7 @@ import logging
 from core.pg_text import causa_segura
 from core.services.demo.dados import CODIGO_PADRAO
 
-from . import insight_aviso_direito
+from . import insight_aviso_direito, pix_pausa
 from .connection import get_conn
 from .schema_repairs import (
     ensure_lower_name_unique, ensure_plan_trials_user_fk, repair_user_fk_cascades,
@@ -3501,6 +3501,8 @@ def init_db():
         """,
         # Perder o direito a `insights` retira a adesão ao aviso por e-mail (PL-06 B6, D1).
         *insight_aviso_direito.ddl(),
+        # Pausa da concessão do Pix (#1574): tabela de controle e gatilhos `before`. Ver o módulo.
+        *pix_pausa.ddl(),
         # "Testar o Piggy" (demo no WhatsApp): tabela ANÔNIMA — sem user_id de
         # propósito (o demo não cria usuário nem toca em nenhuma tabela de
         # usuário). Só o funil lê. wa_hash = HMAC do telefone, zerado após 30

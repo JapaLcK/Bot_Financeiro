@@ -53,7 +53,7 @@ SEM_VALOR = object()  # `valor=SEM_VALOR`: o webhook vem sem a chave `value`
 
 def entregar(tipo: str, cobranca: dict, *, payment_id: str | None = None,
              referencia: str | None = None, valor=_TOTAL,
-             tentativas: int = 0) -> str:
+             tentativas: int = 0, drenar: bool = True) -> str:
     """Grava o evento na outbox e DRENA — o caminho inteiro, não o handler solto.
 
     Devolve o `event_id`, que é o que os testes consultam para conferir
@@ -63,6 +63,8 @@ def entregar(tipo: str, cobranca: dict, *, payment_id: str | None = None,
     acontece depois de N falhas (o fallback do `stripe_cancel`, §8.2) sem drenar
     o mesmo evento seis vezes — cada `entregar` cria um `event_id` novo, então
     repetir a chamada mediria seis eventos com `attempts` zero.
+
+    `drenar=False` só grava: o caminho rápido (`background_tasks`) falhou e quem drena é a varredura.
     """
     from core.services.pix_drain import drenar_evento
     from db.webhook_outbox import registrar_evento
@@ -87,7 +89,8 @@ def entregar(tipo: str, cobranca: dict, *, payment_id: str | None = None,
             cur.execute("update pix_webhook_events set attempts = %s"
                         " where event_id = %s", (int(tentativas), event_id))
             conn.commit()
-    drenar_evento(event_id)
+    if drenar:
+        drenar_evento(event_id)
     return event_id
 
 

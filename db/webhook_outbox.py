@@ -38,10 +38,11 @@ from contextlib import contextmanager
 from core.crypto import encrypt_pii_optional
 
 from .connection import get_conn
+from .pix_pausa import FALHA_PAUSA
 
-# Retenção da outbox (§13.1/§13.3): 7 dias a partir de `received_at`, processado
-# ou não. Mora aqui, e não em `db/pix_charges.py`, porque constante mora com a
-# query que a consome — `purgar_payloads_antigos`, logo abaixo.
+# Retenção da outbox (§13.1/§13.3): 7 dias de `received_at`, processado ou não, salvo o que a pausa
+# do Pix segura (`pix_pausa_guarda`: a pausa mais 7 dias). Mora aqui, e não em `db/pix_charges.py`,
+# porque constante mora com a query que a consome — `purgar_payloads_antigos`, logo abaixo.
 RETENCAO_OUTBOX_DIAS = 7
 
 # MINIMIZAÇÃO NA ESCRITA (§13.3): o resto do corpo do webhook é descartado
@@ -180,7 +181,8 @@ def reservar_evento(event_id: str):
                 "select event_id, event_type, payload_enc, event_version,"
                 "       attempts, received_at, purged_at"
                 "  from pix_webhook_events"
-                " where event_id = %s and processed_at is null"
+                " where event_id = %s and processed_at is null"  # pausa: compra fica aberta, sem tentativa (db/pix_pausa.py)
+                " and not pix_pausa_retem(event_type)"
                 " for update skip locked",
                 (event_id,),
             )
@@ -189,17 +191,17 @@ def reservar_evento(event_id: str):
 
 
 def purgar_payloads_antigos() -> int:
-    """Zera `payload_enc` **e** `last_error` dos eventos com mais de
-    `RETENCAO_OUTBOX_DIAS`; devolve quantas linhas foram purgadas.
+    """Zera `payload_enc` **e** `last_error` dos eventos com mais de `RETENCAO_OUTBOX_DIAS`; devolve quantos.
 
-    §13.3, e as três cláusulas são o conteúdo — nenhuma é zelo:
+    §13.3, e as quatro cláusulas são o conteúdo — nenhuma é zelo:
       • **conta de `received_at`, processado ou não** (correção nº 10): contar de
         `processed_at` deixaria o evento TRAVADO — que é justamente o órfão, de quem
         pediu exclusão da conta — guardando PII para sempre;
       • **`last_error = null` na MESMA operação**, porque quem escreve nessa coluna é um
         filtro de FORMA (`_erro_seguro`) e forma não separa nome de código: `'Fulano'` e
         `'joao_silva'` atravessam inteiros;
-      • **`purged_at is null`** — sem ela o carimbo seria reescrito todo dia.
+      • **`purged_at is null`** — sem ela o carimbo seria reescrito todo dia;
+      • **a guarda da pausa do Pix** (`pix_pausa_guarda`, #1574): o que ela segura espera a pausa mais 7 dias.
 
     **Sem `user_id` no `where`, e não é esquecimento:** a tabela não tem a coluna nem FK,
     e o único vínculo com o titular mora dentro do `payload_enc`, cifrado com Fernet
@@ -212,8 +214,9 @@ def purgar_payloads_antigos() -> int:
                 "update pix_webhook_events"
                 "   set payload_enc = null, last_error = null, purged_at = now()"
                 " where received_at < now() - %s * interval '1 day'"
-                "   and purged_at is null",
-                (RETENCAO_OUTBOX_DIAS,),
+                "   and purged_at is null"
+                "   and not (processed_at is null and pix_pausa_guarda(event_type, last_error, %s))",  # db/pix_pausa.py
+                (RETENCAO_OUTBOX_DIAS, RETENCAO_OUTBOX_DIAS),
             )
             purgadas = cur.rowcount
         conn.commit()
@@ -283,10 +286,10 @@ def registrar_falha(event_id: str, tipo: str, codigo: str | None = None) -> int:
         with conn.cursor() as cur:
             cur.execute(
                 "update pix_webhook_events"
-                "   set attempts = attempts + 1, last_error = %s"
+                "   set attempts = attempts + %s, last_error = %s"
                 " where event_id = %s and purged_at is null"
                 " returning attempts",
-                (_erro_seguro(tipo, codigo), event_id),
+                (int(tipo != FALHA_PAUSA), _erro_seguro(tipo, codigo), event_id),  # recusa da pausa não conta
             )
             row = cur.fetchone()
         conn.commit()
@@ -339,6 +342,7 @@ def eventos_pendentes(limite: int = 100) -> list[str]:
             cur.execute(
                 "select event_id from pix_webhook_events"
                 " where processed_at is null"
+                " and not pix_pausa_retem(event_type)"  # compra pausada não ocupa o lote (db/pix_pausa.py)
                 " order by received_at asc limit %s",
                 (int(limite),),
             )

@@ -1886,6 +1886,61 @@ retentativa, `reconciliar_grant` reconcede (só grant revogado POR ESTE motivo, 
 `refunded_partial` vai a `refunded` com `revoke`; `refunded`/`chargeback` só alertam. Falha do Asaas
 deixa o evento aberto. O nome do evento vem só da documentação do Asaas, não do sandbox.
 
+**Pausa da concessão do Pix (#1574, runbook).** Enquanto a pausa está ativa, nenhum pagamento Pix
+concede acesso nem comissão; os eventos ficam guardados para depois. Serve para drenar estornos sem que um
+pagamento reenviado devolva o acesso (o roteiro do deploy do #1437 a usa). Mora no banco (`db/pix_pausa.py`):
+a linha única de `pix_pausa_concessao` (ativa = `retomada_em` nulo) e três gatilhos `before` (quatro nomes
+`trg_pix_pausa_*`) que recusam, com SQLSTATE `PBPAU`, só a transição da cobrança para `paid`/`paid_orphan`, o
+grant `source='pix'` ficando `active` e o insert de comissão `pix:%`. Valem para qualquer processo, inclusive o
+da versão anterior ainda no ar durante o deploy. O código novo nem lista nem reserva `PAYMENT_RECEIVED`/
+`CONFIRMED` (`pix_pausa_retem`, em `eventos_pendentes` e `reservar_evento`): o evento fica aberto com `attempts`
+parado e não ocupa o lote da varredura, então estorno, parcial e baixa desfeita seguem drenando na ordem de
+chegada. Recusa do gatilho que ainda chegue ao código novo (dreno em voo na ativação, baixa desfeita que
+reconcede) fica aberta com `last_error = 'PausaPix'`, sem somar tentativa e sem alerta de travado. A versão
+anterior bate no gatilho e soma 1 tentativa por passada, só enquanto viver. Stripe e admin seguem normalmente.
+**Retenção:** o evento aberto que a pausa segura (compra `RECEIVED`/`CONFIRMED` sem `processed_at`, ou
+recusado pelo gatilho, com `last_error = 'PausaPix'`) não é zerado pela purga de `RETENCAO_OUTBOX_DIAS`
+enquanto a pausa estiver ativa e por mais 7 dias depois da retomada (`pix_pausa_guarda`, decisão do dono): ele
+não se perde, ao custo de reter o payload minimizado além dos 7 dias só nesse caso. A guarda olha o tipo, não
+a referência: com a pausa ativa sem prazo, ela retém toda compra aberta, inclusive Pix de terceiros da conta
+do negócio, até a retomada mais 7 dias. Os 7 dias depois da retomada são o prazo de a varredura de 60 s drenar o
+que ficou; uma guarda só "enquanto ativa" o perderia se a purga diária rodasse entre a retomada e a varredura.
+Por isso a retomada é um `update`, e gatilhos (`trg_pausa_pix_sem_delete` e `_sem_truncate`) recusam o `delete` e o `truncate` da linha.
+**Aviso:** com a pausa ativa há 30 min, o dreno avisa o admin (`notify_pix_alerta`); depois, a cada 6 h e, no
+último dia antes dos 7 dias de pausa (e depois deles), de hora em hora. A cadência de 6 h é escolha do Coder,
+ainda não confirmada pelo dono. Canal fora tenta de novo na passada seguinte; o envio sai depois do commit da
+marca, sem travar a linha. O texto diz há quanto tempo está pausada, que o que a pausa segura fica guardado e
+quanto falta para os 7 dias. Nunca retoma sozinho. Nada disto foi executado em produção. Só os passos 1 e 4
+escrevem; o resto é leitura.
+0. Pré-condição: o PR do #1574 já implantado **e a implantação anterior a ele já saiu** (no Railway, só o
+   deployment novo ativo), antes de qualquer ativação: a versão anterior soma tentativa ao bater no gatilho, e
+   tentativas somadas antecipam a desistência do `stripe_cancel` depois da retomada. Os gatilhos:
+   `select tgrelid::regclass, tgname, tgenabled from pg_trigger where tgname like 'trg_pix_pausa%';` dá 4
+   linhas, todas com `tgenabled = 'O'`. E o canal do aviso: sem `ADMIN_NOTIFY_WEBHOOK_URL` no serviço, o aviso
+   de pausa longa não sai (conferir a variável antes).
+1. Ativar: `select pix_pausa_ativar('<motivo>');` Ela trava `pix_charges`, `plan_grants` e
+   `affiliate_commissions` (`nowait` em laço, até 5 s) antes de gravar, então só volta depois de terminar a
+   escrita que já tinha passado pelo gatilho sem a pausa; com as tabelas ocupadas por 5 s, dá erro e nada muda
+   (rode de novo). Sobre uma pausa já ativa não muda nada. Rode em autocommit (o padrão do `psql`), ou dê
+   `commit` logo em seguida: enquanto a transação estiver aberta, a trava das 3 tabelas segura checkout, grants
+   e comissões. Não use o `insert` cru na tabela: depois de uma retomada, ele não reativa nada.
+2. Confirmar que está ativa: `select pix_pausa_ativa(), ativa_desde, motivo from pix_pausa_concessao;` dá
+   `true`, e a consulta do passo 0 de novo dá as 4 linhas com `tgenabled = 'O'` (gatilho desligado à mão não
+   segura nada). Nada concedido desde a ativação (as três dão `0`):
+   `select count(*) from pix_charges where status in ('paid', 'paid_orphan') and paid_at >= (select ativa_desde from pix_pausa_concessao);`
+   `select count(*) from plan_grants where source = 'pix' and status = 'active' and updated_at >= (select ativa_desde from pix_pausa_concessao);`
+   `select count(*) from affiliate_commissions where stripe_invoice_id like 'pix:%' and created_at >= (select ativa_desde from pix_pausa_concessao);`
+   A fila de compra guardada: `select event_type, count(*), max(attempts) from pix_webhook_events where
+   processed_at is null and event_type in ('PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED') group by 1;`. Tentativas
+   subindo durante a pausa indicam processo da versão anterior ainda vivo (o gatilho o barrou).
+3. Com a pausa ativa: o trabalho que motivou a pausa (no deploy do #1437, o script de estornos pendentes, que é
+   do PR dele).
+4. Retomar: `update pix_pausa_concessao set retomada_em = now() where retomada_em is null;` (a linha fica: a
+   guarda da purga conta os 7 dias a partir de `retomada_em`; `delete` e `truncate` são recusados).
+5. Confirmar a retomada: `select pix_pausa_ativa();` dá `false`, e a fila de compra da consulta do passo 2
+   esvazia a 100 eventos por passada da varredura do dreno, que roda a cada 60 s (mais antigos primeiro). Quem
+   pagou durante a pausa recebe o acesso quando a compra dele é drenada.
+
 **PR B: emitir com os cadernos (backend; invisível até o modal mandar `extras`).** O
 `POST /billing/pix/checkout` aceita `extras: list[str]` (ids de Price, até 3, sem
 repetir, senão 400). O cliente nunca manda preço: `pix_extras.escolher` relê a oferta

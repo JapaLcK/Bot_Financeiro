@@ -33,6 +33,8 @@ saídas possíveis por linha são, e são só estas:
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from core.observability import log_system_event_sync
 from core.services import admin_notify, asaas
 
@@ -65,12 +67,34 @@ def drenar_pendentes(limite: int = 100) -> int:
     travado não segura a fila dos outros.
     """
     from core.services.pix_drain import drenar_evento
-    from db.webhook_outbox import eventos_pendentes
+    from db.pix_pausa import avisar_se_esquecida
+    from db.webhook_outbox import RETENCAO_OUTBOX_DIAS, eventos_pendentes
 
+    avisar_se_esquecida(lambda pausa: admin_notify.notify_pix_alerta(_texto_da_pausa(pausa)), RETENCAO_OUTBOX_DIAS)
     pendentes = eventos_pendentes(limite)
     for event_id in pendentes:
         drenar_evento(event_id)
     return len(pendentes)
+
+
+def _texto_da_pausa(pausa: dict) -> str:
+    """Aviso de pausa esquecida (#1574), nunca retomada automática. A purga não zera o que a pausa segura
+    (`pix_pausa_guarda`); o que os 7 dias marcam é a retenção desses dados além do prazo."""
+    from db.webhook_outbox import RETENCAO_OUTBOX_DIAS
+
+    def _dur(t: timedelta) -> str:
+        m = max(int(t.total_seconds() // 60), 0)
+        return f"{m // 1440} d {m // 60 % 24} h" if m >= 1440 else f"{m // 60} h {m % 60} min"
+
+    pausada = datetime.now(timezone.utc) - pausa["ativa_desde"]
+    resta = timedelta(days=RETENCAO_OUTBOX_DIAS) - pausada
+    prazo = (f"Faltam {_dur(resta)} para os {RETENCAO_OUTBOX_DIAS} dias; depois disso o que está guardado fica"
+             " com dados além do prazo de retenção da fila." if resta > timedelta(0) else
+             f"Passou dos {RETENCAO_OUTBOX_DIAS} dias: o que está guardado está com dados além do prazo de retenção.")
+    return (f"⏸️ **Pix: concessão pausada há {_dur(pausada)}** (motivo: {pausa['motivo'] or '-'}). As compras e os"
+            " eventos recusados pela pausa ficam guardados, sem ser apagados, e são processados na retomada;"
+            f" mas a pausa está longa demais. {prazo}"
+            " Retomar: ver docs/CLAUDE.md, \"Pausa da concessão do Pix\".")
 
 
 def purgar_retencao() -> dict:
@@ -203,7 +227,6 @@ def _sem_cobranca_remota(linha: dict) -> str:
     `apagar_cobranca`, no banco. `creating` **nunca** expurga — volta a `draft`,
     e a passada seguinte cai aqui de novo com a linha já em `draft`.
     """
-    from datetime import datetime, timedelta, timezone
 
     from db.pix_charges_saga import apagar_cobranca
 
