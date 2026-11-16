@@ -232,7 +232,7 @@ EXPORTADAS: dict[str, tuple[str, str]] = {
                case split_part(actor, ':', 1) when 'user' then 'Autor do acesso não identificado no registro'
                     when 'system' then 'sistema' when 'webhook' then 'sistema'
                     when 'admin' then 'equipe PigBank' when 'cli' then 'equipe PigBank'
-                    else 'não identificado' end as quem,
+                    else 'origem do acesso não classificada' end as quem,
                split_part(purpose, ':', 1) as finalidade, field as dado, count(*) as acessos
         from pii_access_log where subject_user_id = %(uid)s
         group by 1, 2, 3, 4 order by 1, 2, 3, 4

@@ -3,7 +3,7 @@
 Por dia (em São Paulo) × quem × finalidade × dado, com a contagem. Quem vem de lista explícita (PB3 c): `user` é
 "Autor do acesso não identificado no registro" (D1: `get_auth_user` grava `user:self` para o próprio titular, para
 o titular da família lendo um integrante e para job); `system` e `webhook`, "sistema"; `admin` e `cli`, "equipe
-PigBank"; outro prefixo, "não identificado". A finalidade é só o que vem antes de `:` (PB4 a). Não saem o nome do
+PigBank"; outro prefixo, "origem do acesso não classificada". A finalidade é só o que vem antes de `:` (PB4 a). Não saem o nome do
 operador, `endpoint` nem `extra`.
 
 O agregado usa INSERT direto (a suíte roda com `PII_AUDIT_DISABLED=1`, `tests/conftest.py`); o D1 liga a auditoria
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -26,6 +27,7 @@ from db.privacy_export import build_user_export_zip
 from db.privacy_export_conjuntos import EXPORTADAS
 
 AMBIGUO = "Autor do acesso não identificado no registro"
+NAO_CLASSIFICADA = "origem do acesso não classificada"
 
 _HOJE = "2026-11-11 15:00+00"
 _ONTEM_NO_BRASIL = "2026-11-10 02:30+00"  # 23h30 de 09/11 em São Paulo
@@ -43,7 +45,7 @@ ESPERADO = [
     ["2026-11-11", AMBIGUO, "get_auth_user", "email", 4],
     ["2026-11-11", "equipe PigBank", "cli_inspect", "name", 1],
     ["2026-11-11", "equipe PigBank", "render_admin_user_detail", "phone", 1],
-    ["2026-11-11", "não identificado", "ler_ficha", "email", 1],
+    ["2026-11-11", NAO_CLASSIFICADA, "ler_ficha", "email", 1],
     ["2026-11-11", "sistema", "of_sync", "email", 1],
 ]
 _NAO_SAEM = ("fulano_SEG", "operador_SEG", "motivo_SEG", "beltrano_SEG", "SEG_endpoint", "SEG_extra", "B_SEG")
@@ -92,7 +94,7 @@ def test_acessos_saem_agregados_e_sem_operador(monkeypatch):
             monkeypatch, _variante("split_part(purpose, ':', 1)", "purpose"), a)
         assert "no ZIP: B_SEG" in _problemas(monkeypatch, _variante("%(uid)s", "%(uid)s or true"), a)
         for de, para in ((" when 'cli' then 'equipe PigBank'", " when 'cli' then 'sistema'"),
-                         ("else 'não identificado'", "else 'sistema'"), (f"then '{AMBIGUO}'", "then 'você'")):
+                         (f"else '{NAO_CLASSIFICADA}'", "else 'sistema'"), (f"then '{AMBIGUO}'", "then 'você'")):
             assert [p for p in _problemas(monkeypatch, _variante(de, para), a) if p.startswith("agregado")], de
     finally:  # FK `set null`: a limpeza do conftest deixaria as linhas soltas
         _sql("delete from pii_access_log where subject_user_id = any(%s)", ([a, b],))
@@ -134,3 +136,16 @@ def test_d1_acesso_de_user_sai_como_autor_nao_identificado(monkeypatch):
             assert _quem_leu(b, ler) == {AMBIGUO}, caso
     finally:
         _sql("delete from pii_access_log where subject_user_id = any(%s)", ([a, b],))
+
+
+def test_manifesto_explica_os_quatro_valores_de_quem_e_os_tres_casos_do_d1():
+    uid = int(uuid.uuid4().int % 900_000_000) + 1
+    ensure_user(uid)
+    notas = " ".join(json.loads(zipfile.ZipFile(io.BytesIO(build_user_export_zip(uid))).read("manifesto.json"))["notes"])
+    # os valores de `quem` saem da SQL: um rótulo trocado lá e não na nota reprova
+    rotulos = set(re.findall(r"(?:then|else) '([^']+)'", EXPORTADAS["acessos_dados_pessoais"][1]))
+    assert len(rotulos) == 4, rotulos
+    for rotulo in rotulos:
+        assert f"'{rotulo}'" in notas, rotulo
+    for caso in ("feito por você", "outra pessoa autorizada", "tarefa automática"):  # D1
+        assert caso in notas, caso
