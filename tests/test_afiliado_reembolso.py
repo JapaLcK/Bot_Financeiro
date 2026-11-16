@@ -163,7 +163,8 @@ def test_total_sem_invoice_acha_a_fatura_pelo_invoice_payment(mundo, fatura_de):
                                 {"status": "paid", "invoice": fatura_de(com.fatura)}]
     mundo.stripe.cobra(com.fatura, devolvido=100_000)
     _reembolsa(None, intent="pi_1")
-    assert mundo.chamadas == [{"payment": {"type": "payment_intent", "payment_intent": "pi_1"}, "limit": 100}]
+    assert mundo.chamadas == [{"payment": {"type": "payment_intent", "payment_intent": "pi_1"}, "limit": 100,
+                               "api_key": "sk_test_xxx"}]
     assert _numeros(c) == (1, 1, 1, 1, 0)
 
 
