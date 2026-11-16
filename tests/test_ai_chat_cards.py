@@ -125,6 +125,8 @@ def test_visao_do_modelo_esta_no_bloco(mundo, card):
     a, _ = mundo
     if card == "metas":  # a meta da fixture não tem banco (`atual` null, sem R$): dá dinheiro a ela
         posicao(conexao(a, "item-visao-metas", banco="Nubank"), "p1", "1234.567")
+    if card == "simulador":  # a estimativa (janelas de 30 dias até ontem) perde o mês da fixture do dia ~15 ao ~20: gasto de ontem
+        db.add_launch_and_update_balance(a, "despesa", 42.5, "mercado", None, criado_em=now_tz() - timedelta(days=1))
     args, _ = CASOS[card]
     r, (bloco,), _ = mostrar(a, card=card, **args)
     assert r["card"] == card and len(r["abas"]) == len(bloco["abas"])
