@@ -2792,8 +2792,9 @@ um teste compara os dois) traduzem para o pagamento de `affiliate_referral_payme
 `scripts/backfill_afiliado_pagamentos.py` e a conferência do saque na Stripe (`faturas_do_saque`, nos dois
 ramos) pulam as `pix:`, que não são fatura da Stripe; saque só com comissão Pix não consulta a Stripe (QR e
 "Marcar pago" saem sem chave: o atalho mora em `conferir_saque`, antes da checagem dela);
-`affiliate_refund_review_events` guarda ajuste, rejeição, pagamento registrado e recuperação, com
-autor e horário, só por inserção. `registrar_reembolso` grava rótulo e pendência numa transação, sob
+`affiliate_refund_review_events` guarda ajuste, rejeição, pagamento registrado, recuperação e a decisão
+do admin na conferência (`check_reversed`, `check_concluded`; `check_released` no PR 2 da #1538), com autor e
+horário, só por inserção (`registrar_evento`, `db/affiliate_eventos.py`). `registrar_reembolso` grava rótulo e pendência numa transação, sob
 a trava da fatura e da comissão, e decide com o estado de agora:
 
 | Comissão \ evento | Parcial | Total |
@@ -2888,8 +2889,8 @@ permite concluir (disputa aberta, `payment_record`, sem cobrança paga) grava a 
 (`payment_check_reason`: `disputa_aberta`, `forma_inesperada`, `sem_cobranca`) e só volta depois de 1 h
 (`ESPERA_CONFERENCIA_S`), sem segurar as seguintes. Erro 4xx da própria fatura (400, 403 e 404, como
 "No such invoice") vale o mesmo, com o motivo `stripe_<status>`, e a marca fica. A queda da Stripe
-(conexão, prazo, 401, 429, 5xx) para a passada sem gravar nada. Só o
-worker espera e grava a tentativa e o motivo: webhook, QR, "Marcar pago" e "Pagamento já realizado" conferem
+(conexão, prazo, 401, 429, 5xx) para a passada sem gravar nada. Só o worker e o "Concluir conferência" do
+admin (#1538) gravam a tentativa e o motivo: webhook, QR, "Marcar pago" e "Pagamento já realizado" conferem
 na hora (o webhook e o D10 podem marcar, mas não gravam tentativa). Liberar
 zera a tentativa e o motivo (#1497). Toda marca (webhook, D10) grava `payment_check_marked_at` e zera a
 tentativa (entra como nunca tentada); quem libera (`conferir_comissao` e `conferir_saque`) e o adiamento do
@@ -2899,6 +2900,33 @@ de 1 h (#1498). Toda adiada deixa o log
 aparece "em conferência" (`commissions[].checking`), no `/painel` e no `/app`. Comissão antiga nasce `false` na
 migração, sem conferência em massa. O overview do admin mostra quantas aguardam e a mais antiga
 (`commission_checks`), para notar queda longa. Com linha da fatura, `promover` decide e não há consulta.
+
+**Comissões em conferência no admin (#1538, PR 1).** O overview leva `commission_check_list`
+(`db/affiliate_conferencia_admin.py`): as 100 marcadas mais antigas, com código, valor, onde está (solta, no
+saque, paga, e os selos de revisão e recuperação), a data da marca, a última tentativa e o motivo, sem fatura
+nem dado do indicado. O motivo só vale com tentativa (`tried_at` nulo mostra "Aguardando a 1ª conferência").
+`acoes(linha)` é a regra única das decisões: a lista leva o que ela devolve e as rotas a repetem sob a trava
+da comissão. **Estornar** (`POST .../commissions/{id}/check-reverse`): sem Stripe, vale sem tentativa; paga ou
+estornada dá 409; num saque aberto dá 409 e nada muda (a marca segue segurando o saque, que mantém o valor):
+rejeite o saque ou registre o pagamento antes. **Concluir conferência** (`.../check-conclude`, só a paga):
+confere na Stripe na hora pelo executor da conferência (`_na_stripe`) e só tira a marca; saldo, saque,
+status, valor e recuperação ficam. Disputa aberta, motivo nulo ou desconhecido dão 409; a fatura que confirma
+no clique sai pela regra normal (409); Stripe fora ou prazo dão 503 e nenhuma decisão manual é gravada. A
+consulta do clique é a do worker (`adiar=True`): a fatura que não confirma regrava `tried_at = now()` e o motivo,
+o que reinicia a espera de 1 h, e deixa o log `affiliate_commission_check_pending`, mesmo depois do 503 do prazo,
+quando a thread termina sozinha. Corpo:
+`justification` (10 a 500), `evidence` (o formato da referência do comprovante, obrigatória, pode ter id da
+Stripe) e a versão vista (`marked_at`, `reason`, `amount_cents`), comparada em Python depois da trava: marca nova,
+volta do worker, revisão parcial, outro admin ou duplo clique dão 409 "A comissão mudou". A comissão que nasce
+marcada não tem `marked_at`: a versão dela é (None, None) antes e depois de a Stripe liberar, e quem a segura é
+"continua marcada". A trava vem antes da leitura, então o estado anterior gravado é o que a decisão encontrou. Uma decisão grava um evento na mesma transação, com
+`commission_id`, o código no ato e o estado antes e depois (`state_before`, `state_after`, chaves fixas); os
+logs levam só o id. Liberar fica para o PR 2 (`stripe_404`) e o PR 3 (`sem_cobranca` e `forma_inesperada`,
+depois do roteiro na Stripe de teste); até lá esses dois motivos mostram "Liberar indisponível". Todo estorno
+tira a marca (`SEM_MARCA`, `db/affiliate_reviews.py`): o manual e a rota antiga `/reverse` (`_estornar`), o
+automático da solta (D9), a revisão parcial aprovada com 0 e o "Rejeitar" do saque, só na que ele estorna
+(`sem_marca_se`): a que volta ao saldo segue em conferência. "A mais antiga" do cabeçalho e a ordem da lista
+contam desde a marca (`MARCADA_DESDE_SQL`), e não desde o nascimento da comissão.
 **Conferir antes de pagar.** O `charge.refunded` pode se perder, então o QR, o "Marcar pago" e o
 "Pagamento já realizado" consultam a Stripe por cada fatura do saque antes de o dinheiro sair
 (`conferir_saque`): as das comissões do saque e, no saque órfão, as das linhas do vínculo. A regra é a
@@ -3016,7 +3044,7 @@ desvinculado do usuário, dados financeiros retidos:
 | Retido | `affiliate_commissions` | id, afiliado, `stripe_invoice_id`, valor da fatura, comissão, `commission_bps`, `paid_months`, status, `available_at`, `payout_id`, `created_at` |
 | Retido | `affiliate_referrals` | id, afiliado, `code_used`, `first_charge_ref`, `created_at` |
 | Retido | `affiliate_referral_payments` | origem, `payment_ref`, valor, datas, rótulo |
-| Retido | `affiliate_refund_reviews` e `affiliate_refund_review_events` | Fatura, valores, status, referência, justificativa, autor |
+| Retido | `affiliate_refund_reviews` e `affiliate_refund_review_events` | Fatura, valores, status, referência, justificativa, autor; nos eventos da conferência (#1538), `commission_id`, `affiliate_code` (o código no ato, D8), `state_before` e `state_after` |
 | Retido | `affiliate_paid_refund_checks` | Fatura e data da última reconciliação, sem pessoa; sai 541 dias depois da última consulta (#1501) |
 
 `stripe_invoice_id` segue ligado ao cliente dentro da Stripe, e nada no repositório apaga o cliente

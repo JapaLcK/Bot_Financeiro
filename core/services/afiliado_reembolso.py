@@ -128,10 +128,15 @@ def validar_comprovante(data_valor, referencia, minimo: date | None) -> tuple[da
         raise ValueError("A data não pode estar no futuro.")
     if minimo and data < minimo:
         raise ValueError("A data é anterior ao início deste caso.")
-    limpa = limpa_para_pg(referencia).strip() if isinstance(referencia, str) else ""
+    return data, validar_referencia(referencia)
+
+
+def validar_referencia(valor, rotulo: str = "Referência") -> str:
+    """Referência do comprovante, e a evidência da decisão na conferência (#1538): o mesmo formato."""
+    limpa = limpa_para_pg(valor).strip() if isinstance(valor, str) else ""
     if not _REFERENCIA.match(limpa):
-        raise ValueError("Referência inválida: de 4 a 120 caracteres, só letras, números e . _ : / -")
-    return data, limpa
+        raise ValueError(f"{rotulo} inválida: de 4 a 120 caracteres, só letras, números e . _ : / -")
+    return limpa
 
 
 def dia_em_brasilia(instante: datetime) -> date:
@@ -246,8 +251,9 @@ def conferir_comissao(commission_id: int, fatura: str, *, adiar: bool = False, l
     False quando a fatura ainda não permite concluir (`SemConfirmacao`, ou 4xx da própria fatura: 400,
     403, 404), e None quando a Stripe falhou para todas (conexão, prazo, chave, limite, 5xx) ou não há
     chave. Erro de banco sobe para quem chamou.
-    `adiar`, só do worker: o False grava a hora e o motivo, e a comissão espera 1 h (#1497).
-    `lido`: a marca que o worker leu (None na que acabou de nascer); marca mais nova fica (#1498)."""
+    `adiar`, do worker e do "Concluir conferência" do admin (#1538): o False grava a hora e o motivo, e a
+    comissão espera 1 h (#1497). `lido`: a marca que quem confere leu (None na que acabou de nascer); marca
+    mais nova fica (#1498)."""
     import stripe  # noqa: PLC0415
 
     chave = os.getenv("STRIPE_SECRET_KEY")

@@ -65,7 +65,8 @@ def test_admin_affiliate_status_topo_nao_objeto_da_400(corpo):
 
 @pytest.mark.parametrize("caminho", [
     f"payouts/{INEXISTENTE}/payment-recorded", f"refund-reviews/{INEXISTENTE}/approve",
-    f"refund-reviews/{INEXISTENTE}/close-recovery",
+    f"refund-reviews/{INEXISTENTE}/close-recovery", f"commissions/{INEXISTENTE}/check-reverse",
+    f"commissions/{INEXISTENTE}/check-conclude",
 ])
 @pytest.mark.parametrize("corpo", NAO_OBJETOS, ids=IDS)
 def test_admin_pendencia_topo_nao_objeto_da_400(corpo, caminho):
