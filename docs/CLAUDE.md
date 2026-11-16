@@ -1680,9 +1680,14 @@ FECHADO): `payment.type` diferente de `payment_intent`, `payment_intent` vazio, 
 `latest_charge` não expandida (string, nulo, sem os campos). Nos dois casos não envia
 nem fecha, o claim expira com backoff e a próxima passada confere de novo. As quatro chamadas
 do job à Stripe (`list_line_items`, `Session.retrieve` e as duas de `cobrancas_da_fatura`) usam
-`cliente_stripe`: prazo de 8 s por chamada, sem retentativa (#1499). Limite: a passada não
-para na primeira falha de rede, então com a Stripe pendurada cada linha aberta custa cerca
-de 8 s. Depois de
+`cliente_stripe`, sem retentativa (#1499). Os 8 s são o maior silêncio por operação de socket do `requests`,
+não o tempo da chamada: uma Stripe que goteja bytes segura a chamada sem teto (medido: 27,5 s com prazo de
+0,5 s, e a chamada terminou com sucesso). A passada tem tempo limitado (#1533): na 1ª queda da Stripe
+(`StripeError` que não é 400/403/404) as linhas de cartão seguintes nem são reivindicadas e o Pix segue; e o
+orçamento `PRAZO_PASSADA_S` (60 s) é conferido só entre uma linha e outra, então a linha em curso termina (até
+4 chamadas na de cartão; a de Pix gasta o tempo do Asaas e o do envio do e-mail). Fica limitada contra a Stripe
+pendurada e contra a lenta que responde, não contra a que goteja. O que ficou de fora vai para o próximo ciclo,
+sem claim nem tentativa. Depois de
 enviado não há o que desfazer: a linha `enviado` fica como está, e o link já saiu.
 `estornado` é final: não há botão para liberar a entrega, e liberar exige ajuste manual
 no banco; contestação GANHA continua com `disputed` True, então também segura para
@@ -2851,8 +2856,12 @@ e referência) ou `waived` (sem elas), e repetir dá 409, sem novo evento.
 falha. `marcar_avisada` só marca se `refunded_cents` e `status` seguem os do envio: fato novo ou
 "Pagamento já realizado" durante o HTTP deixam o aviso novo pendente. Concorrência por claim com prazo (`reivindicar`, 2 minutos, HTTP fora da transação): processo
 que morre deixa a linha voltar; repetição é possível, perda não. Falha de aviso responde 200. 5xx por
-banco ou queda da Stripe (conexão, prazo de 8 s, 401, 429, 5xx) e por erro ao achar a fatura
-(`fatura_da_cobranca`, `Charge.retrieve`, ainda no cliente global: #1533). Fatura que ainda não confirma
+banco ou queda da Stripe (conexão, prazo de 8 s por operação de socket, 401, 429, 5xx) e por erro ao achar a fatura
+(`fatura_da_cobranca` e a leitura da cobrança da disputa, no `cliente_stripe` desde o #1533). Até 5 leituras em
+série, sem retentativa. Os 8 s são o maior silêncio por operação de socket, não o tempo da leitura: contra a
+Stripe pendurada ou a lenta que responde a rota fica limitada, contra a que goteja bytes não há teto (medido:
+27,5 s com prazo de 0,5 s). Os testes medem 1 pedido por leitura (T8, sem medir prazo) e o prazo de 2 das 5
+leituras (a cobrança, T1, e a busca da fatura, T2). Fatura que ainda não confirma
 (disputa aberta, `payment_record`, sem cobrança paga, 4xx da fatura) ou em que a Stripe ainda mostra zero
 responde 200 e marca a comissão da fatura (`payment_check_pending`) para o worker do A5, com o log
 `affiliate_commission_check_pending` com `event_id` (sem comissão viva, `affiliate_refund_check_pending`,
