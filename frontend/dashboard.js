@@ -6802,6 +6802,31 @@ function _dismissInsight(key) {
   if (_analyticsCache) renderAnalyticsInsights(_analyticsCache.insights);
 }
 
+// O X da lista. Exceção à D6 do PL-06 (P12 do convite): o convite do saldo grava a dispensa no servidor
+// (`PUT /insights/{uid}/estado`), que a filtra em toda leitura do feed (Análises, card da Início, outro aparelho) até
+// a chave do mês seguinte (`wallet_balance_unknown:carteira:AAAA-MM`). Os demais seguem no `localStorage` de 24 h até
+// o PR C. Falha não esconde nada: o convite fica e o toast de erro (vermelho) avisa.
+async function _dispensarInsight(key) {
+  const item = ((_analyticsCache && _analyticsCache.insights) || []).find(i => i.key === key);
+  if (!item || item.type !== "wallet_balance_unknown") return _dismissInsight(key);
+  let ok = false;
+  try {
+    ok = (await fetch(`${API}/insights/${USER_ID}/estado`, {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ chave: key, dispensado: true, severidade: item.severity }),
+    })).ok;
+  } catch (_e) { /* rede caída: o mesmo aviso */ }
+  if (!ok) { showLaunchSuccessToast("Não deu para dispensar agora. Tente de novo.", true); return; }
+  // ponytail: uma revalidação do feed que saiu antes do PUT ainda pode trazer o convite de volta até a próxima carga
+  // (o servidor já o filtra); travar isso pede geração no `_analyticsChannel`.
+  _analyticsCache.insights = _analyticsCache.insights.filter(i => i.key !== key);
+  renderAnalyticsInsights(_analyticsCache.insights);
+  const card = document.getElementById("piggy-insight-card");
+  if (card && card.dataset.tipo === "wallet_balance_unknown") card.style.display = "none";
+}
+
 // Mapeia action_view do backend pra nome real da view no app
 const _INSIGHT_VIEW_MAP = {
   budgets: "budgets",
@@ -6861,7 +6886,7 @@ function renderAnalyticsInsights(insights) {
     const action = i.action_label && i.action_view
       ? `<button class="mini-action" onclick="_switchToInsightView('${escapeJsString(i.action_view)}')" style="background:rgba(255,45,142,.12);border:none;color:var(--purple,#FF2D8E);font-size:.75rem;font-weight:600;padding:5px 10px;border-radius:6px;cursor:pointer;white-space:nowrap">${escapeHtmlSafe(i.action_label)} →</button>`
       : "";
-    const closeBtn = `<button title="Dispensar" aria-label="Dispensar" onclick="_dismissInsight('${escapeJsString(i.key)}')" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;border-radius:6px;opacity:.6" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.6"><i class="ph ph-x" aria-hidden="true"></i></button>`;
+    const closeBtn = `<button title="Dispensar" aria-label="Dispensar" onclick="_dispensarInsight('${escapeJsString(i.key)}')" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;border-radius:6px;opacity:.6" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.6"><i class="ph ph-x" aria-hidden="true"></i></button>`;
     return `
       <div class="tx-row" style="border-left:3px solid ${color};padding-left:10px;align-items:flex-start">
         <div class="tx-icon">${phIcon(i.icon || "🐷")}</div>

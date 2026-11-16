@@ -8,14 +8,15 @@ do detector em 20/10/2026 10:00, menos na conversa (C13), que roda no relógio r
 Controles negativos (mutação numa cópia da árvore; o log mora no relato do PR): sem o ramo `if not informou` → C1
 (critical de R$ 30); convite antes do `fecha >= 0` → C2; sem `marcar_saldo_confirmado` no `adjust-balance` → C6, C12;
 no `initial-balance` → C7, C9; reset sem limpar a marca → C8; apagar tudo sem limpar → C17; limpar depois do laço → C19; 2ª condição de `saldo_informado` sem `user_id = %s` → C9;
-sem o tipo em `RECURSO_POR_TIPO` → C10; `info` no envio por e-mail → C16. Positivos: C5, C6/C7 (nenhuma linha nova no
+sem o tipo em `RECURSO_POR_TIPO` → C10; `info` no envio por e-mail → C16; leitura sem o filtro de dispensados →
+C11, C11b; mês da chave em UTC → C11b. Positivos: C5, C6/C7 (nenhuma linha nova no
 extrato), C10 (Plus e Pro legado veem), C16 (o warning da mesma cena vai).
 """
 from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal as D
 
 import psycopg
@@ -254,6 +255,27 @@ def test_c11_dispensado_some_no_mes_e_volta_no_seguinte(llm, monkeypatch):
     assert _put(uid, chave=CHAVE, dispensado=True, severidade="info").status_code == 200
     assert _tipos(uid) == []
     _relogio(monkeypatch, datetime(2026, 11, 1, 10, tzinfo=_tz()))
+    assert [i["key"] for i in _feed(uid)] == ["wallet_balance_unknown:carteira:2026-11"]
+
+
+def test_c11b_dispensado_vale_o_mes_inteiro_no_fuso_do_app(llm, monkeypatch):
+    """O X do painel antigo grava aqui (exceção à D6, P2 do Codex no #1598): não volta no dia seguinte nem na última
+    noite do mês, quando em UTC já é o mês seguinte; volta na 1ª hora do mês seguinte no fuso do app. Positivo: quem
+    não dispensou vê o convite nos mesmos instantes (sem isso, "não volta" passaria num convite que nem sairia)."""
+    _relogio(monkeypatch)
+    uid, outro = _usuario("pro"), _usuario("pro")
+    for u in (uid, outro):
+        # Carteira em -30 por um gasto antigo: a conta a partir do zero fecha negativa em qualquer dia do mês.
+        db.add_launch_and_update_balance(u, "despesa", 30, "Padaria", None, "padaria", ANTIGO)
+        assert [i["key"] for i in _feed(u)] == [CHAVE]
+    assert _put(uid, chave=CHAVE, dispensado=True, severidade="info").status_code == 200
+    ultima_noite = datetime(2026, 10, 31, 22, tzinfo=_tz())
+    assert ultima_noite.astimezone(timezone.utc).month == 11  # o instante discrimina o fuso
+    for agora in (datetime(2026, 10, 21, 10, tzinfo=_tz()), ultima_noite):
+        _relogio(monkeypatch, agora)
+        assert _tipos(uid) == [], agora
+        assert [i["key"] for i in _feed(outro)] == [CHAVE], agora
+    _relogio(monkeypatch, datetime(2026, 11, 1, 0, 30, tzinfo=_tz()))
     assert [i["key"] for i in _feed(uid)] == ["wallet_balance_unknown:carteira:2026-11"]
 
 

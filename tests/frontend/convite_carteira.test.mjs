@@ -10,8 +10,9 @@
  * computado), com o markup REAL do modal e do card recortado da dashboard.html, para o teste não divergir dela.
  *
  * Controles negativos (medidos à mão, relato do PR): sem a variante sem banco → F1 (linha de bancos visível); o CTA
- * de volta ao `navigateTo` direto → F3; sem `_esconderConviteSaldo` → F4; sem o `opts.vazio` → F1b; sem o link → F5. Positivos: F2 (com banco,
- * o modal de hoje), F3 (`fixed` continua navegando), F5 (mês passado sem link).
+ * de volta ao `navigateTo` direto → F3; sem `_esconderConviteSaldo` → F4; sem o `opts.vazio` → F1b; sem o link → F5; o X do
+ * convite de volta ao `_dismissInsight` local → F6. Positivos: F2 (com banco, o modal de hoje), F3 (`fixed` continua
+ * navegando), F5 (mês passado sem link), F8 (o X dos demais avisos segue local, 24 h), F9 (o card com outro aviso fica).
  *
  * Rodar: node --test tests/frontend/convite_carteira.test.mjs
  */
@@ -55,7 +56,8 @@ async function carregar() {
   await page.goto("http://convite.test/");
   await page.setContent(
     IDS.filter((i) => i !== "grid").map((i) => `<div id="${i}"></div>`).join("") +
-    CARD + '<div id="grid"></div><div id="toast"></div><div id="analytics-insights-list"></div>' + MODAL,
+    CARD + '<div id="grid"></div><div id="toast"></div><div id="analytics-insights-list"></div>' + MODAL +
+    '<div class="modal-success-toast" id="launch-success-toast"></div>',
   );
   await page.evaluate(() => { window.fetch = () => new Promise(() => {}); });
   await page.addStyleTag({ path: join(FRONTEND, "dashboard.css") });
@@ -209,5 +211,112 @@ test("F5: o link \"ajustar\" sai sem banco no mês corrente e não sai em mês p
   assert.deepEqual(await linkAjustar(page, { balance: -30, of_bank_count: 0, is_current_month: false }), []);
   assert.deepEqual(await linkAjustar(page, { balance: 10, of_bank_count: 1, of_bank_balance: 5, is_current_month: true }),
     [["ajustar", "openAdjustWalletModal()"]], "com banco, o link de sempre (um só)");
+  await page.close();
+});
+
+// ── O X do convite grava no servidor (P12; exceção à D6 decidida no P2 do Codex no #1598) ─────────────────────────
+// O servidor real (Postgres, relógio, outro aparelho) foi exercido à parte, pelo botão, no relato do PR. Aqui fica o
+// contrato do lado do navegador: o PUT certo, o esconder só depois do 2xx, a falha visível, e os demais intocados.
+
+const xDe = (page, titulo) => page.locator("#analytics-insights-list .tx-row", { hasText: titulo }).locator('button[aria-label="Dispensar"]');
+const estado = (page) => page.evaluate(() => ({
+  titulos: [...document.querySelectorAll("#analytics-insights-list .tx-desc")].map((e) => e.textContent),
+  card: getComputedStyle(document.getElementById("piggy-insight-card")).display,
+  local: Object.keys(JSON.parse(localStorage.getItem("_pigInsightsDismissed") || "{}")),
+  toast: document.getElementById("launch-success-toast").textContent,
+}));
+
+/** Troca o `fetch` por um que anota as chamadas e responde com `resp` (função: rejeição = rede caída). */
+const pedidos = (page, resp) => page.evaluate((r) => {
+  window.__pedidos = [];
+  window.fetch = async (url, opts = {}) => {
+    window.__pedidos.push({ url: String(url), method: opts.method, body: opts.body && JSON.parse(opts.body),
+      csrf: (opts.headers || {})["X-CSRF-Token"] });
+    if (r === "rede") throw new TypeError("Failed to fetch");
+    return { ok: r >= 200 && r < 300, status: r, json: async () => ({}) };
+  };
+}, resp);
+
+test("F6: o X do convite faz o PUT do estado e, com 2xx, some da lista e do card, sem gravar no localStorage", async () => {
+  const page = await carregar();
+  await comCard(page, [CONVITE, CONTA]);
+  // O `carregar` troca o `csrfHeaders` por um vazio; aqui volta um que põe o token, para o teste ver se o PUT o usa.
+  await page.evaluate(() => {
+    localStorage.clear();
+    window.csrfHeaders = (extra = {}) => ({ ...extra, "X-CSRF-Token": "tok-teste" });
+  });
+  await pedidos(page, 200);
+  await xDe(page, CONVITE.title).click();
+  await page.waitForFunction(() => document.querySelectorAll("#analytics-insights-list .tx-row").length === 1);
+  const api = await page.evaluate(() => API);
+  assert.deepEqual(await page.evaluate(() => window.__pedidos), [{
+    url: `${api}/insights/7/estado`, method: "PUT", body: { chave: CONVITE.key, dispensado: true, severidade: "info" },
+    csrf: "tok-teste",
+  }], "sem o X-CSRF-Token o PUT dá 403 em produção");
+  const r = await estado(page);
+  assert.deepEqual(r.titulos, ["Luz vence hoje"]);
+  assert.equal(r.card, "none", "o card da Início continuou com o convite");
+  assert.deepEqual(r.local, [], "a dispensa do convite é do servidor, não deste navegador");
+  await page.close();
+});
+
+for (const [nome, resp] of [["500", 500], ["401", 401], ["403", 403], ["rede caída", "rede"]]) {
+  test(`F7: PUT com ${nome}: o convite fica na lista e no card, o erro aparece, nada é gravado no navegador`, async () => {
+    const page = await carregar();
+    await comCard(page, [CONVITE, CONTA]);
+    await page.evaluate(() => localStorage.clear());
+    await pedidos(page, resp);
+    await xDe(page, CONVITE.title).click();
+    await page.waitForFunction(() => document.getElementById("launch-success-toast").classList.contains("show"));
+    const r = await estado(page);
+    assert.equal((await page.evaluate(() => window.__pedidos)).length, 1);
+    assert.deepEqual(r.titulos, [CONVITE.title, "Luz vence hoje"]);
+    assert.notEqual(r.card, "none");
+    assert.deepEqual(r.local, []);
+    assert.equal(r.toast, "Não deu para dispensar agora. Tente de novo.");
+    // Visível e na variante de erro (vermelha; verde é só sucesso), medido depois da transição de .35 s.
+    await page.waitForTimeout(450);
+    const t = await page.evaluate(() => {
+      const el = document.getElementById("launch-success-toast"), cs = getComputedStyle(el);
+      return { opacity: cs.opacity, erro: el.classList.contains("error"), fundo: cs.backgroundImage };
+    });
+    assert.equal(t.opacity, "1");
+    assert.equal(t.erro, true);
+    assert.match(t.fundo, /rgb\(220, 38, 38\)/);
+    await page.close();
+  });
+}
+
+test("F9 (positivo): dispensar o convite não esconde o card da Início que mostra outro aviso", async () => {
+  const page = await carregar();
+  const critica = { ...CONTA, severity: "critical", title: "Luz venceu ontem" };
+  await comCard(page, [critica, CONVITE]);
+  assert.equal(await page.textContent("#piggy-insight-title"), "💰 Luz venceu ontem");
+  await pedidos(page, 200);
+  await xDe(page, CONVITE.title).click();
+  await page.waitForFunction(() => document.querySelectorAll("#analytics-insights-list .tx-row").length === 1);
+  const r = await estado(page);
+  assert.deepEqual(r.titulos, ["Luz venceu ontem"]);
+  assert.notEqual(r.card, "none", "o card mostrava outro aviso e sumiu junto com o convite");
+  await page.close();
+});
+
+test("F8 (positivo): o X dos demais avisos continua local, 24 h, sem pedido ao servidor", async () => {
+  const page = await carregar();
+  await comCard(page, [CONVITE, CONTA]);
+  await page.evaluate(() => localStorage.clear());
+  await pedidos(page, 200);
+  await xDe(page, "Luz vence hoje").click();
+  const r = await estado(page);
+  assert.deepEqual(await page.evaluate(() => window.__pedidos), []);
+  assert.deepEqual(r.titulos, [CONVITE.title]);
+  assert.deepEqual(r.local, [CONTA.key]);
+  // Passadas as 24 h, volta.
+  const voltou = await page.evaluate((k) => {
+    localStorage.setItem("_pigInsightsDismissed", JSON.stringify({ [k]: Date.now() - 24 * 60 * 60 * 1000 - 1000 }));
+    renderAnalyticsInsights(_analyticsCache.insights);
+    return [...document.querySelectorAll("#analytics-insights-list .tx-desc")].map((e) => e.textContent);
+  }, CONTA.key);
+  assert.deepEqual(voltou, [CONVITE.title, "Luz vence hoje"]);
   await page.close();
 });
