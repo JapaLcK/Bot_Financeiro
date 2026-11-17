@@ -1717,6 +1717,21 @@ Limites conhecidos: (1) assinatura que morre depois de o
 nascer: o `create-checkout` recusa, mas a tela de status mostra sem plano até o grant sair;
 (3) a reentrega do checkout repete o alerta de estorno.
 
+**Conexões do dreno do Pix (#1413).** Dentro de `reservar_evento`, o `lock_efeito` faz o
+`pg_advisory_lock` na conexão da própria reserva (`conexao_da_reserva`, um `ContextVar` de
+`db/pix_effects.py`) em vez de pedir outra ao pool: no máximo 2 conexões por execução (a reserva e
+uma transitória), em todo caminho, UNDONE incluído. Nessa conexão só rodam o lock e o unlock — uma
+escrita ou um `commit` ali soltaria o `for update` da reserva (`tests/test_pix_dreno_conexoes.py`).
+Quando o `unlock` falha (sessão abortada por deadlock num lock aninhado, ou caída), o `except` do
+`unlock` em `lock_efeito` fecha a conexão da reserva: isso solta todas as travas dela, o pool a
+descarta, e o erro que estava em voo é o que sobe (sem erro em voo, sobe o do `unlock`). Consequência:
+fechar a reserva solta o `for update` ANTES do `registrar_falha`; nesse intervalo outra passada pode
+concluir o evento, e a falha fica gravada num evento já processado. Não duplica efeito (cada um segue
+sob a sua trava e o seu registro); acompanhamento em #1576.
+Limite: cada dreno ainda segura a reserva, e o pool é dividido com as rotas: com N drenos
+simultâneos, sobram `DB_POOL_MAX_SYNC − N` conexões para o processo inteiro. Falta um teto de drenos
+simultâneos.
+
 **Pagamento Pix parcial não libera o plano (#1228).** O dreno (`core/services/pix_valor.py`,
 `conferir_valor`) só concede quando o `value` do webhook cobre `total_cents` da cobrança
 (tolerância zero). Menor, ausente ou ilegível: cobrança segue `pending`, sem grant, cadernos,
@@ -1738,7 +1753,7 @@ efeito de compra, um alerta (efeito `pagamento_duplicado_alertado`, log `pix_pag
 evento fechado. Limite conhecido:
 parcial e integral do mesmo pagamento drenados AO MESMO TEMPO (alerta de retido ainda em voo)
 podem conceder sem o alerta "antes RETIDO foi completado", porque o marcador do retido é lido sem
-lock (lock aninhado esgota o pool, #1260); a coluna `completado_pelo_mesmo_pagamento` do runbook
+lock (escolha de antes do #1413, quando a trava custava uma conexão do pool; #1260); a coluna `completado_pelo_mesmo_pagamento` do runbook
 cobre. O marcador de dedupe só é gravado quando o canal do
 admin confirma a entrega (senão log `pix_alerta_nao_entregue` e o próximo evento tenta de novo). Plano já concedido antes da regra continua. NÃO VERIFICADO: o que `value` traz em baixa
 manual (`receiveInCash`) e em cobrança editada no painel do Asaas, se o pagador pode digitar o
