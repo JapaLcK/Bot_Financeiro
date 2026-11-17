@@ -105,8 +105,7 @@ def estorno_no_dreno(cobranca: dict, payment_id: str, event_id: str) -> dict:
         with conn.cursor() as cur:
             gravar(payment_id, cobranca["external_reference"], event_id, cur)
         conn.commit()
-    proprio = cobranca["asaas_payment_id"] == payment_id or (
-        cobranca["asaas_payment_id"] is None and cobranca["status"] != "creating")
-    if cobranca["status"] in ANTES_DO_PAGAMENTO and proprio:
-        return transicionar(cobranca["id"], de=ANTES_DO_PAGAMENTO, para="canceled", apagar_qr=True) or cobranca
-    return cobranca
+    # O id e o "fora de `creating`" no próprio `UPDATE`, nunca no dicionário lido antes: o checkout
+    # pode levar a linha a `creating` ou a `pending` com id novo nesse meio-tempo (Codex, #1595).
+    return transicionar(cobranca["id"], de=ANTES_DO_PAGAMENTO, para="canceled", apagar_qr=True,
+                        so_do_pagamento=payment_id) or cobranca

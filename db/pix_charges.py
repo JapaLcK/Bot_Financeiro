@@ -186,6 +186,7 @@ def transicionar(
     access_expires_at=None,
     apagar_qr: bool = False,
     sem_estorno: bool = False,
+    so_do_pagamento: str | None = None,
 ) -> dict | None:
     """Transição CONDICIONAL da máquina de estados (§11). Devolve a linha nova
     quando a transição aplicou; **`None`** quando o status atual não é `de`.
@@ -237,6 +238,8 @@ def transicionar(
 
     `sem_estorno` (#1437): só aplica sem estorno registrado para `asaas_payment_id`, na MESMA
     instrução. Fecha o estorno drenado inteiro entre a D3 do `RECEIVED` e esta escrita.
+    `so_do_pagamento` (#1437): só aplica à linha desse id, ou sem id e fora de `creating` (emissão
+    em voo), também na MESMA instrução: o checkout pode avançar a linha depois de quem chama a ler.
 
     `apagar_qr` zera `qr_payload_enc` no destino terminal (§13.6): depois de
     `paid`/`canceled`/`expired` confirmado não há uso legítimo do instrumento
@@ -273,10 +276,12 @@ def transicionar(
                 + carimbo
                 + " where id = %s and status = any(%s)"
                 + (f" and not {ESTORNO_SQL}" if sem_estorno else "")
+                + (" and (asaas_payment_id = %s or (asaas_payment_id is null and status <> 'creating'))"
+                   if so_do_pagamento else "")
                 + f" returning {_COLUNAS}",
                 (para, asaas_payment_id, access_starts_at, access_expires_at,
                  bool(apagar_qr), int(charge_id), list(estados))
-                + ((asaas_payment_id,) if sem_estorno else ()),
+                + ((asaas_payment_id,) if sem_estorno else ()) + ((so_do_pagamento,) if so_do_pagamento else ()),
             )
             row = cur.fetchone()
         conn.commit()

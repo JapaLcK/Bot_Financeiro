@@ -95,3 +95,30 @@ def test_estorno_em_linha_sem_id_fora_da_emissao_cancela(user_id, externo, estad
         conn.commit()
     entregar("PAYMENT_REFUNDED", cobranca)
     assert ler(cobranca["id"])["status"] == "canceled"
+
+
+@pytest.mark.parametrize("ate", ["creating", "pending_com_id_novo"])
+def test_checkout_que_avanca_entre_a_leitura_e_o_cancelamento_nao_e_cancelado(user_id, externo, monkeypatch, ate):
+    """Thread do Codex no #1595. O dreno leu a cobrança em `draft` sem id; entre essa leitura e o
+    `UPDATE` de cancelamento, o checkout a leva a `creating` (emissão em voo) ou já a `pending` com o
+    id NOVO. As condições "id igual" e "sem id fora de `creating`" valem no próprio `UPDATE`: o
+    dicionário lido antes não decide nada. Cancelar aqui deixaria o pagamento novo vivo no Asaas."""
+    import db.pix_charges as pix_charges
+    from db.pix_charges_saga import attach_pagamento
+    from test_pix_matriz_estado_evento import montar
+
+    cobranca = montar("draft", user_id)  # sem id na linha; o evento traz o id de um pagamento anterior
+    transicionar, novo = pix_charges.transicionar, f"pay_{uuid.uuid4().hex[:12]}"
+
+    def checkout_no_meio(charge_id, **kw):  # o cancelamento de `estorno_no_dreno`, já com o dicionário lido
+        if kw.get("para") == "canceled":
+            assert transicionar(charge_id, de="draft", para="creating")
+            if ate != "creating":
+                assert attach_pagamento(charge_id, novo)
+        return transicionar(charge_id, **kw)
+
+    monkeypatch.setattr(pix_charges, "transicionar", checkout_no_meio)
+    entregar("PAYMENT_REFUNDED", cobranca)
+    linha = ler(cobranca["id"])
+    assert (linha["status"], linha["asaas_payment_id"]) == (
+        ("creating", None) if ate == "creating" else ("pending", novo))
