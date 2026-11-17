@@ -194,6 +194,17 @@ test("runServerUpdate pendurado: 25 s e as caixas e o Pagar voltam, com o aviso 
   await ctx.close();
 });
 
+test("runServerUpdate que chama a callback depois do prazo: ela não posta o extra desfeito", async () => {
+  const { ctx, page, posts } = await abrirPagina({ sdk: { updateAtrasa: 30_000 }, relogio: true });
+  await caixas(page).nth(0).click();
+  await page.clock.runFor(25_000);
+  await page.locator("#pp-erro.show").waitFor();
+  await page.clock.runFor(10_000);
+  await page.waitForTimeout(200);
+  assert.deepEqual(posts(BUMP), []);
+  await ctx.close();
+});
+
 test("runServerUpdate normal (controle do de cima): o /bump confirma e o Pagar fica habilitado", async () => {
   const { ctx, page, posts } = await abrirPagina({ relogio: true });
   await caixas(page).nth(0).click();

@@ -105,18 +105,19 @@
        *  paga ou expirada), "recusado" (o Stripe recusou o extra) ou false. Nunca lança. */
       async function sincroniza() {
         const posicoes = marcadas().map(function (c) { return Number(c.dataset.pos); });
-        let erro = false;
+        let erro = false, vencido = false;
         try {
           const r = await Promise.race([actions.runServerUpdate(async function () {
+            if (vencido) throw new Error("vencido");  // o SDK chamou depois do prazo: não grava carrinho velho
             const resp = await Promise.race([
               ctx.post("/billing/checkout/bump", { sid: actions.getSession().id, posicoes: posicoes }), espera(BUMP_MS)]);
             if (resp && resp.ok) return;
             const e = resp && resp.status === 409 && resp.d.detail && resp.d.detail.error;
             erro = e === "sessao_fechada" ? "fechada" : e === "extra_recusado" ? "recusado" : false;
             throw new Error("bump");
-          }), espera(BUMP_MS + 10000)]);
-          // Sem resposta do SDK (null do `espera`): falha, e a resposta tardia cai no vazio (nada abaixo a lê). O
-          // Pagar sincroniza de novo antes do confirm, então um /bump que o servidor aplicou depois não vira cobrança errada.
+          }), espera(BUMP_MS + 10000).then(function () { vencido = true; return null; })]);
+          // Sem resposta do SDK (null): falha. A callback que o SDK chamar depois não posta (`vencido`); um /bump
+          // que já estava no ar no prazo é anterior ao do Pagar, que sincroniza de novo antes do confirm.
           if (!r || r.type === "error") return erro;
           confirmado = marcadas();
           return true;
