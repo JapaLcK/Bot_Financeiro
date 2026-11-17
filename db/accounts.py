@@ -2513,6 +2513,13 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
                 (user_id,),
             )
             rows = cur.fetchall()
+            if rows:
+                # Quem só tinha o saldo lançado volta a "não informou" quando ele é apagado aqui; a confirmação sem
+                # lançamento segue a mesma regra, como no "Recomeçar do zero" (PL-06 P9). Antes do laço: se ele parar
+                # no meio, sobra o convite de novo, e não o "saldo no vermelho" de uma confirmação que já não vale.
+                from .bank_movements import _lock_user
+                _lock_user(cur, user_id)  # mutex antes do 1º lock da transação (o select acima não trava)
+                cur.execute("update accounts set saldo_confirmado_em = null where user_id = %s", (user_id,))
 
     candidatos = [(r["id"], r["user_seq"] or r["id"]) for r in rows]
 

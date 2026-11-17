@@ -27,7 +27,16 @@ def llm(monkeypatch):
     return chamadas
 
 
+def saldo_de_sobra(uid):
+    """O saldo inicial do onboarding (interno: fora de orçamento, gasto e receita dos detectores), de sobra: quem testa
+    outro detector não recebe o convite do saldo (`wallet_balance_unknown`, quem nunca informou e fecha o mês negativo
+    a partir do zero) nem o `month_projection`."""
+    db.add_launch_and_update_balance(uid, "receita", 10000, "setup", "Saldo inicial", categoria="saldo_inicial",
+                                     is_internal_movement=True)
+
+
 def _orcamento_apertando(uid, alvo="Mercado X", nota=None, categoria="mercado"):
+    saldo_de_sobra(uid)
     db.upsert_budget(uid, categoria, 100)
     db.add_launch_and_update_balance(uid, "despesa", 90, alvo, nota, categoria=categoria)
 
@@ -217,6 +226,7 @@ def test_sem_dados_e_sem_destaques(llm):
     r = _http(vazio).get(f"/insights/{vazio}/current").json()
     assert (r["insights"], r["motivo"]) == ([], "sem_dados")
     calmo = _usuario("pro")
+    saldo_de_sobra(calmo)  # sem ele, quem gastou sem informar o saldo recebe o convite (`wallet_balance_unknown`)
     db.add_launch_and_update_balance(calmo, "despesa", 30, "Padaria", None, categoria="padaria")
     r = _http(calmo).get(f"/insights/{calmo}/current").json()
     assert (r["insights"], r["motivo"]) == ([], "sem_destaques")
@@ -261,8 +271,9 @@ def test_conversa_plus_ve_o_card_sem_acoes_e_essencial_e_recusado(monkeypatch, l
 # ── 6. o botão do insight abre uma view que o painel antigo tem ─────────────────
 
 def test_todo_action_view_dos_detectores_e_uma_view_do_painel():
-    """O card "Piggy notou" chama `navigateTo(action_view)` DIRETO (sem `_INSIGHT_VIEW_MAP`): view fora de
-    `DASH_VIEWS` desliga todas e a tela fica vazia. A lista mapeia por `_INSIGHT_VIEW_MAP` (ou passa o valor)."""
+    """O card "Piggy notou" e a lista passam por `_switchToInsightView`: um `action_view` de `_INSIGHT_MODAIS` abre
+    um modal (o convite do saldo abre o "Ajustar carteira"); o resto vai por `_INSIGHT_VIEW_MAP` (ou o próprio valor)
+    ao `navigateTo`, e view fora de `DASH_VIEWS` desliga todas e a tela fica vazia."""
     import ast
     import re
     from pathlib import Path
@@ -270,12 +281,13 @@ def test_todo_action_view_dos_detectores_e_uma_view_do_painel():
     js = (raiz / "frontend/dashboard.js").read_text()
     views = set(re.findall(r'"([\w-]+)"', re.search(r"const DASH_VIEWS = \[(.*?)\];", js, re.S).group(1)))
     mapa = dict(re.findall(r"(\w+):\s*\"([\w-]+)\"", re.search(r"const _INSIGHT_VIEW_MAP = \{(.*?)\};", js, re.S).group(1)))
+    modais = set(re.findall(r"^\s*(\w+):", re.search(r"const _INSIGHT_MODAIS = \{(.*?)\};", js, re.S).group(1), re.M))
     emitidas = {k.value.value for f in ("db/insights.py", "core/services/insights_detectores.py")
                 for k in ast.walk(ast.parse((raiz / f).read_text())) if isinstance(k, ast.keyword)
                 and k.arg == "action_view" and isinstance(k.value, ast.Constant) and k.value.value}
     assert {"budgets", "analytics", "fixed"} < emitidas and {"goals", "budgets"} <= views  # leu de fato
-    assert emitidas <= views, emitidas - views                               # o card
-    assert {mapa.get(v, v) for v in emitidas} <= views                       # a lista
+    assert "carteira" in emitidas and modais                                  # leu de fato
+    assert {mapa.get(v, v) for v in emitidas - modais} <= views, emitidas - modais - views
 
 
 def test_todo_recurso_por_tipo_e_uma_feature_do_plano():

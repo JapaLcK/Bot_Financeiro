@@ -1029,13 +1029,25 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
       <h2><i class="ph ph-receipt" aria-hidden="true"></i> Reembolsos para revisar</h2>
       <span class="meta">Enquanto estiver aqui, o saque que contém a comissão não paga</span>
     </div>
-    <p id="aff-checks" class="meta aff-checks" role="status"></p>
     <div class="table-wrap">
       <table class="table as-cards">
         <thead><tr>
           <th>Afiliado</th><th>Comissão</th><th>Reembolso</th><th>Devolvido ao cliente</th><th>Onde está</th><th>Aviso</th><th></th>
         </tr></thead>
         <tbody id="aff-reviews"></tbody>
+      </table>
+    </div>
+    <div class="section-title" style="margin-top:18px">
+      <h2><i class="ph ph-magnifying-glass" aria-hidden="true"></i> Comissões em conferência na Stripe</h2>
+      <span class="meta">Fora do saldo até a Stripe confirmar ou você decidir</span>
+    </div>
+    <p id="aff-checks" class="meta aff-checks" role="status"></p>
+    <div class="table-wrap">
+      <table class="table as-cards">
+        <thead><tr>
+          <th>Afiliado</th><th>Valor</th><th>Onde está</th><th>Marcada em</th><th>Última tentativa</th><th>Motivo</th><th>Ações</th>
+        </tr></thead>
+        <tbody id="aff-check-list"></tbody>
       </table>
     </div>
     <div class="section-title" style="margin-top:18px">
@@ -1051,7 +1063,7 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
       </table>
     </div>
     <div class="section-title" style="margin-top:18px">
-      <h2><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i> Histórico de reembolsos</h2>
+      <h2><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i> Histórico de reembolsos e conferências</h2>
       <span class="meta">Os 50 mais recentes</span>
     </div>
     <div class="table-wrap">
@@ -2738,19 +2750,53 @@ const AFF_ORIGEM = { paid_before_refund: 'Comissão já paga', payment_recorded:
 const AFF_ACAO = { partial_approved: 'Revisão parcial', payout_rejected: 'Saque rejeitado', payment_recorded: 'Pagamento já realizado',
   paid_before_refund: 'Já paga antes do reembolso', auto_reversed: 'Estorno automático', commission_reversed: 'Estorno manual',
   recovery_recovered: 'Valor recuperado', recovery_waived: 'Recuperação dispensada', reopened: 'Reaberta por reembolso maior',
-  affiliate_deleted: 'Afiliado excluiu a conta' };
+  affiliate_deleted: 'Afiliado excluiu a conta', check_released: 'Liberada na conferência',
+  check_concluded: 'Conferência concluída (já paga)', check_reversed: 'Estornada na conferência' };
 const fmtDia = d => d ? new Date(d).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—';
 const hojeBrasilia = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 let affPendencias = new Map();
+let affConferencia = new Map();
 let affFormAtual = null;
+const AFF_MOTIVO = { disputa_aberta: 'Disputa aberta', forma_inesperada: 'Pago fora do cartão',
+  sem_cobranca: 'Pago com saldo de crédito', stripe_404: 'Fatura não encontrada na Stripe' };
+const affMotivo = m => m === null ? 'Aguardando a 1ª conferência'
+  : AFF_MOTIVO[m] || (/^stripe_\d+$/.test(m) ? `Stripe recusou a consulta (${m.slice(7)})` : m);
+const AFF_DECISAO = {
+  conclude: { rotulo: 'Concluir conferência', classe: 'btn-primary', titulo: 'Concluir conferência',
+    hint: 'Só encerra a conferência: nada de saldo, saque ou recuperação muda.' },
+  reverse: { rotulo: 'Estornar', classe: 'btn-danger', titulo: 'Estornar comissão',
+    hint: 'Sai do saldo do afiliado de vez.' },
+};
 
 function renderRefundBlocks(data) {
   const reviews = data.refund_reviews || [], recoveries = data.refund_recoveries || [];
   affPendencias = new Map([...reviews, ...recoveries].map(r => [r.id, r]));
-  const checks = data.commission_checks || {};
+  const checks = data.commission_checks || {}, lista = data.commission_check_list || [];
+  affConferencia = new Map(lista.map(r => [r.id, r]));
   $id('aff-checks').textContent = checks.count
     ? `${checks.count} comiss${checks.count === 1 ? 'ão aguarda' : 'ões aguardam'} conferência na Stripe, a mais antiga de ${fmtDia(checks.oldest)}`
+      + (lista.length && lista.length < checks.count ? `. Aqui, as ${lista.length} mais antigas de ${checks.count}` : '')
     : '';
+  $id('aff-check-list').innerHTML = lista.map(r => {
+    const onde = r.status === 'paid' ? 'já paga' : r.status === 'reversed' ? 'estornada' : (r.payout_id ? `no saque ${r.payout_id}` : 'fora do saque');
+    const selos = (r.in_review ? ' · <span class="aff-selo">em revisão de reembolso</span>' : '')
+      + (r.in_recovery ? ' · <span class="aff-selo">recuperação aberta</span>' : '');
+    // As ações e o porquê de cada recusa vêm do servidor (`acoes`): a tela não refaz a regra.
+    const acoes = Object.entries(r.actions || {}).map(([acao, porque]) => porque === null && AFF_DECISAO[acao]
+      ? `<button class="${AFF_DECISAO[acao].classe} btn-xs" type="button" onclick="openCheckForm(${r.id}, '${acao}')"
+          aria-label="${AFF_DECISAO[acao].rotulo}: comissão ${r.id} de ${esc(r.code)}, ${fmtCents(r.amount_cents)}">${AFF_DECISAO[acao].rotulo}</button>`
+      : `<span class="meta">${esc(porque || '')}</span>`).join(' ');
+    return `
+      <tr>
+        <td data-primary data-label="Afiliado"><code>${esc(r.code)}</code></td>
+        <td data-label="Valor" style="white-space:nowrap"><strong>${fmtCents(r.amount_cents)}</strong></td>
+        <td data-label="Onde está"><span>${esc(onde)}${selos}</span></td>
+        <td data-label="Marcada em">${fmtDia(r.marked_on)}</td>
+        <td data-label="Última tentativa">${r.tried_at ? fmtDia(r.tried_at) : 'ainda não conferida'}</td>
+        <td data-label="Motivo">${esc(affMotivo(r.reason))}</td>
+        <td data-actions>${acoes}</td>
+      </tr>`;
+  }).join('') || '<tr><td colspan="7" style="color:var(--muted)">Nenhuma comissão em conferência.</td></tr>';
   $id('aff-reviews').innerHTML = reviews.map(r => {
     const onde = r.commission_status === 'paid' ? 'já paga' : (r.payout_id ? `no saque ${r.payout_id}` : 'fora do saque');
     const acao = r.tipo === 'partial'
@@ -2799,7 +2845,7 @@ function showAffFields(campos) {
   });
 }
 
-function openAffForm({ title, hint, campos, caminho, corpo, dataRotulo = 'Data do pagamento' }) {
+function openAffForm({ title, hint, campos, caminho, corpo, dataRotulo = 'Data do pagamento', refRotulo = 'Referência do comprovante' }) {
   affFormAtual = { campos, caminho, corpo };
   $id('aff-form-title').textContent = title;
   $id('aff-form-hint').textContent = hint;
@@ -2809,6 +2855,7 @@ function openAffForm({ title, hint, campos, caminho, corpo, dataRotulo = 'Data d
   $id('aff-f-date').value = hojeBrasilia();
   $id('aff-f-date').max = hojeBrasilia();
   $id('aff-f-date').parentElement.firstChild.textContent = dataRotulo;
+  $id('aff-f-ref').parentElement.firstChild.textContent = refRotulo;
   showAffFields(campos);
   $id('aff-form').showModal();
   lockPageScroll();
@@ -2862,6 +2909,20 @@ function openRecoveryForm(id) {
       const visto = { result, recovery_cents: r.recovery_cents, justification };
       return result === 'waived' ? visto : { ...visto, recovered_on: $id('aff-f-date').value, receipt_ref: $id('aff-f-ref').value };
     },
+  });
+}
+
+function openCheckForm(id, acao) {
+  const r = affConferencia.get(id), d = AFF_DECISAO[acao];
+  // A versão vista é a da abertura: reler `affConferencia` no envio mandaria a da lista recarregada e anularia o 409.
+  const visto = { marked_at: r.marked_at, reason: r.reason, amount_cents: r.amount_cents };
+  openAffForm({
+    title: `${d.titulo} de ${fmtCents(r.amount_cents)}`,
+    hint: `${r.code} · ${affMotivo(r.reason)}. ${d.hint}`,
+    campos: ['ref', 'just'],
+    refRotulo: 'Evidência (id do ticket, da nota de crédito ou do comprovante)',
+    caminho: `/admin/api/affiliates/commissions/${id}/check-${acao}`,
+    corpo: () => ({ ...visto, evidence: $id('aff-f-ref').value, justification: $id('aff-f-just').value }),
   });
 }
 

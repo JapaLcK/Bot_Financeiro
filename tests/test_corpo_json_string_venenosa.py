@@ -325,7 +325,11 @@ def test_payout_note_venenoso_nao_da_500(monkeypatch, veneno, acao, funcao):
     (f"payouts/{INEXISTENTE}/payment-recorded", {"paid_on": "2026-01-01", "receipt_ref": "E1234567"}),
     (f"refund-reviews/{INEXISTENTE}/approve", {"approved_cents": 1, "refunded_cents": 1}),
     (f"refund-reviews/{INEXISTENTE}/close-recovery", {"result": "waived", "recovery_cents": 1}),
-], ids=["realizado", "aprovar", "encerrar"])
+    (f"commissions/{INEXISTENTE}/check-reverse",
+     {"evidence": "ticket-1", "marked_at": None, "reason": None, "amount_cents": 1}),
+    (f"commissions/{INEXISTENTE}/check-conclude",
+     {"evidence": "ticket-1", "marked_at": None, "reason": None, "amount_cents": 1}),
+], ids=["realizado", "aprovar", "encerrar", "conferencia_estornar", "conferencia_concluir"])
 def test_pendencia_justificativa_venenosa_nao_da_500(veneno, caminho, corpo):
     """Saneada, a justificativa passa e o id inexistente responde 404."""
     r = _post_bruto(_admin_client(), f"/admin/api/affiliates/{caminho}",
