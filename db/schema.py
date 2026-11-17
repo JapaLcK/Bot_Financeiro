@@ -177,6 +177,10 @@ def init_db():
           balance numeric not null default 0
         )
         """,
+        # PL-06: o usuário confirmou o saldo sem que nada precisasse ser lançado (zero no onboarding, o mesmo valor
+        # no ajuste). Lido por `carteira_qualidade.saldo_informado`; o "Recomeçar do zero" e o
+        # `delete_all_launches_and_rollback` limpam.
+        "alter table accounts add column if not exists saldo_confirmado_em timestamptz",
 
         # Push notifications (app iOS) — device token do APNs por aparelho.
         # unique(token): um device que re-registra atualiza o dono (troca de
@@ -2477,6 +2481,44 @@ def init_db():
         """
         create index if not exists idx_affiliate_refund_review_events_review
           on affiliate_refund_review_events (review_id, id)
+        """,
+        # Decisão do admin na conferência (#1538): o evento ancora na comissão, guarda o código no ato (D8) e o
+        # estado antes e depois, sem dado do indicado. Banco novo também passa por aqui: o `create` acima é a forma
+        # antiga. Uma vez só (guardado pela coluna), no laço `nowait` da migração de afiliados: tabela ocupada por
+        # ~8 s derruba o boot com erro claro. Os dois `check` saem pelo `pg_constraint` (um deles não tem nome) e
+        # voltam `not valid`, sem varrer a tabela.
+        """
+        do $$ declare r record; begin
+          if not exists (select 1 from pg_attribute where attrelid = 'affiliate_refund_review_events'::regclass
+                            and attname = 'commission_id' and not attisdropped) then
+            for tentativa in 1..160 loop
+              begin
+                lock table affiliate_refund_review_events in access exclusive mode nowait;
+                exit;
+              exception when lock_not_available then
+                if tentativa = 160 then
+                  raise exception 'migração dos eventos de afiliado: tabela ocupada em % tentativas; o boot para aqui',
+                    tentativa using errcode = 'lock_not_available';
+                end if;
+                perform pg_sleep(0.05);
+              end;
+            end loop;
+            alter table affiliate_refund_review_events add column commission_id bigint,  -- sem FK: não trava comissões
+              add column affiliate_code text, add column state_before jsonb, add column state_after jsonb;
+            for r in select conname from pg_constraint
+                      where conrelid = 'affiliate_refund_review_events'::regclass and contype = 'c' loop
+              execute format('alter table affiliate_refund_review_events drop constraint %I', r.conname);
+            end loop;
+            alter table affiliate_refund_review_events add constraint affiliate_refund_review_events_action_check
+              check (action in ('partial_approved', 'payout_rejected', 'payment_recorded', 'paid_before_refund',
+                'auto_reversed', 'commission_reversed', 'recovery_recovered', 'recovery_waived', 'reopened',
+                'affiliate_deleted', 'check_released', 'check_concluded', 'check_reversed')) not valid;
+            alter table affiliate_refund_review_events add constraint affiliate_refund_review_events_ancora_check
+              check (review_id is not null or payout_id is not null or commission_id is not null) not valid;
+            create index idx_affiliate_refund_review_events_commission
+              on affiliate_refund_review_events (commission_id, id) where commission_id is not null;
+          end if;
+        end $$
         """,
         # Reconciliação de comissão paga (#1501): última consulta por fatura. Sem FK de propósito: criar
         # uma pediria lock em `affiliate_commissions`, e a linha do afiliado que excluiu a conta não tem

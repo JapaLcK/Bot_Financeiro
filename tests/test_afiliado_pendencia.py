@@ -1212,7 +1212,8 @@ def test_rota_pix_recusa(adm):
     assert next(p for p in adm.get(OVERVIEW).json()["payouts"] if p["id"] == saque)["blocked"] is False
 
 
-@pytest.mark.parametrize("caminho", ["payouts/1/payment-recorded", "refund-reviews/1/approve", "refund-reviews/1/close-recovery"])
+@pytest.mark.parametrize("caminho", ["payouts/1/payment-recorded", "refund-reviews/1/approve", "refund-reviews/1/close-recovery",
+                                     "commissions/1/check-reverse", "commissions/1/check-conclude"])
 def test_rotas_exigem_admin(adm, caminho):
     c = _afiliado()
     anonimo = TestClient(dashboard.app, base_url="https://testserver")

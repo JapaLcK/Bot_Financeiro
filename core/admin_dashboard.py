@@ -2247,6 +2247,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     @app.get("/admin/api/affiliates")
     async def admin_affiliates_overview(username: str = Depends(_get_current_admin)):
         """Lista afiliados (com saldos), pedidos de saque, pendências e recuperações."""
+        from db.affiliate_conferencia_admin import listar_conferencia
         from db.affiliate_reviews_admin import listar_admin, listar_historico
         from db.affiliate_reviews_manutencao import resumo_da_conferencia
         from db.affiliates import admin_list_affiliates, admin_list_payouts
@@ -2256,6 +2257,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         pendencias = await asyncio.to_thread(listar_admin)
         historico = await asyncio.to_thread(listar_historico)
         conferencia = await asyncio.to_thread(resumo_da_conferencia)
+        em_conferencia = await asyncio.to_thread(listar_conferencia)
         return JSONResponse(content=_json_safe({
             "affiliates": [_decrypt_affiliate_row(r, username) for r in affiliates],
             "payouts": [_decrypt_affiliate_row(r, username) for r in payouts],
@@ -2263,6 +2265,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             "refund_recoveries": [r for r in pendencias if r["status"] == "recovery"],
             "refund_history": historico,
             "commission_checks": conferencia,
+            "commission_check_list": em_conferencia,
         }))
 
     def _bps_do_corpo(payload: dict, padrao: int | None) -> int:
@@ -2377,16 +2380,17 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         )
         return {"ok": True, "commission_bps": bps}
 
-    async def _conferir_saque_na_stripe(payout_id: int) -> dict | None:
-        """Consulta cada fatura do saque antes de o dinheiro sair, fora de transação e com prazo. None = Stripe
-        fora, sem chave, prazo estourado ou vagas cheias: a thread que estourou termina sozinha, segurando a
-        vaga até lá, e o que ela gravar é idempotente."""
+    async def _na_stripe(fn, *args, **kw):
+        """A conferência na Stripe (`conferir_saque` antes de o dinheiro sair, `conferir_comissao` antes da decisão
+        do admin), fora de transação e com prazo. None = Stripe fora, sem chave, prazo estourado ou vagas cheias: a
+        thread que estourou termina sozinha, segurando a vaga até lá, e o que ela gravar é idempotente. Quem chama
+        grava a decisão depois, nunca dentro da thread: com o prazo estourado, nada é decidido em silêncio."""
         from core.services import afiliado_reembolso
 
         if not _VAGAS_CONFERENCIA.acquire(blocking=False):
             return None
         try:
-            futuro = _EXECUTOR_CONFERENCIA.submit(afiliado_reembolso.conferir_saque, payout_id)
+            futuro = _EXECUTOR_CONFERENCIA.submit(fn, *args, **kw)
         except BaseException:
             _VAGAS_CONFERENCIA.release()
             raise
@@ -2407,6 +2411,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         afiliado e o valor do saque já embutido — o admin escaneia e confirma,
         sem digitar chave nem valor (que é onde mora o erro).
         """
+        from core.services import afiliado_reembolso
         from core.services.pix_brcode import build_pix_brcode, qr_svg_data_url
         from db.affiliates import EM_CONFERENCIA, get_payout
 
@@ -2427,7 +2432,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
 
         aberto(await asyncio.to_thread(get_payout, payout_id), "Este saque tem reembolso de cliente em análise.")
         # A última chance antes de o dinheiro sair: o `charge.refunded` pode ter se perdido.
-        conferencia = await _conferir_saque_na_stripe(payout_id)
+        conferencia = await _na_stripe(afiliado_reembolso.conferir_saque, payout_id)
         if conferencia is None:
             raise HTTPException(status_code=503, detail=_STRIPE_FORA)
         if conferencia["disputa"]:
@@ -2458,6 +2463,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     ):
         """Marca o saque como pago (Pix já feito por fora). Body: {"note": "..."}. Confere a Stripe antes:
         reembolso que chegou enquanto o admin pagava bloqueia, e o caminho é "Pagamento já realizado"."""
+        from core.services import afiliado_reembolso
         from db.affiliates import SaqueComPendencia, SaqueOrfao, get_payout, mark_payout_paid
 
         try:
@@ -2481,7 +2487,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         row = await asyncio.to_thread(get_payout, payout_id)
         conferencia = None
         if row and row["status"] == "requested" and not row["orphan"] and not row["blocked"]:
-            conferencia = await _conferir_saque_na_stripe(payout_id)
+            conferencia = await _na_stripe(afiliado_reembolso.conferir_saque, payout_id)
             if conferencia is None:
                 raise HTTPException(status_code=503, detail=_STRIPE_FORA + _SE_O_PIX_SAIU)
             if conferencia["disputa"]:
@@ -2564,6 +2570,84 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         )
         return {"ok": True}
 
+    def _decisao_da_conferencia(payload: dict) -> dict:
+        """Corpo comum das decisões na conferência (#1538): justificativa, evidência e a versão vista (`marked_at`,
+        `reason` e `amount_cents` da lista). A versão só é comparada em Python, nunca vai ao SQL. Inválido dá 422."""
+        from core.services.afiliado_reembolso import validar_justificativa, validar_referencia
+
+        marcada_em, motivo, valor = payload.get("marked_at"), payload.get("reason"), payload.get("amount_cents")
+        try:
+            decisao = {"justificativa": validar_justificativa(payload.get("justification")),
+                       "evidencia": validar_referencia(payload.get("evidence"), "Evidência"), "motivo": motivo,
+                       "valor_cents": valor}
+            # `type`: `true` é `int` para `isinstance`
+            if (not isinstance(motivo, (str, type(None))) or not isinstance(marcada_em, (str, type(None)))
+                    or type(valor) is not int):
+                raise ValueError("Versão vista inválida: recarregue a página.")
+            try:
+                decisao["marcada_em"] = None if marcada_em is None else datetime.fromisoformat(marcada_em)
+            except ValueError:  # o texto do erro ecoaria o valor
+                raise ValueError("Versão vista inválida: recarregue a página.") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
+        return decisao
+
+    # Justificativa, evidência e motivo ficam só no evento: os logs das decisões levam só o id da comissão.
+    @app.post("/admin/api/affiliates/commissions/{commission_id}/check-reverse")
+    async def admin_affiliate_check_reverse(
+        commission_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """Estorna a comissão em conferência. Body: {"justification", "evidence", "marked_at", "reason",
+        "amount_cents"}. Sem Stripe.
+        Num saque aberto recusa (409) e nada muda: rejeite o saque ou registre o pagamento antes."""
+        from db.affiliate_conferencia_admin import ConferenciaMudou, estornar_a_mao
+
+        decisao = _decisao_da_conferencia(await _json_object_body(request))
+        try:
+            ok = await asyncio.to_thread(estornar_a_mao, commission_id, username, **decisao)
+        except ConferenciaMudou as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        if not ok:
+            raise HTTPException(status_code=404, detail="Comissão não encontrada.")
+        await log_system_event("warning", "affiliate_commission_check_reversed",
+                               f"Comissão {commission_id} estornada na conferência.", source="affiliates",
+                               details={"commission_id": commission_id})
+        return {"ok": True}
+
+    @app.post("/admin/api/affiliates/commissions/{commission_id}/check-conclude")
+    async def admin_affiliate_check_conclude(
+        commission_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """Conclui a conferência da comissão já paga: só tira a marca, sem saldo, saque nem recuperação novos.
+        Body igual ao do estorno. Confere na Stripe antes: se a fatura confirma agora, a regra normal decide (409)."""
+        from core.services import afiliado_reembolso
+        from db.affiliate_conferencia_admin import ConferenciaMudou, concluir_a_mao, conferir_decisao
+
+        decisao = _decisao_da_conferencia(await _json_object_body(request))
+        try:
+            linha = await asyncio.to_thread(
+                conferir_decisao, commission_id, "conclude", decisao["marcada_em"], decisao["motivo"],
+                decisao["valor_cents"])
+            if linha is None:
+                raise HTTPException(status_code=404, detail="Comissão não encontrada.")
+            feita = await _na_stripe(afiliado_reembolso.conferir_comissao, commission_id, linha["fatura"],
+                                     adiar=True, lido=decisao["marcada_em"])
+            if feita is None:
+                raise HTTPException(status_code=503, detail=_STRIPE_FORA)
+            if feita:
+                raise HTTPException(status_code=409, detail=(
+                    "A Stripe respondeu agora e a comissão saiu da conferência pela regra normal (ou foi para a"
+                    " revisão de reembolso). Confira as listas."))
+            ok = await asyncio.to_thread(concluir_a_mao, commission_id, username, **decisao)
+        except ConferenciaMudou as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        if not ok:
+            raise HTTPException(status_code=404, detail="Comissão não encontrada.")
+        await log_system_event("warning", "affiliate_commission_check_concluded",
+                               f"Conferência da comissão {commission_id} concluída.", source="affiliates",
+                               details={"commission_id": commission_id})
+        return {"ok": True}
+
     # Referência do comprovante e justificativa ficam só no evento: logs abaixo levam apenas ids.
     @app.post("/admin/api/affiliates/payouts/{payout_id}/payment-recorded")
     async def admin_affiliate_payment_recorded(
@@ -2572,6 +2656,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         """O Pix já saiu. Body: {"justification", "paid_on", "receipt_ref"}. Nunca recusa por falta de pendência
         nem pela Stripe: confere antes (reembolso achado vira recuperação) e, com a Stripe fora, registra e deixa
         as comissões marcadas para o worker conferir."""
+        from core.services import afiliado_reembolso
         from core.services.afiliado_reembolso import dia_em_brasilia, validar_comprovante, validar_justificativa
         from db.affiliate_reviews import faturas_do_saque
         from db.affiliate_reviews_manutencao import marcar_conferencia
@@ -2587,7 +2672,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
                 payload.get("paid_on"), payload.get("receipt_ref"), dia_em_brasilia(row["requested_at"]))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
-        conferencia = await _conferir_saque_na_stripe(payout_id) if row["status"] == "requested" else {}
+        conferencia = await _na_stripe(afiliado_reembolso.conferir_saque, payout_id) if row["status"] == "requested" else {}
         ok = await asyncio.to_thread(
             registrar_pagamento_realizado, payout_id, pago_em, justificativa, referencia, username)
         if not ok:

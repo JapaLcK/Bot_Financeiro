@@ -22,14 +22,11 @@ from datetime import datetime, timezone
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
 
 import core.admin_dashboard as admin_dashboard
 import db
 import db.affiliate_payments as pagamentos
 import db.affiliates as afiliados
-import db.connection as conexao
 import frontend.finance_bot_websocket_custom as dashboard
 from _apoio_auth_app import csrf
 from _billing_grants_helpers import conta, garantir_system_event_logs
@@ -47,7 +44,7 @@ from db.affiliates import (
     set_affiliate_status,
 )
 from db import schema
-from db.connection import _Conn, _get_pool, get_conn
+from db.connection import _get_pool, get_conn
 from db.plan_grants import list_grants
 from db.schema import BACKFILL_AFILIADO_PAGAMENTOS_SQL
 from db.users import MergeRefused, merge_users
@@ -525,25 +522,6 @@ def test_resposta_so_leva_contagens_e_rotulo(cobrar):
 
 
 # ── Conexões ─────────────────────────────────────────────────────────────────
-
-@pytest.fixture
-def pool_de(monkeypatch):
-    """Troca o pool por um pequeno, com timeout curto: conexão aninhada vira `PoolTimeout`."""
-    abertos = []
-    conninfo = _get_pool().conninfo
-
-    def _pool(tamanho):
-        pool = ConnectionPool(conninfo, connection_class=_Conn, min_size=1, max_size=tamanho,
-                              timeout=2, kwargs={"row_factory": dict_row}, open=True)
-        abertos.append(pool)
-        monkeypatch.setattr(conexao, "_get_pool", lambda: pool)
-        return pool
-
-    yield _pool
-    monkeypatch.undo()
-    for pool in abertos:
-        pool.close()
-
 
 def test_stats_simultaneos_nao_esgotam_pool_pequeno(pool_de, monkeypatch):
     """As duas chamadas chegam juntas ao resumo: com a 1ª conexão na mão, ninguém acharia a 2ª."""

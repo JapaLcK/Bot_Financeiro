@@ -38,6 +38,7 @@ from contextlib import contextmanager
 from core.crypto import encrypt_pii_optional
 
 from .connection import get_conn
+from .pix_effects import conexao_da_reserva
 from .pix_estornos import marcar_estorno
 
 # Retenção da outbox (§13.1/§13.3): 7 dias a partir de `received_at`, processado
@@ -157,20 +158,15 @@ def registrar_evento(event_id: str, event_type: str, corpo: dict, event_version:
 def reservar_evento(event_id: str):
     """Reserva o evento para UMA passada do dreno. Rende a linha, ou `None`.
 
-    É o `select … and processed_at is null for update skip locked` do §8.2.
-    **Context manager, e não função, porque `for update` só vale enquanto a transação
-    viver**: devolver a linha e fechar a conexão soltaria o lock no `return` e o
-    `skip locked` viraria decoração. Quem drena roda DENTRO do `with`.
+    É o `select … and processed_at is null for update skip locked` do §8.2. **Context
+    manager, e não função, porque `for update` só vale enquanto a transação viver**: soltar
+    a conexão no `return` faria do `skip locked` decoração. Quem drena roda DENTRO do `with`.
 
-    `None` rende para evento inexistente, já processado ou travado por outra passada —
-    o chamador não precisa distinguir, a ação é a mesma. O `payload_enc` sai
-    **cifrado**: decifrar é do dreno, que é quem tem o `subject_user_id` do
-    `PiiAccessContext` (ver o cabeçalho).
+    `None`: evento inexistente, já processado ou travado por outra passada (a ação é a
+    mesma). O `payload_enc` sai **cifrado**: decifrar é do dreno (ver o cabeçalho).
 
-    `ponytail:` teto — a transação fica aberta pelo dreno inteiro, chamadas externas
-    incluídas: uma conexão do pool presa por evento. Com a vazão de uma venda anual
-    isso não chega perto do teto do pool; se chegar, a saída é reservar, soltar e
-    reconferir `processed_at` antes de cada efeito.
+    `ponytail:` teto — a conexão fica presa pelo dreno inteiro, HTTP incluído, e o
+    `lock_efeito` a reusa (`conexao_da_reserva`, #1413); drenos simultâneos sem teto ainda.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -183,7 +179,11 @@ def reservar_evento(event_id: str):
                 (event_id,),
             )
             row = cur.fetchone()
-        yield row
+        token = conexao_da_reserva.set(conn)
+        try:
+            yield row
+        finally:
+            conexao_da_reserva.reset(token)
 
 
 def purgar_payloads_antigos() -> int:

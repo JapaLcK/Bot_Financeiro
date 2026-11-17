@@ -61,7 +61,7 @@ from db.affiliates import (
 from db import schema
 from db.connection import get_conn
 from test_afiliado_area import _conta, _me, _painel_aberto  # noqa: F401
-from test_afiliado_pagantes import _admin, _indicado, cobrar, pool_de  # noqa: F401
+from test_afiliado_pagantes import _admin, _indicado, cobrar  # noqa: F401
 from test_billing_webhook_lifecycle import _T_LIFE, _fake_sub, _post
 
 AGORA = datetime(2026, 11, 9, tzinfo=timezone.utc)
