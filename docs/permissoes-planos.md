@@ -29,7 +29,8 @@ Insights são barrados antes de cache ou geração, inclusive no pré-processame
 O Plus recebe a explicação de cada insight (período, fonte, referência) e o link de
 navegação; o Pro recebe também `impacto` e `acoes` (feature `insights_acoes`), calculados em código.
 O cache é um só e o plano vale na leitura: a rota e o card `piggy` do chat passam pela mesma projeção.
-O insight do mês no vermelho (`month_projection`) exige também `forecast` (Plus), na geração e na leitura.
+O insight do mês no vermelho (`month_projection`) e o convite para informar o saldo (`wallet_balance_unknown`) exigem
+também `forecast` (Plus), na geração e na leitura. O modal "Ajustar carteira" e o link "ajustar" não têm gate.
 O insight de reajuste de assinatura (`subscription_increase`) exige também `subscriptions` (Plus), na geração e na leitura.
 O insight do mês fechado com sobra (`positive_result`) segue o gate `insights` e a janela de histórico do plano: quem não
 enxerga os dois meses inteiros não o recebe.

@@ -46,7 +46,7 @@ PATTERNS_CACHE_TTL_SECONDS = 24 * 3600    # 24h
 # Bumpe quando mudar o prompt/payload dos padrões ou o CONTRATO dos itens de insights
 # (`core/services/insights_contrato.py`). Cache antigo vira miss (kind diferente).
 _PROMPT_VERSION_PATTERNS = 8
-_PROMPT_VERSION_INSIGHTS = 15
+_PROMPT_VERSION_INSIGHTS = 16
 # Marcador "dados mudaram" (D13): linha do usuário em `ai_proactive_cache` com o instante da última escrita
 # financeira, gravada pelo ouvinte do `pb_escrita`. `ai_proactive_cache` NUNCA entra em `TABELAS_QUE_AVISAM` (laço).
 _MARCADOR_INSIGHTS = "insights_mudou"

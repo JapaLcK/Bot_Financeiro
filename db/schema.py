@@ -177,6 +177,10 @@ def init_db():
           balance numeric not null default 0
         )
         """,
+        # PL-06: o usuário confirmou o saldo sem que nada precisasse ser lançado (zero no onboarding, o mesmo valor
+        # no ajuste). Lido por `carteira_qualidade.saldo_informado`; o "Recomeçar do zero" e o
+        # `delete_all_launches_and_rollback` limpam.
+        "alter table accounts add column if not exists saldo_confirmado_em timestamptz",
 
         # Push notifications (app iOS) — device token do APNs por aparelho.
         # unique(token): um device que re-registra atualiza o dono (troca de

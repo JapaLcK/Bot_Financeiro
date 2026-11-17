@@ -10,11 +10,12 @@ from _cards_apoio import _http
 from core import ai_patterns
 from core.services.insights_contrato import sujeito, tem_pii
 from db.pockets import update_pocket_meta
-from test_insights_contrato import _usuario, llm  # noqa: F401  (llm é fixture)
+from test_insights_contrato import _usuario, llm, saldo_de_sobra  # noqa: F401  (llm é fixture)
 
 
 def test_feed_mostra_6_os_mais_graves_primeiro_e_o_cache_guarda_todos(llm):  # noqa: F811
     uid = _usuario("pro_max")
+    saldo_de_sobra(uid)
     for i, gasto in enumerate((81, 82, 83, 84, 85, 86, 110, 120)):  # 6 amarelos e 2 vermelhos
         db.upsert_budget(uid, f"cat{i}", 100)
         db.add_launch_and_update_balance(uid, "despesa", gasto, "Loja", None, categoria=f"cat{i}")
@@ -44,6 +45,7 @@ def test_meta_atrasada_e_vencida_sao_fatos_diferentes(llm):  # noqa: F811
 
 def test_orcamento_que_estoura_e_o_mesmo_fato_mais_grave(llm):  # noqa: F811
     uid = _usuario("pro_max")
+    saldo_de_sobra(uid)
     db.upsert_budget(uid, "mercado", 100)
     db.add_launch_and_update_balance(uid, "despesa", 90, "Loja", None, categoria="mercado")
     (apertando,) = ai_patterns.generate_ai_insights(uid, force=True)
@@ -83,6 +85,7 @@ def test_sujeito_com_dado_pessoal_vira_hash_estavel():
 
 def test_categoria_com_email_nao_vaza_na_chave_e_aparece_para_o_usuario(llm):  # noqa: F811
     uid = _usuario("pro_max")
+    saldo_de_sobra(uid)
     db.upsert_budget(uid, "alimentação joao@x.com", 100)
     db.add_launch_and_update_balance(uid, "despesa", 90, "Loja", None, categoria="alimentação joao@x.com")
     (it,) = ai_patterns.generate_ai_insights(uid, force=True)

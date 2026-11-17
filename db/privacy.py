@@ -592,7 +592,8 @@ def reset_user_data(
                 # null` para launches/credit_transactions terem índice (ver #253):
                 # `ensure_fk_indexes_once` em db/schema_repairs.py.
                 ensure_user_tx(cur, user_id)
-                cur.execute("update accounts set balance = 0 where user_id = %s", (user_id,))
+                # A marca do saldo confirmado sai junto: quem recomeça não "informou" o zero de nascença (PL-06 P9).
+                cur.execute("update accounts set balance = 0, saldo_confirmado_em = null where user_id = %s", (user_id,))
                 # sem `counts["accounts"]`: o retorno é {"deleted": ...} e a
                 # linha NÃO é apagada — contar aqui seria mentira no contrato.
 

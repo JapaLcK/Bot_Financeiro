@@ -36,12 +36,14 @@ TIPOS: dict[str, tuple[str, dict[str, Any]]] = {
     "subscription_increase": ("assinatura", {"base": "open_finance", "cartao": None,
                                              "origem": "assinaturas detectadas pelo Open Finance"}),
     "positive_result": ("evolucao_positiva", {"base": "lancamentos", **_FATURA}),
+    "wallet_balance_unknown": ("projecao", {"base": "previsao", "cartao": None,
+                                            "origem": "saldo da Carteira, ainda não informado"}),
 }
 SO_PRO = ("impacto", "acoes")
 # Recurso de plano que o tipo exige além de `insights`, conferido NA LEITURA (`projetar`): o cache é um só para todos
 # os planos, e quem perde o recurso dentro do TTL não pode seguir vendo o item (plano-b, B3).
 RECURSO_POR_TIPO = {"bill_due": "recurring_expenses", "month_projection": "forecast",
-                    "subscription_increase": "subscriptions"}
+                    "subscription_increase": "subscriptions", "wallet_balance_unknown": "forecast"}
 GRAVIDADE = {"info": 0, "warning": 1, "critical": 2}  # a ordem do feed e a régua do "piorou" (D4)
 # Reajuste (`recurring_increase` e `subscription_increase`, Q5 e P1 da B5): entra no feed até `REAJUSTE_DIAS` dias
 # depois da mudança de preço, e é warning a partir de `REAJUSTE_ALERTA`% de alta (info abaixo).
@@ -138,6 +140,8 @@ def chave(tipo: str, sujeito, periodo: str) -> str:
       anterior em centavos` (`chave_periodo`): dois serviços do mesmo comerciante no mesmo dia são dois fatos, e a
       correção ou relançamento da cobrança nova não muda a chave.
     - sobra do mês fechado (`positive_result`): sujeito fixo `mes`, período o mês fechado.
+    - convite do saldo (`wallet_balance_unknown`): sujeito fixo `carteira`, período o mês (dispensado volta no mês
+      seguinte, P12).
     O sujeito pode ter `:` (`merchant_key` não tira; a meta usa `id:estado`): a chave é opaca, comparada
     inteira. Nunca faça `split(":")` dela.
     Sujeito textual entra por `sujeito()`, que troca por hash o nome com dado pessoal.

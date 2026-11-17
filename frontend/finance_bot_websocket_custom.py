@@ -9271,6 +9271,8 @@ async def set_initial_balance_route(request: Request, user_id: int, payload: Ini
             detail="Conta já tem saldo. Saldo inicial só pode ser definido em conta virgem.",
         )
     if payload.amount == 0:
+        from db.carteira_qualidade import marcar_saldo_confirmado
+        await asyncio.to_thread(marcar_saldo_confirmado, user_id)  # "tenho 0" também é saldo informado (PL-06 P9)
         return {"ok": True, "balance": 0.0, "launch_id": None}
 
     launch_id, _user_seq, new_bal = await asyncio.to_thread(
@@ -9310,6 +9312,8 @@ async def adjust_balance_route(request: Request, user_id: int, payload: AdjustBa
     current = float(cb["manual"] or 0)
     delta = float(payload.target_balance) - float(current)
     if abs(delta) < 0.005:
+        from db.carteira_qualidade import marcar_saldo_confirmado
+        await asyncio.to_thread(marcar_saldo_confirmado, user_id)  # confirmar o mesmo valor também informa (PL-06 P9)
         return {"ok": True, "balance": float(current), "delta": 0.0, "launch_id": None}
 
     tipo = "receita" if delta > 0 else "despesa"

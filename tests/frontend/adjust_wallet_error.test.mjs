@@ -53,6 +53,9 @@ const IDS = [
   // O modal de ajustar carteira + o `#toast` que showToast() usa no sucesso.
   "adjust-wallet-overlay", "adjust-wallet-submit", "toast",
   "adjust-wallet-banks", "adjust-wallet-total",
+  // As partes que trocam entre as variantes com banco × sem banco (PL-06, convite do saldo).
+  "adjust-wallet-title", "adjust-wallet-sub", "adjust-wallet-label", "adjust-wallet-banks-line",
+  "adjust-wallet-hint", "adjust-wallet-total-line",
 ];
 
 let browser;

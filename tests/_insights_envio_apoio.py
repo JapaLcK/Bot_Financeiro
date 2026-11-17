@@ -74,8 +74,11 @@ def envio(monkeypatch):
 
 def gasto(uid, texto="gastei 90 no mercado", limite=100):
     """Um gasto pela conversa e um orçamento de `limite` na categoria que o Piggy escolheu: a chave do item."""
+    from test_insights_contrato import saldo_de_sobra
+    saldo_de_sobra(uid)
     diga(uid, texto)
-    (cat,) = {r["categoria"] for r in sql("select categoria from launches where user_id = %s", (uid,))}
+    (cat,) = {r["categoria"] for r in sql("select categoria from launches where user_id = %s and not is_internal_movement",
+                                          (uid,))}
     db.upsert_budget(uid, cat, limite)
     return cat
 

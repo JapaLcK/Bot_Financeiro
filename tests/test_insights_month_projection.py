@@ -17,7 +17,7 @@ janela (`estruturais(snapshot.motivos)`) → 1, 2, 4, 5, 9, 10, 10b, 13–16, 19
 na geração: verde, a leitura corta); sem o recurso na leitura → 15; gravidade única → 3, 12, 16, 17, 18, F, H[com];
 depois do orçamento no laço → 18; o pior dia no lugar do fim do mês → 4, 9; sem a `NOTA` → 1, 3, 12; sem `impacto` →
 13; `estruturais_com_janela` sem `JANELA_SUBSTITUI` → os mesmos do 1º item (e 16 do simulador); `premissa_da_janela`
-None → 1, 10 (e 6 do simulador); sem a guarda `saldo_informado` → A, B, D4, E1, F, G, H[sem] (o E2 segue verde: o
+None → 1, 10 (e 6 do simulador); sem a guarda `saldo_informado` → A, B, D4, F, G, H[sem] (o E2 segue verde: o
 import já fica calado por `carteira_nao_confirmada`); sem `"ajuste"` na lista → D, D3; sem `"ajuste_saldo"` → D2;
 consulta sem `user_id = %s` → F; sem `and is_internal_movement` → D4; com `and tipo = 'receita'` → D3; a rota
 `initial-balance` gravando outra categoria → C, G, H[com]; a rota `adjust-balance` gravando outra categoria → D, D3.
@@ -453,13 +453,15 @@ def test_d4_categoria_ajuste_do_proprio_usuario_nao_conta(llm, monkeypatch):
     assert _mes(uid) == []
 
 
-def test_e1_saldo_inicial_zero_nao_deixa_marca_e_nao_avisa(llm, monkeypatch):
-    """Limite declarado (P9): o onboarding com 0 não grava nada, então o "informei zero" não é detectável."""
+def test_e1_saldo_inicial_zero_marca_e_avisa(llm, monkeypatch):
+    """Invertido de propósito pela P9 do convite (dono, 2026-11-13): o onboarding com 0 não lança nada, mas grava
+    `accounts.saldo_confirmado_em`; o "tenho 0" vale como saldo informado, e o gasto de 30 é saldo no vermelho de fato.
+    Antes da P9 este caso era o limite declarado (nada gravado, nada avisado)."""
     _relogio(monkeypatch)
     uid = _usuario("pro")
     assert _post(uid, "initial-balance", {"amount": 0})["launch_id"] is None
     db.add_launch_and_update_balance(uid, "despesa", 30, "Padaria", None, "padaria", ANTIGO)
-    assert _mes(uid) == []
+    assert [i["message"].split(" Previsão")[0] for i in _mes(uid)] == ["Seu saldo já está R$ 30,00 no negativo."]
 
 
 def test_e2_import_de_ofx_ja_fica_calado_pela_regra_do_simulador(llm, monkeypatch):
