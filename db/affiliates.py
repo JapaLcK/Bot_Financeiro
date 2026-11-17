@@ -27,7 +27,9 @@ from .affiliate_reviews import (
     PENDENCIA_ABERTA_SQL,
     SAQUE_BLOQUEADO_SQL,
     SAQUE_EM_CONFERENCIA_SQL,
+    SEM_MARCA,
     _comissao_que_saiu,
+    sem_marca_se,
     abertas_do_saque,
     promover,
     registrar_evento,
@@ -431,31 +433,37 @@ def list_affiliate_commissions(affiliate_id: int, limit: int = 50) -> list[dict]
 
 def reverse_commission(commission_id: int, revisor: str = "admin") -> bool:
     """Estorna uma comissão (refund/chargeback da fatura). Só enquanto pending
-    e fora de um saque em andamento. Pendência aberta dela fecha na mesma transação.
+    e fora de um saque em andamento. Pendência aberta dela fecha na mesma transação."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            estornou = _estornar(cur, commission_id, revisor)
+            conn.commit()
+            return estornou
+
+
+def _estornar(cur, commission_id: int, revisor: str) -> bool:
+    """O estorno, na transação de quem chama. Sai também da conferência na Stripe (A5): estornada não
+    tem o que conferir, e a marca a deixaria na fila do worker para sempre (#1538).
 
     A trava vem antes, pelo `id`: o `update` sozinho filtra `payout_id is null` no snapshot, e
     com a comissão ainda no saque ele nem espera o `reject_payout` em voo, que a devolve logo
     depois. Esperando, o `update` lê a linha já solta."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select id from affiliate_commissions where id = %s for update",
-                        (int(commission_id),))
-            cur.execute(
-                """
-                update affiliate_commissions
-                   set status = 'reversed'
-                 where id = %s and status = 'pending' and payout_id is null
-                """,
-                (int(commission_id),),
-            )
-            estornou = cur.rowcount > 0
-            if estornou:
-                cur.execute("update affiliate_refund_reviews set status = 'resolved'"
-                            " where commission_id = %s and status = 'open' returning id", (int(commission_id),))
-                for pendencia in cur.fetchall():
-                    registrar_evento(cur, pendencia["id"], "commission_reversed", revisor)
-            conn.commit()
-            return estornou
+    cur.execute("select id from affiliate_commissions where id = %s for update", (int(commission_id),))
+    cur.execute(
+        f"""
+        update affiliate_commissions
+           set status = 'reversed', {SEM_MARCA}
+         where id = %s and status = 'pending' and payout_id is null
+        """,
+        (int(commission_id),),
+    )
+    estornou = cur.rowcount > 0
+    if estornou:
+        cur.execute("update affiliate_refund_reviews set status = 'resolved'"
+                    " where commission_id = %s and status = 'open' returning id", (int(commission_id),))
+        for pendencia in cur.fetchall():
+            registrar_evento(cur, pendencia["id"], "commission_reversed", revisor)
+    return estornou
 
 
 # ─── Saque ────────────────────────────────────────────────────────────────────
@@ -662,11 +670,8 @@ def reject_payout(payout_id: int, note: str | None = None, revisor: str = "admin
                 (int(payout_id),),
             )
             abertas = abertas_do_saque(cur, payout_id)
-            cur.execute(
-                f"""
-                update affiliate_commissions c
-                   set payout_id = null,
-                       status = case when c.status = 'pending' and (exists (
+            # A que vira estorno sai também da conferência (#1538); a que só volta ao saldo segue marcada.
+            estorna = f"""c.status = 'pending' and (exists (
                          select 1
                            from affiliate_referral_payments p
                            join affiliate_referrals r on r.id = p.referral_id
@@ -676,7 +681,13 @@ def reject_payout(payout_id: int, note: str | None = None, revisor: str = "admin
                        ) or exists (
                          select 1 from affiliate_refund_reviews v
                           where v.commission_id = c.id and v.tipo = 'total' and v.status = 'open'
-                       )) then 'reversed' else c.status end
+                       ))"""
+            cur.execute(
+                f"""
+                update affiliate_commissions c
+                   set payout_id = null,
+                       status = case when {estorna} then 'reversed' else c.status end,
+                       {sem_marca_se(estorna)}
                  where c.payout_id = %s
                 returning c.id, c.status
                 """,

@@ -11,6 +11,7 @@
       "dismissEvent",
       "editAffiliateCommission",
       "navigateToFilter",
+      "openCheckForm",
       "openRecordedForm",
       "openRecoveryForm",
       "openReviewForm",
