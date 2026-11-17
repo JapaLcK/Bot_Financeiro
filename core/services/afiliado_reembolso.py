@@ -34,14 +34,14 @@ _DATA = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 _REFERENCIA = re.compile(r"^[A-Za-z0-9._:/-]{4,120}$")
 
 
-def fatura_da_cobranca(cobranca) -> str | None:
+def fatura_da_cobranca(cobranca, chave: str) -> str | None:
     """Id da fatura da cobrança, ou None se ela não tem fatura.
 
     Dois caminhos, porque o formato do evento segue a versão de API do ENDPOINT, que não
     mora no repositório: `charge.invoice` existe nas versões antigas e saiu do SDK fixado
     (`stripe==15.6.1`, 2026-08-26). Sem ele, a volta é o `InvoicePayment` da `PaymentIntent`.
     """
-    import stripe  # noqa: PLC0415
+    from core.services.ebook_entrega import cliente_stripe  # noqa: PLC0415
 
     fatura = _ler(cobranca, "invoice")
     if fatura:
@@ -51,7 +51,7 @@ def fatura_da_cobranca(cobranca) -> str | None:
     if not intent:
         return None
     filtro = {"type": "payment_intent", "payment_intent": intent}
-    for pagamento in stripe.InvoicePayment.list(payment=filtro, limit=100)["data"]:
+    for pagamento in cliente_stripe(chave).v1.invoice_payments.list(params={"payment": filtro, "limit": 100})["data"]:
         if pagamento["status"] == "paid":  # estornado continua "paid"; open/canceled são tentativas
             fatura = pagamento["invoice"]
             return _ler(fatura, "id") or fatura
@@ -143,16 +143,19 @@ def tratar_evento(event) -> None:
     `devolvido_na_stripe`, a regra da conferência (#1498). Sem fatura é no-op."""
     import stripe  # noqa: PLC0415
 
+    from core.services.ebook_entrega import cliente_stripe  # noqa: PLC0415
+
+    chave = os.getenv("STRIPE_SECRET_KEY")
     objeto = event["data"]["object"]
     if event["type"] == "charge.dispute.closed":
         if objeto["status"] != "lost":
             return
         cobranca = objeto["charge"]
         if isinstance(cobranca, str):
-            cobranca = stripe.Charge.retrieve(cobranca)
+            cobranca = cliente_stripe(chave).v1.charges.retrieve(cobranca)
     else:
         cobranca = objeto
-    fatura = fatura_da_cobranca(cobranca)
+    fatura = fatura_da_cobranca(cobranca, chave)
     if not fatura:
         log_system_event_sync(
             "warning", "affiliate_refund_sem_fatura",
@@ -161,7 +164,7 @@ def tratar_evento(event) -> None:
         )
         return
     try:
-        tipo, devolvido, _ = devolvido_na_stripe(fatura, os.getenv("STRIPE_SECRET_KEY"))
+        tipo, devolvido, _ = devolvido_na_stripe(fatura, chave)
     except (SemConfirmacao, stripe.InvalidRequestError, stripe.PermissionError) as exc:
         # O texto da Stripe pode trazer a fatura: no motivo vai só o status.
         _conferir_depois(fatura, str(exc) if isinstance(exc, SemConfirmacao) else f"stripe_{exc.http_status}", event["id"])
