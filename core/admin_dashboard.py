@@ -2294,15 +2294,16 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     @app.post("/admin/api/affiliates")
     async def admin_affiliate_create(request: Request, username: str = Depends(_get_current_admin)):
         """Cria um afiliado a partir do email de uma conta existente.
-        Body: {"email": "...", "code": "OPCIONAL", "commission_bps": 10000 (padrão)}"""
+        Body: {"email": "...", "code": "OPCIONAL", "commission_bps": 0..10000 (obrigatório)}"""
         from db import find_user_id_by_email
-        from db.affiliates import DEFAULT_COMMISSION_BPS, create_affiliate
+        from db.affiliates import create_affiliate
 
         payload = await _json_object_body(request)
 
         email = str(payload.get("email") or "").strip()
         if not email:
             raise HTTPException(status_code=422, detail="Informe o email da conta.")
+        bps = _bps_do_corpo(payload, None)
         user_id = await asyncio.to_thread(find_user_id_by_email, email)
         if not user_id:
             raise HTTPException(status_code=404, detail="Nenhuma conta com esse email.")
@@ -2312,9 +2313,8 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         # .strip() → AttributeError → 500. O `except ValueError` abaixo não pega.
         if code is not None and not isinstance(code, str):
             raise HTTPException(status_code=422, detail="code inválido.")
-        bps = _bps_do_corpo(payload, DEFAULT_COMMISSION_BPS)
         try:
-            affiliate = await asyncio.to_thread(create_affiliate, int(user_id), code, bps)
+            affiliate = await asyncio.to_thread(create_affiliate, int(user_id), code, commission_bps=bps)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=detalhe_seguro(exc))
 

@@ -38,7 +38,7 @@ def com_senha(*, afiliado=True, plano=False, direito_perdido=False):
     else:
         sql("update auth_accounts set plan='free', plan_selected_at=null where user_id=%s", uid)
     if afiliado:
-        create_affiliate(uid)
+        create_affiliate(uid, commission_bps=10_000)
     return uid, email
 
 

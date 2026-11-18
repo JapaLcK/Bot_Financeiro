@@ -39,7 +39,6 @@ from .affiliate_reviews import (
 )
 from .connection import get_conn
 
-DEFAULT_COMMISSION_BPS = 10_000     # 100%
 COMMISSION_HOLD_DAYS = 30           # carência anti-estorno antes de ficar sacável
 MIN_PAYOUT_CENTS = 50_00            # saque mínimo R$ 50
 REF_COOKIE_MAX_AGE_DAYS = 30        # janela de atribuição do link
@@ -82,9 +81,8 @@ def _validar_bps(bps) -> int:
     return int(bps)
 
 
-def create_affiliate(user_id: int, code: str | None = None,
-                     commission_bps: int = DEFAULT_COMMISSION_BPS) -> dict:
-    """Cria (ou retorna, se já existe) o afiliado do user_id."""
+def create_affiliate(user_id: int, code: str | None = None, *, commission_bps: int) -> dict:
+    """Cria (ou retorna, se já existe) o afiliado do user_id. Comissão é obrigatória: sem padrão."""
     if code is not None:
         code = _normalize_code(code)
         if not _CODE_RE.match(code):

@@ -136,10 +136,9 @@ def _admin(monkeypatch):
 
 @pytest.mark.parametrize("corpo,esperado", [
     ({"commission_bps": 0}, 0), ({"commission_bps": "0"}, 0),
-    ({}, 10_000), ({"commission_bps": None}, 10_000), ({"commission_bps": ""}, 10_000),
-    ({"commission_bps": False}, 10_000), ({"commission_bps": 2500}, 2500),
-], ids=["zero", "zero_texto", "ausente", "null", "vazio", "false", "positivo_normal"])
-def test_admin_grava_zero_como_zero_e_ausente_como_padrao(monkeypatch, corpo, esperado):
+    ({"commission_bps": 10_000}, 10_000), ({"commission_bps": 2500}, 2500),
+], ids=["zero", "zero_texto", "cem_por_cento", "positivo_normal"])
+def test_admin_grava_zero_como_zero_e_o_valor_enviado(monkeypatch, corpo, esperado):
     c = _conta(plano=False)
     admin = _admin(monkeypatch)
     r = admin.post("/admin/api/affiliates", headers=csrf(admin), json={"email": c.email, **corpo})
@@ -147,7 +146,30 @@ def test_admin_grava_zero_como_zero_e_ausente_como_padrao(monkeypatch, corpo, es
     assert get_affiliate_by_user(c.uid)["commission_bps"] == esperado
 
 
-@pytest.mark.parametrize("bps", [0.5, 0.99, -0.5, 1.5, 2500.5])
+@pytest.mark.parametrize("corpo", [{}, {"commission_bps": None}, {"commission_bps": ""}, {"commission_bps": False}],
+                         ids=["ausente", "null", "vazio", "false"])
+def test_admin_recusa_criar_sem_percentual(monkeypatch, corpo):
+    """Sem padrão de 100%: ausente/null/"" -> 422 e nenhuma linha em affiliates."""
+    c = _conta(plano=False)
+    admin = _admin(monkeypatch)
+    r = admin.post("/admin/api/affiliates", headers=csrf(admin), json={"email": c.email, **corpo})
+    assert r.status_code == 422, r.text
+    assert get_affiliate_by_user(c.uid) is None
+
+
+def test_admin_valida_percentual_antes_de_buscar_o_email(monkeypatch):
+    """Ordem pinada: e-mail inexistente + sem percentual -> 422, não 404."""
+    admin = _admin(monkeypatch)
+    r = admin.post("/admin/api/affiliates", headers=csrf(admin), json={"email": f"nao-existe-{uuid.uuid4().hex}@example.com"})
+    assert r.status_code == 422, r.text
+
+
+def test_create_affiliate_exige_commission_bps():
+    with pytest.raises(TypeError):
+        create_affiliate(1)
+
+
+@pytest.mark.parametrize("bps", [10001, 0.5, 0.99, -0.5, 1.5, 2500.5])
 def test_admin_recusa_percentual_nao_inteiro(monkeypatch, bps):
     c = _conta(plano=False)
     admin = _admin(monkeypatch)
