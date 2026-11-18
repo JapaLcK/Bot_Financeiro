@@ -76,8 +76,8 @@ def _texto(r: dict) -> str:
 def _registrar_tentativa(r: dict, entregue: bool, event_id: str | None = None) -> None:
     """`error` quando o aviso não sai: a pendência segura o dinheiro, mas o admin ainda não sabe.
     `event_id` só do webhook; o worker não tem evento."""
-    detalhes = {"commission_id": r["commission_id"], "payout_id": r.get("payout_id"), "tipo": r["tipo"],
-                "alerta_entregue": entregue, "review_id": r["id"]}  # a linha, também sem comissão nem evento (Pix)
+    detalhes = {"commission_id": r["commission_id"], "tipo": r["tipo"], "alerta_entregue": entregue,
+                "review_id": r["id"], **({"payout_id": r["payout_id"]} if "payout_id" in r else {})}  # crua: sem saque
     if event_id is not None:
         detalhes["event_id"] = event_id
     log_system_event_sync(
