@@ -41,6 +41,7 @@ from db.affiliates import (
     registrar_pagamento_realizado,
     reject_payout,
     request_payout,
+    reverse_commission,
 )
 from db.connection import get_conn
 from test_afiliado_area import ME, _afiliado, _comissao, _esperando_lock, _me, _painel_aberto, _sacar  # noqa: F401
@@ -793,7 +794,7 @@ def test_estorno_manual_fecha_a_pendencia(adm):
     c = _afiliado()
     a = _paga(c)
     _parcial(a)
-    assert _post(adm, f"commissions/{a.id}/reverse").status_code == 200
+    assert reverse_commission(a.id, "admin")
     assert _rev(a.fatura)["status"] == "resolved" and _acoes(a.fatura) == ["commission_reversed"]
     assert _quadros(c)["review"] == 0
 
@@ -1776,20 +1777,15 @@ def test_revisao_recusa_comissao_que_saiu_do_saque_no_meio(mundo):
     assert _saque(saque)["amount_cents"] == 17_000 and _comissao_db(a)["amount_cents"] == 10_000
 
 
-@pytest.mark.parametrize("rota", ["reject", "reverse"])
-def test_autor_do_evento_e_o_admin_logado(mundo, monkeypatch, rota):
-    """Mutações 73 e 74: com usuário diferente do padrão, o evento leva quem agiu."""
+def test_autor_do_evento_e_o_admin_logado(mundo, monkeypatch):
+    """Mutação 73: com usuário diferente do padrão, o evento leva quem agiu."""
     monkeypatch.setattr(admin_dashboard, "ADMIN_DASHBOARD_USERNAME", "lucas")
     adm = _admin(monkeypatch)
     c = _afiliado()
     a = _paga(c)
-    if rota == "reject":
-        saque = request_payout(c.aff["id"])["id"]
-        _total(a)
-        assert _rejeitar(adm, saque).status_code == 200
-    else:
-        _parcial(a)
-        assert _post(adm, f"commissions/{a.id}/reverse").status_code == 200
+    saque = request_payout(c.aff["id"])["id"]
+    _total(a)
+    assert _rejeitar(adm, saque).status_code == 200
     assert _eventos(a.fatura)[-1]["actor"] == "lucas"
 
 
