@@ -1835,6 +1835,10 @@ da primeira cobrança do cartão: chave `pix:<id>` (`external_reference`) em `st
 em `core/services/pix_pricing.py` ao lado de `DURACAO_DIAS`), sem conferência A5. Falha levanta e
 vira retentativa; o marcador e o `unique` seguram o reprocessamento. Pix e cartão do mesmo cliente
 se serializam por `trava_indicado`: o primeiro pago decide.
+UNDONE (baixa em dinheiro desfeita, #1448) em `paid`/`paid_orphan`: `reabrir_baixa` apaga na mesma transação a
+linha de `affiliate_referral_payments` (`pix`, `payment_ref` = id da cobrança) e os efeitos `grant` e `afiliado`:
+o pagamento nunca existiu, então o cliente deixa de contar e o `RECEIVED` real conta de novo. Não é reembolso
+(esse só rotula). Em `refunded_partial`, `desfazer_baixa` rotula `total`.
 Reembolso do Pix passa pela máquina do cartão: `marcar` chama `registrar_reembolso` com a chave
 `pix:<id>` (rótulo, pendência e estorno numa transação) e `avisar_pendencia`. Devolvido no total: o
 cobrado (plano + cadernos, `total_cents`), sem rede. No parcial, só quando o valor decide algo
