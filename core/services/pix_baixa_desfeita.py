@@ -79,13 +79,15 @@ def reconciliar_grant(cobranca, evt, payment_id: str) -> bool:
             # `_grant` commita o grant ANTES do `recompute`: se este levantou, a retentativa
             # acha o grant ativo e só reprojeta (idempotente; nunca reconcede nem toca o grant).
             recompute_entitlement(cobranca["user_id"], origem="pix")
+            afiliado_pix.soltar_baixa_desfeita(cobranca)  # a soltura pode ter caído depois do grant
             return False
         if estado != "revoked":
             return False
         EXECUTORES["grant"](cobranca, evt)
-    # Morreu depois de `_segurar_comissao` e antes de `reabrir_baixa`: o `afiliado` do RECEIVED já está
-    # registrado e o dreno o pula, então é aqui que a revisão `open/0` do UNDONE se solta (#1616).
-    afiliado_pix.soltar_baixa_desfeita(cobranca)
+        # Morreu depois de `_segurar_comissao` e antes de `reabrir_baixa`: o `afiliado` do RECEIVED já está
+        # registrado e o dreno o pula, então é aqui que a revisão `open/0` do UNDONE se solta (#1616). Sob o
+        # `grant`: um UNDONE novo segura e reabre sob ele, então não solta a revisão que ele acabou de abrir.
+        afiliado_pix.soltar_baixa_desfeita(cobranca)
     log.warning("pix: grant reconcedido (baixa desfeita, Pix real) cobranca=%s", cobranca["id"])
     _alertar(cobranca, "acesso reconcedido: o Pix real chegou antes da retentativa do UNDONE.")
     return True

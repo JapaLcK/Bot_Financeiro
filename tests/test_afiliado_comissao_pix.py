@@ -1290,6 +1290,28 @@ def test_p24_morte_entre_segurar_e_reabrir_o_pix_real_solta_a_revisao(externo, m
     assert rev["status"] == "resolved" and _acoes(chave).count("partial_approved") == 1
 
 
+def test_p24_soltura_que_cai_depois_do_grant_e_refeita_na_retentativa(externo, monkeypatch):
+    import core.services.pix_baixa_desfeita as m
+
+    ind, cobranca = _cara(_afiliado())
+    chave = cobranca["external_reference"]
+    real_reabrir, real_soltar = m.reabrir_baixa, m.afiliado_pix.soltar_baixa_desfeita
+    monkeypatch.setattr(m, "reabrir_baixa", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("morreu")))
+    entregar(UNDONE, cobranca)
+    monkeypatch.setattr(m, "reabrir_baixa", real_reabrir)
+    monkeypatch.setattr(m.afiliado_pix, "soltar_baixa_desfeita",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("caiu")))
+    externo["get_status"] = "RECEIVED"
+    try:
+        entregar("PAYMENT_RECEIVED", cobranca)  # grant reconcedido, soltura caiu
+    except RuntimeError:
+        pass
+    assert _revisao(chave)["status"] == "open"
+    monkeypatch.setattr(m.afiliado_pix, "soltar_baixa_desfeita", real_soltar)
+    entregar("PAYMENT_RECEIVED", cobranca)  # retentativa acha o grant ativo
+    assert _revisao(chave)["status"] == "resolved" and _acoes(chave).count("partial_approved") == 1
+
+
 def test_p24_ciclo_duplo_com_a_comissao_ja_paga_reabre_no_segundo_undone(externo):
     c = _afiliado()
     ind, cobranca = _cara(c)
