@@ -1185,9 +1185,9 @@ def test_p24_baixa_desfeita_nao_rotula_o_pagamento_como_reembolsado(externo):
     ind, cobranca = _cara(_afiliado())
     entregar(UNDONE, cobranca)
     with get_conn() as conn:
-        rotulo = conn.execute("select refund_status from affiliate_referral_payments where source = 'pix'"
-                              " and payment_ref = %s", (str(cobranca["id"]),)).fetchone()["refund_status"]
-    assert rotulo not in ("partial", "total")
+        linha = conn.execute("select refund_status from affiliate_referral_payments where source = 'pix'"
+                             " and payment_ref = %s", (str(cobranca["id"]),)).fetchone()
+    assert linha is None  # #1448: a linha sai em vez de ser rotulada como reembolso
 
 
 def test_p24_positivo_estorno_parcial_com_asaas_fora_rotula_o_pagamento(externo):

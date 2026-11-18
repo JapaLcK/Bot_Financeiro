@@ -292,14 +292,11 @@ def rezerar_rastreio_de_orfas() -> int:
 def reabrir_baixa(charge_id: int, payment_id: str, status: str) -> bool:
     """Baixa manual desfeita (#1267): `paid`/`paid_orphan` volta a `status`
     (`pending`, ou `expired` se outra cobrança já ocupa o índice de ativa), sem
-    janela de acesso, e os efeitos `grant` e `afiliado` do pagamento saem da tabela para o
-    `RECEIVED` real conceder e contar de novo. A linha de `affiliate_referral_payments` (pix,
-    `payment_ref` = `charge_id`) também sai: baixa desfeita é pagamento que nunca existiu, não
-    reembolso (#1448). UMA transação. Devolve True se aplicou.
+    janela de acesso; os efeitos `grant`/`afiliado` e a linha pix de `affiliate_referral_payments`
+    saem: baixa desfeita é pagamento que nunca existiu, não reembolso (#1448). UMA transação.
 
     Sem `user_id` no `where`, como `transicionar` (tabela de exceções em
-    `db/pix_charges.py`): chaveada por `charge_id` que veio do evento assinado (idem a linha
-    de `affiliate_referral_payments`, que não tem `user_id`).
+    `db/pix_charges.py`): chaveada por `charge_id` do evento assinado.
     O `qr_payload_enc` foi apagado em `paid`; a cobrança reaberta não tem QR, por
     isso `qr_expires_at = now()`. O marcador `baixa_desfeita` NUNCA é apagado.
     """
