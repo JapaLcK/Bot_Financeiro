@@ -7,6 +7,7 @@ from core.pg_text import causa_segura
 from core.services.demo.dados import CODIGO_PADRAO
 
 from . import insight_aviso_direito
+from .affiliate_payments import CHAVE_NAO_PIX_SQL
 from .connection import get_conn
 from .schema_repairs import (
     ensure_lower_name_unique, ensure_plan_trials_user_fk, repair_user_fk_cascades,
@@ -130,14 +131,14 @@ RESYNC_LEGACY_GRANT_USER_SQL = _RESYNC_LEGACY_GRANTS_SQL.format(filtro="and a.us
 # comissão não tem histórico aqui. Comissão do Pix (`pix:<id>`) fica fora do 1º ramo: ela
 # não é fatura, e o 2º ramo já traz a cobrança. Roda em todo boot, e `do nothing` não mexe no que
 # o webhook e o dreno já gravaram. Fora de `ddl_statements`: ver `_run_ddl`.
-BACKFILL_AFILIADO_PAGAMENTOS_SQL = """
+BACKFILL_AFILIADO_PAGAMENTOS_SQL = f"""
 insert into affiliate_referral_payments (referral_id, source, payment_ref, amount_cents,
                                          paid_at, refund_status, refunded_at)
 select r.id, 'stripe', c.stripe_invoice_id, c.invoice_amount_cents, c.created_at, 'none', null
   from affiliate_commissions c
   join affiliate_referrals r on r.referred_user_id = c.referred_user_id
                             and r.affiliate_id = c.affiliate_id
- where c.invoice_amount_cents > 0 and left(c.stripe_invoice_id, 4) <> 'pix:'
+ where c.invoice_amount_cents > 0 and {CHAVE_NAO_PIX_SQL.format(c='c')}
 union all
 select r.id, 'pix', p.id::text, p.amount_cents, coalesce(p.paid_at, p.created_at),
        case p.status when 'paid' then 'none' when 'refunded_partial' then 'partial' else 'total' end,

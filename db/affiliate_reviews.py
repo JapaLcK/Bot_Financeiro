@@ -13,7 +13,7 @@ comissão, pendência, sem saque. Sem ciclo. Nada aqui guarda dado do indicado; 
 justificativa moram só em `affiliate_refund_review_events`, nunca em log, aviso ou nota do saque.
 """
 from .affiliate_eventos import registrar_evento  # mudou de lugar (#1538); os chamadores importam daqui
-from .affiliate_payments import _rotular, origem_da_chave
+from .affiliate_payments import CHAVE_NAO_PIX_SQL, _rotular, origem_da_chave
 from .connection import get_conn
 
 # Comissão em revisão e saque bloqueado são a MESMA pendência, vista de dois lados. Fonte única
@@ -195,13 +195,13 @@ def faturas_do_saque(payout_id: int) -> list[dict]:
     A comissão do Pix (`pix:<id>`) fica fora: não é fatura da Stripe, e o estorno dela chega pelo dreno."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            """
+            f"""
             select c.id as commission_id, c.stripe_invoice_id as fatura, c.payment_check_pending as marcada,
                    c.payment_check_marked_at as marcada_em from affiliate_commissions c
-             where c.payout_id = %s and left(c.stripe_invoice_id, 4) <> 'pix:'
+             where c.payout_id = %s and {CHAVE_NAO_PIX_SQL.format(c='c')}
             union all
             select null, r.stripe_invoice_id, false, null from affiliate_refund_reviews r
-             where r.orphan_payout_id = %s and r.commission_id is null and left(r.stripe_invoice_id, 4) <> 'pix:'
+             where r.orphan_payout_id = %s and r.commission_id is null and {CHAVE_NAO_PIX_SQL.format(c='r')}
             """,
             (int(payout_id), int(payout_id)),
         )

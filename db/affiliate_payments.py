@@ -14,18 +14,26 @@ from datetime import datetime
 from .connection import get_conn
 
 
+# A chave da comissão do Pix é `pix:<id>`; o resto é fatura Stripe. Única fonte do lado que LÊ a chave da comissão (#1523); quem grava é `db/pix_charges.py`.
+PREFIXO_PIX = "pix:"
+_N = len(PREFIXO_PIX)
+# O filtro "não é Pix" (fatura Stripe), com o alias em `{c}`. Sem `%`, para servir em consulta com parâmetro.
+CHAVE_NAO_PIX_SQL = f"left({{c}}.stripe_invoice_id, {_N}) <> '{PREFIXO_PIX}'"
+
+
 def origem_da_chave(chave: str) -> tuple[str, str]:
     """A chave da comissão (`stripe_invoice_id`) como pagamento: `"pix:7"` é a cobrança Pix 7,
     o resto é fatura Stripe. Par SQL: `PAGAMENTO_DA_COMISSAO_SQL` (um teste compara os dois)."""
-    return ("pix", chave[4:]) if chave.startswith("pix:") else ("stripe", chave)
+    return ("pix", chave[_N:]) if chave.startswith(PREFIXO_PIX) else ("stripe", chave)
 
 
 # O mesmo, em SQL: `{p}` (pagamento) casa com a chave da comissão `{c}`. Sem `%`, para servir em
 # consulta com parâmetro.
-PAGAMENTO_DA_COMISSAO_SQL = """({p}.source, {p}.payment_ref) = (
-    case when left({c}.stripe_invoice_id, 4) = 'pix:' then 'pix' else 'stripe' end,
-    case when left({c}.stripe_invoice_id, 4) = 'pix:' then substr({c}.stripe_invoice_id, 5)
-         else {c}.stripe_invoice_id end)"""
+_E_PIX = f"left({{c}}.stripe_invoice_id, {_N}) = '{PREFIXO_PIX}'"
+PAGAMENTO_DA_COMISSAO_SQL = f"""({{p}}.source, {{p}}.payment_ref) = (
+    case when {_E_PIX} then 'pix' else 'stripe' end,
+    case when {_E_PIX} then substr({{c}}.stripe_invoice_id, {_N + 1})
+         else {{c}}.stripe_invoice_id end)"""
 
 
 def registrar_pagamento(referred_user_id: int, source: str, payment_ref: str,

@@ -3,6 +3,7 @@ db/affiliate_reconciliacao.py — a fila da reconciliação de comissão já pag
 reconferir na Stripe e quando cada uma foi conferida. A regra do reembolso mora em `registrar_reembolso`;
 aqui só custo e cadência. Sem pessoa: fatura e data.
 """
+from .affiliate_payments import CHAVE_NAO_PIX_SQL
 from .connection import get_conn
 
 
@@ -12,16 +13,16 @@ def faturas_pagas_a_conferir(limite: int, janela_dias: int, cadencia_s: int) -> 
     registrada segue (um total depois é fato novo). Pix fica fora: não é fatura da Stripe."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            """
+            f"""
             with pagas as (
               select c.stripe_invoice_id as fatura, c.created_at as desde
                 from affiliate_commissions c
-               where c.status = 'paid' and left(c.stripe_invoice_id, 4) <> 'pix:'
+               where c.status = 'paid' and {CHAVE_NAO_PIX_SQL.format(c='c')}
               union all
               -- comissão paga de afiliado que excluiu a conta: o valor ficou na linha da fatura (N1)
               select r.stripe_invoice_id, r.created_at
                 from affiliate_refund_reviews r
-               where r.commission_id is null and r.paid_cents is not null and left(r.stripe_invoice_id, 4) <> 'pix:'
+               where r.commission_id is null and r.paid_cents is not null and {CHAVE_NAO_PIX_SQL.format(c='r')}
             )
             select p.fatura from pagas p
               left join affiliate_paid_refund_checks k on k.stripe_invoice_id = p.fatura

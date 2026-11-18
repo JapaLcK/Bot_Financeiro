@@ -8,6 +8,7 @@ admin ou duplo clique dão `ConferenciaMudou`, e nada é gravado. "Continua marc
 nasce marcada: a versão dela é (None, None) antes e depois de a Stripe liberar. O evento sai na mesma transação do efeito: uma decisão, um evento.
 """
 from .affiliate_eventos import registrar_evento
+from .affiliate_payments import CHAVE_NAO_PIX_SQL, PREFIXO_PIX
 from .affiliate_reviews import PENDENCIA_ABERTA_SQL, SEM_MARCA, PendenciaMudou
 from .affiliate_reviews_manutencao import MARCADA_DESDE_SQL
 from .affiliates import _estornar
@@ -22,7 +23,7 @@ c.id, a.code, c.amount_cents, c.status, c.payout_id, p.status as payout_status,
        c.payment_check_tried_at as tried_at,
        case when c.payment_check_tried_at is not null then c.payment_check_reason end as reason,
        {PENDENCIA_ABERTA_SQL.format(c="c")} as in_review,
-       coalesce(left(c.stripe_invoice_id, 4) <> 'pix:', false) as has_stripe_invoice,
+       coalesce({CHAVE_NAO_PIX_SQL.format(c='c')}, false) as has_stripe_invoice,
        exists (select 1 from affiliate_refund_reviews v
                 where v.commission_id = c.id and v.status = 'recovery') as in_recovery
 """
@@ -174,7 +175,7 @@ def fatura_da_comissao(commission_id: int) -> str | None:
         row = conn.execute("select stripe_invoice_id as f from affiliate_commissions where id = %s",
                            (int(commission_id),)).fetchone()
     f = row and row["f"]
-    return f if f and not f.startswith("pix:") else None
+    return f if f and not f.startswith(PREFIXO_PIX) else None
 
 
 def comissoes_liberadas(ids: list[int]) -> set[int]:
