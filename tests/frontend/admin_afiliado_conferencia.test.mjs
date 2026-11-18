@@ -17,16 +17,16 @@ const NO_SAQUE = "A comissão está no saque 7, ainda aberto. Rejeite o saque se
 const JA_PAGA = "Comissão já paga: reembolso confirmado vira recuperação.";
 const linha = (id, extra) => ({ id, code: "ANA2026", amount_cents: 10000, status: "pending", payout_id: null, payout_status: null, marcada: true,
   marked_at: "2026-11-02T10:00:00.123456+00:00", marked_on: "2026-11-02T10:00:00.123456+00:00", tried_at: "2026-11-03T10:00:00+00:00",
-  reason: "sem_cobranca", in_review: false, in_recovery: false, actions: { reverse: null }, ...extra });
+  reason: "sem_cobranca", has_stripe_invoice: true, in_review: false, in_recovery: false, actions: { reverse: null }, ...extra });
 const LISTA = [
-  linha(11, { actions: { release: "Liberar indisponível: origem do pagamento ainda não conferida.", reverse: null } }),
-  linha(12, { payout_id: 7, payout_status: "requested", reason: "disputa_aberta", actions: { reverse: NO_SAQUE } }),
+  linha(11, { actions: { release: null, reverse: null } }),
+  linha(12, { has_stripe_invoice: false, payout_id: 7, payout_status: "requested", reason: "disputa_aberta", actions: { reverse: NO_SAQUE } }),
   linha(13, { status: "paid", payout_id: 5, payout_status: "paid", reason: "forma_inesperada", in_recovery: true,
     actions: { conclude: null, reverse: JA_PAGA } }),
   linha(14, { status: "paid", payout_id: 5, payout_status: "paid", reason: "disputa_aberta",
     actions: { conclude: "Disputa aberta: a conferência fecha sozinha quando a disputa terminar.", reverse: JA_PAGA } }),
   linha(15, { code: "<b>EVA</b>", reason: null, tried_at: null, marked_at: null, marked_on: "2026-11-01T10:00:00+00:00", in_review: true }),
-  linha(16, { reason: "stripe_403", actions: { reverse: null } }),
+  linha(16, { reason: "stripe_403", actions: { release: "Em revisão de reembolso: decida a pendência antes.", reverse: null } }),
 ];
 const evento = (id, action, extra) => ({ id, review_id: null, action, actor: "lucas", before_cents: 10000, after_cents: 0, payout_id: null,
   event_on: null, receipt_ref: "ticket:SUP-1", justification: "Indicado pediu de volta", created_at: "2026-11-05T12:00:00+00:00",
@@ -44,7 +44,7 @@ async function abrir({ width = 1280, height = 900, visao = VISAO, resposta = { s
   const posts = [], leituras = [];
   await page.route("**/admin/api/**", (r) => r.fulfill({ contentType: "application/json", body: "{}" }));
   await page.route("**/admin/api/affiliates", (r) => { leituras.push(Date.now()); return r.fulfill({ contentType: "application/json", body: JSON.stringify(visao) }); });
-  await page.route(/\/admin\/api\/affiliates\/commissions\/\d+\/check-(reverse|conclude)$/, (r) => {
+  await page.route(/\/admin\/api\/affiliates\/commissions\/\d+\/check-(reverse|conclude|release)$/, (r) => {
     posts.push({ url: new URL(r.request().url()).pathname, corpo: r.request().postDataJSON() });
     return r.fulfill({ contentType: "application/json", ...resposta });
   });
@@ -65,8 +65,13 @@ for (const [nome, width, height] of TAMANHOS) {
       const [solta, noSaque, paga, pagaDisputa, nova, s403] = await linhas(page);
       const t = await solta.innerText();
       assert.match(t, /ANA2026[\s\S]*R\$ 100,00[\s\S]*fora do saque[\s\S]*02\/11\/2026[\s\S]*03\/11\/2026[\s\S]*Pago com saldo de crédito/);
-      assert.match(t, /Liberar indisponível: origem do pagamento ainda não conferida/);
-      assert.deepEqual(await solta.getByRole("button").allInnerTexts(), ["Estornar"]);
+      assert.deepEqual(await solta.getByRole("button").allInnerTexts(), ["Liberar", "Estornar"]);
+      // "Ver fatura": link para a rota do admin, sem o id da fatura na tela
+      const ver = solta.getByRole("link", { name: "Ver fatura" });
+      assert.equal(await ver.getAttribute("href"), "/admin/api/affiliates/commissions/11/stripe-invoice");
+      assert.equal(await ver.getAttribute("rel"), "noopener noreferrer");
+      // comissão Pix (`has_stripe_invoice` falso): sem link, que o servidor responderia 404
+      assert.equal(await noSaque.getByRole("link", { name: "Ver fatura" }).count(), 0);
       assert.match(await noSaque.innerText(), /no saque 7[\s\S]*Disputa aberta[\s\S]*ainda aberto\. Rejeite o saque/);
       assert.equal(await noSaque.getByRole("button").count(), 0);
       const tp = await paga.innerText();
@@ -79,7 +84,8 @@ for (const [nome, width, height] of TAMANHOS) {
       const tn = await nova.innerText();
       assert.match(tn, /<b>EVA<\/b>[\s\S]*em revisão de reembolso[\s\S]*01\/11\/2026[\s\S]*ainda não conferida[\s\S]*Aguardando a 1ª conferência/);
       assert.equal(await nova.locator("b").count(), 0);
-      assert.match(await s403.innerText(), /Stripe recusou a consulta \(403\)/);
+      assert.match(await s403.innerText(), /Stripe recusou a consulta \(403\)[\s\S]*Em revisão de reembolso: decida a pendência antes/);
+      assert.deepEqual(await s403.getByRole("button").allInnerTexts(), ["Estornar"]);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
       for (const caixa of await page.locator("#aff-check-list button").evaluateAll((bs) => bs.map((b) => b.getBoundingClientRect().toJSON()))) {
         assert.ok(caixa.left >= 0 && caixa.right <= width, `botão passa da tela: ${JSON.stringify(caixa)}`);
@@ -138,6 +144,24 @@ test("concluir: rota própria, e o formulário seguinte volta ao rótulo da refe
     assert.match(await page.locator("#aff-form").innerText(), /Referência do comprovante/);
   } finally { await page.close(); }
 });
+
+// mutação: tirar `release` de AFF_DECISAO (o botão some do clique) ou mandar para a rota do estorno
+for (const [nome, width, height] of TAMANHOS) {
+  test(`liberar: rota própria e o texto do formulário (${nome})`, async () => {
+    const { page, posts } = await abrir({ width, height });
+    try {
+      await (await linhas(page))[0].getByRole("button", { name: "Liberar" }).click();
+      assert.match(await page.locator("#aff-form").innerText(), /Liberar comissão de R\$ 100,00[\s\S]*Entra no saldo disponível do afiliado/);
+      const caixa = await page.locator("#aff-form").boundingBox();
+      assert.ok(caixa.x >= 0 && caixa.x + caixa.width <= width && caixa.height <= height, JSON.stringify(caixa));
+      await page.locator("#aff-f-ref").fill("ticket:SUP-1");
+      await page.locator("#aff-f-just").fill("Fatura da Stripe não existe mais");
+      await page.locator("#aff-form-send").click();
+      await page.waitForFunction(() => !document.getElementById("aff-form").open);
+      assert.deepEqual(posts.map((p) => p.url), ["/admin/api/affiliates/commissions/11/check-release"]);
+    } finally { await page.close(); }
+  });
+}
 
 // mutação: tirar o `loadAffiliates` do 409 em `submitAffForm`, ou fechar o diálogo no erro
 for (const [status, recarrega] of [[409, true], [422, false]]) {

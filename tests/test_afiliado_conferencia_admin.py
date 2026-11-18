@@ -128,12 +128,11 @@ def test_lista_mostra_motivo_datas_e_acoes(adm, formas, monkeypatch):
     linha = _linha(adm, com)
     assert (linha["code"], linha["amount_cents"], linha["reason"], linha["tried_at"]) == (c.aff["code"], 10_000, None, None)
     assert linha["marked_at"] and linha["marked_on"] == linha["marked_at"]
-    assert linha["actions"] == {"reverse": None}  # sem tentativa: só Estornar
+    assert linha["actions"] == {"release": "Aguarde a conferência na Stripe antes de decidir.", "reverse": None}
     _tentada(com, formas, monkeypatch)
     linha = _linha(adm, com)
     assert linha["reason"] == "sem_cobranca" and linha["tried_at"]
-    assert linha["actions"] == {"release": "Liberar indisponível: origem do pagamento ainda não conferida.",
-                                "reverse": None}
+    assert linha["actions"] == {"release": None, "reverse": None}
     _marca(com)  # remarcada: o motivo velho fica na coluna, mas não vale sem tentativa
     assert _db(com)["payment_check_reason"] == "sem_cobranca"
     assert _linha(adm, com)["reason"] is None
@@ -142,7 +141,8 @@ def test_lista_mostra_motivo_datas_e_acoes(adm, formas, monkeypatch):
 def test_lista_acoes_por_estado(adm, formas, monkeypatch):
     c = _afiliado()
     disputa = _tentada(_marca(_comissao(c, 100)), formas, monkeypatch, "disputa_aberta")
-    assert _linha(adm, disputa)["actions"] == {"reverse": None}  # disputa: sem Liberar, Estornar pode (a issue)
+    assert _linha(adm, disputa)["actions"] == {"release": "Disputa aberta: a conferência fecha sozinha quando a disputa terminar.",
+                                               "reverse": None}  # disputa: sem Liberar, Estornar pode (a issue)
     paga = _tentada(_marca(_paga_e_saca(c)[0]), formas, monkeypatch, "forma_inesperada")
     acoes = _linha(adm, paga)["actions"]
     assert acoes == {"conclude": None, "reverse": "Comissão já paga: reembolso confirmado vira recuperação."}
@@ -876,7 +876,7 @@ def test_rejeitar_saque_devolve_a_marcada_com_a_marca(adm, fonte):
     linha = _db(outra)
     assert (linha["status"], linha["payout_id"], linha["payment_check_pending"], linha["payment_check_marked_at"]) == (
         "pending", None, True, marca)
-    assert _linha(adm, outra)["actions"] == {"reverse": None}
+    assert _linha(adm, outra)["actions"]["reverse"] is None
 
 
 @pytest.mark.parametrize("texto", [

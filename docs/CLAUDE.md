@@ -2883,7 +2883,7 @@ um teste compara os dois) traduzem para o pagamento de `affiliate_referral_payme
 ramos) pulam as `pix:`, que não são fatura da Stripe; saque só com comissão Pix não consulta a Stripe (QR e
 "Marcar pago" saem sem chave: o atalho mora em `conferir_saque`, antes da checagem dela);
 `affiliate_refund_review_events` guarda ajuste, rejeição, pagamento registrado, recuperação e a decisão
-do admin na conferência (`check_reversed`, `check_concluded`; `check_released` no PR 2 da #1538), com autor e
+do admin na conferência (`check_reversed`, `check_concluded`; `check_released`), com autor e
 horário, só por inserção (`registrar_evento`, `db/affiliate_eventos.py`). `registrar_reembolso` grava rótulo e pendência numa transação, sob
 a trava da fatura e da comissão, e decide com o estado de agora:
 
@@ -3016,8 +3016,11 @@ volta do worker, revisão parcial, outro admin ou duplo clique dão 409 "A comis
 marcada não tem `marked_at`: a versão dela é (None, None) antes e depois de a Stripe liberar, e quem a segura é
 "continua marcada". A trava vem antes da leitura, então o estado anterior gravado é o que a decisão encontrou. Uma decisão grava um evento na mesma transação, com
 `commission_id`, o código no ato e o estado antes e depois (`state_before`, `state_after`, chaves fixas); os
-logs levam só o id. Liberar fica para o PR 2 (`stripe_404`) e o PR 3 (`sem_cobranca` e `forma_inesperada`,
-depois do roteiro na Stripe de teste); até lá esses dois motivos mostram "Liberar indisponível". Todo estorno
+logs levam só o id. "Liberar" (`/check-release`) vale para a pendente fora de saque, com tentativa e motivo concluível (os mesmos do Concluir; disputa aberta
+não), sem revisão de reembolso aberta, e confere a Stripe antes como o Concluir (confirmou: 409; fora: 503). Entra no saldo
+disponível; evento `check_released`. "Ver fatura" (`GET /admin/api/affiliates/commissions/{id}/stripe-invoice`, só admin) responde 302 para o painel
+da Stripe (`/test/` com chave de teste, `_test_` na chave); a fatura nunca vai para a lista nem para o log. 404/400 da fatura no QR e no
+"Marcar pago" não é mais 503: vira "sem confirmação", marca a comissão e o saque responde 409 (`_DISPUTA_ABERTA`); rejeitar o saque a solta. 403 (chave sem permissão) e erro local seguem 503 "Stripe fora". `stripe_403` não se libera nem se conclui (o worker reconfere quando a chave for corrigida). Todo estorno
 tira a marca (`SEM_MARCA`, `db/affiliate_reviews.py`): o manual (`/check-reverse`; a rota antiga `/reverse` foi removida no #1581), o
 automático da solta (D9), a revisão parcial aprovada com 0 e o "Rejeitar" do saque, só na que ele estorna
 (`sem_marca_se`): a que volta ao saldo segue em conferência. "A mais antiga" do cabeçalho e a ordem da lista

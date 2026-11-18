@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import bcrypt
 import jwt as pyjwt
@@ -61,8 +62,8 @@ _VAGAS_CONFERENCIA = threading.BoundedSemaphore(VAGAS_CONFERENCIA)
 _EXECUTOR_CONFERENCIA = ThreadPoolExecutor(VAGAS_CONFERENCIA, thread_name_prefix="conferir-saque")
 _STRIPE_FORA = "Não foi possível conferir reembolsos na Stripe agora. Tente de novo em instantes."
 _SE_O_PIX_SAIU = " Se o Pix já saiu, use Pagamento já realizado."
-_DISPUTA_ABERTA = ("Uma comissão deste saque tem disputa aberta na Stripe. Rejeite o saque para liberar as outras; "
-                   "ela volta quando a disputa fechar.")
+_DISPUTA_ABERTA = ("Uma comissão deste saque está em conferência na Stripe (disputa aberta ou fatura sem confirmação). "
+                   "Rejeite o saque para liberar as outras; ela fica na lista de conferência do admin.")
 DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
 ADMIN_AUTH_COOKIE_NAME = "admin_auth_token"
 
@@ -2619,6 +2620,51 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
                                f"Conferência da comissão {commission_id} concluída.", source="affiliates",
                                details={"commission_id": commission_id})
         return {"ok": True}
+
+    @app.post("/admin/api/affiliates/commissions/{commission_id}/check-release")
+    async def admin_affiliate_check_release(
+        commission_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """Libera a comissão pendente em conferência: ela entra no saldo disponível. Body igual ao do estorno.
+        Confere na Stripe antes: se a fatura confirma agora, a regra normal decide (409)."""
+        from core.services import afiliado_reembolso
+        from db.affiliate_conferencia_admin import ConferenciaMudou, conferir_decisao, liberar_a_mao
+
+        decisao = _decisao_da_conferencia(await _json_object_body(request))
+        try:
+            linha = await asyncio.to_thread(
+                conferir_decisao, commission_id, "release", decisao["marcada_em"], decisao["motivo"],
+                decisao["valor_cents"])
+            if linha is None:
+                raise HTTPException(status_code=404, detail="Comissão não encontrada.")
+            feita = await _na_stripe(afiliado_reembolso.conferir_comissao, commission_id, linha["fatura"],
+                                     adiar=True, lido=decisao["marcada_em"])
+            if feita is None:
+                raise HTTPException(status_code=503, detail=_STRIPE_FORA)
+            if feita:
+                raise HTTPException(status_code=409, detail=(
+                    "A Stripe respondeu agora e a comissão saiu da conferência pela regra normal (ou foi para a"
+                    " revisão de reembolso). Confira as listas."))
+            ok = await asyncio.to_thread(liberar_a_mao, commission_id, username, **decisao)
+        except ConferenciaMudou as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        if not ok:
+            raise HTTPException(status_code=404, detail="Comissão não encontrada.")
+        await log_system_event("warning", "affiliate_commission_check_released",
+                               f"Comissão {commission_id} liberada na conferência.", source="affiliates",
+                               details={"commission_id": commission_id})
+        return {"ok": True}
+
+    @app.get("/admin/api/affiliates/commissions/{commission_id}/stripe-invoice")
+    async def admin_affiliate_stripe_invoice(commission_id: int, username: str = Depends(_get_current_admin)):
+        """Abre a fatura da comissão no painel da Stripe (302). O id da fatura nunca vai para a lista nem para o log."""
+        from db.affiliate_conferencia_admin import fatura_da_comissao
+
+        fatura = await asyncio.to_thread(fatura_da_comissao, commission_id)
+        if not fatura:
+            raise HTTPException(status_code=404, detail="Fatura não encontrada.")
+        teste = "/test" if "_test_" in STRIPE_SECRET_KEY else ""
+        return RedirectResponse(f"https://dashboard.stripe.com{teste}/invoices/{quote(fatura, safe='')}", status_code=302)
 
     # Referência do comprovante e justificativa ficam só no evento: logs abaixo levam apenas ids.
     @app.post("/admin/api/affiliates/payouts/{payout_id}/payment-recorded")

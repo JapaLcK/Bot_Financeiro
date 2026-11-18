@@ -22,6 +22,7 @@ c.id, a.code, c.amount_cents, c.status, c.payout_id, p.status as payout_status,
        c.payment_check_tried_at as tried_at,
        case when c.payment_check_tried_at is not null then c.payment_check_reason end as reason,
        {PENDENCIA_ABERTA_SQL.format(c="c")} as in_review,
+       coalesce(left(c.stripe_invoice_id, 4) <> 'pix:', false) as has_stripe_invoice,
        exists (select 1 from affiliate_refund_reviews v
                 where v.commission_id = c.id and v.status = 'recovery') as in_recovery
 """
@@ -31,10 +32,8 @@ _DE = """
   left join affiliate_payouts p on p.id = c.payout_id
 """
 _LINHA = f"select {_COLUNAS} {_DE}"
-# Liberar entra no PR 2 (404) e no PR 3 (origem do crédito). Até lá, estes motivos só dizem por que não.
-_ORIGEM_A_CONFERIR = {"sem_cobranca", "forma_inesperada"}
 # Lista fechada: motivo novo, ou disputa (o worker resolve quando ela fecha), não conclui.
-_CONCLUIVEIS = {"sem_cobranca", "forma_inesperada", "stripe_400", "stripe_403", "stripe_404"}
+_CONCLUIVEIS = {"sem_cobranca", "forma_inesperada", "stripe_400", "stripe_404"}
 _MUDOU = "A comissão mudou: recarregue antes de decidir."
 
 
@@ -42,27 +41,32 @@ class ConferenciaMudou(PendenciaMudou):
     """A comissão não está como o admin a viu, ou a ação não vale para ela: a rota responde 409."""
 
 
+def _porque_nao_decide(linha: dict) -> str | None:
+    """Concluir e Liberar decidem só com a conferência tentada e um motivo da lista. None = pode."""
+    if linha["tried_at"] is None:
+        return "Aguarde a conferência na Stripe antes de decidir."
+    if linha["reason"] == "disputa_aberta":
+        return "Disputa aberta: a conferência fecha sozinha quando a disputa terminar."
+    if linha["reason"] == "stripe_403":
+        return "A chave da Stripe não tem permissão para conferir: corrija a chave, o worker reconfere."
+    if linha["reason"] not in _CONCLUIVEIS:
+        return "Motivo sem regra de decisão: confira na Stripe."
+    return None
+
+
 def acoes(linha: dict) -> dict[str, str | None]:
     """As ações da linha, na ordem da tela. None = pode; texto = por que não. Ação ausente não se aplica."""
     if linha["status"] == "paid":
-        if linha["tried_at"] is None:
-            concluir = "Aguarde a conferência na Stripe antes de concluir."
-        elif linha["reason"] == "disputa_aberta":
-            concluir = "Disputa aberta: a conferência fecha sozinha quando a disputa terminar."
-        elif linha["reason"] not in _CONCLUIVEIS:
-            concluir = "Motivo sem regra de decisão: confira na Stripe."
-        else:
-            concluir = None
-        return {"conclude": concluir, "reverse": "Comissão já paga: reembolso confirmado vira recuperação."}
+        return {"conclude": _porque_nao_decide(linha),
+                "reverse": "Comissão já paga: reembolso confirmado vira recuperação."}
     if linha["status"] != "pending":
         return {}
-    feitas = {}
-    if linha["reason"] in _ORIGEM_A_CONFERIR:
-        feitas["release"] = "Liberar indisponível: origem do pagamento ainda não conferida."
-    feitas["reverse"] = None if linha["payout_id"] is None else (
-        f"A comissão está no saque {linha['payout_id']}, ainda aberto. Rejeite o saque se o Pix não saiu (ela volta"
-        " marcada e pode ser estornada) ou registre \"Pagamento já realizado\" se saiu.")
-    return feitas
+    no_saque = (f"A comissão está no saque {linha['payout_id']}, ainda aberto. Rejeite o saque se o Pix não saiu (ela"
+                " volta marcada e pode ser estornada) ou registre \"Pagamento já realizado\" se saiu.")
+    return {"release": (no_saque if linha["payout_id"] is not None
+                        else "Em revisão de reembolso: decida a pendência antes." if linha["in_review"]
+                        else _porque_nao_decide(linha)),
+            "reverse": None if linha["payout_id"] is None else no_saque}
 
 
 def listar_conferencia(limite: int = 100) -> list[dict]:
@@ -146,3 +150,37 @@ def concluir_a_mao(commission_id: int, revisor: str, *, justificativa: str, evid
         _registrar(cur, linha, "check_concluded", revisor, justificativa, evidencia, linha["amount_cents"])
         conn.commit()
     return True
+
+
+def liberar_a_mao(commission_id: int, revisor: str, *, justificativa: str, evidencia: str, marcada_em,
+                  motivo, valor_cents: int) -> bool:
+    """Liberar (#1538): a pendente em conferência entra no saldo disponível. Tira a marca; valor e status não mudam."""
+    with get_conn() as conn, conn.cursor() as cur:
+        linha = _decidir(cur, commission_id, "release", marcada_em, motivo, valor_cents, trava=True)
+        if linha is None:
+            return False
+        cur.execute(f"update affiliate_commissions set {SEM_MARCA} where id = %s and status = 'pending'"
+                    " and payout_id is null", (int(commission_id),))
+        if cur.rowcount != 1:
+            raise ConferenciaMudou(_MUDOU)
+        _registrar(cur, linha, "check_released", revisor, justificativa, evidencia, linha["amount_cents"])
+        conn.commit()
+    return True
+
+
+def fatura_da_comissao(commission_id: int) -> str | None:
+    """O id da fatura Stripe, só para o redirecionamento do admin. Comissão Pix (`pix:`) ou sem fatura: None."""
+    with get_conn() as conn:
+        row = conn.execute("select stripe_invoice_id as f from affiliate_commissions where id = %s",
+                           (int(commission_id),)).fetchone()
+    f = row and row["f"]
+    return f if f and not f.startswith("pix:") else None
+
+
+def comissoes_liberadas(ids: list[int]) -> set[int]:
+    """As que o admin liberou à mão: a conferência sem confirmação da Stripe não as marca de novo."""
+    with get_conn() as conn:
+        rows = conn.execute("select distinct commission_id from affiliate_refund_review_events"
+                            " where action = 'check_released' and commission_id = any(%s)",
+                            ([int(i) for i in ids],)).fetchall()
+    return {r["commission_id"] for r in rows}
