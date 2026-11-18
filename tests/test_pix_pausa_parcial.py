@@ -183,3 +183,48 @@ def test_parcial_fora_de_ordem_na_janela_age_se_a_compra_chega(externo):
     drenar_evento(parcial)
     assert evento(parcial)["processed_at"] is not None
     _estorno_registrado(uid, cob)
+
+
+def test_parciais_segurados_nao_enchem_o_lote_da_varredura(externo, varredura):
+    """Thread do Codex (#1600): parciais segurados mais antigos (cobranças cuja compra não veio) enchiam o lote, e a
+    compra retida, que o caminho rápido não drena, nunca entrava; ao fim da janela o parcial dela fechava sem
+    efeito e a comissão ficava cheia. Lote de 3 aqui no lugar de 100. Com o parcial segurado por último, a compra
+    entra na 1ª passada depois da retomada. Limite declarado: com tantos parciais segurados quanto o lote, o da
+    compra espera a janela fechar (a comissão está na carência de 30 dias) e aí é aplicado, não perdido."""
+    ativar()
+    for _ in range(3):  # parciais fora de ordem de outras cobranças, mais antigos
+        _, outra = _venda(afiliado=False)
+        varredura.append(entregar("PAYMENT_PARTIALLY_REFUNDED", outra))
+    uid, cob = _venda()
+    externo["refunds"] = DEVOLVIDO
+    compra = entregar("PAYMENT_RECEIVED", cob)
+    parcial = entregar("PAYMENT_PARTIALLY_REFUNDED", cob)
+    varredura.extend([compra, parcial])
+    retomar()
+    drenar_pendentes(limite=3)
+    assert evento(compra)["processed_at"], "a compra ficou fora do lote, atrás dos parciais segurados"
+    _sql("update pix_pausa_concessao set retomada_em = now() - make_interval(hours => %s)", (JANELA_DO_PARCIAL_H + 1,))
+    for _ in range(2):
+        drenar_pendentes(limite=3)
+    assert evento(parcial)["processed_at"] and all(evento(e)["processed_at"] for e in varredura)
+    _estorno_registrado(uid, cob)
+
+
+def test_ordem_do_lote_estorno_primeiro_e_parcial_segurado_por_ultimo(externo, varredura):
+    """POSITIVO da ordem: o estorno total segue na frente (#1437); entre os eventos comuns vale a chegada; o parcial
+    segurado vai para o fim, mesmo mais antigo; o parcial ainda não tentado (`last_error` nulo) não."""
+    from db.webhook_outbox import eventos_pendentes
+
+    ativar()
+    _, pendente = _venda(afiliado=False)
+    segurado = entregar("PAYMENT_PARTIALLY_REFUNDED", pendente)
+    retomar()
+    _, a = _venda(afiliado=False)
+    _, b = _venda(afiliado=False)
+    comum_1 = entregar("PAYMENT_OVERDUE", a, drenar=False)
+    fresco = entregar("PAYMENT_PARTIALLY_REFUNDED", a, drenar=False)
+    comum_2 = entregar("PAYMENT_OVERDUE", b, drenar=False)
+    total = entregar("PAYMENT_REFUNDED", b, drenar=False)
+    varredura.extend([segurado, comum_1, fresco, comum_2, total])
+    assert evento(segurado)["last_error"] == FALHA_PAUSA
+    assert eventos_pendentes(10) == [total, comum_1, fresco, comum_2, segurado]

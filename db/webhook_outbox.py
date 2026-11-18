@@ -323,7 +323,7 @@ def _erro_seguro(tipo: str, codigo: str | None) -> str:
 
 
 def eventos_pendentes(limite: int = 100) -> list[str]:
-    """`event_id` dos eventos ainda abertos, mais antigos primeiro.
+    """`event_id` dos eventos abertos: estorno total, depois por chegada, e o parcial segurado pela pausa por último.
 
     É o que o laço de 60 s do monólito drena. O `background_tasks` do handler é
     o caminho rápido; este é o que RECUPERA — processo reiniciado no meio, efeito
@@ -341,7 +341,8 @@ def eventos_pendentes(limite: int = 100) -> list[str]:
                 "select event_id from pix_webhook_events"
                 " where processed_at is null"  # #1437: o estorno antes, complemento da pausa (#1574)
                 " and not pix_pausa_retem(event_type)"  # compra pausada não ocupa o lote (db/pix_pausa.py)
-                " order by (event_type = 'PAYMENT_REFUNDED') desc, received_at asc limit %s",
-                (int(limite),),
+                " order by (event_type = 'PAYMENT_REFUNDED') desc, (event_type = 'PAYMENT_PARTIALLY_REFUNDED'"
+                " and last_error is not distinct from %s) asc, received_at asc limit %s",  # parcial segurado por último
+                (FALHA_PAUSA, int(limite)),
             )
             return [r["event_id"] for r in cur.fetchall()]

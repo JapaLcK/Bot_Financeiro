@@ -1964,10 +1964,13 @@ chegada. Exceção: o estorno parcial de cobrança ainda antes do pagamento espe
 comissão cheia, sem revisão. A janela existe porque, na retomada, a compra retida ainda pode drenar depois do
 parcial (passada listada antes da retomada, outro drenador com a compra reservada, compra que falha uma vez).
 Esse parcial segurado **ocupa o lote**: é listado, reservado e decifrado a cada passada de 60 s (com uma linha
-de `pii_access_log` cada vez). Parcial que chegou antes da compra no Asaas (fora de ordem de verdade; sem pausa
+de `pii_access_log` cada vez), mas vai para o fim dele (`eventos_pendentes`: estorno total primeiro, depois a ordem
+de chegada, e o parcial com `last_error = 'PausaPix'` por último), para não deixar a compra retida fora do lote.
+Limite: com tantos parciais segurados quanto o lote (100), o da compra recém-drenada espera a janela fechar e só
+então é aplicado (a comissão está na carência de 30 dias, então não sai antes). Parcial que chegou antes da compra no Asaas (fora de ordem de verdade; sem pausa
 ele fecha sem efeito, D1-a) a menos de 24 h de uma retomada também espera, com dois desfechos: se a compra chega
 dentro da janela, ela drena e o parcial AGE depois dela (`refunded_partial`, revisão `open`/`partial`, comissão em
-revisão), diferente do D1-a e para melhor; se a compra não chega, o parcial fecha sem efeito ao fim da janela,
+revisão), diferente do D1-a e para melhor (divergência aceita pelo dono); se a compra não chega, o parcial fecha sem efeito ao fim da janela,
 como no D1-a. Limite medido: compra que segue falhando por mais de 24 h depois da retomada deixa o parcial fechar
 sem efeito, e a compra, quando passa, dá comissão cheia sem revisão. O único sinal é o alerta de evento travado
 da compra (a partir da 6ª tentativa); o alerta do parcial é idêntico ao de um parcial aplicado. Recusa do gatilho que ainda chegue ao código novo (dreno em voo na ativação, baixa desfeita que
@@ -2016,7 +2019,7 @@ escrevem; o resto é leitura.
 4. Retomar: `update pix_pausa_concessao set retomada_em = now() where retomada_em is null;` (a linha fica: a
    guarda da purga conta os 7 dias a partir de `retomada_em`; `delete` e `truncate` são recusados).
 5. Confirmar a retomada: `select pix_pausa_ativa();` dá `false`, e a fila de compra da consulta do passo 2
-   esvazia a 100 eventos por passada da varredura do dreno, que roda a cada 60 s (mais antigos primeiro). Quem
+   esvazia a 100 eventos por passada da varredura do dreno, que roda a cada 60 s (mais antigos primeiro, com o parcial segurado no fim). Quem
    pagou durante a pausa recebe o acesso quando a compra dele é drenada. **Dentro das 24 h depois da
    retomada**, a contagem de `PAYMENT_PARTIALLY_REFUNDED` aberto do passo 2 tem de chegar a `0`. Se não
    chegar, olhe a compra travada antes de a janela fechar (a fila de compra do passo 2 com `max(attempts)`
