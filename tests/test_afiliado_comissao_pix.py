@@ -1149,7 +1149,7 @@ def test_p24_pix_real_entregue_duas_vezes_aprova_uma_vez(externo):
 
 
 def test_p24_parcial_de_verdade_nao_e_liberada_pelo_pix_real(externo):
-    from db.affiliate_reviews import liberar_baixa_desfeita
+    from db.affiliate_reviews_manutencao import liberar_baixa_desfeita
 
     c = _afiliado()
     ind, cobranca = _cara(c)
@@ -1201,7 +1201,7 @@ def test_p24_comissao_estornada_com_a_revisao_aberta_nao_e_solta_pelo_pix_real(e
 
 
 def test_p24_revisao_orfa_nao_e_solta_pelo_pix_real(externo):
-    from db.affiliate_reviews import liberar_baixa_desfeita
+    from db.affiliate_reviews_manutencao import liberar_baixa_desfeita
 
     ind, cobranca = _cara(_afiliado())
     chave = cobranca["external_reference"]
@@ -1233,7 +1233,7 @@ def test_p24_pix_real_aprova_o_valor_atual_da_comissao_e_nao_o_da_revisao(extern
 
 
 def test_p24_pix_real_com_a_pendencia_mudando_no_meio_nao_derruba_o_webhook(externo, monkeypatch):
-    import db.affiliate_reviews as rv
+    import db.affiliate_reviews_manutencao as rv
 
     ind, cobranca = _cara(_afiliado())
     chave = cobranca["external_reference"]
@@ -1251,7 +1251,7 @@ def test_p24_pix_real_com_a_pendencia_mudando_no_meio_nao_derruba_o_webhook(exte
 
 
 def test_p24_parcial_de_verdade_open_zero_sem_marcador_nao_e_solta(externo):
-    from core.services.afiliado_pix import soltar_baixa_desfeita
+    from core.services.pix_baixa_desfeita import soltar_baixa_desfeita
     from db.affiliate_reviews import registrar_reembolso
 
     ind, cobranca = _cara(_afiliado())  # sem UNDONE: não há marcador `baixa_desfeita`
@@ -1263,7 +1263,7 @@ def test_p24_parcial_de_verdade_open_zero_sem_marcador_nao_e_solta(externo):
 
 
 def test_p24_marcador_com_a_cobranca_ja_estornada_parcial_nao_e_solta(externo):
-    from core.services.afiliado_pix import soltar_baixa_desfeita
+    from core.services.pix_baixa_desfeita import soltar_baixa_desfeita
 
     ind, cobranca = _cara(_afiliado())
     chave = cobranca["external_reference"]
@@ -1295,11 +1295,11 @@ def test_p24_soltura_que_cai_depois_do_grant_e_refeita_na_retentativa(externo, m
 
     ind, cobranca = _cara(_afiliado())
     chave = cobranca["external_reference"]
-    real_reabrir, real_soltar = m.reabrir_baixa, m.afiliado_pix.soltar_baixa_desfeita
+    real_reabrir, real_soltar = m.reabrir_baixa, m.soltar_baixa_desfeita
     monkeypatch.setattr(m, "reabrir_baixa", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("morreu")))
     entregar(UNDONE, cobranca)
     monkeypatch.setattr(m, "reabrir_baixa", real_reabrir)
-    monkeypatch.setattr(m.afiliado_pix, "soltar_baixa_desfeita",
+    monkeypatch.setattr(m, "soltar_baixa_desfeita",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("caiu")))
     externo["get_status"] = "RECEIVED"
     try:
@@ -1307,7 +1307,7 @@ def test_p24_soltura_que_cai_depois_do_grant_e_refeita_na_retentativa(externo, m
     except RuntimeError:
         pass
     assert _revisao(chave)["status"] == "open"
-    monkeypatch.setattr(m.afiliado_pix, "soltar_baixa_desfeita", real_soltar)
+    monkeypatch.setattr(m, "soltar_baixa_desfeita", real_soltar)
     entregar("PAYMENT_RECEIVED", cobranca)  # retentativa acha o grant ativo
     assert _revisao(chave)["status"] == "resolved" and _acoes(chave).count("partial_approved") == 1
 

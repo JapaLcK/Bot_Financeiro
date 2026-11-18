@@ -1840,7 +1840,7 @@ linha de `affiliate_referral_payments` (`pix`, `payment_ref` = id da cobrança) 
 o pagamento nunca existiu, então o cliente deixa de contar e o `RECEIVED` real conta de novo. Não é reembolso
 (esse só rotula). Em `refunded_partial`, `desfazer_baixa` rotula `total`.
 O `RECEIVED` real depois do UNDONE (#1616) fecha sozinho a revisão `open/0` que o UNDONE abriu
-(`afiliado_pix.soltar_baixa_desfeita` → `liberar_baixa_desfeita`, fim de `registrar` e depois do `grant` reconcedido
+(`pix_baixa_desfeita.soltar_baixa_desfeita` → `liberar_baixa_desfeita`, fim de `registrar` e depois do `grant` reconcedido
 em `reconciliar_grant`, que cobre a morte entre segurar e reabrir): aprova a comissão cheia, ator `sistema`, evento
 `partial_approved` (o admin vê "Revisão parcial"). `devolvido 0` não prova a origem (o parcial de verdade também abre
 `open/0` com o Asaas fora), então só solta com o marcador `baixa_desfeita` do pagamento, sem estorno registrado e com a

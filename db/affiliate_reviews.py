@@ -273,25 +273,6 @@ def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: st
     return True
 
 
-def liberar_baixa_desfeita(fatura: str) -> bool:
-    """O Pix real da cobrança chegou depois da baixa desfeita: fecha a revisão `open/0` que o UNDONE abriu,
-    aprovando a comissão cheia (destrava o saque sem mudar valor). Só `partial` com devolvido 0: a de
-    estorno de verdade (`refunded_cents > 0`) fica com o admin. Já decidida ou com o saque mudando: False."""
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select r.id, c.amount_cents as cheio"
-                    " from affiliate_refund_reviews r join affiliate_commissions c on c.id = r.commission_id"  # órfã: com o admin
-                    " where r.stripe_invoice_id = %s and r.status = 'open' and r.tipo = 'partial'"
-                    " and r.refunded_cents = 0"  # pré-filtro barato: quem decide é `resolver_parcial`
-                    " and c.status <> 'reversed'", (fatura,))  # estornada: aprovar cheio mentiria
-        r = cur.fetchone()
-    if r is None:
-        return False
-    try:
-        return resolver_parcial(r["id"], "sistema", r["cheio"], "baixa desfeita: Pix real da mesma cobrança", 0)
-    except PendenciaMudou:  # inclui `SaqueAberto`
-        return False
-
-
 def refunded_at_da_pendencia(review_id: int):
     """A data mínima do comprovante de recuperação."""
     with get_conn() as conn, conn.cursor() as cur:
