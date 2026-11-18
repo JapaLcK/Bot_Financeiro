@@ -199,7 +199,7 @@ def indicado(user_id, monkeypatch):
     from types import SimpleNamespace
     from core.services import ga4_mp, meta_capi
     uid, client, fake = _setup(monkeypatch, f"eb-c-{user_id}")
-    assert record_referral(create_affiliate(user_id)["code"], uid)
+    assert record_referral(create_affiliate(user_id, commission_bps=10_000)["code"], uid)
     envios: list = []
     capt = SimpleNamespace(post=lambda *a, **k: envios.append(k) or SimpleNamespace(status_code=200, text=""))
     for mod in (ga4_mp, meta_capi):

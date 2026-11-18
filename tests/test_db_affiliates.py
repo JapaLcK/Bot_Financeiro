@@ -58,12 +58,12 @@ def _inv(prefix: str = "in_test") -> str:
 
 
 def test_create_affiliate_gera_codigo_e_eh_idempotente(user_id):
-    a1 = create_affiliate(user_id)
+    a1 = create_affiliate(user_id, commission_bps=10_000)
     assert a1["code"] and len(a1["code"]) == 8
     assert a1["status"] == "active"
     assert a1["commission_bps"] == 10_000  # padrão: 100%
 
-    a2 = create_affiliate(user_id)  # segunda chamada devolve o mesmo
+    a2 = create_affiliate(user_id, commission_bps=10_000)  # segunda chamada devolve o mesmo
     assert a2["id"] == a1["id"]
     assert get_affiliate_by_code(a1["code"].lower())["id"] == a1["id"]  # lookup case-insensitive
 
@@ -217,5 +217,5 @@ def test_estorno_de_comissao(user_id, referred_user_id):
 
 def test_get_affiliate_by_user(user_id):
     assert get_affiliate_by_user(user_id) is None
-    created = create_affiliate(user_id)
+    created = create_affiliate(user_id, commission_bps=10_000)
     assert get_affiliate_by_user(user_id)["id"] == created["id"]

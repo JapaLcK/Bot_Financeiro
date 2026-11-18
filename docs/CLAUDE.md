@@ -3189,7 +3189,7 @@ cai em `_orfao`, que não registra compra, e sem titular o backfill não acha a 
 `lock_timeout` de 1s: qualquer falha vira `logger.error` só com o tipo e o sqlstate, não impede a
 subida, e o próximo boot repete. Fatura Stripe sem comissão não tem histórico para ele.
 **Comissão: percentual individual, uma vez por cliente** (`db/affiliates.py`, `_comissao_da_primeira`).
-Padrão 100% (`DEFAULT_COMMISSION_BPS = 10000`); só o admin muda, pela coluna "%" e pelo botão "Editar
+Obrigatória na criação, sem padrão (`create_affiliate(..., commission_bps=)` e `POST /admin/api/affiliates` recusam sem ela); só o admin muda depois, pela coluna "%" e pelo botão "Editar
 comissão" (`POST /admin/api/affiliates/{id}/commission`, corpo `{"commission_bps": 0..10000}`, log
 `affiliate_commission_changed` com antes e depois). Vale o percentual vigente quando o pagamento é processado;
 comissão já registrada não muda. Base é o valor pago na primeira cobrança confirmada (o plano já com cupom,

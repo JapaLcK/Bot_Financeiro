@@ -24,7 +24,6 @@ from _corpo_json_helpers import (  # noqa: F401  (fixtures autouse)
     afiliado_stub,
     configured_admin,
 )
-from db.affiliates import DEFAULT_COMMISSION_BPS
 
 # Filhos não-objeto que chegam a um `.get()`/`.strip()`/`int()`. `None` sai
 # dos que exigem valor truthy (`x or default` já o neutraliza) e entra nos
@@ -152,19 +151,18 @@ def test_affiliate_code_nao_string_da_422(afiliado_stub, code):
     """`code` não-string chegava em _normalize_code (db/affiliates.py:37), que
     faz .strip() → AttributeError, que o `except ValueError` não pega."""
     r = _post_bruto(_admin_client(), "/admin/api/affiliates",
-                    {"email": "x@y.com", "code": code})
+                    {"email": "x@y.com", "code": code, "commission_bps": 1000})
     assert r.status_code == 422, r.text
     assert afiliado_stub == []
 
 
 @pytest.mark.parametrize("corpo,esperado", [
-    ({}, (4242, None, DEFAULT_COMMISSION_BPS)),
-    ({"code": "MEUCODIGO"}, (4242, "MEUCODIGO", DEFAULT_COMMISSION_BPS)),
-    ({"code": ""}, (4242, None, DEFAULT_COMMISSION_BPS)),
+    ({"code": "MEUCODIGO", "commission_bps": 10000}, (4242, "MEUCODIGO", 10000)),
+    ({"code": "", "commission_bps": 10000}, (4242, None, 10000)),
     ({"commission_bps": 2000}, (4242, None, 2000)),
     ({"commission_bps": "1500"}, (4242, None, 1500)),
     ({"code": "ABCD", "commission_bps": 500}, (4242, "ABCD", 500)),
-], ids=["so_email", "code", "code_vazio", "bps_int", "bps_string", "ambos"])
+], ids=["code", "code_vazio", "bps_int", "bps_string", "ambos"])
 def test_controle_positivo_affiliate_caminho_valido(afiliado_stub, corpo, esperado):
     """O caminho válido não pode mudar de status nem de argumento. A string
     numérica ("1500") está aqui de propósito: o `int()` a aceitava antes e um
@@ -189,5 +187,5 @@ def test_affiliate_code_nao_string_nao_chega_no_normalize_code(monkeypatch):
 
     monkeypatch.setattr(db, "find_user_id_by_email", lambda email: 4242)
     r = _post_bruto(_admin_client(), "/admin/api/affiliates",
-                    {"email": "x@y.com", "code": 42})
+                    {"email": "x@y.com", "code": 42, "commission_bps": 1000})
     assert r.status_code == 422, r.text

@@ -34,7 +34,7 @@ def conta(uid, *, afiliado=True, plano=False, credencial=True):
     if not plano:
         sql("update auth_accounts set plan='free', plan_selected_at=null where user_id=%s", uid)
     if afiliado:
-        create_affiliate(uid)
+        create_affiliate(uid, commission_bps=10_000)
     if not credencial:
         sql("update auth_accounts set password_hash=null where user_id=%s", uid)
     return s

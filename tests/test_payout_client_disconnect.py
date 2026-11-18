@@ -133,7 +133,7 @@ def saque(user_id):
     """
     indicado = int(uuid.uuid4().int % 10_000_000_000)
     ensure_user(indicado)
-    aff = create_affiliate(user_id)
+    aff = create_affiliate(user_id, commission_bps=10_000)
     record_referral(aff["code"], indicado)
     comissao = record_commission_for_invoice(indicado, f"in_test_{uuid.uuid4().hex[:12]}", 100000)
     with db.get_conn() as conn:
