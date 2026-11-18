@@ -2928,6 +2928,8 @@ obrigatórios. `total` vai a `recovery`; `partial` segue `open`, sem bloqueio. J
 pedido, `receipt_ref` de 4 a 120 caracteres. Referência e justificativa moram só no evento: nunca em
 log, aviso ou `affiliate_payouts.note`, que sai no `/api/affiliate/me`.
 
+"Marcar pago" e "Rejeitar" (`POST /admin/api/affiliates/payouts/{id}/paid` e `/reject`) exigem `justification` de 10 a 500 caracteres (`validar_justificativa`), gravada em `affiliate_payouts.note` e visível ao afiliado no `/api/affiliate/me`; sem ela, 422. É diferente da justificativa da revisão de reembolso, que nunca vai para `note` (acima).
+
 **Recuperação (D4 e D6).** Dinheiro que saiu antes do reembolso: bloco "Recuperações" no admin, nada
 desconta de saque futuro e o afiliado segue vendo o valor em "Já pago", com o selo. Comissão paga
 não muda na revisão: `recovery_cents = max(0, pago - aprovado - recovery_closed_cents)`, atribuído e

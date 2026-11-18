@@ -2730,11 +2730,12 @@ async function toggleAffiliateStatus(id, status) {
 async function payoutAction(id, action) {
   const label = action === 'paid' ? 'Confirmar que o Pix deste saque JÁ FOI PAGO?' : 'Rejeitar este saque? As comissões voltam pro saldo do afiliado, menos as de fatura reembolsada por inteiro, e a de reembolso parcial volta para revisão. Se o Pix já saiu, não rejeite.';
   if (!confirm(label)) return;
-  const note = prompt('Observação (opcional):') || '';
+  const justification = prompt('Justificativa (10 a 500 caracteres, o afiliado vê este texto):');
+  if (justification === null) return;
   const res = await fetch(`/admin/api/affiliates/payouts/${id}/${action}`, {
     method: 'POST',
     headers: { ...authH(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(note ? { note } : {}),
+    body: JSON.stringify({ justification }),
   });
   if (!res.ok) {
     const d = await res.json().catch(() => ({}));

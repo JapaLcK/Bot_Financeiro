@@ -508,7 +508,7 @@ def test_saque_rejeitado_depois_do_reembolso_nao_devolve_a_comissao(mundo, monke
     _reembolsa(com.fatura)
     assert _status(com)["status"] == "pending"
     admin = _admin(monkeypatch)
-    r = admin.post(f"/admin/api/affiliates/payouts/{pedido}/reject", headers=csrf(admin), json={"note": "reembolso"})
+    r = admin.post(f"/admin/api/affiliates/payouts/{pedido}/reject", headers=csrf(admin), json={"justification": "Reembolso do cliente na Stripe"})
     assert r.status_code == 200, r.text
     assert _status(com) == {"status": "reversed", "payout_id": None}
     s = _me(c)["stats"]

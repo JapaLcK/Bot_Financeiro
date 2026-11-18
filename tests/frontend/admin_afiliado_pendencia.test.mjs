@@ -222,7 +222,7 @@ test("409 fica no formulário, com a mensagem do servidor", async () => {
 test("'Marcar pago' recusado com 409 recarrega a lista", async () => {
   const { page, leituras } = await abrir();
   const alertas = [];
-  page.on("dialog", (d) => { if (d.type() === "alert") alertas.push(d.message()); return d.accept(); });
+  page.on("dialog", (d) => { if (d.type() === "alert") alertas.push(d.message()); return d.accept(d.type() === "prompt" ? "Pix pago fora do sistema" : undefined); });
   await page.route("**/admin/api/affiliates/payouts/8/paid", (r) => r.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: "Este saque tem reembolso de cliente em análise." }) }));
   try {
     const antes = leituras.length;
