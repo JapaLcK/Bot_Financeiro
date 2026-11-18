@@ -19,6 +19,7 @@ import json
 import uuid
 
 import pytest
+from fastapi import HTTPException
 from starlette.requests import ClientDisconnect, Request
 
 import core.admin_dashboard as admin_dashboard
@@ -184,35 +185,29 @@ def test_cliente_que_some_nao_liquida_o_saque(saque, sufixo, _pago, _comissao, _
 
 
 @pytest.mark.parametrize("sufixo, pago, comissao, ligada", ACOES)
-def test_requisicao_normal_com_note_continua_liquidando(saque, sufixo, pago, comissao, ligada):
+def test_requisicao_normal_com_justificativa_continua_liquidando(saque, sufixo, pago, comissao, ligada):
     """Controle POSITIVO 1: o caminho legítimo COM corpo segue idêntico ao de
     hoje. Sem ele, o mutante "aborta sempre" passaria — e é pior que o bug.
     """
-    corpo = json.dumps({"note": "pix enviado"}).encode()
+    corpo = json.dumps({"justification": "pix enviado por fora"}).encode()
     assert _chamar(sufixo, saque["payout_id"], corpo=corpo) == {"ok": True}
 
     status, note = _linha_do_payout(saque["payout_id"])
-    assert (status, note) == (pago, "pix enviado")
+    assert (status, note) == (pago, "pix enviado por fora")
 
     comissoes = _comissoes(saque["payout_id"], saque["affiliate_id"])
     assert [c["status"] for c in comissoes] == [comissao]
     assert [c["payout_id"] for c in comissoes] == [saque["payout_id"] if ligada else None]
 
 
-@pytest.mark.parametrize("sufixo, pago, comissao, ligada", ACOES)
-def test_requisicao_normal_sem_corpo_continua_liquidando(saque, sufixo, pago, comissao, ligada):
-    """Controle POSITIVO 2: `note` é opcional, então o painel manda POST SEM
-    corpo nenhum — corpo vazio tem de continuar caindo no `payload = {}` e o
-    `coalesce(%s, note)` tem de preservar a nota anterior. É este caso que
-    proíbe reusar o `_json_object_body`, que transformaria isto em 400.
-    """
+@pytest.mark.parametrize("sufixo, _pago, _comissao, _ligada", ACOES)
+def test_requisicao_sem_corpo_da_422_e_nao_liquida(saque, sufixo, _pago, _comissao, _ligada):
+    """Corpo vazio cai no `payload = {}` e a justificativa obrigatória (#1610)
+    recusa com 422: o saque segue `requested` e a nota anterior fica intacta."""
     _set_note(saque["payout_id"], "nota previa")
 
-    assert _chamar(sufixo, saque["payout_id"], corpo=b"") == {"ok": True}
+    with pytest.raises(HTTPException) as exc:
+        _chamar(sufixo, saque["payout_id"], corpo=b"")
+    assert exc.value.status_code == 422
 
-    status, note = _linha_do_payout(saque["payout_id"])
-    assert (status, note) == (pago, "nota previa")
-
-    comissoes = _comissoes(saque["payout_id"], saque["affiliate_id"])
-    assert [c["status"] for c in comissoes] == [comissao]
-    assert [c["payout_id"] for c in comissoes] == [saque["payout_id"] if ligada else None]
+    assert _linha_do_payout(saque["payout_id"]) == ("requested", "nota previa")

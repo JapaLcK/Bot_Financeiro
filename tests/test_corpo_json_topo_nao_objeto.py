@@ -90,15 +90,15 @@ def test_pluggy_webhook_topo_nao_objeto_da_400(corpo):
 
 @pytest.mark.parametrize("acao", ["paid", "reject"])
 @pytest.mark.parametrize("corpo", NAO_OBJETOS, ids=IDS)
-def test_payout_topo_nao_objeto_normaliza_e_segue(corpo, acao):
-    """404 (saque inexistente), não 400: aqui o corpo é opcional por design.
-    Virar 400 mudaria um caminho que hoje funciona."""
+def test_payout_topo_nao_objeto_normaliza_e_da_422(corpo, acao):
+    """Normaliza para {} (nunca 500) e a justificativa obrigatória (#1610) dá 422,
+    não 400: é a mesma recusa do corpo vazio."""
     r = _post_bruto(
         _admin_client(),
         f"/admin/api/affiliates/payouts/{INEXISTENTE}/{acao}",
         corpo,
     )
-    assert r.status_code == 404, r.text
+    assert r.status_code == 422, r.text
 
 
 # --------------------------------------------------------------------------
@@ -135,12 +135,23 @@ def test_controle_positivo_pluggy_webhook_objeto_valido():
 
 
 @pytest.mark.parametrize("acao", ["paid", "reject"])
-def test_controle_positivo_payout_sem_corpo_nenhum(acao):
-    """Prova que o fallback `payload = {}` do `except` continua de pé: sem
-    corpo, a ação segue e termina em 404 por saque inexistente, igual a hoje."""
+def test_payout_sem_corpo_nenhum_da_422(acao):
+    """O fallback `payload = {}` do `except` segue de pé: sem corpo, a
+    justificativa ausente dá 422 (não 500)."""
     client = _admin_client()
     r = client.post(
         f"/admin/api/affiliates/payouts/{INEXISTENTE}/{acao}",
         headers={dashboard.CSRF_HEADER_NAME: CSRF},
+    )
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.parametrize("acao", ["paid", "reject"])
+def test_controle_positivo_payout_justificativa_valida_passa(acao):
+    """Justificativa válida passa a validação e termina em 404 (saque inexistente)."""
+    r = _post_bruto(
+        _admin_client(),
+        f"/admin/api/affiliates/payouts/{INEXISTENTE}/{acao}",
+        {"justification": "pago por fora, comprovante conferido"},
     )
     assert r.status_code == 404, r.text

@@ -2461,29 +2461,26 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     async def admin_affiliate_payout_paid(
         payout_id: int, request: Request, username: str = Depends(_get_current_admin)
     ):
-        """Marca o saque como pago (Pix já feito por fora). Body: {"note": "..."}. Confere a Stripe antes:
+        """Marca o saque como pago (Pix já feito por fora). Body: {"justification": "..."}. Confere a Stripe antes:
         reembolso que chegou enquanto o admin pagava bloqueia, e o caminho é "Pagamento já realizado"."""
         from core.services import afiliado_reembolso
+        from core.services.afiliado_reembolso import validar_justificativa
         from db.affiliates import SaqueComPendencia, SaqueOrfao, get_payout, mark_payout_paid
 
         try:
             payload = await request.json()
         except ClientDisconnect:
-            # Corpo ruim → `{}` é legítimo (`note` é opcional). Cliente que
+            # Corpo ruim → `{}` vira 422 na justificativa. Cliente que
             # sumiu não é corpo ruim: liquidar aqui é agir sem mandato (#372).
             raise
         except Exception:
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
-        # str(): `note` não-string (42, lista, objeto) quebrava o .strip() → 500.
-        # Mesmo idioma do resto do arquivo (username/plan/status), e os casos de
-        # hoje seguem idênticos: ausente/null/""/"   " → None.
-        # limpa_para_pg(): NUL e surrogate solitário na string também davam 500,
-        # aqui no `note text` de db/affiliates.py (#317). Helper compartilhado e
-        # não replace() inline porque "o que o Postgres aceita" tem de ter uma
-        # fonte só (CLAUDE.md §0.7).
-        note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
+        try:
+            note = validar_justificativa(payload.get("justification"))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
         row = await asyncio.to_thread(get_payout, payout_id)
         conferencia = None
         if row and row["status"] == "requested" and not row["orphan"] and not row["blocked"]:
@@ -2515,27 +2512,24 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     async def admin_affiliate_payout_reject(
         payout_id: int, request: Request, username: str = Depends(_get_current_admin)
     ):
-        """Rejeita o saque e devolve as comissões pro saldo. Body: {"note": "..."}"""
+        """Rejeita o saque e devolve as comissões pro saldo. Body: {"justification": "..."}"""
+        from core.services.afiliado_reembolso import validar_justificativa
         from db.affiliates import reject_payout
 
         try:
             payload = await request.json()
         except ClientDisconnect:
-            # Corpo ruim → `{}` é legítimo (`note` é opcional). Cliente que
+            # Corpo ruim → `{}` vira 422 na justificativa. Cliente que
             # sumiu não é corpo ruim: liquidar aqui é agir sem mandato (#372).
             raise
         except Exception:
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
-        # str(): `note` não-string (42, lista, objeto) quebrava o .strip() → 500.
-        # Mesmo idioma do resto do arquivo (username/plan/status), e os casos de
-        # hoje seguem idênticos: ausente/null/""/"   " → None.
-        # limpa_para_pg(): NUL e surrogate solitário na string também davam 500,
-        # aqui no `note text` de db/affiliates.py (#317). Helper compartilhado e
-        # não replace() inline porque "o que o Postgres aceita" tem de ter uma
-        # fonte só (CLAUDE.md §0.7).
-        note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
+        try:
+            note = validar_justificativa(payload.get("justification"))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
         ok = await asyncio.to_thread(reject_payout, payout_id, note, username)
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
@@ -2544,7 +2538,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             "affiliate_payout_rejected",
             f"Saque {payout_id} rejeitado.",
             source="affiliates",
-            details={"payout_id": payout_id, "note": note},
+            details={"payout_id": payout_id},
         )
         return {"ok": True}
 

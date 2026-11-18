@@ -138,11 +138,11 @@ def _post(adm, caminho, corpo=None):
 
 
 def _pagar(adm, saque):
-    return _post(adm, f"payouts/{saque}/paid")
+    return _post(adm, f"payouts/{saque}/paid", {"justification": "Pix pago fora do sistema"})
 
 
 def _rejeitar(adm, saque):
-    return _post(adm, f"payouts/{saque}/reject", {"note": "reembolso"})
+    return _post(adm, f"payouts/{saque}/reject", {"justification": "Reembolso do cliente na Stripe"})
 
 
 def _aprovar(adm, com, cents, nota="Ajuste pelo valor que ficou com o cliente"):

@@ -240,8 +240,8 @@ def test_item_id_venenoso_nao_casa_com_id_real(user_id):
     Pluggy, então "não casa" é garantido.
 
     MEDIDO: com a variante que apaga, este fica vermelho — junto com os de
-    leitura de volta e com `test_payout_note_so_veneno_nao_vira_none`. A matriz,
-    que só mede status, não vê; `test_payout_note_venenoso_nao_da_500` também
+    leitura de volta e com `test_payout_justification_so_veneno_da_422`. A matriz,
+    que só mede status, não vê; `test_payout_justification_venenosa_nao_da_500` também
     não, porque `"AAABBB"` satisfaz os asserts dele.
     """
     item_id = f"item-317-identidade-{user_id}"
@@ -304,20 +304,20 @@ def _espiao_payout(monkeypatch, funcao):
 
 @pytest.mark.parametrize("acao,funcao", ACOES_PAYOUT, ids=["paid", "reject"])
 @pytest.mark.parametrize("veneno", VENENOS, ids=VENENO_IDS)
-def test_payout_note_venenoso_nao_da_500(monkeypatch, veneno, acao, funcao):
-    """404 (saque inexistente) e não 500 — e o que chega na coluna `text` já
-    não tem NUL nem surrogate solitário."""
+def test_payout_justification_venenosa_nao_da_500(monkeypatch, veneno, acao, funcao):
+    """Veneno + texto válido: 404 (saque inexistente) e não 500 — e o que chega
+    ao banco já não tem NUL nem surrogate solitário."""
     vistos = _espiao_payout(monkeypatch, funcao)
     r = _post_bruto(
         _admin_client(),
         f"/admin/api/affiliates/payouts/{INEXISTENTE}/{acao}",
-        {"note": _veneno(veneno)},
+        {"justification": _veneno(veneno) + " texto longo"},
     )
     assert r.status_code == 404, r.text
     assert len(vistos) == 1, vistos
     assert NUL not in vistos[0]
     vistos[0].encode("utf-8")  # levanta se sobrou surrogate solitário
-    assert vistos[0].startswith("AAA") and vistos[0].endswith("BBB"), vistos
+    assert vistos[0].startswith("AAA") and "BBB" in vistos[0], vistos
 
 
 @pytest.mark.parametrize("veneno", VENENOS, ids=VENENO_IDS)
@@ -347,29 +347,27 @@ def test_referencia_venenosa_da_422_sem_500(veneno):
 
 
 @pytest.mark.parametrize("acao,funcao", ACOES_PAYOUT, ids=["paid", "reject"])
-def test_payout_note_so_veneno_nao_vira_none(monkeypatch, acao, funcao):
-    """`note` que é SÓ veneno: o `.strip()` não tira o U+FFFD, então sobra
-    string em vez de None. Registrado de propósito — é o teto do saneamento."""
+def test_payout_justification_so_veneno_da_422(monkeypatch, acao, funcao):
+    """Só veneno: vira U+FFFD, que não conta como texto visível; 422 e nada no banco."""
     vistos = _espiao_payout(monkeypatch, funcao)
     r = _post_bruto(
         _admin_client(),
         f"/admin/api/affiliates/payouts/{INEXISTENTE}/{acao}",
-        {"note": NUL},
+        {"justification": NUL},
     )
-    assert r.status_code == 404, r.text
-    assert vistos == ["�"]
+    assert r.status_code == 422, r.text
+    assert vistos == []
 
 
 @pytest.mark.parametrize("acao,funcao", ACOES_PAYOUT, ids=["paid", "reject"])
-def test_controle_positivo_note_limpo_inalterado(monkeypatch, acao, funcao):
-    """Os 6 formatos legítimos moram em `campo_filho.py`; aqui fica o que ele
-    não tem — acento e emoji intactos, onde um `encode('ascii','ignore')`
-    passaria despercebido."""
+def test_controle_positivo_justification_limpa_inalterada(monkeypatch, acao, funcao):
+    """Acento e emoji intactos, onde um `encode('ascii','ignore')` passaria
+    despercebido: a justificativa limpa chega ao banco aparada e igual."""
     vistos = _espiao_payout(monkeypatch, funcao)
     r = _post_bruto(
         _admin_client(),
         f"/admin/api/affiliates/payouts/{INEXISTENTE}/{acao}",
-        {"note": "  pago à mão ✓ 😀  "},
+        {"justification": "  pago à mão ✓ 😀  "},
     )
     assert r.status_code == 404, r.text
     assert vistos == ["pago à mão ✓ 😀"]

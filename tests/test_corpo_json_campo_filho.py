@@ -5,7 +5,7 @@ ela prova que `payload` é dict, e o 500 volta na primeira linha que faz
 `.get()`/`.strip()`/`int()` sobre o VALOR de um campo. Um deles (`item`, no
 webhook) fica 6 linhas abaixo da própria guarda.
 
-São quatro campos e o mesmo defeito: `{"item": null}`, `{"note": 42}`,
+São quatro campos e o mesmo defeito: `{"item": null}`, `{"justification": 42}`,
 `{"code": [..]}`, `{"commission_bps": "abc"}`. O caso do número não finito
 (topo objeto, campo do tipo certo, e ainda assim 500) mora em
 `test_corpo_json_nao_finito.py`.
@@ -72,7 +72,7 @@ def test_controle_positivo_pluggy_item_id_resolve_igual(monkeypatch, corpo, espe
 
 
 # --------------------------------------------------------------------------
-# Saque: `note` não-string (era 500 no .strip())
+# Saque: `justification` não-string (era 500 no .strip() quando era `note`)
 # --------------------------------------------------------------------------
 
 ACOES_PAYOUT = [("paid", "mark_payout_paid"), ("reject", "reject_payout")]
@@ -94,33 +94,29 @@ def _espiao_payout(monkeypatch, funcao):
 
 @pytest.mark.parametrize("acao,funcao", ACOES_PAYOUT, ids=["paid", "reject"])
 @pytest.mark.parametrize("filho", FILHOS_RUINS, ids=FILHOS_IDS)
-def test_payout_note_nao_string_nao_da_500(monkeypatch, filho, acao, funcao):
+def test_payout_justification_nao_string_da_422_sem_500(monkeypatch, filho, acao, funcao):
+    """Não-string vira 422 (justificativa obrigatória, #1610), nunca 500, e a ação
+    não chega ao banco."""
     vistos = _espiao_payout(monkeypatch, funcao)
     r = _post_bruto(
         _admin_client(),
         f"/admin/api/affiliates/payouts/{INEXISTENTE}/{acao}",
-        {"note": filho},
+        {"justification": filho},
     )
-    assert r.status_code == 404, r.text
-    # O que importa não é o texto que sai, é que a coluna text nunca recebe
-    # um não-string — e que a ação seguiu, como segue hoje sem corpo.
-    assert vistos and isinstance(vistos[0], str), vistos
+    assert r.status_code == 422, r.text
+    assert vistos == []
 
 
 @pytest.mark.parametrize("acao,funcao", ACOES_PAYOUT, ids=["paid", "reject"])
 @pytest.mark.parametrize("corpo,esperado", [
-    ({}, None),
-    ({"note": None}, None),
-    ({"note": ""}, None),
-    ({"note": "   "}, None),
-    ({"note": "pago à mão ✓"}, "pago à mão ✓"),
-    ({"note": "  x  "}, "x"),
-], ids=["vazio", "null", "string_vazia", "so_espaco", "acento", "com_espaco"])
-def test_controle_positivo_payout_note_string_inalterada(
+    ({"justification": "pago à mão ✓ ok"}, "pago à mão ✓ ok"),
+    ({"justification": "  x pago por fora  "}, "x pago por fora"),
+], ids=["acento", "com_espaco"])
+def test_controle_positivo_payout_justification_string_valida(
     monkeypatch, corpo, esperado, acao, funcao
 ):
-    """`note` é opcional por design. Os 6 formatos abaixo × 2 ações = os 24
-    casos que o Tester mediu com espião: têm de continuar idênticos."""
+    """Justificativa limpa passa a validação: chega ao banco (404, saque inexistente)
+    com o texto aparado. Sem este caso o grupo passaria num código que recusa tudo."""
     vistos = _espiao_payout(monkeypatch, funcao)
     r = _post_bruto(
         _admin_client(),

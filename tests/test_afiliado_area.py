@@ -349,7 +349,7 @@ def test_fluxo_real_do_link_ao_pix_comissao_so_na_primeira_cobranca(monkeypatch)
     assert admin.post("/admin/auth/login", headers=csrf(admin), json={
         "username": admin_dashboard.ADMIN_DASHBOARD_USERNAME, "password": "secret-admin",
     }).status_code == 200
-    r = admin.post(f"/admin/api/affiliates/payouts/{saque}/paid", headers=csrf(admin), json={})
+    r = admin.post(f"/admin/api/affiliates/payouts/{saque}/paid", headers=csrf(admin), json={"justification": "Pix pago fora do sistema"})
     assert r.status_code == 200, r.text
 
     s = _me(c)["stats"]
