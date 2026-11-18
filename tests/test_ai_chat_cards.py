@@ -13,7 +13,7 @@ from decimal import ROUND_HALF_UP, Decimal
 import pytest
 
 import db
-from _cards_apoio import (CASOS, M, M0, _http, _numeros, _reais, mostrar, mundo,  # noqa: F401  (mundo é fixture)
+from _cards_apoio import (_NUM, CASOS, M, M0, _http, _numeros, _reais, mostrar, mundo,  # noqa: F401  (mundo é fixture)
                           valores_de_b_em)
 from conftest import usuario_pagante
 from core.services.ai_chat import cards
@@ -143,9 +143,17 @@ def test_visao_do_modelo_esta_no_bloco(mundo, card):
                      "periodo": {"categorias_total"}}.get(card, set())
         sem_derivados = [{k: v for k, v in a.items() if k not in derivados} for a in r["abas"]]
         assert _numeros(sem_derivados) <= _numeros(bloco)
-        assert any(isinstance(x, float) for x in _numeros(r)) or card in ("assinaturas", "piggy"), \
+        assert not _texto_numerico(r) and (_numeros(r) or card in ("assinaturas", "piggy")), \
             "a visão do modelo tem número como número"
     json.dumps(r)  # serializa como o runner serializa
+
+
+def _texto_numerico(o):
+    """Algum valor é número escrito como texto. Por ocorrência: o `_numeros` devolve conjunto e lê `"61.1"` como
+    61.1, então o mesmo valor como número em outro campo esconderia o texto."""
+    if isinstance(o, str):
+        return bool(_NUM.match(o))
+    return any(map(_texto_numerico, o.values() if isinstance(o, dict) else o if isinstance(o, list) else []))
 
 
 def _ids(o, achados=None):
