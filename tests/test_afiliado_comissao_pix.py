@@ -1072,7 +1072,7 @@ def test_p24_positivo_comissao_estornada_com_fallback_zero_nao_cria_pendencia(ex
     assert rev is None or rev["status"] != "open"
 
 
-def test_p24_baixa_desfeita_segura_a_comissao_e_o_pix_real_depois_nao_solta(externo, avisos):
+def test_p24_baixa_desfeita_segura_a_comissao_e_o_pix_real_depois_solta(externo, avisos):
     c = _afiliado()
     ind, cobranca = _cara(c)
     _vence(_linha(ind.uid)["id"])
@@ -1085,10 +1085,270 @@ def test_p24_baixa_desfeita_segura_a_comissao_e_o_pix_real_depois_nao_solta(exte
     with pytest.raises(ValueError):  # e a comissão não entra em saque novo
         request_payout(c.aff["id"])
     externo["get_status"] = "RECEIVED"
-    entregar("PAYMENT_RECEIVED", cobranca)
-    assert len(_comissoes_completas(ind.uid)) == 1 and _revisao(chave)["status"] == "open"
+    entregar("PAYMENT_RECEIVED", cobranca)  # #1616: o Pix real solta a comissão sozinho
+    rev = _revisao(chave)
+    assert rev["status"] == "resolved" and rev["approved_cents"] == _linha(ind.uid)["amount_cents"] == 8325
+    assert "partial_approved" in _acoes(chave) and _atores(chave) == ["sistema"]
+    assert mark_payout_paid(saque["id"])
     from db.plan_grants import list_grants
     assert [g["status"] for g in list_grants(ind.uid) if g["source"] == "pix"] == ["active"]
+
+
+def _atores(chave):
+    with get_conn() as conn:
+        return [r["actor"] for r in conn.execute(
+            "select e.actor from affiliate_refund_review_events e join affiliate_refund_reviews v on v.id = e.review_id"
+            " where v.stripe_invoice_id = %s and e.action = 'partial_approved' order by e.id", (chave,)).fetchall()]
+
+
+def _undone_com_saque(externo, c):
+    ind, cobranca = _cara(c)
+    _vence(_linha(ind.uid)["id"])
+    saque = request_payout(c.aff["id"])
+    entregar(UNDONE, cobranca)
+    externo["get_status"] = "RECEIVED"
+    return ind, cobranca, saque
+
+
+def test_p24_pix_real_com_a_comissao_ja_paga_resolve_sem_recuperacao(externo):
+    c = _afiliado()
+    ind, cobranca = _cara(c)
+    _vence(_linha(ind.uid)["id"])
+    saque = request_payout(c.aff["id"])
+    assert mark_payout_paid(saque["id"])
+    entregar(UNDONE, cobranca)
+    assert _revisao(cobranca["external_reference"])["status"] == "open"
+    externo["get_status"] = "RECEIVED"
+    entregar("PAYMENT_RECEIVED", cobranca)
+    rev = _revisao(cobranca["external_reference"])
+    assert rev["status"] == "resolved" and rev["recovery_cents"] is None
+    with get_conn() as conn:
+        assert conn.execute("select status from affiliate_payouts where id = %s", (saque["id"],)).fetchone()["status"] == "paid"
+
+
+def test_p24_pix_real_depois_da_decisao_do_admin_nao_muda_nada(externo):
+    from db.affiliate_reviews import resolver_parcial
+
+    ind, cobranca = _cara(_afiliado())  # sem saque aberto: só assim o admin aprova menos que o cheio
+    chave = cobranca["external_reference"]
+    entregar(UNDONE, cobranca)
+    externo["get_status"] = "RECEIVED"
+    rev = _revisao(chave)
+    assert resolver_parcial(rev["id"], "admin", 0, "estorno", 0)
+    antes, acoes = _revisao(chave), _acoes(chave)
+    entregar("PAYMENT_RECEIVED", cobranca)
+    assert _revisao(chave) == antes and _acoes(chave) == acoes
+    assert [x["status"] for x in _comissoes_completas(ind.uid)] == ["reversed"]
+
+
+def test_p24_pix_real_entregue_duas_vezes_aprova_uma_vez(externo):
+    ind, cobranca, saque = _undone_com_saque(externo, _afiliado())
+    entregar("PAYMENT_RECEIVED", cobranca)
+    entregar("PAYMENT_RECEIVED", cobranca)
+    assert _acoes(cobranca["external_reference"]).count("partial_approved") == 1
+
+
+def test_p24_parcial_de_verdade_nao_e_liberada_pelo_pix_real(externo):
+    from db.affiliate_reviews_manutencao import liberar_baixa_desfeita
+
+    c = _afiliado()
+    ind, cobranca = _cara(c)
+    chave = cobranca["external_reference"]
+    entregar(UNDONE, cobranca)
+    externo["get_status"] = "RECEIVED"
+    entregar("PAYMENT_RECEIVED", cobranca)  # resolvida pelo sistema
+    externo["refunds"] = [{"value": 100.0}]
+    entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)
+    assert _revisao(chave)["status"] == "open" and _revisao(chave)["refunded_cents"] == 10000
+    entregar("PAYMENT_RECEIVED", cobranca)
+    assert not liberar_baixa_desfeita(chave) and _revisao(chave)["status"] == "open"
+
+
+def test_p24_pix_real_de_outra_cobranca_nao_solta_a_revisao_da_baixa_desfeita(externo):
+    c = _afiliado()
+    ind, cobranca, saque = _undone_com_saque(externo, c)
+    with get_conn() as conn:  # A sai de `pending` (índice de uma cobrança ativa por usuário) para a B nascer
+        conn.execute("update pix_charges set status = 'expired' where id = %s", (cobranca["id"],))
+    outra = _anual(ind)  # limite declarado: a cobrança B do mesmo indicado não move a revisão da A
+    entregar("PAYMENT_RECEIVED", outra)
+    assert _revisao(cobranca["external_reference"])["status"] == "open"
+    with pytest.raises(SaqueComPendencia):
+        mark_payout_paid(saque["id"])
+
+
+def test_p24_ciclo_duplo_baixa_desfeita_pix_real_termina_resolvida(externo):
+    ind, cobranca, saque = _undone_com_saque(externo, _afiliado())
+    chave = cobranca["external_reference"]
+    entregar("PAYMENT_RECEIVED", cobranca)
+    assert _revisao(chave)["status"] == "resolved"
+    externo["get_status"] = "PENDING"
+    entregar(UNDONE, cobranca)
+    assert _revisao(chave)["status"] == "open"
+    externo["get_status"] = "RECEIVED"
+    entregar("PAYMENT_RECEIVED", cobranca)
+    assert _revisao(chave)["status"] == "resolved" and _acoes(chave).count("partial_approved") == 2
+
+
+def test_p24_comissao_estornada_com_a_revisao_aberta_nao_e_solta_pelo_pix_real(externo):
+    ind, cobranca = _cara(_afiliado())
+    chave = cobranca["external_reference"]
+    entregar(UNDONE, cobranca)
+    with get_conn() as conn:  # T1: a comissão já está estornada enquanto a revisão segue `open/0`
+        conn.execute("update affiliate_commissions set status = 'reversed' where referred_user_id = %s", (ind.uid,))
+    externo["get_status"] = "RECEIVED"
+    entregar("PAYMENT_RECEIVED", cobranca)
+    assert _revisao(chave)["status"] == "open" and "partial_approved" not in _acoes(chave)
+
+
+def test_p24_revisao_orfa_nao_e_solta_pelo_pix_real(externo):
+    from db.affiliate_reviews_manutencao import liberar_baixa_desfeita
+
+    ind, cobranca = _cara(_afiliado())
+    chave = cobranca["external_reference"]
+    entregar(UNDONE, cobranca)
+    with get_conn() as conn:
+        conn.execute("update affiliate_refund_reviews set commission_id = null, paid_cents = 7000"
+                     " where stripe_invoice_id = %s", (chave,))
+    assert liberar_baixa_desfeita(chave) is False and _revisao(chave)["status"] == "open"
+
+
+def test_p24_pix_real_aprova_o_valor_atual_da_comissao_e_nao_o_da_revisao(externo):
+    ind, cobranca = _cara(_afiliado())
+    chave = cobranca["external_reference"]
+    entregar(UNDONE, cobranca)
+    externo["get_status"] = "RECEIVED"
+    entregar("PAYMENT_RECEIVED", cobranca)
+    with get_conn() as conn:  # o admin reduz a comissão; o UNDONE seguinte reabre a revisão
+        conn.execute("update affiliate_commissions set amount_cents = 5000 where referred_user_id = %s", (ind.uid,))
+    externo["get_status"] = "PENDING"
+    entregar(UNDONE, cobranca)
+    with get_conn() as conn:  # restos na linha: o valor aprovado vem da comissão viva
+        conn.execute("update affiliate_refund_reviews set paid_cents = 7000, commission_cents = 9000"
+                     " where stripe_invoice_id = %s", (chave,))
+    assert _revisao(chave)["amount_cents"] == 8325  # o retrato da revisão também difere do valor vivo
+    externo["get_status"] = "RECEIVED"
+    entregar("PAYMENT_RECEIVED", cobranca)
+    rev = _revisao(chave)
+    assert rev["status"] == "resolved" and rev["approved_cents"] == 5000
+
+
+def test_p24_pix_real_com_a_pendencia_mudando_no_meio_nao_derruba_o_webhook(externo, monkeypatch):
+    import db.affiliate_reviews_manutencao as rv
+
+    ind, cobranca = _cara(_afiliado())
+    chave = cobranca["external_reference"]
+    entregar(UNDONE, cobranca)
+    externo["get_status"] = "RECEIVED"
+
+    def muda(*a, **k):
+        raise rv.PendenciaMudou("mudou")
+
+    monkeypatch.setattr(rv, "resolver_parcial", muda)
+    assert rv.liberar_baixa_desfeita(chave) is False
+    entregar("PAYMENT_RECEIVED", cobranca)  # não levanta
+    assert _revisao(chave)["status"] == "open"
+    assert "afiliado" in efeitos(cobranca["asaas_payment_id"])
+
+
+def test_p24_parcial_de_verdade_open_zero_sem_marcador_nao_e_solta(externo):
+    from core.services.pix_baixa_desfeita import soltar_baixa_desfeita
+    from db.affiliate_reviews import registrar_reembolso
+
+    ind, cobranca = _cara(_afiliado())  # sem UNDONE: não há marcador `baixa_desfeita`
+    chave = cobranca["external_reference"]
+    registrar_reembolso(chave, "partial", 0, datetime.now(timezone.utc), desconhecido=True)  # parcial com o Asaas fora
+    assert _revisao(chave)["status"] == "open" and _revisao(chave)["refunded_cents"] == 0
+    soltar_baixa_desfeita(cobranca)
+    assert _revisao(chave)["status"] == "open" and "partial_approved" not in _acoes(chave)
+
+
+def test_p24_marcador_com_a_cobranca_ja_estornada_parcial_nao_e_solta(externo):
+    from core.services.pix_baixa_desfeita import soltar_baixa_desfeita
+
+    ind, cobranca = _cara(_afiliado())
+    chave = cobranca["external_reference"]
+    entregar(UNDONE, cobranca)  # marcador e `open/0` do UNDONE
+    with get_conn() as conn:  # o parcial de verdade venceu a corrida; `cobranca` é o retrato velho (`paid`)
+        conn.execute("update pix_charges set status = 'refunded_partial' where id = %s", (cobranca["id"],))
+    soltar_baixa_desfeita(cobranca)
+    assert _revisao(chave)["status"] == "open" and "partial_approved" not in _acoes(chave)
+
+
+def test_p24_morte_entre_segurar_e_reabrir_o_pix_real_solta_a_revisao(externo, monkeypatch):
+    import core.services.pix_baixa_desfeita as m
+
+    ind, cobranca = _cara(_afiliado())
+    chave = cobranca["external_reference"]
+    real = m.reabrir_baixa
+    monkeypatch.setattr(m, "reabrir_baixa", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("morreu")))
+    entregar(UNDONE, cobranca)
+    assert _revisao(chave)["status"] == "open"
+    monkeypatch.setattr(m, "reabrir_baixa", real)
+    externo["get_status"] = "RECEIVED"
+    entregar("PAYMENT_RECEIVED", cobranca)  # `afiliado` já registrado: só a reconciliação alcança a revisão
+    rev = _revisao(chave)
+    assert rev["status"] == "resolved" and _acoes(chave).count("partial_approved") == 1
+
+
+def test_p24_soltura_que_cai_depois_do_grant_e_refeita_na_retentativa(externo, monkeypatch):
+    import core.services.pix_baixa_desfeita as m
+
+    ind, cobranca = _cara(_afiliado())
+    chave = cobranca["external_reference"]
+    real_reabrir, real_soltar = m.reabrir_baixa, m.soltar_baixa_desfeita
+    monkeypatch.setattr(m, "reabrir_baixa", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("morreu")))
+    entregar(UNDONE, cobranca)
+    monkeypatch.setattr(m, "reabrir_baixa", real_reabrir)
+    monkeypatch.setattr(m, "soltar_baixa_desfeita",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("caiu")))
+    externo["get_status"] = "RECEIVED"
+    try:
+        entregar("PAYMENT_RECEIVED", cobranca)  # grant reconcedido, soltura caiu
+    except RuntimeError:
+        pass
+    assert _revisao(chave)["status"] == "open"
+    monkeypatch.setattr(m, "soltar_baixa_desfeita", real_soltar)
+    entregar("PAYMENT_RECEIVED", cobranca)  # retentativa acha o grant ativo
+    assert _revisao(chave)["status"] == "resolved" and _acoes(chave).count("partial_approved") == 1
+
+
+def test_p24_ciclo_duplo_com_a_comissao_ja_paga_reabre_no_segundo_undone(externo):
+    c = _afiliado()
+    ind, cobranca = _cara(c)
+    chave = cobranca["external_reference"]
+    _vence(_linha(ind.uid)["id"])
+    assert mark_payout_paid(request_payout(c.aff["id"])["id"])
+    entregar(UNDONE, cobranca)
+    externo["get_status"] = "RECEIVED"
+    entregar("PAYMENT_RECEIVED", cobranca)
+    assert _revisao(chave)["status"] == "resolved"
+    externo["get_status"] = "PENDING"
+    entregar(UNDONE, cobranca)
+    assert _revisao(chave)["status"] == "open"
+    externo["get_status"] = "RECEIVED"
+    entregar("PAYMENT_RECEIVED", cobranca)
+    assert _revisao(chave)["status"] == "resolved" and _acoes(chave).count("partial_approved") == 2
+
+
+def test_p24_segundo_undone_nao_reabre_a_recuperacao_decidida_pelo_admin(externo):
+    from db.affiliate_reviews import resolver_parcial
+
+    c = _afiliado()
+    ind, cobranca = _cara(c)
+    chave = cobranca["external_reference"]
+    _vence(_linha(ind.uid)["id"])
+    assert mark_payout_paid(request_payout(c.aff["id"])["id"])
+    entregar(UNDONE, cobranca)
+    rev = _revisao(chave)
+    assert resolver_parcial(rev["id"], "admin", 0, "baixa desfeita: recuperar tudo", rev["refunded_cents"])
+    antes = _revisao(chave)
+    assert antes["status"] == "recovery"
+    externo["get_status"] = "RECEIVED"
+    entregar("PAYMENT_RECEIVED", cobranca)  # recuperação não é `open`: o Pix real não a solta
+    assert _revisao(chave) == antes
+    externo["get_status"] = "PENDING"
+    entregar(UNDONE, cobranca)  # outra baixa desfeita: a decisão do admin fica
+    assert _revisao(chave) == antes
 
 
 def test_p24_baixa_desfeita_reentregue_nao_duplica_a_pendencia(externo, avisos):

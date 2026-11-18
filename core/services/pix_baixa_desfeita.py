@@ -79,10 +79,15 @@ def reconciliar_grant(cobranca, evt, payment_id: str) -> bool:
             # `_grant` commita o grant ANTES do `recompute`: se este levantou, a retentativa
             # acha o grant ativo e só reprojeta (idempotente; nunca reconcede nem toca o grant).
             recompute_entitlement(cobranca["user_id"], origem="pix")
+            soltar_baixa_desfeita(cobranca)  # a soltura pode ter caído depois do grant
             return False
         if estado != "revoked":
             return False
         EXECUTORES["grant"](cobranca, evt)
+        # Morreu depois de `_segurar_comissao` e antes de `reabrir_baixa`: o `afiliado` do RECEIVED já está
+        # registrado e o dreno o pula, então é aqui que a revisão `open/0` do UNDONE se solta (#1616). Sob o
+        # `grant`: um UNDONE novo segura e reabre sob ele, então não solta a revisão que ele acabou de abrir.
+        soltar_baixa_desfeita(cobranca)
     log.warning("pix: grant reconcedido (baixa desfeita, Pix real) cobranca=%s", cobranca["id"])
     _alertar(cobranca, "acesso reconcedido: o Pix real chegou antes da retentativa do UNDONE.")
     return True
@@ -195,3 +200,21 @@ def veto_afiliado(payment_id: str) -> tuple[bool, tuple | None]:
     if atual is not None and atual["status"] not in ("paid", "paid_orphan", "refunded_partial", "refunded"):
         return (True, ("CobrancaReaberta", None))
     return (False, None)
+
+
+def soltar_baixa_desfeita(cobranca) -> None:
+    """Pix real depois da baixa desfeita: a revisão `open/0` do UNDONE se resolve sozinha. `devolvido 0` não prova
+    a origem (o parcial de verdade também abre `open/0` com o Asaas fora), então só solta com o marcador
+    `baixa_desfeita` do pagamento, sem estorno registrado e com a cobrança `paid` AGORA, relida sob o lock do
+    parcial: o `marcar` concorrente espera aqui, ou já levou a cobrança a `refunded_partial`. Sem revisão
+    `open/0` da fatura é no-op. Também chamada pela `reconciliar_grant` (o `afiliado` registrado o RECEIVED pula)."""
+    from db.affiliate_reviews_manutencao import liberar_baixa_desfeita
+
+    pid = cobranca["asaas_payment_id"]
+    if not pid:
+        return
+    with lock_efeito(pid, "afiliado_estorno_parcial"):
+        atual = buscar_por_asaas_payment_id(pid)
+        if (atual and atual["status"] in ("paid", "paid_orphan") and efeito_registrado(pid, "baixa_desfeita")
+                and not estorno_registrado(pid)):
+            liberar_baixa_desfeita(cobranca["external_reference"])

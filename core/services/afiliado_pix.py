@@ -35,6 +35,8 @@ def registrar(cobranca, evt) -> None:
     # Sem as tentativas da compra: gastas por outra falha, abririam `open/0` na 1ª falha do Asaas. A
     # compra retenta sozinha (só o `afiliado` falta) até o valor sair; a purga de 7 dias é o limite.
     rotular_reembolso(cobranca, cobranca["status"])
+    from core.services.pix_baixa_desfeita import soltar_baixa_desfeita
+    soltar_baixa_desfeita(cobranca)
 
 
 def estornado_cents(payment_id: str) -> int:

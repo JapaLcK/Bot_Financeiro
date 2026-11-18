@@ -870,6 +870,19 @@ def test_undone_so_apaga_a_linha_pix_daquela_cobranca(externo):
     assert _numeros(c)[1] == 2
 
 
+def test_undone_de_uma_cobranca_deixa_a_linha_da_outra_do_mesmo_indicado(externo):
+    c = _afiliado()
+    ind = _indicado(c)
+    a = _pix(ind)
+    entregar("PAYMENT_RECEIVED", a)
+    b = _pix(ind)  # A já paga (`paid` não é ativa): a B nasce
+    entregar("PAYMENT_RECEIVED", b)
+    assert len(_linhas(c)) == 2
+    entregar(_UNDONE, a)
+    assert [(x["source"], x["payment_ref"]) for x in _linhas(c)] == [("pix", str(b["id"]))]
+    assert _numeros(c)[1] == 1
+
+
 def test_undone_seguido_do_pix_real_conta_uma_vez(externo):
     c = _afiliado()
     cobranca = _paga_e_desfaz(c)

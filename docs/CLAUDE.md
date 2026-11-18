@@ -1839,6 +1839,15 @@ UNDONE (baixa em dinheiro desfeita, #1448) em `paid`/`paid_orphan`: `reabrir_bai
 linha de `affiliate_referral_payments` (`pix`, `payment_ref` = id da cobrança) e os efeitos `grant` e `afiliado`:
 o pagamento nunca existiu, então o cliente deixa de contar e o `RECEIVED` real conta de novo. Não é reembolso
 (esse só rotula). Em `refunded_partial`, `desfazer_baixa` rotula `total`.
+O `RECEIVED` real depois do UNDONE (#1616) fecha sozinho a revisão `open/0` que o UNDONE abriu
+(`pix_baixa_desfeita.soltar_baixa_desfeita` → `liberar_baixa_desfeita`, fim de `registrar` e depois do `grant` reconcedido
+em `reconciliar_grant`, que cobre a morte entre segurar e reabrir): aprova a comissão cheia, ator `sistema`, evento
+`partial_approved` (o admin vê "Revisão parcial"). `devolvido 0` não prova a origem (o parcial de verdade também abre
+`open/0` com o Asaas fora), então só solta com o marcador `baixa_desfeita` do pagamento, sem estorno registrado e com a
+cobrança `paid`/`paid_orphan` relida sob o lock `afiliado_estorno_parcial` (o do `marcar`). E só se for `partial` com
+devolvido 0, ainda `open`; decidida pelo admin, ou com devolvido > 0, não muda; revisão órfã (sem comissão) também fica
+com o admin. Um novo UNDONE reabre a revisão `resolved` mesmo com a comissão já paga (`registrar_reembolso(rotular=False)`).
+Limites: o Pix real de OUTRA cobrança do mesmo indicado não solta a da A; cobrança órfã (sem titular, sem grant revogado) que morreu entre segurar e reabrir não passa pela `reconciliar_grant`.
 Reembolso do Pix passa pela máquina do cartão: `marcar` chama `registrar_reembolso` com a chave
 `pix:<id>` (rótulo, pendência e estorno numa transação) e `avisar_pendencia`. Devolvido no total: o
 cobrado (plano + cadernos, `total_cents`), sem rede. No parcial, só quando o valor decide algo
