@@ -2877,8 +2877,7 @@ saldo. Nunca recusa por falta de pendência: com a Stripe fora, é o único regi
 sem pendência o evento fica no saque, sem `review_id`. O botão aparece em todo saque `requested`: no
 livre, ao lado de "Pagar via Pix", "Marcar pago" e "Rejeitar" (é a saída quando o "Marcar pago" dá 503 com
 o Pix já feito); no bloqueado e no órfão, só ele e "Rejeitar". Justificativa, data e comprovante seguem
-obrigatórios. `total` vai a `recovery`; `partial` segue `open`, sem bloqueio. Justificativa de 10 a 500 caracteres, contados depois de limpar (NUL e surrogate
-viram U+FFFD, que não conta como texto), `paid_on` não futura em Brasília nem anterior ao
+obrigatórios. `total` vai a `recovery`; `partial` segue `open`, sem bloqueio. Justificativa com no mínimo 10 caracteres visíveis (letra, número, pontuação ou símbolo, conforme `validar_justificativa` em `core/services/afiliado_reembolso.py`) e no máximo 500 no total, `paid_on` não futura em Brasília nem anterior ao
 pedido, `receipt_ref` de 4 a 120 caracteres. Referência e justificativa moram só no evento: nunca em
 log, aviso ou `affiliate_payouts.note`, que sai no `/api/affiliate/me`.
 
