@@ -968,7 +968,7 @@ def test_p23_marcar_pago_de_saque_so_pix_sem_chave(externo, monkeypatch):
     from _apoio_auth_app import csrf
 
     cobranca, saque, admin = _saque_so_pix(_afiliado(), monkeypatch)
-    r = admin.post(f"/admin/api/affiliates/payouts/{saque}/paid", headers=csrf(admin), json={})
+    r = admin.post(f"/admin/api/affiliates/payouts/{saque}/paid", headers=csrf(admin), json={"justification": "Pix pago fora do sistema"})
     assert (r.status_code, _status_do_saque(saque)) == (200, "paid"), r.text
 
 
@@ -980,7 +980,7 @@ def test_p23_atalho_sem_stripe_nao_pula_o_bloqueio_da_pendencia_pix(externo, mon
     entregar("PAYMENT_REFUNDED", cobranca)
     assert _revisao(cobranca["external_reference"])["status"] == "open"
     assert admin.get(f"/admin/api/affiliates/payouts/{saque}/pix").status_code == 409
-    assert admin.post(f"/admin/api/affiliates/payouts/{saque}/paid", headers=csrf(admin), json={}).status_code == 409
+    assert admin.post(f"/admin/api/affiliates/payouts/{saque}/paid", headers=csrf(admin), json={"justification": "Pix pago fora do sistema"}).status_code == 409
     assert _status_do_saque(saque) == "requested"
 
 
