@@ -1839,6 +1839,10 @@ UNDONE (baixa em dinheiro desfeita, #1448) em `paid`/`paid_orphan`: `reabrir_bai
 linha de `affiliate_referral_payments` (`pix`, `payment_ref` = id da cobrança) e os efeitos `grant` e `afiliado`:
 o pagamento nunca existiu, então o cliente deixa de contar e o `RECEIVED` real conta de novo. Não é reembolso
 (esse só rotula). Em `refunded_partial`, `desfazer_baixa` rotula `total`.
+O `RECEIVED` real depois do UNDONE (#1616) fecha sozinho a revisão `open/0` que o UNDONE abriu
+(`liberar_baixa_desfeita`, fim de `registrar`): aprova a comissão cheia, ator `sistema`, evento `partial_approved`
+(o admin vê "Revisão parcial"). Só se for `partial` com devolvido 0, ainda `open` e sem estorno; decidida pelo
+admin, ou com devolvido > 0, não muda; revisão órfã (sem comissão) também fica com o admin. Limite: o Pix real de OUTRA cobrança do mesmo indicado não solta a da A.
 Reembolso do Pix passa pela máquina do cartão: `marcar` chama `registrar_reembolso` com a chave
 `pix:<id>` (rótulo, pendência e estorno numa transação) e `avisar_pendencia`. Devolvido no total: o
 cobrado (plano + cadernos, `total_cents`), sem rede. No parcial, só quando o valor decide algo

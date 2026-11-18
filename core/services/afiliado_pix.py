@@ -35,6 +35,11 @@ def registrar(cobranca, evt) -> None:
     # Sem as tentativas da compra: gastas por outra falha, abririam `open/0` na 1ª falha do Asaas. A
     # compra retenta sozinha (só o `afiliado` falta) até o valor sair; a purga de 7 dias é o limite.
     rotular_reembolso(cobranca, cobranca["status"])
+    from db.affiliate_reviews import liberar_baixa_desfeita
+
+    # Pix real depois da baixa desfeita: a revisão `open/0` do UNDONE se resolve sozinha. O dreno já barra
+    # estorno e baixa não desfeita antes de chegar aqui; sem revisão `open/0` da fatura é no-op.
+    liberar_baixa_desfeita(cobranca["external_reference"])
 
 
 def estornado_cents(payment_id: str) -> int:
