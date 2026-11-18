@@ -2007,14 +2007,21 @@ escrevem; o resto é leitura.
    `select count(*) from affiliate_commissions where stripe_invoice_id like 'pix:%' and created_at >= (select ativa_desde from pix_pausa_concessao);`
    A fila de compra guardada: `select event_type, count(*), max(attempts) from pix_webhook_events where
    processed_at is null and event_type in ('PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED') group by 1;`. Tentativas
-   subindo durante a pausa indicam processo da versão anterior ainda vivo (o gatilho o barrou).
+   subindo durante a pausa indicam processo da versão anterior ainda vivo (o gatilho o barrou). O estorno
+   parcial de cobrança ainda não paga também fica guardado (#1600) e não aparece nessa consulta; o dele é
+   `select count(*) from pix_webhook_events where processed_at is null and event_type = 'PAYMENT_PARTIALLY_REFUNDED';`
+   (só contagem: as consultas deste roteiro não leem `payload_enc` nem `last_error`).
 3. Com a pausa ativa: o trabalho que motivou a pausa (no deploy do #1437, o script de estornos pendentes, que é
    do PR dele).
 4. Retomar: `update pix_pausa_concessao set retomada_em = now() where retomada_em is null;` (a linha fica: a
    guarda da purga conta os 7 dias a partir de `retomada_em`; `delete` e `truncate` são recusados).
 5. Confirmar a retomada: `select pix_pausa_ativa();` dá `false`, e a fila de compra da consulta do passo 2
    esvazia a 100 eventos por passada da varredura do dreno, que roda a cada 60 s (mais antigos primeiro). Quem
-   pagou durante a pausa recebe o acesso quando a compra dele é drenada.
+   pagou durante a pausa recebe o acesso quando a compra dele é drenada. **Dentro das 24 h depois da
+   retomada**, a contagem de `PAYMENT_PARTIALLY_REFUNDED` aberto do passo 2 tem de chegar a `0`. Se não
+   chegar, olhe a compra travada antes de a janela fechar (a fila de compra do passo 2 com `max(attempts)`
+   subindo, e o alerta de evento travado no canal do admin): passadas as 24 h, o parcial fecha sem efeito e a
+   compra, quando passar, dá comissão cheia sem revisão.
 
 **PR B: emitir com os cadernos (backend; invisível até o modal mandar `extras`).** O
 `POST /billing/pix/checkout` aceita `extras: list[str]` (ids de Price, até 3, sem

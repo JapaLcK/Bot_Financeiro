@@ -168,3 +168,18 @@ def test_depois_da_janela_o_parcial_fora_de_ordem_volta_ao_d1a(externo):
     drenar_evento(dentro)
     assert evento(fora)["processed_at"] and evento(dentro)["processed_at"]
     assert ler(cob["id"])["status"] == "pending" and _revisao(cob["external_reference"]) is None
+
+
+def test_parcial_fora_de_ordem_na_janela_age_se_a_compra_chega(externo):
+    """O A5 do Tester: depois da retomada, dentro da janela, o parcial chega antes da compra (fora de ordem no
+    Asaas) e espera; a compra chega, drena, e o parcial AGE sobre a cobrança paga. Diverge do D1-a, para melhor."""
+    ativar()
+    retomar()
+    uid, cob = _venda()
+    externo["refunds"] = DEVOLVIDO
+    parcial = entregar("PAYMENT_PARTIALLY_REFUNDED", cob)
+    assert evento(parcial)["last_error"] == FALHA_PAUSA and evento(parcial)["processed_at"] is None
+    entregar("PAYMENT_RECEIVED", cob)
+    drenar_evento(parcial)
+    assert evento(parcial)["processed_at"] is not None
+    _estorno_registrado(uid, cob)
