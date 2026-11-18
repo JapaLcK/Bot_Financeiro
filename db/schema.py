@@ -3303,6 +3303,21 @@ def init_db():
         create unique index if not exists uniq_pix_unmatched_payment
           on pix_unmatched_payments (asaas_payment_id)
         """,
+        # #1437: o marcador "o estorno total deste pagamento CHEGOU", gravado na recepção do
+        # `PAYMENT_REFUNDED` (`db/pix_estornos.py`). Tabela nova, `create table if not exists`: nenhuma
+        # trava em tabela quente. A chave começa pelo id, que é por onde (e só por onde) a D3 bloqueia.
+        """
+        create table if not exists pix_estornos_recebidos (
+          asaas_payment_id text not null,
+          origem text not null,
+          classificacao text not null
+            check (classificacao in ('nosso', 'nao_identificado', 'alheio')),
+          event_id text not null,
+          recebido_em timestamptz not null default now(),
+          classificado_em timestamptz not null default now(),
+          primary key (asaas_payment_id, origem)
+        )
+        """,
         """alter table pix_unmatched_payments
              drop constraint if exists pix_unmatched_ref_formato""",
         # O MESMO `^pix:[0-9]+$` do `pix_charges_ref_formato`, e a regra é a que
@@ -3400,6 +3415,20 @@ def init_db():
           fechado_em timestamptz,
           clicado_em timestamptz,
           unique (user_id, etapa)
+        )
+        """,
+        # Black Friday 2026: um e-mail por pessoa e tipo no lugar dos degraus (`oferta`) e o do último
+        # dia (`ultimo_dia`). A PK é a reivindicação atômica; sai com a conta (cascade); fora do export.
+        """
+        create table if not exists remarketing_bf (
+          user_id bigint not null references users(id) on delete cascade,
+          tipo text not null check (tipo in ('oferta', 'ultimo_dia')),
+          status text not null check (status in ('enviando', 'enviado', 'sem_canal')),
+          email_ok boolean,
+          motivo text,
+          criado_em timestamptz not null default now(),
+          fechado_em timestamptz,
+          primary key (user_id, tipo)
         )
         """,
         # Reconquista de trial vencido sem pagamento (um e-mail, 2 dias depois). Fila de

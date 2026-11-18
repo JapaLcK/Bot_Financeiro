@@ -28,6 +28,8 @@ CONTROLES NEGATIVOS MEDIDOS (um a um, com o resto do grupo verde):
     `test_received_depois_de_estorno_total_nao_concede` VERMELHO (grant concedido
     sobre dinheiro devolvido).
 
+A D3 lê o estorno RECEBIDO desde o #1437: `tests/test_pix_estorno_recebido.py`.
+
 POSITIVOS do grupo: `test_estorno_total_revoga_o_acesso` (D1-c) e
 `test_received_sem_estorno_anterior_concede` (D3-b). Sem eles o grupo passaria
 num dreno que **nunca concede nada**, que é pior que o bug.

@@ -18,9 +18,9 @@ const json = (r, corpo, status = 200) => r.fulfill({ status, contentType: "appli
 const RET = {
   email: "l•••@dominio.com", desconto_pct: 20, trial: true,
   precos: {
-    essencial: { pct: 20, monthly: 792, annual: 7920, pix: 7920 },
-    plus: { pct: 20, monthly: 1592, annual: 15920, pix: 15920 },
-    pro: { pct: 20, monthly: 3992, annual: 39920, pix: 39920 },
+    essencial: { pct: 20, pct_mensal: 20, na_hora: false, monthly: 792, annual: 7920, pix: 7920 },
+    plus: { pct: 20, pct_mensal: 20, na_hora: false, monthly: 1592, annual: 15920, pix: 15920 },
+    pro: { pct: 20, pct_mensal: 20, na_hora: false, monthly: 3992, annual: 39920, pix: 39920 },
   },
 };
 

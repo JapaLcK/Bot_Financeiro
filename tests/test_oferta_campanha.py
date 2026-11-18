@@ -1,8 +1,12 @@
-"""Oferta de campanha (40% em Plus e Pro, 23 a 30/11/2026, Brasília): janela, cartão, Pix e plans-config.
+"""Oferta de campanha (40% no ANUAL de Plus e Pro, sem trial, 23 a 30/11/2026, Brasília): janela, cartão, Pix e plans-config.
 
 Controles: negativos = desligar `pct_da_oferta` no checkout do cartão ou no Pix, voltar `<=` para `==` na
-substituição do QR e voltar o comparador de `rm_desc` deixa o grupo vermelho; positivo = fora da janela tudo
-como antes (`allow_promotion_codes`, 19900, 49900, 9900). Stripe e Asaas falsos; banco de verdade.
+substituição do QR, voltar o comparador de `rm_desc`, tirar o `trial_days = 0` da campanha, tirar o `interval`
+de `campanha_vale` (mensal ganha 40%) ou o `elegivel` do Pix (assinante ganha 40%) deixa o grupo vermelho;
+positivo = fora da janela tudo como antes (`allow_promotion_codes`, trial, 19900, 49900, 9900) e o mensal com o
+link da etapa continua com o % do link. Stripe e Asaas falsos; banco de verdade.
+(Mudou de propósito em relação ao #1449: o PDF da Blue Ocean tira o mensal e o trial da oferta e o cupom vira
+`once`, `bf_40_once_*`.)
 """
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -48,13 +52,26 @@ def test_janela_em_brasilia_fim_exclusivo():
     assert camp.campanha_pct(datetime(2026, 12, 1, 0, 0, 0, tzinfo=BRT)) is None
 
 
-def test_maior_entre_link_e_campanha_so_em_plus_e_pro():
-    assert camp.pct_da_oferta("pro", 20, DENTRO) == 40 and camp.pct_da_oferta("pro_max", None, DENTRO) == 40
-    assert camp.pct_da_oferta("pro", 45, DENTRO) == 45          # nunca a soma
-    assert camp.pct_da_oferta("essencial", None, DENTRO) is None
-    assert camp.pct_da_oferta("essencial", 20, DENTRO) == 20
-    assert camp.pct_da_oferta("plus", None, DENTRO) is None     # vocabulário público não casa
-    assert camp.pct_da_oferta("pro", 20, DEPOIS) == 20 and camp.pct_da_oferta("pro", None, ANTES) is None
+def test_estado_antes_oferta_depois():
+    assert [camp.campanha_estado(x) for x in (ANTES, datetime(2026, 11, 23, tzinfo=BRT), DENTRO,
+                                              datetime(2026, 11, 30, 23, 59, 59, tzinfo=BRT), DEPOIS)] \
+        == ["antes", "oferta", "oferta", "oferta", "depois"]
+
+
+def test_maior_entre_link_e_campanha_so_no_anual_de_plus_e_pro():
+    a = lambda *x, **k: camp.pct_da_oferta(*x, interval="annual", **k)    # noqa: E731
+    m = lambda *x, **k: camp.pct_da_oferta(*x, interval="monthly", **k)   # noqa: E731
+    assert a("pro", 20, DENTRO) == 40 and a("pro_max", None, DENTRO) == 40
+    assert a("pro", 45, DENTRO) == 45          # nunca a soma
+    assert a("essencial", None, DENTRO) is None
+    assert a("essencial", 20, DENTRO) == 20
+    assert a("plus", None, DENTRO) is None     # vocabulário público não casa
+    assert a("pro", 20, DEPOIS) == 20 and a("pro", None, ANTES) is None
+    # o mensal fica fora da campanha; o desconto do link nele continua (controle positivo)
+    assert m("pro", None, DENTRO) is None and m("pro_max", None, DENTRO) is None
+    assert m("pro", 20, DENTRO) == 20 and m("pro", 10, DENTRO) == 10
+    # quem já assina não ganha a campanha, mas o link segue valendo
+    assert a("pro", None, DENTRO, elegivel=False) is None and a("pro", 20, DENTRO, elegivel=False) == 20
 
 
 def test_campanha_config(monkeypatch):
@@ -62,11 +79,13 @@ def test_campanha_config(monkeypatch):
     _relogio(monkeypatch, DENTRO)
     c = campanha_config()
     assert (c["precos"]["plus"]["annual"], c["precos"]["pro"]["annual"]) == (11940, 29940)
-    assert (c["precos"]["plus"]["monthly"], c["precos"]["pro"]["monthly"]) == (1194, 2994)
+    assert (c["precos"]["plus"]["monthly"], c["precos"]["pro"]["monthly"]) == (None, None)   # o mensal fica de fora
+    assert c["precos"]["plus"]["na_hora"] is True and c["precos"]["plus"]["pct_mensal"] is None
     assert set(c["textos"]) == {"plus", "pro"} and set(c["precos"]) == {"plus", "pro"}   # Essencial fora
-    assert "30 de novembro" in c["frase"] and "30 de novembro" in c["frase_assinante"]
+    assert c["faixa"] == "Black Friday do PigBank. 12 meses de Plus pelo preço de 6, só até segunda, 30/11."
+    assert not {"frase", "frase_assinante"} & set(c)          # o assinante não vê oferta nenhuma
     assert c["textos"]["plus"]["linha_anual"] == "R$ 119,40 no 1º ano, depois R$ 199 por ano"
-    assert c["textos"]["pro"]["linha_mensal"] == "1º mês por R$ 29,94, depois R$ 49,90 por mês"
+    assert not any(k in t for t in c["textos"].values() for k in ("linha_mensal", "frase_mensal", "mensal"))
     assert c["textos"]["plus"]["anual_mes"] == "R$ 9,95" and c["trial"] is False
     assert all("—" not in t for x in c["textos"].values() for t in x.values())
     _relogio(monkeypatch, DEPOIS)
@@ -86,24 +105,85 @@ def test_cupom_da_campanha_nasce_com_o_nome_do_percentual(monkeypatch):
     fake, _x = _cartao(monkeypatch), _relogio(monkeypatch, DENTRO)
     nomes, orig = [], fake.Coupon.create
     monkeypatch.setattr(fake.Coupon, "create", lambda **kw: (nomes.append(kw["name"]), orig(**kw))[1])
-    assert _checkout(_cliente(auth=a), plan="plus", interval="monthly").status_code == 200
+    assert _checkout(_cliente(auth=a), plan="plus", interval="annual").status_code == 200
     assert nomes == ["40% OFF"]
 
 
 @pytest.mark.parametrize("plan", ["plus", "pro"])
-@pytest.mark.parametrize("interval", ["monthly", "annual"])
-def test_cartao_plus_e_pro_levam_o_cupom_da_campanha(monkeypatch, plan, interval):
-    a, _ = _conta(f"c-{plan}-{interval}")
+def test_cartao_anual_plus_e_pro_levam_o_cupom_once_e_cobram_na_hora(monkeypatch, plan):
+    a, _ = _conta(f"c-{plan}-annual")
+    fake, _x = _cartao(monkeypatch), _relogio(monkeypatch, DENTRO)
+    import db.plans as plans
+    monkeypatch.setattr(plans, "is_trial_eligible_for_user", lambda uid: True)   # elegível ao trial: a campanha o tira
+    assert _checkout(_cliente(auth=a), plan=plan, interval="annual").status_code == 200
+    k = fake.last_session_kwargs
+    assert k["discounts"] == [{"coupon": "bf_40_once_prod_x"}] and "allow_promotion_codes" not in k
+    assert k["metadata"]["rm_desc"] == "40" and "rm_etapa" not in k["metadata"]
+    # `once` + trial gastaria o cupom na fatura de R$ 0 do trial: NENHUM trial na sessão (controle negativo:
+    # tirar o `trial_days = 0` da campanha deixa este teste vermelho)
+    assert "trial_period_days" not in k["subscription_data"] and k["metadata"]["td"] == "0"
+    assert "ev=purchase" in k["success_url"] and "td=0" in k["success_url"]   # o pixel do navegador dispara Purchase
+    c = fake.coupons["bf_40_once_prod_x"]
+    assert (c["duration"], c["redeem_by"]) == ("once", int(camp.CAMPANHA_FIM.timestamp()))   # 01/12 0h BRT
+
+
+@pytest.mark.parametrize("faltam, esperado", [(600, 1800), (7200, 7200)], ids=["fim-em-10min-sobe-a-30min", "fim-em-2h-corta-nele"])
+def test_sessao_hospedada_da_campanha_expira_no_fim_dela(monkeypatch, faltam, esperado):
+    """Controle negativo: tirar o bloco `if campanha` do `expires_at` deixa o hospedado sem prazo (KeyError) e o
+    embutido em +3600. Positivo: sem campanha (mensal) a /precos segue sem `expires_at`."""
+    import time
+    a, _ = _conta(f"c-exp-{faltam}")
+    fake, _x = _cartao(monkeypatch), _relogio(monkeypatch, DENTRO)
+    agora = int(time.time())
+    monkeypatch.setattr(dashboard, "CAMPANHA_FIM", datetime.fromtimestamp(agora + faltam, timezone.utc))
+    assert _checkout(_cliente(auth=a), plan="plus", interval="annual").status_code == 200
+    assert abs(fake.last_session_kwargs["expires_at"] - (agora + esperado)) <= 5
+    assert _checkout(_cliente(auth=a), plan="plus", interval="monthly").status_code == 200
+    assert "expires_at" not in fake.last_session_kwargs
+
+
+def test_sessao_hospedada_da_campanha_sem_fim_proximo_vale_quase_24h(monkeypatch):
+    import time
+    a, _ = _conta("c-exp-24h")
+    fake, _x = _cartao(monkeypatch), _relogio(monkeypatch, DENTRO)
+    monkeypatch.setattr(dashboard, "CAMPANHA_FIM", datetime.fromtimestamp(time.time() + 864000, timezone.utc))
+    assert _checkout(_cliente(auth=a), plan="plus", interval="annual").status_code == 200
+    assert abs(fake.last_session_kwargs["expires_at"] - (time.time() + 86340)) <= 5   # fim a 10 dias: vale o teto do Stripe
+
+
+@pytest.mark.parametrize("plan", ["plus", "pro"])
+def test_cartao_mensal_na_janela_fica_como_antes_com_trial_e_sem_cupom(monkeypatch, plan):
+    a, _ = _conta(f"c-{plan}-monthly")
     fake, _x = _cartao(monkeypatch), _relogio(monkeypatch, DENTRO)
     import db.plans as plans
     monkeypatch.setattr(plans, "is_trial_eligible_for_user", lambda uid: True)
-    assert _checkout(_cliente(auth=a), plan=plan, interval=interval).status_code == 200
+    assert _checkout(_cliente(auth=a), plan=plan, interval="monthly").status_code == 200
     k = fake.last_session_kwargs
-    assert k["discounts"] == [{"coupon": "rm_e0_40_prod_x"}] and "allow_promotion_codes" not in k
-    assert k["metadata"]["rm_desc"] == "40" and "rm_etapa" not in k["metadata"]
-    if interval == "annual":   # o trial de 7 dias segue; o desconto cai na 1ª cobrança real
-        assert k["subscription_data"]["trial_period_days"] == 7 and k["metadata"]["td"] == "7"
-    assert fake.coupons["rm_e0_40_prod_x"]["duration"] == "repeating"
+    assert k["allow_promotion_codes"] is True and "discounts" not in k and "rm_desc" not in k["metadata"]
+    assert k["subscription_data"]["trial_period_days"] == 7 and fake.coupon_create_calls == 0
+
+
+def test_mensal_com_o_link_da_etapa_2_continua_com_10(monkeypatch):
+    a, _ = _conta("c-link-mensal")
+    fake, _x = _cartao(monkeypatch), _relogio(monkeypatch, DENTRO)
+    import db.plans as plans
+    monkeypatch.setattr(plans, "is_trial_eligible_for_user", lambda uid: True)
+    assert _checkout(_cliente(a, 2), plan="plus", interval="monthly").status_code == 200
+    k = fake.last_session_kwargs
+    assert k["discounts"] == [{"coupon": "rm_e2_10_prod_x"}] and k["metadata"]["rm_desc"] == "10"
+    assert k["subscription_data"]["trial_period_days"] == 7        # o trial do link fica
+    assert fake.coupons["rm_e2_10_prod_x"]["duration"] == "repeating"   # e o cupom do link segue repeating
+
+
+def test_cupom_da_campanha_existente_divergente_e_503_sem_sessao(monkeypatch):
+    a, _ = _conta("c-div")
+    fake, _x = _cartao(monkeypatch), _relogio(monkeypatch, DENTRO)
+    fake.coupons["bf_40_once_prod_x"] = {"id": "bf_40_once_prod_x", "valid": True, "percent_off": 40.0,
+                                         "duration": "once", "redeem_by": None, "duration_in_months": None,
+                                         "applies_to": {"products": ["prod_x"]}}   # sem o redeem_by esperado
+    n = fake.session_create_calls
+    assert _checkout(_cliente(auth=a), plan="plus", interval="annual").status_code == 503
+    assert fake.session_create_calls == n
 
 
 def test_cartao_essencial_fica_sem_cupom(monkeypatch):
@@ -119,36 +199,39 @@ def test_cartao_essencial_fica_sem_cupom(monkeypatch):
 def test_cartao_fora_da_janela_tudo_como_antes(monkeypatch):
     a, _ = _conta("c-fora")
     fake = _cartao(monkeypatch)
+    import db.plans as plans
+    monkeypatch.setattr(plans, "is_trial_eligible_for_user", lambda uid: True)
     for quando in (ANTES, DEPOIS):
         _relogio(monkeypatch, quando)
         assert _checkout(_cliente(auth=a), plan="pro", interval="annual").status_code == 200
         k = fake.last_session_kwargs
         assert k["allow_promotion_codes"] is True and "discounts" not in k and "rm_desc" not in k["metadata"]
+        assert k["subscription_data"]["trial_period_days"] == 7      # o trial do anual fora da campanha fica
 
 
 def test_sessao_cheia_de_antes_da_janela_expira_e_nasce_uma_com_cupom(monkeypatch):
     a, _ = _conta("c-antes")
     fake = _cartao(monkeypatch)
     _relogio(monkeypatch, ANTES)
-    velha = _checkout(_cliente(auth=a), plan="plus").json()["checkout_url"]
+    velha = _checkout(_cliente(auth=a), plan="plus", interval="annual").json()["checkout_url"]
     _relogio(monkeypatch, DENTRO)
-    nova = _checkout(_cliente(auth=a), plan="plus").json()["checkout_url"]
+    nova = _checkout(_cliente(auth=a), plan="plus", interval="annual").json()["checkout_url"]
     assert nova != velha and fake.session_expire_calls == 1
-    assert fake.last_session_kwargs["discounts"] == [{"coupon": "rm_e0_40_prod_x"}]
-    assert _checkout(_cliente(auth=a), plan="plus").json()["checkout_url"] == nova   # igual reaproveita
+    assert fake.last_session_kwargs["discounts"] == [{"coupon": "bf_40_once_prod_x"}]
+    assert _checkout(_cliente(auth=a), plan="plus", interval="annual").json()["checkout_url"] == nova   # igual reaproveita
 
 
 def test_sessao_de_retomada_de_20_de_antes_da_janela_nao_e_reusada_dentro_dela(monkeypatch):
     a, _ = _conta("c-antes20")
     fake = _cartao(monkeypatch)
     _relogio(monkeypatch, ANTES)
-    velha = _checkout(_cliente(a, 3), plan="plus").json()["checkout_url"]
+    velha = _checkout(_cliente(a, 3), plan="plus", interval="annual").json()["checkout_url"]
     assert fake.last_session_kwargs["metadata"]["rm_desc"] == "20" and fake.last_session_kwargs["metadata"]["rm_etapa"] == "3"
     _relogio(monkeypatch, DENTRO)
-    nova = _checkout(_cliente(a, 3), plan="plus").json()["checkout_url"]
+    nova = _checkout(_cliente(a, 3), plan="plus", interval="annual").json()["checkout_url"]
     assert nova != velha and fake.session_expire_calls == 1
     assert fake.last_session_kwargs["metadata"]["rm_desc"] == "40"
-    assert fake.last_session_kwargs["discounts"] == [{"coupon": "rm_e3_40_prod_x"}]
+    assert fake.last_session_kwargs["discounts"] == [{"coupon": "bf_40_once_prod_x"}]   # o cupom da CAMPANHA, não o da etapa
 
 
 def test_sessao_de_40_depois_do_corte_nao_e_reusada(monkeypatch):
@@ -165,9 +248,11 @@ def test_sessao_de_40_depois_do_corte_nao_e_reusada(monkeypatch):
 def test_link_na_janela_vale_o_maior_e_assinante_ativo_leva_409(monkeypatch):
     a, _ = _conta("c-link")
     fake, _x = _cartao(monkeypatch), _relogio(monkeypatch, DENTRO)
-    assert _checkout(_cliente(a, 3), plan="plus").status_code == 200
+    assert _checkout(_cliente(a, 3), plan="plus", interval="annual").status_code == 200
     k = fake.last_session_kwargs
     assert k["metadata"]["rm_desc"] == "40" and k["metadata"]["rm_etapa"] == "3"   # 20 do link < 40
+    assert _checkout(_cliente(a, 3), plan="plus", interval="monthly").status_code == 200
+    assert fake.last_session_kwargs["metadata"]["rm_desc"] == "20"                   # mensal: só o do link
     assert _checkout(_cliente(a, 3), plan="essencial").status_code == 200
     assert fake.last_session_kwargs["metadata"]["rm_desc"] == "20"                   # Essencial mantém o do link
 
@@ -176,7 +261,7 @@ def test_link_na_janela_vale_o_maior_e_assinante_ativo_leva_409(monkeypatch):
     db.set_stripe_customer(b, "cus_ja_assina")
     fake.Subscription = type("S", (), {"list": staticmethod(lambda **kw: {"data": [{"id": "sub", "schedule": None}]})})
     n = fake.session_create_calls
-    r = _checkout(_cliente(auth=b), plan="plus")
+    r = _checkout(_cliente(auth=b), plan="plus", interval="annual")
     assert r.status_code == 409 and r.json()["detail"]["error"] == "already_subscribed"
     assert fake.session_create_calls == n
 
@@ -233,7 +318,8 @@ def test_pix_upgrade_com_credito_sobre_o_valor_pago(monkeypatch, vendavel, asaas
     _marcar_paga(a, plus["public_token"], dias=-1)
     up = _comprar(a, "pro_max")
     linha = _linhas(a)[-1]
-    assert linha["credit_cents"] > 0 and linha["amount_cents"] == 29940 - linha["credit_cents"] == up["amount_cents"]
+    # quem já paga o anual é assinante: o upgrade sai a preço CHEIO (a campanha é só para quem não assina)
+    assert linha["credit_cents"] > 0 and linha["amount_cents"] == 49900 - linha["credit_cents"] == up["amount_cents"]
 
 
 def test_pix_rota_com_retomada_na_janela_vale_o_maior(monkeypatch, vendavel, asaas_falso):

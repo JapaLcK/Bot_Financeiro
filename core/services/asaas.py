@@ -298,3 +298,24 @@ def obter_qr_pix(asaas_payment_id: str) -> dict:
             status_code=None,
         )
     return dados
+
+
+def listar_estornados(limite: int = 100) -> list[dict]:
+    """`GET /v3/payments?status=REFUNDED`, todas as páginas — a fonte 2 de
+    `scripts/pix_estornos_pendentes.py` (#1437): o estorno cujo evento já saiu da outbox.
+
+    O filtro `status=REFUNDED` e a paginação (`offset`, `hasMore`) seguem a documentação do Asaas e
+    ainda não foram conferidos no sandbox. Forma inesperada levanta, mesma regra do
+    `buscar_por_external_reference`: lista incompleta não pode virar "não há estorno".
+    """
+    todos: list[dict] = []
+    while True:
+        dados = _request("GET", "/v3/payments", contexto="Falha ao listar estornos no Asaas",
+                         params={"status": "REFUNDED", "offset": len(todos), "limit": limite})
+        lista = dados.get("data") if isinstance(dados, dict) else None
+        if (not isinstance(lista, list) or not isinstance(dados.get("hasMore"), bool)
+                or (dados["hasMore"] and not lista)):
+            raise AsaasApiError("Listagem de estornos do Asaas com forma inesperada", status_code=None)
+        todos += lista
+        if not dados["hasMore"]:
+            return todos

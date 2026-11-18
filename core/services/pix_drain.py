@@ -29,11 +29,11 @@ lista na retentativa).
     `AWAITING_CHARGEBACK_REVERSAL` (que significa que NÓS GANHAMOS) não podia
     mesmo continuar revogando o acesso do cliente. Quem revoga quando perdemos é
     o `PAYMENT_REFUNDED` que chega depois. **Nome novo cai em desconhecido**;
-  * **dinheiro devolvido não é reconcedido** — com `(payment_id, 'revoke')` já
-    registrado, os efeitos de COMPRA não rodam. É a regra "quem concede é o
-    pagamento, nunca o estorno" lida do outro lado, para o estorno TOTAL que
-    chega antes do `RECEIVED`. Usa só `pix_payment_effects`, que **nunca é
-    purgada** — a única autoridade que sobrevive a uma morte no meio.
+  * **dinheiro devolvido não é reconcedido** — com o marcador de `db/pix_estornos.py`
+    (gravado na RECEPÇÃO do `PAYMENT_REFUNDED`, #1437) ou `revoke` registrado,
+    os efeitos de COMPRA não rodam, nem com o `revoke` falhando. É "quem concede é
+    o pagamento, nunca o estorno" lido do outro lado. `pix_payment_effects` e o marcador
+    **nunca são purgados** — a única autoridade que sobrevive a uma morte no meio.
 
 ## Onde o `processed_at` é escrito, e por que FORA da reserva
 
@@ -50,7 +50,6 @@ inofensiva: outra passada refaz o trabalho e cada efeito é pulado pelo registro
 from __future__ import annotations
 
 import json
-import re
 
 from psycopg import errors
 
@@ -69,13 +68,9 @@ from db.pix_charges import (
 )
 from db.pix_charges_saga import registrar_nao_casado
 from db.pix_effects import efeito_registrado, lock_efeito, registrar_efeito
+from db.pix_estornos import REFERENCIA_NOSSA, estorno_no_dreno, estorno_registrado
 from db.pix_pausa import FALHA_PAUSA, falha_de
 from db.webhook_outbox import marcar_processado, registrar_falha, reservar_evento
-
-# `ponytail:` regex fixa, não env — o formato é escrito por nós, num lugar só
-# (`criar_cobranca`). É ele que separa o nosso dinheiro do Pix avulso que a
-# conta do NEGÓCIO também recebe (§11, correção 5).
-REFERENCIA_NOSSA = re.compile(r"^pix:[0-9]+$")
 
 # `ebook` logo depois do `grant`: pendência dos cadernos da foto, no-op sem cadernos.
 # `afiliado` por último: a falha dele vira retentativa sem segurar grant nem e-mail.
@@ -208,10 +203,12 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
     if cobranca["user_id"] is None:
         return _orfao(event_id, cobranca, destino, origens, payment_id, int(evt["attempts"] or 0))
 
-    # D3 — dinheiro devolvido não é reconcedido. Vale só para efeito de COMPRA:
-    # o `revoke` de um estorno que chegue depois continua rodando.
+    if evt["event_type"] == "PAYMENT_REFUNDED":  # #1437: marcador `nosso`; não paga vai a `canceled`
+        cobranca = estorno_no_dreno(cobranca, payment_id, event_id)
+    # D3 — dinheiro devolvido não é reconcedido: o estorno CHEGOU, não "o `revoke` rodou".
+    # Vale só para efeito de COMPRA: o `revoke` de um estorno que chegue depois continua rodando.
     if set(efeitos) & set(EFEITOS_DE_COMPRA):
-        if efeito_registrado(payment_id, "revoke"):
+        if estorno_registrado(payment_id):
             log_system_event_sync(
                 "warning", "pix_received_apos_estorno",
                 "Pagamento confirmado depois de estorno ja registrado — nenhum "
@@ -242,6 +239,8 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
         with lock_efeito(payment_id, "grant" if efeito == "revoke" else efeito):  # estorno espera o grant em voo
             if efeito not in _REPETEM and efeito_registrado(payment_id, efeito):
                 continue
+            if efeito in EFEITOS_DE_COMPRA and estorno_registrado(payment_id):
+                return None  # #1437: o estorno chegou depois da D3; relido sob a trava, antes de cada efeito
             if efeito in ("grant", "afiliado") and (veto := (veto_grant if efeito == "grant" else veto_afiliado)(payment_id))[0]:
                 return veto[1]  # #1267: UNDONE/estorno ganhou a corrida (relido sob o lock)
             try:
@@ -339,7 +338,7 @@ def _transicionar(cobranca, origens, destino, payment_id):
     janela: dict = {}
     if destino == "paid":
         inicio, fim = janela_de_acesso(cobranca)
-        janela = {"access_starts_at": inicio, "access_expires_at": fim}
+        janela = {"access_starts_at": inicio, "access_expires_at": fim, "sem_estorno": True}  # #1437
     try:
         nova = transicionar(cobranca["id"], de=origens, para=destino,
                             asaas_payment_id=payment_id,

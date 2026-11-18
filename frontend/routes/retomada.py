@@ -108,18 +108,22 @@ async def desconto_pix(etapa, user_id: int):
 
 
 def _precos_tela(pct_link: int | None) -> dict:
-    """Por tier público COM desconto: `{pct, monthly, annual, pix}` em centavos. O % é o efetivo
-    (link e campanha: o maior); tier sem desconto fica de fora, e a tela não mexe nele."""
+    """Por tier público COM desconto: `{pct, pct_mensal, monthly, annual, pix, na_hora}` em centavos. O %
+    é o efetivo POR CICLO (link e campanha: o maior; a campanha só no anual, então `monthly`/`pct_mensal`
+    são None quando só ela vale). `na_hora` = anual da campanha, sem trial. Tier sem desconto fica de
+    fora, e a tela não mexe nele."""
     from core.services.pix_pricing import PRECOS_ANUAIS_CENTS  # noqa: PLC0415
     from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
 
     precos = {}
     for tier, mensal in tokens.PRECOS_MENSAIS_CENTS.items():
         stored = TIER_TO_STORED_PLAN[tier]
-        pct = camp.pct_da_oferta(stored, pct_link)
-        if pct:
-            anual = tokens.com_desconto(PRECOS_ANUAIS_CENTS[stored], pct)
-            precos[tier] = {"pct": pct, "monthly": tokens.com_desconto(mensal, pct), "annual": anual, "pix": anual}
+        pa = camp.pct_da_oferta(stored, pct_link, interval="annual")
+        pm = camp.pct_da_oferta(stored, pct_link, interval="monthly")
+        if pa:
+            anual = tokens.com_desconto(PRECOS_ANUAIS_CENTS[stored], pa)
+            precos[tier] = {"pct": pa, "pct_mensal": pm, "monthly": tokens.com_desconto(mensal, pm) if pm else None,
+                            "annual": anual, "pix": anual, "na_hora": camp.campanha_vale(stored, "annual")}
     return precos
 
 
@@ -148,34 +152,31 @@ def _brl(cents: int) -> str:
     return _fmt_brl(cents / 100).replace(",00", "")
 
 
+_DIAS = ("segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo")
+
+
 def campanha_config() -> dict | None:
-    """Para o `plans-config`: None fora da janela; dentro, a oferta de campanha (Plus e Pro) com
+    """Para o `plans-config`: None fora da janela; dentro, a oferta de campanha (anual de Plus e Pro) com
     TODO texto já formatado. Não depende de cookie; a tela decide quem vê (assinante não)."""
-    if not camp.campanha_pct():
+    if camp.campanha_estado() != "oferta":
         return None
     from core.services.pix_pricing import PRECOS_ANUAIS_CENTS  # noqa: PLC0415
     from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
 
-    pct = camp.CAMPANHA_PCT
     fim = camp.CAMPANHA_FIM - timedelta(days=1)
     ate = f"só até {fim.day} de {MESES[fim.month - 1]}"
     precos = _precos_tela(None)
     textos = {}
     for tier, p in precos.items():
         nome, cheio_a = tier.capitalize(), PRECOS_ANUAIS_CENTS[TIER_TO_STORED_PLAN[tier]]
-        cheio_m = tokens.PRECOS_MENSAIS_CENTS[tier]
         textos[tier] = {
-            "mensal": _brl(p["monthly"]), "anual": _brl(p["annual"]), "anual_mes": _brl(p["annual"] // 12),
-            "linha_mensal": f"1º mês por {_brl(p['monthly'])}, depois {_brl(cheio_m)} por mês",
+            "anual": _brl(p["annual"]), "anual_mes": _brl(p["annual"] // 12),
             "linha_anual": f"{_brl(p['annual'])} no 1º ano, depois {_brl(cheio_a)} por ano",
-            "frase_anual": f"12 meses de {nome} pelo preço de 6, {_brl(p['annual'])} no plano anual, {ate}.",
-            "frase_mensal": f"1º mês do {nome} por {_brl(p['monthly'])}, depois {_brl(cheio_m)} por mês. "
-                            f"Só até {fim.day} de {MESES[fim.month - 1]}."}
+            "frase_anual": f"12 meses de {nome} pelo preço de 6, {_brl(p['annual'])} no plano anual, {ate}."}
     return {
-        "desconto_pct": pct, "trial": False, "precos": precos, "textos": textos,
-        "frase": f"Black Friday: {pct}% OFF nos planos Plus e Pro, anual a partir de "
-                 f"{_brl(precos['plus']['annual'])}, {ate}.",
-        "frase_assinante": f"Black Friday: o anual no Pix sai com {pct}% OFF nos planos Plus e Pro, {ate}."}
+        "desconto_pct": camp.CAMPANHA_PCT, "trial": False, "precos": precos, "textos": textos,
+        "faixa": f"Black Friday do PigBank. 12 meses de Plus pelo preço de 6, só até "
+                 f"{_DIAS[fim.weekday()]}, {fim.day}/{fim.month:02d}."}
 
 
 def _precos(request: Request) -> str:

@@ -88,7 +88,7 @@ import pytest
 # nasceram das divisões de tamanho do C6/C7 — o segundo é por onde o CPF passa.
 MODULOS_INERTES = ("core.services.asaas", "core.services.asaas_customers",
                    "db.pix_charges", "db.pix_charges_saga",
-                   "db.webhook_outbox", "db.pix_effects", "db.pix_extras")
+                   "db.webhook_outbox", "db.pix_effects", "db.pix_extras", "db.pix_estornos")
 
 # Allowlist do portão de IMPORT: caminhos (POSIX) que PODEM importar os módulos
 # acima. É um conjunto de caminhos, não um mapa — quem importa o quê fica no
@@ -130,6 +130,10 @@ CHAMADORES_PERMITIDOS: frozenset[str] = frozenset({
     "core/services/asaas_customers.py",
     "db/pix_charges_saga.py",
     "db/webhook_outbox.py",
+    "db/pix_charges.py",                   # #1437: a transição para `paid` lê `ESTORNO_SQL` de `pix_estornos`
+    "db/pix_estornos.py",                  # #1437: o dreno do estorno cancela a cobrança não paga (`transicionar`)
+    # #1437: grava o marcador que faltou e drena os estornos abertos (passo 4 do roteiro do deploy).
+    "scripts/pix_estornos_pendentes.py",
 })
 
 
@@ -337,6 +341,8 @@ def test_pix_pricing_so_e_importado_pelo_checkout_e_pela_rota():
         # a retomada (remarketing 6b) lê só `PRECOS_ANUAIS_CENTS` para mostrar o preço
         # com desconto; não emite cobrança. É o 2º leitor: o gatilho acima vale (issue própria).
         "frontend/routes/retomada.py",
+        # o e-mail da Black Friday lê só `PRECOS_ANUAIS_CENTS` para a copy do preço; não emite cobrança
+        "core/services/remarketing_emails.py",
         # o efeito `afiliado` do próprio dreno do Pix lê `MESES_DO_PIX`, o divisor da comissão;
         # não emite cobrança
         "core/services/afiliado_pix.py",

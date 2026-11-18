@@ -181,7 +181,7 @@ NAO_EXPORTADAS: dict[str, str] = {
         "recurring_income_credits", "recurring_suggestion_dismissed", "bill_instances", "pocket_lots",
         "user_categories", "financial_spaces", "household_budget_config", "household_budget_income",
         "budget_alert_sent", "open_finance_item_registry", "prospect_referrals", "plan_grants", "plan_trials",
-        "checkout_funnel_events", "remarketing_envios", "remarketing_regua", "reconquista_trial",
+        "checkout_funnel_events", "remarketing_envios", "remarketing_regua", "remarketing_bf", "reconquista_trial",
         "audit_events", "auth_identities", "auth_sessions", "push_tokens", "user_mfa",
         "pii_access_log",  # P2: sai agregado
         # P1: cada pessoa recebe só a própria participação

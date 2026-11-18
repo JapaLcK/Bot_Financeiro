@@ -1,5 +1,8 @@
 /**
  * Black Friday (plans-config `campanha`, textos prontos do servidor) em /precos, / e /assinar.
+ * Mudou de propósito (PDF da Blue Ocean): a oferta é SÓ do anual de Plus e Pro. O mensal fica como está, a faixa
+ * traz o link "Ver a oferta" para /black-friday, o assinante não vê oferta nenhuma (nem a frase do Pix) e a /assinar
+ * só mostra a frase do anual.
  * Controles (2026-11-06): sem a chamada `aplicarDescontoRetomada(campanha)` da /precos, sem o `campanha()` do
  * oferta.js ou sem o `oferta()` do assinar.js, os testes "com campanha" ficam vermelhos; positivos: Essencial
  * intacto, assinante sem preço de oferta, sem `campanha` nada muda.
@@ -47,15 +50,21 @@ async function precos(opts) {
 for (const [nome, viewport] of VP) {
   test(`/precos com campanha (${nome}): faixa, Plus e Pro com 40%, Essencial intacto, tabela pintada`, async () => {
     const { ctx, page } = await precos({ viewport });
-    assert.equal(n(await page.locator("#oferta-faixa").innerText()), CAMP.frase);
+    assert.equal(n(await page.locator("#oferta-faixa").innerText()), CAMP.faixa + " Ver a oferta");
+    assert.equal(await page.locator("#oferta-faixa a").getAttribute("href"), "/black-friday");
     const cards = page.locator("#plans-v2 article.plan");
-    for (const [i, cheio] of [[1, "R$ 19,90"], [2, "R$ 49,90"]]) {
-      const m = cards.nth(i).locator("[data-price-monthly]");
-      assert.equal(await m.locator(".rm-selo").innerText(), "40% OFF");
-      assert.equal(n(await m.locator("s.rm-cheio").innerText()), cheio);
+    for (let i = 0; i < 3; i++) {   // o mensal fica como está: nenhum selo, nenhum preço riscado
+      assert.equal(await cards.nth(i).locator("[data-price-monthly] .rm-selo, [data-price-monthly] s.rm-cheio").count(), 0, `mensal do card ${i}`);
     }
-    assert.match(n(await cards.nth(1).locator("[data-price-monthly]").innerText()), /R\$ 11,94\s*\/mês/);
-    assert.equal(n(await cards.nth(1).locator(".price-cycle-copy").innerText()), "40% OFF na 1ª cobrança, depois R$ 19,90");
+    assert.match(n(await cards.nth(1).locator("[data-price-monthly]").innerText()), /R\$ 19,90\s*\/mês/);
+    await page.click("#cycle-annual");
+    for (const [i, cheio] of [[1, "R$ 199"], [2, "R$ 499"]]) {
+      const a = cards.nth(i).locator("[data-price-annual]").first();
+      assert.equal(await a.locator(".rm-selo").innerText(), "40% OFF");
+      assert.equal(n(await a.locator("s.rm-cheio").innerText()), cheio);
+    }
+    assert.equal(n(await cards.nth(1).locator(".price-cycle-copy").innerText()), "40% OFF na 1ª cobrança, depois R$ 199");   // sem "dias grátis": cobra na hora
+    await page.click("#cycle-annual");   // volta ao mensal
     const ess = cards.nth(0);
     assert.equal(await ess.locator(".rm-selo, .rm-cheio").count(), 0);
     assert.equal(await ess.evaluate((e) => e.classList.contains("rm-on")), false);
@@ -65,7 +74,8 @@ for (const [nome, viewport] of VP) {
     assert.equal(n(await cards.nth(2).locator("[data-price-annual]").first().innerText()).includes("R$ 299,40"), true);
     const tab = (t, a) => page.locator(`#cmp-v2 [data-plano="${t}"] [data-price-${a}]`).first().textContent().then(n);
     assert.match(await tab("plus", "annual"), /R\$ 119,40/);
-    assert.match(await tab("pro", "monthly"), /R\$ 29,94/);
+    assert.match(await tab("pro", "monthly"), /R\$ 49,90/);
+    assert.doesNotMatch(await tab("pro", "monthly"), /OFF|29,94/);
     assert.doesNotMatch(await tab("essencial", "annual"), /OFF|119/);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "overflow horizontal");
     await page.screenshot({ path: `${process.env.TMPDIR || "/tmp"}/campanha-precos-${nome}.png`, fullPage: false });
@@ -73,9 +83,40 @@ for (const [nome, viewport] of VP) {
   });
 }
 
+// Exceção do trial: o anual da campanha é cobrado na hora; vale em qualquer ordem entre a faixa e o /auth/me.
+// Controle: sem `excecaoTrialBF()` no precos.html os casos "com campanha" ficam vermelhos; o sem campanha é o positivo.
+const EXC = /Exceção: o anual do Plus e do Pro na Black Friday é cobrado na hora, sem período grátis; nos outros planos, os 7 dias continuam/;
+const textos = (page) => page.evaluate(() => ["precos-sub", "plans-note-v2"].map((i) => document.getElementById(i).textContent.replace(/\s+/g, " ")));
+for (const [ordem, opts] of [["faixa antes do /auth/me", { atrasoMe: 800 }], ["/auth/me antes da faixa", { atrasoSub: 800 }]]) {
+  test(`/precos com campanha, logado sem plano (${ordem}): os dois textos trazem a exceção do anual`, async () => {
+    const ctx = await ctxCom({ viewport: VP[0][1], atrasoSub: opts.atrasoSub });
+    await ctx.route("**/auth/me", async (r) => { await new Promise((ok) => setTimeout(ok, opts.atrasoMe || 0));
+      return json(r, { user_id: 7, needs_plan_selection: true, app_access: false }); });
+    const page = await ctx.newPage();
+    await page.goto(`${ORIGIN}/precos.html`);
+    await page.waitForSelector("#plans-v2 .plan");
+    await page.waitForTimeout(2000);
+    const [sub, nota] = await textos(page);
+    assert.match(sub, /Escolha um plano pra continuar: 7 dias grátis/);   // a perna needs_plan_selection rodou
+    for (const t of [sub, nota]) { assert.match(t, EXC); assert.equal(t.match(/Exceção/g).length, 1); }
+    await ctx.close();
+  });
+}
+test("/precos com campanha, deslogado: exceção nos dois textos; sem campanha: só o trial, sem exceção", async () => {
+  let { ctx, page } = await precos({ viewport: VP[0][1] });
+  for (const t of await textos(page)) assert.match(t, EXC);
+  await ctx.close();
+  ({ ctx, page } = await precos({ campanha: null, viewport: VP[0][1] }));
+  const [sub, nota] = await textos(page);
+  assert.match(sub, /7 dias grátis no cartão/); assert.match(nota, /7 dias grátis pra testar/);
+  for (const t of [sub, nota]) assert.doesNotMatch(t, /Exceção/);
+  await ctx.close();
+});
+
 // Link de retomada + campanha: preço pintado pelo link (maior %), faixa da campanha, um selo por card.
 const LINK = { email: "l•••@dominio.com", desconto_pct: 40, trial: true, precos: {
-  essencial: { pct: 20, monthly: 792, annual: 7920, pix: 7920 }, plus: CAMP.precos.plus, pro: CAMP.precos.pro } };
+  essencial: { pct: 20, pct_mensal: 20, monthly: 792, annual: 7920, pix: 7920, na_hora: false },
+  plus: { ...CAMP.precos.plus, pct_mensal: 20, monthly: 1592 }, pro: { ...CAMP.precos.pro, pct_mensal: 20, monthly: 3992 } } };
 async function precosLink(campanha) {
   const ctx = await ctxCom({ campanha, viewport: VP[0][1] });
   await ctx.route("**/billing/plans-config", (r) => json(r, { ...CFG(campanha), retomada: LINK }));
@@ -86,15 +127,17 @@ async function precosLink(campanha) {
   await page.waitForTimeout(500);
   return { ctx, page };
 }
-test("/precos pelo link + campanha: faixa geral, um selo por card, Essencial com o % do link", async () => {
+test("/precos pelo link + campanha: faixa geral, um selo por card e ciclo, o mensal com o % do link", async () => {
   const { ctx, page } = await precosLink(CAMP);
-  assert.equal(n(await page.locator("#oferta-faixa").innerText()), CAMP.frase);
+  assert.equal(n(await page.locator("#oferta-faixa").innerText()), CAMP.faixa + " Ver a oferta");
   assert.ok(await page.locator("#oferta-faixa").isVisible());
   const cards = page.locator("#plans-v2 article.plan");
-  for (const [i, pct] of [[0, "20% OFF"], [1, "40% OFF"], [2, "40% OFF"]]) {
-    const m = cards.nth(i).locator("[data-price-monthly]");
-    assert.equal(await m.locator(".rm-selo").count(), 1, `selo duplicado no card ${i}`);
-    assert.equal(await m.locator(".rm-selo").innerText(), pct);
+  for (const [ciclo, pcts] of [["monthly", ["20% OFF", "20% OFF", "20% OFF"]], ["annual", ["20% OFF", "40% OFF", "40% OFF"]]]) {
+    for (const [i, pct] of pcts.entries()) {
+      const m = cards.nth(i).locator(`[data-price-${ciclo}]`).first();
+      assert.equal(await m.locator(".rm-selo").count(), 1, `selo duplicado no card ${i} (${ciclo})`);
+      assert.equal(await m.locator(".rm-selo").innerText(), pct);
+    }
   }
   await ctx.close();
 });
@@ -115,7 +158,8 @@ test("/precos: coluna da tabela no anual mostra o equivalente com desconto, nos 
   for (const t of [plus, pro]) assert.doesNotMatch(t, /16,58|41,58/);
   await page.click("#cycle-annual");   // volta ao mensal
   assert.doesNotMatch(await col("plus"), /Equivale/);
-  assert.match(await col("plus"), /R\$ 11,94/);
+  assert.match(await col("plus"), /R\$ 19,90/);
+  assert.doesNotMatch(await col("plus"), /11,94|OFF/);
   await page.click("#cycle-annual");
   assert.match(await col("plus"), /Equivale a R\$ 9,95\/mês/);
   await ctx.close();
@@ -130,9 +174,9 @@ test("/precos: ilha React atrasada, a tabela e os cards ainda saem pintados", as
   await ctx.close();
 });
 
-test("/precos: assinante ativo só vê a frase do Pix, sem preço de oferta", async () => {
+test("/precos: assinante ativo não vê oferta nenhuma (nem faixa, nem a frase do Pix)", async () => {
   const { ctx, page } = await precos({ viewport: VP[0][1], assinante: true });
-  assert.equal(n(await page.locator("#oferta-faixa").innerText()), CAMP.frase_assinante);
+  assert.equal(await page.locator("#oferta-faixa").isVisible(), false);
   assert.equal(await page.locator(".rm-selo, .rm-cheio, .rm-on").count(), 0);
   assert.equal(await page.locator('#cmp-v2 [data-plano="plus"] s').count(), 0);
   await ctx.close();
@@ -160,7 +204,8 @@ const visivel = (page, t, sel) => card(page, t).locator(sel).filter({ visible: t
 for (const [nome, viewport] of VP) {
   test(`/ com campanha (${nome}): faixa, Plus e Pro trocados, abre em Anual, Essencial intacto`, async () => {
     const { ctx, page } = await home({ viewport });
-    assert.equal(n(await page.locator("#oferta-faixa").innerText()), CAMP.frase);
+    assert.equal(n(await page.locator("#oferta-faixa").innerText()), CAMP.faixa + " Ver a oferta");
+    assert.equal(await page.locator("#oferta-faixa a").getAttribute("href"), "/black-friday");
     assert.equal(await page.locator("#planos").getAttribute("data-ciclo"), "anual");
     assert.equal(await visivel(page, "plus", "span.pb-d[class*=so-]"), "R$ 9,95");
     assert.equal(await visivel(page, "plus", "span.so-anual:not(.pb-d)"), "R$ 119,40 no 1º ano, depois R$ 199 por ano");
@@ -168,9 +213,9 @@ for (const [nome, viewport] of VP) {
     assert.equal(await visivel(page, "pro", "span.so-anual:not(.pb-d)"), "R$ 299,40 no 1º ano, depois R$ 499 por ano");
     assert.equal(await visivel(page, "essencial", "span.so-anual:not(.pb-d)"), "R$ 99 por ano · 2 meses grátis");
     await page.locator("#planos [data-set=mensal]").click();
-    assert.equal(await visivel(page, "plus", "span.pb-d[class*=so-]"), "R$ 11,94");
-    assert.equal(await visivel(page, "plus", "span.so-mensal:not(.pb-d)"), "1º mês por R$ 11,94, depois R$ 19,90 por mês");
-    assert.equal(await visivel(page, "pro", "span.so-mensal:not(.pb-d)"), "1º mês por R$ 29,94, depois R$ 49,90 por mês");
+    assert.equal(await visivel(page, "plus", "span.pb-d[class*=so-]"), "R$ 19,90");   // o mensal não tem oferta
+    assert.equal(await visivel(page, "pro", "span.pb-d[class*=so-]"), "R$ 49,90");
+    assert.doesNotMatch(await visivel(page, "plus", "span.so-mensal:not(.pb-d)"), /1º mês|11,94/);
     assert.equal(await visivel(page, "essencial", "span.pb-d[class*=so-]"), "R$ 9,90");
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "overflow horizontal");
     await page.screenshot({ path: `${process.env.TMPDIR || "/tmp"}/campanha-home-${nome}.png` });
@@ -200,12 +245,15 @@ test("/ sem campanha: como hoje", async () => {
 
 const API = { "GET /billing/plans-config": [200, CFG(CAMP)] };
 for (const [plano, ciclo, esperado] of [
-  ["plus", "annual", CAMP.textos.plus.frase_anual], ["pro", "monthly", CAMP.textos.pro.frase_mensal]]) {
-  test(`/assinar ${plano} ${ciclo}: a frase da campanha no S1`, async () => {
+  ["plus", "annual", CAMP.textos.plus.frase_anual], ["pro", "annual", CAMP.textos.pro.frase_anual], ["pro", "monthly", null]]) {
+  test(`/assinar ${plano} ${ciclo}: ${esperado ? "a frase da campanha" : "nenhuma frase (o mensal não tem oferta)"} no S1`, async () => {
     const { ctx, page } = await abrirAssinar(browser, { query: `?plano=${plano}&ciclo=${ciclo}`, api: API });
     await tela(page, "s1");
-    await page.waitForFunction(() => !document.getElementById("s1-oferta").hidden);
-    assert.equal(n(await page.locator("#s1-oferta").innerText()), esperado);
+    await page.waitForTimeout(300);
+    if (esperado) {
+      await page.waitForFunction(() => !document.getElementById("s1-oferta").hidden);
+      assert.equal(n(await page.locator("#s1-oferta").innerText()), esperado);
+    } else assert.equal(await page.locator("#s1-oferta").isVisible(), false);
     await ctx.close();
   });
 }
@@ -220,6 +268,30 @@ test("/assinar plus annual, logado com outro e-mail: S1 com a frase da campanha"
   await ctx.close();
 });
 
+// O S1 da campanha não promete os 7 dias grátis (cobrança na hora); fora dela o texto do trial segue.
+for (const [plano, ciclo, campanha] of [["plus", "annual", true], ["pro", "annual", true], ["pro", "monthly", false], ["essencial", "annual", false]]) {
+  for (const [nome, viewport] of VP) {
+    test(`/assinar ${plano} ${ciclo} (${nome}): S1 ${campanha ? "sem" : "com"} 7 dias grátis`, async () => {
+      const { ctx, page } = await abrirAssinar(browser, { query: `?plano=${plano}&ciclo=${ciclo}`, api: API });
+      await page.setViewportSize(viewport);
+      await tela(page, "s1");
+      await page.waitForTimeout(300);
+      const s1 = n(await page.locator("#s1").innerText());
+      if (campanha) {
+        assert.match(n(await page.locator("#s1-titulo").innerText()), /anual com 40% de desconto/);
+        assert.match(n(await page.locator("#s1-sub").innerText()), /cobrança é feita na hora/);
+        assert.doesNotMatch(s1, /7 dias grátis|Teste grátis|nada/);
+      } else {
+        assert.match(n(await page.locator("#s1-titulo").innerText()), /^Seus 7 dias grátis do \w+ começam aqui$/);
+        assert.match(n(await page.locator("#s1-sub").innerText()), /Hoje você não paga nada/);
+        assert.match(n(await page.locator("#s1-hint").innerText()), /^Teste grátis disponível/);
+      }
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "overflow horizontal");
+      await ctx.close();
+    });
+  }
+}
+
 test("/assinar Essencial: nenhuma frase", async () => {
   const { ctx, page } = await abrirAssinar(browser, { query: "?plano=essencial&ciclo=annual", api: API });
   await tela(page, "s1");
@@ -230,7 +302,7 @@ test("/assinar Essencial: nenhuma frase", async () => {
 
 // S4 (logado, o checkout embutido): a mesma frase, com e sem teste grátis; Essencial sem frase.
 for (const [plano, ciclo, trial, esperado] of [
-  ["plus", "annual", 7, CAMP.textos.plus.frase_anual], ["pro", "monthly", 0, CAMP.textos.pro.frase_mensal],
+  ["plus", "annual", 0, CAMP.textos.plus.frase_anual], ["pro", "monthly", 7, null],
   ["essencial", "annual", 7, null]]) {
   test(`/assinar ${plano} ${ciclo} trial ${trial}: a frase da campanha no S4`, async () => {
     const { ctx, page } = await abrirAssinar(browser, { query: `?plano=${plano}&ciclo=${ciclo}`,
@@ -258,3 +330,21 @@ for (const [rotulo, sub, pinta] of [["degraded", { active: false, degraded: true
     await ctx.close();
   });
 }
+
+// Exceção do trial na home: garantia, FAQ e fecho prometem os 7 dias; com a faixa, cada um ganha a exceção (uma vez).
+// Controle: sem o `PBExcecaoTrialBF("[data-trial]")` do oferta.js o caso "com campanha" fica vermelho; sem campanha e assinante são o positivo.
+test("/ com campanha: garantia, FAQ e fecho trazem a exceção; sem campanha e assinante, só o trial", async () => {
+  const textosHome = (page) => page.evaluate(() => [...document.querySelectorAll("[data-trial]")].map((e) => e.textContent.replace(/\s+/g, " ")));
+  let { ctx, page } = await home({ viewport: VP[0][1] });
+  let ts = await textosHome(page);
+  assert.equal(ts.length, 3);
+  for (const t of ts) { assert.match(t, EXC); assert.equal(t.match(/Exceção/g).length, 1); }
+  await ctx.close();
+  for (const opts of [{ campanha: null }, { assinante: true }]) {
+    ({ ctx, page } = await home({ viewport: VP[0][1], ...opts }));
+    ts = await textosHome(page);
+    assert.equal(ts.length, 3);
+    for (const t of ts) { assert.match(t, /7 dias/); assert.doesNotMatch(t, /Exceção/); }
+    await ctx.close();
+  }
+});

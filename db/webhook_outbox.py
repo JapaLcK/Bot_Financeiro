@@ -40,6 +40,7 @@ from core.crypto import encrypt_pii_optional
 from .connection import get_conn
 from .pix_effects import conexao_da_reserva
 from .pix_pausa import FALHA_PAUSA
+from .pix_estornos import marcar_estorno
 
 # Retenção da outbox (§13.1/§13.3): 7 dias de `received_at`, processado ou não, salvo o que a pausa
 # do Pix segura (`pix_pausa_guarda`: a pausa mais 7 dias). Mora aqui, e não em `db/pix_charges.py`,
@@ -126,33 +127,30 @@ def minimizar(corpo: dict) -> dict:
     }
 
 
-def registrar_evento(event_id: str, event_type: str, corpo: dict,
-                     event_version: int) -> bool:
+def registrar_evento(event_id: str, event_type: str, corpo: dict, event_version: int) -> bool:
     """Grava o evento na outbox. Devolve **True** se a linha é nova, **False** na duplicata.
 
-    É o `insert … on conflict (event_id) do nothing returning` do §8.1: o Asaas reentrega,
-    e o 200 da duplicata não pode custar trabalho nenhum. O `returning` vazio é a
-    resposta — não há `select` antes, que teria a corrida entre duas entregas simultâneas
-    do mesmo evento.
+    É o `insert … on conflict (event_id) do nothing returning` do §8.1: o Asaas reentrega, e o 200
+    da duplicata não pode custar trabalho nenhum. O `returning` vazio é a resposta — não há
+    `select` antes, que teria a corrida entre duas entregas simultâneas do mesmo evento.
 
-    O payload é **minimizado e depois cifrado** (§13.3). A ordem importa: cifrar primeiro
-    e minimizar depois guardaria o dado pessoal cifrado no banco, que é exatamente o que
-    a purga de 7 dias tenta desfazer.
+    O payload é **minimizado e depois cifrado** (§13.3): cifrar primeiro guardaria o dado
+    pessoal cifrado no banco, que é o que a purga de 7 dias tenta desfazer.
+
+    **O `PAYMENT_REFUNDED` grava o marcador `estorno_recebido` NA MESMA TRANSAÇÃO** (#1437,
+    `marcar_estorno`), também na duplicata: depois do 200 não há instante com o estorno aceito e
+    sem marcador. Se o marcador falha, a linha também não entra, e o Asaas reentrega.
     """
     payload_enc = encrypt_pii_optional(
         json.dumps(minimizar(corpo), ensure_ascii=False, sort_keys=True, default=str)
     )
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "insert into pix_webhook_events"
-                "  (event_id, event_type, payload_enc, event_version)"
-                " values (%s, %s, %s, %s)"
-                " on conflict (event_id) do nothing"
-                " returning event_id",
-                (event_id, event_type, payload_enc, int(event_version)),
-            )
+            cur.execute("insert into pix_webhook_events (event_id, event_type, payload_enc, event_version)"
+                        " values (%s, %s, %s, %s) on conflict (event_id) do nothing returning event_id",
+                        (event_id, event_type, payload_enc, int(event_version)))
             novo = cur.fetchone() is not None
+            marcar_estorno(event_type, corpo, event_id, cur)
         conn.commit()
     return novo
 
@@ -341,9 +339,9 @@ def eventos_pendentes(limite: int = 100) -> list[str]:
         with conn.cursor() as cur:
             cur.execute(
                 "select event_id from pix_webhook_events"
-                " where processed_at is null"
+                " where processed_at is null"  # #1437: o estorno antes, complemento da pausa (#1574)
                 " and not pix_pausa_retem(event_type)"  # compra pausada não ocupa o lote (db/pix_pausa.py)
-                " order by received_at asc limit %s",
+                " order by (event_type = 'PAYMENT_REFUNDED') desc, received_at asc limit %s",
                 (int(limite),),
             )
             return [r["event_id"] for r in cur.fetchall()]
