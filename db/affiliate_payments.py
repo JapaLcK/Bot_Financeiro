@@ -14,7 +14,7 @@ from datetime import datetime
 from .connection import get_conn
 
 
-# A chave da comissão do Pix é `pix:<id>`; o resto é fatura Stripe. Única fonte do lado que LÊ a chave da comissão (#1523); quem grava é `db/pix_charges.py`.
+# A chave da comissão do Pix é `pix:<id>`; o resto é fatura Stripe. Única fonte do lado que LÊ a chave da comissão (#1523); quem grava a chave é a cobrança Pix.
 PREFIXO_PIX = "pix:"
 _N = len(PREFIXO_PIX)
 # O filtro "não é Pix" (fatura Stripe), com o alias em `{c}`. Sem `%`, para servir em consulta com parâmetro.
