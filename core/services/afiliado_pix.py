@@ -35,11 +35,28 @@ def registrar(cobranca, evt) -> None:
     # Sem as tentativas da compra: gastas por outra falha, abririam `open/0` na 1ª falha do Asaas. A
     # compra retenta sozinha (só o `afiliado` falta) até o valor sair; a purga de 7 dias é o limite.
     rotular_reembolso(cobranca, cobranca["status"])
-    from db.affiliate_reviews import liberar_baixa_desfeita
+    soltar_baixa_desfeita(cobranca)
 
-    # Pix real depois da baixa desfeita: a revisão `open/0` do UNDONE se resolve sozinha. O dreno já barra
-    # estorno e baixa não desfeita antes de chegar aqui; sem revisão `open/0` da fatura é no-op.
-    liberar_baixa_desfeita(cobranca["external_reference"])
+
+def soltar_baixa_desfeita(cobranca) -> None:
+    """Pix real depois da baixa desfeita: a revisão `open/0` do UNDONE se resolve sozinha. `devolvido 0` não prova
+    a origem (o parcial de verdade também abre `open/0` com o Asaas fora), então só solta com o marcador
+    `baixa_desfeita` do pagamento, sem estorno registrado e com a cobrança `paid` AGORA, relida sob o lock do
+    parcial: o `marcar` concorrente espera aqui, ou já levou a cobrança a `refunded_partial`. Sem revisão
+    `open/0` da fatura é no-op. Também chamada pela `reconciliar_grant` (o `afiliado` registrado o RECEIVED pula)."""
+    from db.affiliate_reviews import liberar_baixa_desfeita
+    from db.pix_charges import buscar_por_asaas_payment_id
+    from db.pix_effects import efeito_registrado, lock_efeito
+    from db.pix_estornos import estorno_registrado
+
+    pid = cobranca["asaas_payment_id"]
+    if not pid:
+        return
+    with lock_efeito(pid, "afiliado_estorno_parcial"):
+        atual = buscar_por_asaas_payment_id(pid)
+        if (atual and atual["status"] in ("paid", "paid_orphan") and efeito_registrado(pid, "baixa_desfeita")
+                and not estorno_registrado(pid)):
+            liberar_baixa_desfeita(cobranca["external_reference"])
 
 
 def estornado_cents(payment_id: str) -> int:

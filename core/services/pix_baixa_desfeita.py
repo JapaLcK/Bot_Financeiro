@@ -83,6 +83,9 @@ def reconciliar_grant(cobranca, evt, payment_id: str) -> bool:
         if estado != "revoked":
             return False
         EXECUTORES["grant"](cobranca, evt)
+    # Morreu depois de `_segurar_comissao` e antes de `reabrir_baixa`: o `afiliado` do RECEIVED já está
+    # registrado e o dreno o pula, então é aqui que a revisão `open/0` do UNDONE se solta (#1616).
+    afiliado_pix.soltar_baixa_desfeita(cobranca)
     log.warning("pix: grant reconcedido (baixa desfeita, Pix real) cobranca=%s", cobranca["id"])
     _alertar(cobranca, "acesso reconcedido: o Pix real chegou antes da retentativa do UNDONE.")
     return True
