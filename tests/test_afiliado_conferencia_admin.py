@@ -868,3 +868,21 @@ def test_rejeitar_saque_devolve_a_marcada_com_a_marca(adm, fonte):
     assert (linha["status"], linha["payout_id"], linha["payment_check_pending"], linha["payment_check_marked_at"]) == (
         "pending", None, True, marca)
     assert _linha(adm, outra)["actions"] == {"reverse": None}
+
+
+@pytest.mark.parametrize("texto", [
+    "\u200b" * 20, "\x01" * 20, "\u2060\ufeff" * 10, "\u200b" * 5 + "abc", "\u200b \u2060 \ufeff\t\u200b" * 4 + "abc",
+    "\u3164" * 10, "\u2800" * 20, "\u0301" * 20, "\ufffc" * 10, "\U00013441" * 10,
+    "\u115f" * 10, "\uffa0" * 10, "\U0001d159" * 10, "\ufffd" * 10,
+])
+def test_justificativa_so_invisivel_recusada(texto):
+    with pytest.raises(ValueError):
+        servico.validar_justificativa(texto)
+
+
+@pytest.mark.parametrize("texto", [
+    "Reembolso confirmado após análise", "Ação revisada 👍🏽 ok", "abcdefgh 👨\u200d👩\u200d👧 ij",
+    "e\u0301" * 10,
+])
+def test_justificativa_visivel_aceita(texto):
+    assert servico.validar_justificativa(texto) == texto

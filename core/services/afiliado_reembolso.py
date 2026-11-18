@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
@@ -106,11 +107,16 @@ def reenviar_pendentes(limite: int = 20) -> int:
     return enviados
 
 
+_EM_BRANCO = frozenset("\u3164\uffa0\u115f\u1160\u2800\ufffc\U0001d159\ufffd\U00013441\U00013442")
+
+
 def validar_justificativa(valor) -> str:
     """Regra única das três ações do admin. O erro nunca ecoa o valor. Conta depois de limpar:
-    NUL e surrogate viram U+FFFD, que não é texto."""
+    NUL e surrogate viram U+FFFD, que não é texto. Conta só letra, número, pontuação e símbolo
+    (marcas combinantes e preenchimentos em branco como U+3164 e U+2800 não contam)."""
     texto = limpa_para_pg(valor).strip() if isinstance(valor, str) else ""
-    if len(texto.replace("\ufffd", "").strip()) < 10 or len(texto) > 500:
+    visiveis = sum(1 for c in texto if unicodedata.category(c)[0] in "LNPS" and c not in _EM_BRANCO)
+    if visiveis < 10 or len(texto) > 500:
         raise ValueError("Justificativa: de 10 a 500 caracteres.")
     return texto
 
