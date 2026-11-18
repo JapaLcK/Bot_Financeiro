@@ -1330,6 +1330,27 @@ def test_p24_ciclo_duplo_com_a_comissao_ja_paga_reabre_no_segundo_undone(externo
     assert _revisao(chave)["status"] == "resolved" and _acoes(chave).count("partial_approved") == 2
 
 
+def test_p24_segundo_undone_nao_reabre_a_recuperacao_decidida_pelo_admin(externo):
+    from db.affiliate_reviews import resolver_parcial
+
+    c = _afiliado()
+    ind, cobranca = _cara(c)
+    chave = cobranca["external_reference"]
+    _vence(_linha(ind.uid)["id"])
+    assert mark_payout_paid(request_payout(c.aff["id"])["id"])
+    entregar(UNDONE, cobranca)
+    rev = _revisao(chave)
+    assert resolver_parcial(rev["id"], "admin", 0, "baixa desfeita: recuperar tudo", rev["refunded_cents"])
+    antes = _revisao(chave)
+    assert antes["status"] == "recovery"
+    externo["get_status"] = "RECEIVED"
+    entregar("PAYMENT_RECEIVED", cobranca)  # recuperação não é `open`: o Pix real não a solta
+    assert _revisao(chave) == antes
+    externo["get_status"] = "PENDING"
+    entregar(UNDONE, cobranca)  # outra baixa desfeita: a decisão do admin fica
+    assert _revisao(chave) == antes
+
+
 def test_p24_baixa_desfeita_reentregue_nao_duplica_a_pendencia(externo, avisos):
     ind, cobranca = _cara(_afiliado())
     chave = cobranca["external_reference"]

@@ -153,8 +153,8 @@ def registrar_reembolso(fatura: str, tipo: str, devolvido_cents: int, quando, at
         a = cur.fetchone()
         if a is None or (a["tipo"] != "total" and (devolvido_cents > a["refunded_cents"]
                                                     or (desconhecido and a["status"] == "resolved"
-                                                     and ((c or _comissao_que_saiu(cur, a)) or {}).get("status")
-                                                     not in (None, "paid", "reversed") or not rotular))):
+                                                     and (((c or _comissao_que_saiu(cur, a)) or {}).get("status")
+                                                          not in (None, "paid", "reversed") or not rotular)))):
             if a is not None:
                 devolvido_cents = max(devolvido_cents, a["refunded_cents"])
             a = _aplicar(cur, fatura, a, c, tipo, devolvido_cents, quando, ator)
