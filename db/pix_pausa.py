@@ -15,7 +15,8 @@ estreito, recusam com o SQLSTATE `SQLSTATE_PAUSA` só:
 Estorno, revogação, Stripe e admin passam. O código novo nem lista nem reserva `PAYMENT_RECEIVED`/
 `CONFIRMED` com a pausa ativa (`pix_pausa_retem`, em `db/webhook_outbox.py`): o evento fica aberto, sem
 tentativa, e não ocupa o lote da varredura. Recusa do gatilho que ainda chegue ao código novo (dreno
-reservado antes da ativação, baixa desfeita que reconcede) vira `FALHA_PAUSA`, sem contar tentativa. A
+reservado antes da ativação, baixa desfeita que reconcede) vira `FALHA_PAUSA`, sem contar tentativa; o
+estorno parcial de cobrança ainda não paga também espera assim (`pix_drain`, #1600). A
 versão antiga bate no gatilho e conta uma tentativa por passada, só enquanto ela viver.
 
 O evento que a pausa segura não se perde na purga da outbox (`pix_pausa_guarda`): enquanto a pausa está
@@ -166,6 +167,11 @@ def ddl() -> list[str]:
         end $$
         """,
     ]
+
+
+def pausa_ativa() -> bool:
+    with get_conn() as conn:
+        return bool(conn.execute("select pix_pausa_ativa() as a").fetchone()["a"])
 
 
 def falha_de(exc: Exception) -> tuple[str, str | None]:

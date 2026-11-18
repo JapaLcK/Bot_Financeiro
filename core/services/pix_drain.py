@@ -69,7 +69,7 @@ from db.pix_charges import (
 from db.pix_charges_saga import registrar_nao_casado
 from db.pix_effects import efeito_registrado, lock_efeito, registrar_efeito
 from db.pix_estornos import REFERENCIA_NOSSA, estorno_no_dreno, estorno_registrado
-from db.pix_pausa import FALHA_PAUSA, falha_de
+from db.pix_pausa import FALHA_PAUSA, falha_de, pausa_ativa
 from db.webhook_outbox import marcar_processado, registrar_falha, reservar_evento
 
 # `ebook` logo depois do `grant`: pendência dos cadernos da foto, no-op sem cadernos.
@@ -178,6 +178,8 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
         )
         return None
     origens, destino, efeitos = rota
+    if evt["event_type"] == "PAYMENT_PARTIALLY_REFUNDED" and cobranca["status"] in _ORIGENS_DE_PAGAMENTO and pausa_ativa():
+        return (FALHA_PAUSA, None)  # #1600: a compra deste pagamento pode estar retida pela pausa; espera a retomada
     payment_id = (payment_id if isinstance(payment_id, str) else "") or cobranca["asaas_payment_id"]
     if set(efeitos) - {"afiliado_estorno_parcial"} and not payment_id:  # sem id o efeito não se registra e repete sem fim
         return ("PagamentoSemId", None)

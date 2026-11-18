@@ -1958,7 +1958,9 @@ grant `source='pix'` ficando `active` e o insert de comissão `pix:%`. Valem par
 da versão anterior ainda no ar durante o deploy. O código novo nem lista nem reserva `PAYMENT_RECEIVED`/
 `CONFIRMED` (`pix_pausa_retem`, em `eventos_pendentes` e `reservar_evento`): o evento fica aberto com `attempts`
 parado e não ocupa o lote da varredura, então estorno, parcial e baixa desfeita seguem drenando na ordem de
-chegada. Recusa do gatilho que ainda chegue ao código novo (dreno em voo na ativação, baixa desfeita que
+chegada. Exceção: o estorno parcial de cobrança ainda antes do pagamento espera a retomada como a compra
+(`last_error = 'PausaPix'`, #1600), senão ele fecharia sem efeito e a compra retida daria comissão cheia, sem
+revisão. Recusa do gatilho que ainda chegue ao código novo (dreno em voo na ativação, baixa desfeita que
 reconcede) fica aberta com `last_error = 'PausaPix'`, sem somar tentativa e sem alerta de travado. A versão
 anterior bate no gatilho e soma 1 tentativa por passada, só enquanto viver. Stripe e admin seguem normalmente.
 **Retenção:** o evento aberto que a pausa segura (compra `RECEIVED`/`CONFIRMED` sem `processed_at`, ou
