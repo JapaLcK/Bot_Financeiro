@@ -81,9 +81,10 @@ def _feedback(pergunta: str) -> str:
             + "".join(chip(r) for r in MOTIVOS) + '</div>')
 
 
-def _email(titulo: str, lead: str, corpo: str, cta: str, extra: str, base: str, unsub: str) -> str:
+def _email(titulo: str, lead: str, corpo: str, cta: str, extra: str, base: str, unsub: str, pre: str = "") -> str:
+    oculto = (f'<div style="display:none;max-height:0;overflow:hidden;opacity:0">{escape(pre)}</div>' if pre else "")
     return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>{titulo}</title></head>
-<body style="margin:0;padding:16px 0;background:{BG};font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;color:{TXT}">
+<body style="margin:0;padding:16px 0;background:{BG};font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;color:{TXT}">{oculto}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:0 8px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:{CARD};border:1px solid rgba(255,255,255,.08);border-radius:24px;overflow:hidden">
 <tr><td style="height:4px;background:{PINK}"></td></tr>
@@ -127,5 +128,38 @@ def montar(etapa: int, link: str, unsub: str, base: str) -> tuple[str, str, str]
     html = _email(assunto, lead, corpo, cta, extra, base, u)
     texto = (f"{lead}\n\n{corpo}\n\n{pct}% OFF no primeiro pagamento do plano.\n\nVoltar de onde parou: {link}\n\n"
              f"{pergunta} Responda este e-mail ou escreva para {CONTATO}.\n\n"
+             f"Lucas, fundador do PigBank\nNão quer mais estes avisos? {unsub}\n")
+    return assunto, html, texto
+
+
+# Black Friday (23 a 30/11): UM e-mail no lugar dos degraus, mais o "Termina hoje" no último dia. Os preços
+# saem da mesma conta do checkout (`PRECOS_ANUAIS_CENTS` + `com_desconto`), nunca digitados aqui.
+_BF_ASSUNTO = {"oferta": ("12 meses de Plus pelo preço de 6", "Black Friday do PigBank, só até segunda, 30 de novembro."),
+               "ultimo_dia": ("Termina hoje, às 23h59", "O Plus anual por R$ {plus} acaba hoje à noite.")}
+
+
+def montar_black_friday(tipo: str, nome: str, link: str, unsub: str, base: str) -> tuple[str, str, str]:
+    """`(assunto, html, texto)` da Black Friday (`tipo`: "oferta" | "ultimo_dia"). `nome` é o primeiro nome
+    (vazio = "Oi."); `link` e `unsub` são URLs prontas, escapadas aqui."""
+    from core.services.oferta_campanha import CAMPANHA_PCT  # noqa: PLC0415
+    from core.services.pix_pricing import PRECOS_ANUAIS_CENTS  # noqa: PLC0415
+    from core.services.retomada import com_desconto  # noqa: PLC0415
+
+    cents = com_desconto(PRECOS_ANUAIS_CENTS["pro"], CAMPANHA_PCT)   # "pro" GRAVADO = Plus
+    plus = f"{cents // 100},{cents % 100:02d}"
+    assunto, pre = _BF_ASSUNTO[tipo]
+    pre = pre.format(plus=plus)
+    lead = f"Oi, {nome.strip()}." if (nome or "").strip() else "Oi."
+    paragrafos = (
+        f"Na Black Friday do PigBank, o primeiro ano de Plus e Pro anuais sai com {CAMPANHA_PCT}% de desconto. "
+        f"No Plus, são R$ {plus} pelo ano inteiro, o preço de 6 meses no mensal.",
+        "Você conecta o banco uma vez e eu organizo cartão, parcela e fatura no WhatsApp e no painel. "
+        "Quando quiser saber quanto sobrou, é só perguntar.",
+        "Vale até segunda, 30 de novembro, às 23h59, no cartão ou no Pix. "
+        "Se não fizer sentido, você tem 7 dias pra pedir 100% de volta.",
+        "Piggy, do PigBank")
+    corpo = '</p><p style="margin:0 0 8px">'.join(escape(p) for p in paragrafos)
+    html = _email(assunto, escape(lead), corpo, _btn("Garantir meu Plus anual", escape(link)), "", base, escape(unsub), pre)
+    texto = (f"{lead}\n\n" + "\n\n".join(paragrafos) + f"\n\nGarantir meu Plus anual: {link}\n\n"
              f"Lucas, fundador do PigBank\nNão quer mais estes avisos? {unsub}\n")
     return assunto, html, texto

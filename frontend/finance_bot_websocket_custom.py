@@ -146,7 +146,7 @@ from frontend.routes.retomada import (
     COOKIE as RETOMADA_COOKIE, Comprador, campanha_config, comprador, desconto_config, email_mascarado,
     router as retomada_router,
 )
-from core.services.oferta_campanha import pct_da_oferta
+from core.services.oferta_campanha import CAMPANHA_FIM, campanha_vale, pct_da_oferta
 from core.services.retomada import desconto_da_etapa
 from core.services.retomada_cupom import CupomIndisponivel, cupom_id
 from db.remarketing import ja_comprou
@@ -5428,10 +5428,17 @@ async def _billing_user_lock(user_id: int):
                 await cur.execute("select pg_advisory_unlock(hashtext(%s))", (lock_key,))
 
 
-def _pct_checkout(plan: str, retomada_etapa) -> int | None:
-    """% efetivo do cartão: o maior entre o link e a campanha. `plan` é o PÚBLICO."""
+def _pct_checkout(plan: str, interval: str, retomada_etapa) -> int | None:
+    """% efetivo do cartão: o maior entre o link e a campanha (esta só no anual). `plan` é o PÚBLICO."""
     from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
-    return pct_da_oferta(TIER_TO_STORED_PLAN.get(plan, plan), desconto_da_etapa(retomada_etapa))
+    return pct_da_oferta(TIER_TO_STORED_PLAN.get(plan, plan), desconto_da_etapa(retomada_etapa),
+                         interval=interval)
+
+
+def _campanha_checkout(plan: str, interval: str) -> bool:
+    """A campanha vale para este checkout: cobrança na hora (sem trial) e cupom `bf_40_once_*`."""
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
+    return campanha_vale(TIER_TO_STORED_PLAN.get(plan, plan), interval)
 
 
 def _checkout_session_matches(session, user_id: int, plan: str, interval: str, price_id: str,
@@ -5460,7 +5467,7 @@ def _checkout_session_matches(session, user_id: int, plan: str, interval: str, p
         and str(_sg(metadata, "rm_etapa") or "") == str(retomada_etapa or "")
         # O desconto também (% efetivo, com a campanha): sessão sem `rm_desc`, de outra tabela ou de
         # antes/depois da janela não é reaproveitada.
-        and str(_sg(metadata, "rm_desc") or "") == str(_pct_checkout(plan, retomada_etapa) or "")
+        and str(_sg(metadata, "rm_desc") or "") == str(_pct_checkout(plan, interval, retomada_etapa) or "")
         and modo_ok
     )
 
@@ -5511,7 +5518,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
     if desconto and await asyncio.to_thread(ja_comprou, user_id):
         raise HTTPException(status_code=409, detail={
             "error": "ja_comprou", "message": "Você já é cliente. O desconto de retomada vale só no 1º pagamento."})
-    desconto = _pct_checkout(plan, retomada_etapa)   # campanha: vale o maior, nunca a soma
+    desconto = _pct_checkout(plan, interval, retomada_etapa)   # campanha: vale o maior, nunca a soma
 
     customer_id = user.get("stripe_customer_id")
     if customer_id:
@@ -5650,6 +5657,9 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             status_code=503,
             detail="Não consegui confirmar seu período grátis agora. Tenta de novo em instantes.",
         )
+    campanha = _campanha_checkout(plan, interval)
+    if campanha:   # Black Friday: cobrança na hora. Trial + cupom `once` gastaria o cupom na fatura de R$ 0.
+        trial_days = 0
 
     # Cota mensal da IA do plano comprado. Plus e Pro têm `ai_monthly_messages:
     # None` em plan_limits.py, o que NÃO é ilimitado: cai no teto global
@@ -5667,7 +5677,8 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
     cupom = None
     if desconto:   # antes de criar qualquer coisa: cupom divergente é 503, sem sessão
         try:
-            cupom = await asyncio.to_thread(cupom_id, stripe_mod, retomada_etapa or 0, desconto, price_id)
+            cupom = await asyncio.to_thread(cupom_id, stripe_mod, retomada_etapa or 0, desconto, price_id,
+                                       campanha=campanha)
         except CupomIndisponivel:
             raise HTTPException(status_code=503, detail="Não consegui aplicar o desconto agora. Tenta de novo em instantes.")
 
@@ -5737,6 +5748,11 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             # Stripe usa 24 h, e o hospedado deixaria aberta por 24 h a cobrança
             # dupla (Pix numa aba, cartão na outra). A /precos segue sem.
             kwargs["expires_at"] = int(datetime.now(timezone.utc).timestamp()) + 3600
+        if campanha:
+            # A sessão da campanha não paga depois do fim dela (o hospedado da /precos vive 24 h no Stripe).
+            # O Stripe só aceita de agora+30 min a agora+24 h: no último meia hora o teto sobe para +30 min (limite declarado).
+            agora = int(datetime.now(timezone.utc).timestamp())
+            kwargs["expires_at"] = max(min(kwargs.get("expires_at", agora + 86340), int(CAMPANHA_FIM.timestamp())), agora + 1800)
         if embutido:
             # `embedded_page` e `elements` recusam success_url/cancel_url: a volta é o return_url.
             kwargs["ui_mode"] = "elements" if elementos else "embedded_page"
@@ -9271,6 +9287,8 @@ async def set_initial_balance_route(request: Request, user_id: int, payload: Ini
             detail="Conta já tem saldo. Saldo inicial só pode ser definido em conta virgem.",
         )
     if payload.amount == 0:
+        from db.carteira_qualidade import marcar_saldo_confirmado
+        await asyncio.to_thread(marcar_saldo_confirmado, user_id)  # "tenho 0" também é saldo informado (PL-06 P9)
         return {"ok": True, "balance": 0.0, "launch_id": None}
 
     launch_id, _user_seq, new_bal = await asyncio.to_thread(
@@ -9310,6 +9328,8 @@ async def adjust_balance_route(request: Request, user_id: int, payload: AdjustBa
     current = float(cb["manual"] or 0)
     delta = float(payload.target_balance) - float(current)
     if abs(delta) < 0.005:
+        from db.carteira_qualidade import marcar_saldo_confirmado
+        await asyncio.to_thread(marcar_saldo_confirmado, user_id)  # confirmar o mesmo valor também informa (PL-06 P9)
         return {"ok": True, "balance": float(current), "delta": 0.0, "launch_id": None}
 
     tipo = "receita" if delta > 0 else "despesa"

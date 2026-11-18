@@ -17,9 +17,13 @@ Quem chama é o dreno (`core/services/pix_drain.py`), e ele é o único —
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 
 from .connection import get_conn
+
+# A conexão de `reservar_evento` enquanto o `with` dele durar; só `lock_efeito` a lê (#1413).
+conexao_da_reserva: ContextVar = ContextVar("pix_conexao_da_reserva", default=None)
 
 
 # Efeitos válidos do §3.4. A lista existe para o insert recusar typo — um
@@ -138,16 +142,34 @@ def lock_efeito(asaas_payment_id: str, effect: str):
     `event_id` (§13.6), o e-mail por `recent_event_exists`, `grant` é criação
     única e `revoke` é idempotente. Se um efeito NOVO não tiver dedupe própria,
     é aqui que se lê que ele não está coberto.
+
+    **Dentro do dreno, a trava vai na conexão da reserva** (#1413, mesma classe do #1260):
+    pedir outra ao pool por efeito, com a reserva já na mão, esgotava o pool com 4
+    drenos. Ali rodam SÓ o lock e o unlock — nunca escrita nem `commit`, que
+    soltaria o `for update` da reserva e deixaria dois drenos do evento juntos.
+    O `nullcontext` não é enfeite: `with conn:` do psycopg commitaria na saída.
     """
     chave = f"pix_effect:{asaas_payment_id}:{effect}"
-    with get_conn() as conn:
+    reserva = conexao_da_reserva.get()
+    with (nullcontext(reserva) if reserva is not None else get_conn()) as conn:
         with conn.cursor() as cur:
             cur.execute("select pg_advisory_lock(hashtext(%s))", (chave,))
+            em_voo = True
             try:
                 yield
+                em_voo = False
             finally:
                 # `unlock` no `finally` e não no fim do bloco: o lock é de
                 # SESSÃO e a conexão volta para o pool viva — sem isto, uma
                 # exceção no efeito deixaria a chave travada para o processo
                 # inteiro, e o próximo evento daquele par nunca mais drenaria.
-                cur.execute("select pg_advisory_unlock(hashtext(%s))", (chave,))
+                try:
+                    cur.execute("select pg_advisory_unlock(hashtext(%s))", (chave,))
+                except Exception:
+                    # Sessão abortada (lock aninhado nela deu deadlock) ou caída: fechar
+                    # solta TODAS as travas dela, e o pool descarta conexão fechada. Com
+                    # erro em voo, é ele que sobe: o `InFailedSqlTransaction` daqui
+                    # apagaria a causa no `last_error`.
+                    conn.close()
+                    if not em_voo:
+                        raise

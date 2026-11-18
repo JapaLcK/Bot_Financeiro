@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
@@ -106,11 +107,16 @@ def reenviar_pendentes(limite: int = 20) -> int:
     return enviados
 
 
+_EM_BRANCO = frozenset("\u3164\uffa0\u115f\u1160\u2800\ufffc\U0001d159\ufffd\U00013441\U00013442")
+
+
 def validar_justificativa(valor) -> str:
     """Regra única das três ações do admin. O erro nunca ecoa o valor. Conta depois de limpar:
-    NUL e surrogate viram U+FFFD, que não é texto."""
+    NUL e surrogate viram U+FFFD, que não é texto. Conta só letra, número, pontuação e símbolo
+    (marcas combinantes e preenchimentos em branco como U+3164 e U+2800 não contam)."""
     texto = limpa_para_pg(valor).strip() if isinstance(valor, str) else ""
-    if len(texto.replace("\ufffd", "").strip()) < 10 or len(texto) > 500:
+    visiveis = sum(1 for c in texto if unicodedata.category(c)[0] in "LNPS" and c not in _EM_BRANCO)
+    if visiveis < 10 or len(texto) > 500:
         raise ValueError("Justificativa: de 10 a 500 caracteres.")
     return texto
 
@@ -128,10 +134,15 @@ def validar_comprovante(data_valor, referencia, minimo: date | None) -> tuple[da
         raise ValueError("A data não pode estar no futuro.")
     if minimo and data < minimo:
         raise ValueError("A data é anterior ao início deste caso.")
-    limpa = limpa_para_pg(referencia).strip() if isinstance(referencia, str) else ""
+    return data, validar_referencia(referencia)
+
+
+def validar_referencia(valor, rotulo: str = "Referência") -> str:
+    """Referência do comprovante, e a evidência da decisão na conferência (#1538): o mesmo formato."""
+    limpa = limpa_para_pg(valor).strip() if isinstance(valor, str) else ""
     if not _REFERENCIA.match(limpa):
-        raise ValueError("Referência inválida: de 4 a 120 caracteres, só letras, números e . _ : / -")
-    return data, limpa
+        raise ValueError(f"{rotulo} inválida: de 4 a 120 caracteres, só letras, números e . _ : / -")
+    return limpa
 
 
 def dia_em_brasilia(instante: datetime) -> date:
@@ -249,8 +260,9 @@ def conferir_comissao(commission_id: int, fatura: str, *, adiar: bool = False, l
     False quando a fatura ainda não permite concluir (`SemConfirmacao`, ou 4xx da própria fatura: 400,
     403, 404), e None quando a Stripe falhou para todas (conexão, prazo, chave, limite, 5xx) ou não há
     chave. Erro de banco sobe para quem chamou.
-    `adiar`, só do worker: o False grava a hora e o motivo, e a comissão espera 1 h (#1497).
-    `lido`: a marca que o worker leu (None na que acabou de nascer); marca mais nova fica (#1498)."""
+    `adiar`, do worker e do "Concluir conferência" do admin (#1538): o False grava a hora e o motivo, e a
+    comissão espera 1 h (#1497). `lido`: a marca que quem confere leu (None na que acabou de nascer); marca
+    mais nova fica (#1498)."""
     import stripe  # noqa: PLC0415
 
     chave = os.getenv("STRIPE_SECRET_KEY")

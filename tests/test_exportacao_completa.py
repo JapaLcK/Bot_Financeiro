@@ -313,7 +313,8 @@ DATASETS_DO_PR_B = (
     " despesas_fixas receitas_fixas cobrancas_despesas_fixas creditos_receitas_fixas sugestoes_fixas_dispensadas"
     " contas_a_pagar lotes_caixinhas categorias espacos_financeiros orcamento_domestico_potes"
     " orcamento_domestico_renda alertas_orcamento_enviados itens_open_finance indicacao_prospeccao"
-    " planos_concedidos periodo_de_teste funil_assinatura remarketing_envios remarketing_regua reconquista_teste"
+    " planos_concedidos periodo_de_teste funil_assinatura remarketing_envios remarketing_regua"
+    " remarketing_black_friday reconquista_teste"
     " auditoria_conta logins_google_apple sessoes_login dispositivos_push verificacao_em_duas_etapas"
     " acessos_dados_pessoais familia_participacao familia_permissoes familia_leituras_dos_meus_dados"
     " familia_grupo familia_assentos").split()

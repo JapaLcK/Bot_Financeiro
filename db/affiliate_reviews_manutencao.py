@@ -4,7 +4,7 @@ a limpeza de `no_commission` e a fila da conferência na Stripe.
 
 Separado de `db/affiliate_reviews.py` pelo portão de 350 linhas; as regras da pendência moram lá.
 """
-from .affiliate_reviews import registrar_evento
+from .affiliate_reviews import SEM_MARCA, registrar_evento
 from .connection import get_conn
 
 
@@ -111,6 +111,8 @@ ESPERA_CONFERENCIA_S = 3600  # a adiada (fatura que ainda não confirma) volta �
 # Toda marca grava o instante dela; quem libera compara o que leu antes da Stripe, para não apagar a marca
 # posta depois da leitura (#1498). E entra como nunca tentada: não herda a espera de 1 h de um adiamento antigo.
 _MARCA = "payment_check_pending = true, payment_check_marked_at = clock_timestamp(), payment_check_tried_at = null"
+# Desde quando a comissão está em conferência: o cabeçalho ("a mais antiga") e a ordem da lista do admin.
+MARCADA_DESDE_SQL = "coalesce({c}.payment_check_marked_at, {c}.created_at)"
 
 
 def comissoes_a_conferir(limite: int = 20) -> list[dict]:
@@ -132,9 +134,9 @@ def comissoes_a_conferir(limite: int = 20) -> list[dict]:
 
 
 def adiar_conferencia(commission_id: int, motivo: str, lido) -> None:
-    """Só o worker: a fatura ainda não confirma. Grava a hora e o motivo, depois do HTTP e numa transação
-    curta; a marca, e com ela o bloqueio financeiro, fica. Marca posta durante o HTTP (`lido`, como em
-    `liberar_conferencia`) não herda a espera: segue nunca tentada (#1498)."""
+    """O worker e o "Concluir conferência" do admin (#1538): a fatura ainda não confirma. Grava a hora e o
+    motivo, depois do HTTP e numa transação curta; a marca, e com ela o bloqueio financeiro, fica. Marca posta
+    durante o HTTP (`lido`, como em `liberar_conferencia`) não herda a espera: segue nunca tentada (#1498)."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("update affiliate_commissions set payment_check_tried_at = now(), payment_check_reason = %s"
                     " where id = %s and payment_check_pending and payment_check_marked_at is not distinct from %s",
@@ -166,8 +168,7 @@ def liberar_conferencia(commission_id: int, lido) -> bool:
     """Tira a marca só se ela segue a que quem confere leu antes da Stripe (`lido` = `payment_check_marked_at`,
     None na que nasceu marcada). False = outra marca chegou no meio: fica para o worker."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("update affiliate_commissions set payment_check_pending = false, payment_check_tried_at = null,"
-                    " payment_check_reason = null, payment_check_marked_at = null"
+        cur.execute(f"update affiliate_commissions set {SEM_MARCA}"
                     " where id = %s and payment_check_marked_at is not distinct from %s", (int(commission_id), lido))
         conn.commit()
         return cur.rowcount == 1
@@ -176,6 +177,6 @@ def liberar_conferencia(commission_id: int, lido) -> bool:
 def resumo_da_conferencia() -> dict:
     """Para o admin notar queda longa da Stripe: quantas aguardam e desde quando."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select count(*) as count, min(created_at) as oldest from affiliate_commissions"
-                    " where payment_check_pending")
+        cur.execute(f"select count(*) as count, min({MARCADA_DESDE_SQL.format(c='c')}) as oldest"
+                    " from affiliate_commissions c where c.payment_check_pending")
         return cur.fetchone()

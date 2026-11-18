@@ -17,6 +17,10 @@ ALERTA = 3     # de D-3 a D-1: warning; D-0: critical
 N_VENCIDA = 7  # P1 do dono (2026-10-28): a vencida aparece de D+1 a D+7, critical
 # P6 da B3: a tela do botão ("Ver gastos fixos") calcula outra coisa; a ressalva nunca sai do texto por tamanho.
 NOTA_GASTOS_FIXOS = "A Previsão mensal de Gastos fixos considera só recorrências e pode mostrar outro valor."
+# Convite "Informe seu saldo" (P14 do dono, 2026-11-13). Sem número: o card do chat repassa o item ao modelo.
+CONVITE_TITULO = "Quanto você tem na Carteira hoje?"
+CONVITE_TEXTO = ("Informe o saldo de hoje da Carteira para melhorar a previsão do mês. Sem esse saldo, a previsão usa "
+                 "zero como ponto de partida.")
 
 
 def _textos(nm: str, due, dias: int, valor, variavel: bool) -> tuple[str, str]:
@@ -94,7 +98,11 @@ def detect_month_projection(user_id: int) -> list[dict[str, Any]]:
     soma só recorrências e pode discordar: o texto avisa (`NOTA_GASTOS_FIXOS`). O chat (`check_cashflow`, sem a janela)
     pode se abster no mesmo caso (P7, issue #1326). Gate `forecast` (Plus) aqui e na leitura (`RECURSO_POR_TIPO`).
     Só para quem já informou o saldo (`carteira_qualidade.saldo_informado`, emenda 1): a Carteira nasce em 0, e o
-    primeiro gasto de quem nunca a informou não é "saldo no vermelho"."""
+    primeiro gasto de quem nunca a informou não é "saldo no vermelho". Para esse, no mesmo caso (o simulador conclui
+    e o mês a partir do zero fecha negativo, P11 b), sai o convite `wallet_balance_unknown` (info, fora do e-mail):
+    pede o saldo e não leva número nenhum, nem no texto nem na `explicacao`, porque o `fecha` aqui parte do zero de
+    nascença e o card do chat entrega a `explicacao` ao modelo. Some quando o saldo é informado (lançamento ou
+    `accounts.saldo_confirmado_em`, que avisam o `pb_escrita`); dispensado, volta no mês seguinte (chave por mês)."""
     from core.services.cashflow import fechamento_pior_caso, premissa_da_janela
     from core.services.cashflow_snapshot import carregar
     from core.services.plan_service import plan_gate_ok
@@ -103,14 +111,18 @@ def detect_month_projection(user_id: int) -> list[dict[str, Any]]:
     if not plan_gate_ok(user_id, RECURSO_POR_TIPO["month_projection"]):  # poupa a snapshot; a leitura confere de novo
         return []
     with get_conn() as conn, conn.cursor() as cur:
-        if not saldo_informado(cur, user_id):  # antes do `carregar`, que é a parte cara
-            return []
+        informou = saldo_informado(cur, user_id)
     hoje = day_tz(now_tz())
     per = periodo_mes(hoje)
     snap = carregar(user_id, hoje, per["fim"])
     fecha = fechamento_pior_caso(snap, per["fim"])
     if fecha is None or fecha >= 0:
         return []
+    if not informou:  # o zero de nascença não é saldo: no lugar do alarme falso, o convite (P11 b)
+        return [montar_item(
+            "wallet_balance_unknown", "carteira", per, severity="info", icon="💰", title=CONVITE_TITULO,
+            message=CONVITE_TEXTO, action_label="Informar saldo", action_view="carteira",
+            referencia={"estatistica": "saldo_nao_informado"}, atual={}, diferenca=None, amostra=None)]
     saldo = dinheiro(snap.base["saldo"])
     severity, title, message = _textos_mes(per, fecha, saldo)
     return [montar_item(

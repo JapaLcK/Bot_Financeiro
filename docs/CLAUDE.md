@@ -1717,6 +1717,21 @@ Limites conhecidos: (1) assinatura que morre depois de o
 nascer: o `create-checkout` recusa, mas a tela de status mostra sem plano até o grant sair;
 (3) a reentrega do checkout repete o alerta de estorno.
 
+**Conexões do dreno do Pix (#1413).** Dentro de `reservar_evento`, o `lock_efeito` faz o
+`pg_advisory_lock` na conexão da própria reserva (`conexao_da_reserva`, um `ContextVar` de
+`db/pix_effects.py`) em vez de pedir outra ao pool: no máximo 2 conexões por execução (a reserva e
+uma transitória), em todo caminho, UNDONE incluído. Nessa conexão só rodam o lock e o unlock — uma
+escrita ou um `commit` ali soltaria o `for update` da reserva (`tests/test_pix_dreno_conexoes.py`).
+Quando o `unlock` falha (sessão abortada por deadlock num lock aninhado, ou caída), o `except` do
+`unlock` em `lock_efeito` fecha a conexão da reserva: isso solta todas as travas dela, o pool a
+descarta, e o erro que estava em voo é o que sobe (sem erro em voo, sobe o do `unlock`). Consequência:
+fechar a reserva solta o `for update` ANTES do `registrar_falha`; nesse intervalo outra passada pode
+concluir o evento, e a falha fica gravada num evento já processado. Não duplica efeito (cada um segue
+sob a sua trava e o seu registro); acompanhamento em #1576.
+Limite: cada dreno ainda segura a reserva, e o pool é dividido com as rotas: com N drenos
+simultâneos, sobram `DB_POOL_MAX_SYNC − N` conexões para o processo inteiro. Falta um teto de drenos
+simultâneos.
+
 **Pagamento Pix parcial não libera o plano (#1228).** O dreno (`core/services/pix_valor.py`,
 `conferir_valor`) só concede quando o `value` do webhook cobre `total_cents` da cobrança
 (tolerância zero). Menor, ausente ou ilegível: cobrança segue `pending`, sem grant, cadernos,
@@ -1738,7 +1753,7 @@ efeito de compra, um alerta (efeito `pagamento_duplicado_alertado`, log `pix_pag
 evento fechado. Limite conhecido:
 parcial e integral do mesmo pagamento drenados AO MESMO TEMPO (alerta de retido ainda em voo)
 podem conceder sem o alerta "antes RETIDO foi completado", porque o marcador do retido é lido sem
-lock (lock aninhado esgota o pool, #1260); a coluna `completado_pelo_mesmo_pagamento` do runbook
+lock (escolha de antes do #1413, quando a trava custava uma conexão do pool; #1260); a coluna `completado_pelo_mesmo_pagamento` do runbook
 cobre. O marcador de dedupe só é gravado quando o canal do
 admin confirma a entrega (senão log `pix_alerta_nao_entregue` e o próximo evento tenta de novo). Plano já concedido antes da regra continua. NÃO VERIFICADO: o que `value` traz em baixa
 manual (`receiveInCash`) e em cobrança editada no painel do Asaas, se o pagador pode digitar o
@@ -2400,7 +2415,7 @@ já enviado antes do PUT não é desfeito.
 
 **PigBank Insights, contrato v1 (PL-06 PR A1).** `/insights/{uid}/current` e o card `piggy` do chat
 devolvem os fatos dos detectores de `db/insights.py` e `core/services/insights_detectores.py` (`budget_warning`,
-`category_spike`, `recurring_increase`, `of_bill_increase`, `salary_burn_fast`, `goal_behind`, `bill_due`, `month_projection`, `subscription_increase`, `positive_result`) no contrato de
+`category_spike`, `recurring_increase`, `of_bill_increase`, `salary_burn_fast`, `goal_behind`, `bill_due`, `month_projection`, `wallet_balance_unknown`, `subscription_increase`, `positive_result`) no contrato de
 `core/services/insights_contrato.py`: os campos legados (`key`, `type`, `icon`, `title`, `message`,
 `severity`, `action_*`) mais `explicacao` (versao 1: `tipo`, `familia`, `detector`, `calculado_em`,
 `periodo` com `rotulo` e `parcial`, `fonte`, `referencia`, `atual`, `diferenca`, `amostra`), com dinheiro
@@ -2450,9 +2465,20 @@ mês corrente que fecha negativo no pior caso do simulador lido no último dia d
 (`cashflow.fechamento_pior_caso`: a mesma janela de conferência do veredito, sem a estimativa do dia a dia nem as
 saídas duvidosas): warning com o saldo de hoje >= 0, critical com ele < 0, nada com fechamento >= 0; chave
 `month_projection:saldo:AAAA-MM`, gate `forecast` (Plus) na geração e na leitura, só para quem já informou o saldo
-(`carteira_qualidade.saldo_informado`: um lançamento INTERNO `saldo_inicial`, `ajuste` ou `ajuste_saldo`; a categoria
-própria `#ajuste`, que nasce não interna, não conta; a Carteira nasce em 0 e o primeiro gasto de quem nunca a informou
-não é alarme), `impacto {falta_valor}` só no Pro, logo depois do `bill_due` no laço. Fica calado onde o simulador não
+(`carteira_qualidade.saldo_informado`: um lançamento INTERNO `saldo_inicial`, `ajuste` ou `ajuste_saldo`, ou
+`accounts.saldo_confirmado_em`, que o `initial-balance` com 0 e o `adjust-balance` sem diferença gravam sem lançar
+nada e o "Recomeçar do zero" e o "apagar todos os lançamentos" do chat limpam; a categoria própria `#ajuste`, que
+nasce não interna, não conta; a Carteira nasce em
+0 e o primeiro gasto de quem nunca a informou não é alarme), `impacto {falta_valor}` só no Pro, logo depois do
+`bill_due` no laço. Quem nunca informou, no mesmo caso (o simulador conclui e o mês a partir do zero fecha negativo),
+recebe no lugar o convite `wallet_balance_unknown` (mesmo detector, família `projecao`, info, fora do e-mail, chave
+`wallet_balance_unknown:carteira:AAAA-MM`, gate `forecast`, botão "Informar saldo" com `action_view` `carteira`, que
+o painel antigo resolve em `_INSIGHT_MODAIS` abrindo o "Ajustar carteira" sem banco). O convite não leva número nenhum,
+nem no texto nem na `explicacao` (o card do chat a repassa ao modelo). Some quando o saldo é informado; dispensado,
+volta no mês seguinte (no painel antigo o X dele grava no servidor, ver a exceção à D6 abaixo). A junção de contas não leva `saldo_confirmado_em` da origem. A confirmação sem lançamento
+(`saldo_confirmado_em`) se comporta como um lançamento de saldo que não aparece no extrato: sai com o "apagar todos
+os lançamentos" e o "Recomeçar do zero", não sai quando se apaga um lançamento específico, e vale como o
+`saldo_inicial`, sem validade por data (decisão D1 do dono, 2026-11-16). Fica calado onde o simulador não
 conclui (banco conectado, fixo sem data, valor estimado, pedido pendente no chat). A receita fixa ainda não conferida,
 dentro da janela de conferência (`JANELA_CONFERENCIA_DIAS`), conta a favor e só cala o aviso quando cobre o déficit. O
 corpo termina sempre com a ressalva de que a Previsão mensal de Gastos fixos considera só recorrências e pode mostrar
@@ -2515,7 +2541,10 @@ e, na conta do OF (sempre `warning`), valor maior (`medida`). Período novo é c
 (o feed sai, sem registro ou sem filtro, e o cache é gravado do mesmo jeito: sem recálculo em laço); o PUT
 não é. Merge de contas apaga o estado da origem (cascata, D7); "Recomeçar do zero" apaga; o export LGPD
 leva `insights_estado`. O X do painel antigo segue no `localStorage` (D6): os botões ligados ao servidor e a
-rota em `/api/v2` são do PR C.
+rota em `/api/v2` são do PR C. Exceção: o X do convite `wallet_balance_unknown` (`_dispensarInsight` em
+`dashboard.js`) grava pelo `PUT .../estado` com a severidade vista, para valer na Início, depois de recarregar e
+em outro aparelho até a chave do mês seguinte (P12; decisão do dono sobre o P2 do Codex no #1598). Falha do PUT
+não esconde: o convite fica e o toast de erro avisa.
 
 **Chat com agentes no `/painel` (`@Nome` na barra do Piggy).** Consumidor das rotas acima (`@Nome` na barra, `parts/AskBar.tsx`, `parts/Mencoes.tsx`, `lib/agentes.ts`; as rotas já existiam, e o contrato do `card` abaixo é o único acréscimo de backend): reaproveita `GET /agents/{uid}`, `POST /agents/{uid}/{kind}/activate` e `POST /agents/{uid}/{kind}/chat` de `frontend/routes/agents.py` (o `uid` vem só do `contaQuery`; `chamar` aceita o prefixo `/agents` e o `ErroApi.corpo` guarda o `detail` objeto). Sem `@` o Piggy segue como era (sem IA, atalhos), e o catálogo da barra só é lido quando há `@` no começo ou depois de espaço no texto. Exceção: o **painel lateral** da conversa (`parts/PainelChat.tsx`, `styles/chat-painel.css`), só a partir de 1181 px (`useMedia` em `PiggyChat.tsx`; abaixo disso nem monta, então no celular e em 761–1180 continua sem `GET /agents` sem `@`), lê `GET /agents/{uid}` mesmo sem `@`, só com a conta conferida (`conferida`), e mostra dois blocos: os agentes por grupo (as cabeças de `GRUPOS` e `⚡custo` só nos que faltam ativar; **nunca** `saved_365d`, `fired_30d` nem a energia livre), cujo clique dispara `dash:mencao` (a barra troca o token em edição; senão a menção do começo; senão põe `@Nome ` antes, sem apagar nada e com o cursor no fim), e "Nesta conversa", o índice dos cards (`Msg.cartao`, título de `tituloDe`, sem número), cujo clique rola até a resposta e põe o foco nela. Enquanto o catálogo carrega, o painel ocupa o lugar com "Carregando agentes…" (`role=status`). Catálogo em 4xx (o freio `AGENTS_UI_ENABLED=0`, `/agents` em 404) ou fora do contrato, e sem card: o painel some, `body[data-chat-painel]` desliga e a tela volta a uma coluna centralizada. Em 5xx ou rede (decisão do dono, 2026-10-20) o painel FICA, com "Tentar de novo" (`aria-disabled` durante a nova tentativa, que guarda o foco), para a coluna não saltar depois das tentativas. O envio com `@` cancela a leitura do catálogo em voo antes de reler (`cancelQueries` em `AskBar.tsx`): com o painel, a leitura tem um observador fixo e não se cancela sozinha, e o envio aproveitaria uma leitura de antes de o plano mudar noutra aba. A geometria é uma só (`--chat-w`, `--chat-x`, `--painel-w`, declaradas no `body` em `chat.css`): a coluna, a barra, a fileira de perguntas e a lista do `@` leem as mesmas variáveis. Limites: o card que não aparece (mês virou, 401/403) continua no índice e leva à resposta; dois cards do mesmo tipo têm o mesmo título no índice; quem fica sem painel (4xx, catálogo vazio) vê "Carregando agentes…" e depois a coluna desloca ~144 px uma vez (só com o freio ligado: `agents_ui_enabled` é `True` por padrão); as "próximas perguntas" ficam na fileira acima da barra; o app (`app/`) não tem o painel. A PRIMEIRA menção válida (nome de `AGENTES`, sem acento/maiúscula, o mais longo primeiro) decide o agente e a mensagem vai sem esse token; as outras ficam no texto; a bolha pinta toda menção válida de `--pink-ink`. `acessoDe` copia a fórmula de `dashboard-agent-chat.js` e só AGRUPA a lista (ativos / ativar para conversar = `activate` + `no_energy` / No PigBank+ = `upgrade`, que o servidor aplica a todos os agentes de uma vez, então o grupo nunca aparece junto dos outros); quem decide é o servidor. Estados da resposta (`lib/conversation.ts`): enviando, pronto (texto puro, `white-space: pre-line`, nunca HTML; um botão por `redirects`), erro (`detail.message`; "Tentar de novo" só se o servidor mandou `detail.retryable === true` ou se a requisição falhou na rede, sem resposta, como no chat legado `frontend/dashboard-agent-chat.js`: um POST que chegou ao servidor e se perdeu na volta, repetido, pode gastar cota de novo; 401, 403 sem `error` de objeto (CSRF e "Acesso negado para este usuário" de troca de conta em outra aba) e `password_required` mostram "Sua sessão terminou. Recarregue a página." (ou o pedido de senha), sem repetir; o mesmo TEXTO de `MetasResposta`/`InvestidoResposta`, mas critério próprio. `/agents/*` fica fora do `/api/v2`, então o `password_required` real vem como `{"detail":{"error":"password_required"}}` e é lido em `detail.error`, no chat e no "Ativar e responder"), inativo ("Ativar e responder": o bloqueio vale enquanto a ativação/o envio daquele agente está em voo, então duplo clique é uma ativação só, mas duas bolhas inativas do mesmo agente clicadas em sequência fazem duas (o servidor aceita reativar)), sem energia e sem plano ("Ver planos" → `/precos`). O `context` de cada agente e os envios em voo ficam fora do React (um envio por agente por vez); `invalid_context` apaga o context. `kind`/`nome` de `AGENTES` são presos a `DOMAINS` e ao `AGENT_CATALOG` por `tests/test_painel_agentes_catalogo.py`. O app tem o mesmo `@` na aba Piggy (PR #1161, `app/src/features/painel/agentes.ts`); como `app/` e `webapp/` são projetos npm separados, o catálogo fica duplicado, e o mesmo teste prende os dois a `DOMAINS`/`AGENT_CATALOG` e exige `AGENTES` igual (kind, nome e tema) nos dois lados. **Card com os dados do tema (Faria Limer, Barão, Detetive, Repórter, Xerife, Carteiro e Banqueiro).** A resposta de `POST /agents/{uid}/{kind}/chat` ganha `card`, sempre presente: `null | {"tipo": "investido" | "renda_fixa" | "assinaturas" | "caixinhas"} | {"tipo": "contas", "hoje": "AAAA-MM-DD"} | {"tipo": "orcamentos", "mes": "AAAA-MM"} | {"tipo": "resumo_mes", "mes": "AAAA-MM", "motivos": [...]} | {"tipo": "comparacao_meses", "meses": ["AAAA-MM", "AAAA-MM"], "motivos": [...]}` (o servidor só acrescenta: o app e o `dashboard-agent-chat.js` ignoram campo extra). Quem decide é `core/services/agent_chat_card.py::card_da_resposta`, pelas consultas que o `_answer` fez (`consultas`): `consultar_dados_do_agente` no `faria_limer` → `investido`, no `barao` → `renda_fixa`, no `detetive` → `assinaturas`; `get_period_summary` no `reporter` → `resumo_mes`; `compare_periods` no `reporter` → `comparacao_meses` (regra abaixo); `get_budget_status` no `xerife` → `orcamentos`; `get_bills_to_pay` no `carteiro` → `contas` (só sem `include_paid`: com as pagas o texto fala de mais que a rota, que traz só as pendentes; resultado sem `bills` = consulta falhou = `null`); `list_pockets` no `cofre` (Banqueiro) → `caixinhas` (a consulta não tem filtro; sem `pockets` = `null`); só `get_balance`, outro agente ou conversa sem consulta → `null`. O gate é o da rota v2 que o card lê (`GATES` em `agent_chat_card.py`): `investments` (`/api/v2/investido`) para `investido`/`renda_fixa`, `subscriptions` (`/api/v2/assinaturas`) para `assinaturas`, `recurring_expenses` (`/api/v2/contas-a-pagar`, o gate da agenda de boletos `/recurring-bills`) para `contas`, sem gate para `resumo_mes` e `comparacao_meses` (`/api/v2/resumo-do-mes`, lido uma vez por mês; a comparação só chega ao card se a tool passou do `financial_comparison`, e a rota não tem gate), `orcamentos` (`/api/v2/orcamentos-categoria`) e `caixinhas` (`/api/v2/caixinhas`, que não têm), e sem o plano → `null`. O card mostra o MESMO período do texto: `resumo_mes` só quando o resultado do `get_period_summary` é de UM mês civil (`cartao_por: "fatura"`, `start_date` e `end_date` no mesmo `AAAA-MM`; período livre, vários meses, mês futuro ou resposta sem datas → `null`) e o `mes` sai das datas do resultado, os `motivos` também (os selos do card são os avisos que o agente viu: a rota ainda avisa do "início do histórico" quando o corte só pegou o mês anterior, que a consulta de um mês inteiro tira); `comparacao_meses` só quando o resultado do `compare_periods` é de EXATAMENTE dois meses civis inteiros, cartão pela fatura (`base.cartao`), o mais antigo em `anterior` e o mais novo em `atual` (`meses` = `[anterior, atual]`, tirados das datas do resultado, nunca dos argumentos): período livre, lado com vários meses, mês igual, ordem trocada, mês futuro (a rota dá 422), `inicio_do_historico`, `sem_base` ou lado com `fim_ajustado`/`pedido` → `null`; o card lê o `resumo-do-mes` dos dois meses (duas leituras, UMA conferência de conta depois das duas, chave `card-comparacao_meses-<a>-<b>`: falha de uma = o card inteiro falha, nunca um lado só) e mostra Entrou, Saiu e Sobrou de cada um e a diferença (mais novo − mais antigo, em BigInt) com cor por sentido (verde quando melhorou: Entrou e Sobrou subiram, Saiu caiu; aviso quando piorou; zero neutro; o sinal +/− fica no texto); `orcamentos` só no `get_budget_status` sem `categoria` e com orçamentos, levando o mês em que a consulta rodou (`execute_read` o carimba); a rota só serve o mês corrente, então se o mês virou entre a consulta e o card, o card não aparece; `contas` leva o `today` da consulta e, pela mesma razão ("vence amanhã" e "vencida" dependem do dia), some se `/api/v2/contas-a-pagar` responder outro `hoje`; duas consultas que dão cards diferentes (dois meses) → `null`. O `mes` é validado no servidor (`MES` = `PADRAO_MES` de `api/v2/resumo_mes.py`) e no cliente (`cardDe`) (a cópia TS é presa à do servidor por `tests/test_agent_chat_card.py::test_padrao_do_mes_no_cliente_e_o_da_rota`) antes de entrar na URL; falha ao decidir é logada e vira `null` (cosmético, não derruba a resposta). O texto e o card mostram o MESMO número: o snapshot do agente ganhou `investido` (`db.investido.ler`, a regra de `/api/v2/investido`) e, no Barão, `total_renda_fixa` (Renda fixa + Tesouro, `None` se algum falta saldo; os dois testes leem a mesma tabela, `tests/frontend/total_renda_fixa.json`); o do Detetive ganhou `total_mensal` (a soma das assinaturas ativas, o número do card). No painel, `parts/CardAgente.tsx` escolhe a leitura pelo tipo (um componente por tipo: `CardInvestido`, `CardAssinaturas`, `CardResumoMes`, com o "Sobrou" = entrou − saiu em BigInt, `CardComparacaoMeses` (a mesma subtração, `menos`), `CardOrcamentos`, que reusa a `Linha` de `widgets/OrcamentosCategoria.tsx`, `CardContas` e `CardCaixinhas`; testes dos que leem `resumo_mes` e `comparacao_meses` e dos de assinaturas e orçamentos em `tests/frontend/dashboard_v2_chat_agentes_card_temas.test.mjs` e dos dois últimos em `tests/frontend/dashboard_v2_chat_agentes_card_contas.test.mjs`) e lê a rota v2 do tipo sob a chave `["conta", "card-investido" | "card-assinaturas" | "card-resumo_mes-<mes>" | "card-comparacao_meses-<a>-<b>" | "card-orcamentos" | "card-contas" | "card-caixinhas", uid]` e só mostra a resposta depois de `daConta` (`conta/api.ts`: relê `/auth/dashboard-profile` e lança `ContaTrocada` se a sessão já não é a do `uid`, porque a /api/v2 lê o usuário da SESSÃO): sessão de outra conta = nenhum número na tela e `lerContaFresca` (a conversa da anterior some). Rede/5xx ou corpo fora do contrato: "Não deu para carregar os dados agora." + "Tentar de novo"; 401/403: nada. Limites: o card é um retrato lido DEPOIS da resposta (relido no foco), então pode diferir do que o agente leu se o banco sincronizar no meio; os selos do `resumo_mes` e do `comparacao_meses` são os da resposta e não são relidos (um aviso resolvido depois continua no card); `get_period_summary` e `compare_periods` na mesma resposta, ou dois `compare_periods` de meses diferentes, não têm card (cada um daria um card diferente); só estes tipos; `contas` e `caixinhas` não têm link (o painel não tem tela de contas a pagar nem de caixinhas; `/metas` é outra entidade); o `resumo_mes` do mês corrente lê o mês inteiro (a rota inclui lançamento com data futura, como o `get_period_summary` de meses inteiros); o Detetive sempre consulta o snapshot, então toda resposta dele com dados leva o card de assinaturas, mesmo a de duplicidade, e o "Ver as N" conta só as assinaturas ativas (o texto tem `total_recorrencias`, com as outras e as canceladas); o Carteiro e o Banqueiro não têm argumento que recorte o conjunto (`get_bills_to_pay` só tem `include_paid`, `list_pockets` nenhum), então numa pergunta sobre uma conta ou uma caixinha só o texto fala dela e o card mostra todas as pendentes / todas as caixinhas; conta variável sem estimativa (gravada como 0) aparece como "valor a definir" e fica fora do total; o app (`app/`) não desenha o card (par: issue #1197). O protótipo usa dados e respostas fixas, sem rede. Fora, de propósito: contador de cota, acesso vindo do servidor na lista (o 403 do chat vale) e pausar agentes para liberar energia.
 
@@ -2806,8 +2835,9 @@ um teste compara os dois) traduzem para o pagamento de `affiliate_referral_payme
 `scripts/backfill_afiliado_pagamentos.py` e a conferência do saque na Stripe (`faturas_do_saque`, nos dois
 ramos) pulam as `pix:`, que não são fatura da Stripe; saque só com comissão Pix não consulta a Stripe (QR e
 "Marcar pago" saem sem chave: o atalho mora em `conferir_saque`, antes da checagem dela);
-`affiliate_refund_review_events` guarda ajuste, rejeição, pagamento registrado e recuperação, com
-autor e horário, só por inserção. `registrar_reembolso` grava rótulo e pendência numa transação, sob
+`affiliate_refund_review_events` guarda ajuste, rejeição, pagamento registrado, recuperação e a decisão
+do admin na conferência (`check_reversed`, `check_concluded`; `check_released` no PR 2 da #1538), com autor e
+horário, só por inserção (`registrar_evento`, `db/affiliate_eventos.py`). `registrar_reembolso` grava rótulo e pendência numa transação, sob
 a trava da fatura e da comissão, e decide com o estado de agora:
 
 | Comissão \ evento | Parcial | Total |
@@ -2847,8 +2877,7 @@ saldo. Nunca recusa por falta de pendência: com a Stripe fora, é o único regi
 sem pendência o evento fica no saque, sem `review_id`. O botão aparece em todo saque `requested`: no
 livre, ao lado de "Pagar via Pix", "Marcar pago" e "Rejeitar" (é a saída quando o "Marcar pago" dá 503 com
 o Pix já feito); no bloqueado e no órfão, só ele e "Rejeitar". Justificativa, data e comprovante seguem
-obrigatórios. `total` vai a `recovery`; `partial` segue `open`, sem bloqueio. Justificativa de 10 a 500 caracteres, contados depois de limpar (NUL e surrogate
-viram U+FFFD, que não conta como texto), `paid_on` não futura em Brasília nem anterior ao
+obrigatórios. `total` vai a `recovery`; `partial` segue `open`, sem bloqueio. Justificativa com no mínimo 10 caracteres visíveis (letra, número, pontuação ou símbolo, conforme `validar_justificativa` em `core/services/afiliado_reembolso.py`) e no máximo 500 no total, `paid_on` não futura em Brasília nem anterior ao
 pedido, `receipt_ref` de 4 a 120 caracteres. Referência e justificativa moram só no evento: nunca em
 log, aviso ou `affiliate_payouts.note`, que sai no `/api/affiliate/me`.
 
@@ -2906,8 +2935,8 @@ permite concluir (disputa aberta, `payment_record`, sem cobrança paga) grava a 
 (`payment_check_reason`: `disputa_aberta`, `forma_inesperada`, `sem_cobranca`) e só volta depois de 1 h
 (`ESPERA_CONFERENCIA_S`), sem segurar as seguintes. Erro 4xx da própria fatura (400, 403 e 404, como
 "No such invoice") vale o mesmo, com o motivo `stripe_<status>`, e a marca fica. A queda da Stripe
-(conexão, prazo, 401, 429, 5xx) para a passada sem gravar nada. Só o
-worker espera e grava a tentativa e o motivo: webhook, QR, "Marcar pago" e "Pagamento já realizado" conferem
+(conexão, prazo, 401, 429, 5xx) para a passada sem gravar nada. Só o worker e o "Concluir conferência" do
+admin (#1538) gravam a tentativa e o motivo: webhook, QR, "Marcar pago" e "Pagamento já realizado" conferem
 na hora (o webhook e o D10 podem marcar, mas não gravam tentativa). Liberar
 zera a tentativa e o motivo (#1497). Toda marca (webhook, D10) grava `payment_check_marked_at` e zera a
 tentativa (entra como nunca tentada); quem libera (`conferir_comissao` e `conferir_saque`) e o adiamento do
@@ -2917,6 +2946,33 @@ de 1 h (#1498). Toda adiada deixa o log
 aparece "em conferência" (`commissions[].checking`), no `/painel` e no `/app`. Comissão antiga nasce `false` na
 migração, sem conferência em massa. O overview do admin mostra quantas aguardam e a mais antiga
 (`commission_checks`), para notar queda longa. Com linha da fatura, `promover` decide e não há consulta.
+
+**Comissões em conferência no admin (#1538, PR 1).** O overview leva `commission_check_list`
+(`db/affiliate_conferencia_admin.py`): as 100 marcadas mais antigas, com código, valor, onde está (solta, no
+saque, paga, e os selos de revisão e recuperação), a data da marca, a última tentativa e o motivo, sem fatura
+nem dado do indicado. O motivo só vale com tentativa (`tried_at` nulo mostra "Aguardando a 1ª conferência").
+`acoes(linha)` é a regra única das decisões: a lista leva o que ela devolve e as rotas a repetem sob a trava
+da comissão. **Estornar** (`POST .../commissions/{id}/check-reverse`): sem Stripe, vale sem tentativa; paga ou
+estornada dá 409; num saque aberto dá 409 e nada muda (a marca segue segurando o saque, que mantém o valor):
+rejeite o saque ou registre o pagamento antes. **Concluir conferência** (`.../check-conclude`, só a paga):
+confere na Stripe na hora pelo executor da conferência (`_na_stripe`) e só tira a marca; saldo, saque,
+status, valor e recuperação ficam. Disputa aberta, motivo nulo ou desconhecido dão 409; a fatura que confirma
+no clique sai pela regra normal (409); Stripe fora ou prazo dão 503 e nenhuma decisão manual é gravada. A
+consulta do clique é a do worker (`adiar=True`): a fatura que não confirma regrava `tried_at = now()` e o motivo,
+o que reinicia a espera de 1 h, e deixa o log `affiliate_commission_check_pending`, mesmo depois do 503 do prazo,
+quando a thread termina sozinha. Corpo:
+`justification` (10 a 500), `evidence` (o formato da referência do comprovante, obrigatória, pode ter id da
+Stripe) e a versão vista (`marked_at`, `reason`, `amount_cents`), comparada em Python depois da trava: marca nova,
+volta do worker, revisão parcial, outro admin ou duplo clique dão 409 "A comissão mudou". A comissão que nasce
+marcada não tem `marked_at`: a versão dela é (None, None) antes e depois de a Stripe liberar, e quem a segura é
+"continua marcada". A trava vem antes da leitura, então o estado anterior gravado é o que a decisão encontrou. Uma decisão grava um evento na mesma transação, com
+`commission_id`, o código no ato e o estado antes e depois (`state_before`, `state_after`, chaves fixas); os
+logs levam só o id. Liberar fica para o PR 2 (`stripe_404`) e o PR 3 (`sem_cobranca` e `forma_inesperada`,
+depois do roteiro na Stripe de teste); até lá esses dois motivos mostram "Liberar indisponível". Todo estorno
+tira a marca (`SEM_MARCA`, `db/affiliate_reviews.py`): o manual e a rota antiga `/reverse` (`_estornar`), o
+automático da solta (D9), a revisão parcial aprovada com 0 e o "Rejeitar" do saque, só na que ele estorna
+(`sem_marca_se`): a que volta ao saldo segue em conferência. "A mais antiga" do cabeçalho e a ordem da lista
+contam desde a marca (`MARCADA_DESDE_SQL`), e não desde o nascimento da comissão.
 **Conferir antes de pagar.** O `charge.refunded` pode se perder, então o QR, o "Marcar pago" e o
 "Pagamento já realizado" consultam a Stripe por cada fatura do saque antes de o dinheiro sair
 (`conferir_saque`): as das comissões do saque e, no saque órfão, as das linhas do vínculo. A regra é a
@@ -3034,7 +3090,7 @@ desvinculado do usuário, dados financeiros retidos:
 | Retido | `affiliate_commissions` | id, afiliado, `stripe_invoice_id`, valor da fatura, comissão, `commission_bps`, `paid_months`, status, `available_at`, `payout_id`, `created_at` |
 | Retido | `affiliate_referrals` | id, afiliado, `code_used`, `first_charge_ref`, `created_at` |
 | Retido | `affiliate_referral_payments` | origem, `payment_ref`, valor, datas, rótulo |
-| Retido | `affiliate_refund_reviews` e `affiliate_refund_review_events` | Fatura, valores, status, referência, justificativa, autor |
+| Retido | `affiliate_refund_reviews` e `affiliate_refund_review_events` | Fatura, valores, status, referência, justificativa, autor; nos eventos da conferência (#1538), `commission_id`, `affiliate_code` (o código no ato, D8), `state_before` e `state_after` |
 | Retido | `affiliate_paid_refund_checks` | Fatura e data da última reconciliação, sem pessoa; sai 541 dias depois da última consulta (#1501) |
 
 `stripe_invoice_id` segue ligado ao cliente dentro da Stripe, e nada no repositório apaga o cliente

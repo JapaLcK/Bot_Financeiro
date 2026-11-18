@@ -12,6 +12,7 @@ Ordem de travas: nas ações do admin, saque, comissões, pendência; no webhook
 comissão, pendência, sem saque. Sem ciclo. Nada aqui guarda dado do indicado; referência do comprovante e
 justificativa moram só em `affiliate_refund_review_events`, nunca em log, aviso ou nota do saque.
 """
+from .affiliate_eventos import registrar_evento  # mudou de lugar (#1538); os chamadores importam daqui
 from .affiliate_payments import _rotular, origem_da_chave
 from .connection import get_conn
 
@@ -28,6 +29,16 @@ SAQUE_BLOQUEADO_SQL = """exists (select 1 from affiliate_refund_reviews v
 # como bloqueio no admin, mas o dinheiro não sai por ela: QR relido e "Marcar pago" recusam (#1498).
 SAQUE_EM_CONFERENCIA_SQL = """exists (select 1 from affiliate_commissions mc
                                        where mc.payout_id = {saque} and mc.payment_check_pending)"""
+# Sair da conferência (A5), por qualquer caminho: Stripe confirmou, estorno (todos), decisão do admin (#1538).
+_SEM_MARCA = {"payment_check_pending": "false", "payment_check_tried_at": "null", "payment_check_reason": "null",
+              "payment_check_marked_at": "null"}
+SEM_MARCA = ", ".join(f"{k} = {v}" for k, v in _SEM_MARCA.items())
+
+
+def sem_marca_se(condicao: str) -> str:
+    """`SEM_MARCA` só nas linhas em que `condicao` vale, no `update` único que também mexe nas outras.
+    `condicao` é sempre SQL constante do código, nunca entrada externa: entra no texto da query."""
+    return ", ".join(f"{k} = case when {condicao} then {v} else c.{k} end" for k, v in _SEM_MARCA.items())
 
 
 class PendenciaMudou(Exception):
@@ -47,18 +58,6 @@ def trava_fatura(cur, fatura: str) -> None:
 def trava_indicado(cur, referred_user_id: int) -> None:
     """Serializa a 1ª cobrança do mesmo cliente (Pix e cartão). Só depois da `trava_fatura`: sem ciclo."""
     cur.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"afiliado_indicado:{int(referred_user_id)}",))
-
-
-def registrar_evento(cur, review_id: int, action: str, actor: str, *, antes=None, depois=None,
-                     saque=None, em=None, referencia=None, justificativa=None) -> None:
-    cur.execute(
-        """
-        insert into affiliate_refund_review_events(review_id, action, actor, before_cents, after_cents,
-                                                   payout_id, event_on, receipt_ref, justification)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (review_id, action, actor, antes, depois, saque, em, referencia, justificativa),
-    )
 
 
 def _gravar(cur, fatura, antes, c, tipo, devolvido, quando, status, ator, recuperacao=None) -> dict:
@@ -113,7 +112,7 @@ def _aplicar(cur, fatura, a, c, tipo, devolvido, quando, ator) -> dict | None:
         registrar_evento(cur, linha["id"], "paid_before_refund", ator, depois=c["amount_cents"], saque=c["payout_id"])
         return linha
     if tipo == "total" and c["payout_id"] is None:  # solta: D9, estorna sozinha
-        cur.execute("update affiliate_commissions set status = 'reversed' where id = %s", (c["id"],))
+        cur.execute(f"update affiliate_commissions set status = 'reversed', {SEM_MARCA} where id = %s", (c["id"],))
         linha = _gravar(cur, fatura, a, c, tipo, devolvido, quando, "resolved", ator)
         registrar_evento(cur, linha["id"], "auto_reversed", ator, antes=c["amount_cents"], depois=0)
         return linha
@@ -259,7 +258,8 @@ def resolver_parcial(review_id: int, revisor: str, aprovado_cents: int, nota: st
             status = "recovery" if falta else "resolved"
         elif diferenca:  # fora de saque aberto: a comissão solta
             if aprovado_cents == 0:  # equivale a estorno: `amount_cents` fica como estava
-                cur.execute("update affiliate_commissions set status = 'reversed', payout_id = null where id = %s",
+                cur.execute(f"update affiliate_commissions set status = 'reversed', payout_id = null, {SEM_MARCA}"
+                            " where id = %s",
                             (c["id"],))
             else:
                 cur.execute("update affiliate_commissions set amount_cents = %s where id = %s",

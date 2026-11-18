@@ -58,6 +58,20 @@ def test_aprovacao_de_reembolso_nao_finito_da_422(token):
     assert r.status_code == 422, r.text
 
 
+@pytest.mark.parametrize("token", NAO_FINITOS, ids=NF_IDS)
+@pytest.mark.parametrize("acao", ["check-reverse", "check-conclude"])
+@pytest.mark.parametrize("campo", ["reason", "amount_cents"])
+def test_decisao_da_conferencia_nao_finito_da_422(token, acao, campo):
+    """A versão vista (`reason`, texto ou null; `amount_cents`, inteiro) recusa número não finito antes de comparar."""
+    corpo = {"reason": "null", "amount_cents": "1", campo: token}
+    r = _post_texto(
+        _admin_client(), f"/admin/api/affiliates/commissions/999999999/{acao}",
+        '{"justification": "justificativa ok", "evidence": "ticket-1", "marked_at": null, "reason": %(reason)s,'
+        ' "amount_cents": %(amount_cents)s}' % corpo,
+    )
+    assert r.status_code == 422, r.text
+
+
 @pytest.fixture
 def plano_espiao(monkeypatch):
     """`set_account_plan` vira espião que devolve None (→ 404, o mesmo fim da

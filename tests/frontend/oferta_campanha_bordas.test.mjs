@@ -121,8 +121,8 @@ test("pagamento: cupom do cliente (promotionCode) e sessão sem desconto mantêm
 // idempotente: o que o controle mede é o preço/selo do link MAIOR sobrescrito pelos 40%.)
 test("/precos pelo link de 45% + campanha de 40%: o card do Plus fica com os 45% do link", async () => {
   const link = { email: "l•••@dominio.com", desconto_pct: 45, trial: true, precos: {
-    essencial: { pct: 20, monthly: 792, annual: 7920, pix: 7920 },
-    plus: { pct: 45, monthly: 1095, annual: 10945, pix: 10945 }, pro: CAMP.precos.pro } };
+    essencial: { pct: 20, pct_mensal: 20, monthly: 792, annual: 7920, pix: 7920, na_hora: false },
+    plus: { pct: 45, pct_mensal: 45, monthly: 1095, annual: 10945, pix: 10945, na_hora: false }, pro: CAMP.precos.pro } };
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   await ctx.route("**/auth/validate", (r) => json(r, {}, 401));
   await ctx.route("**/auth/me", (r) => json(r, { detail: "x" }, 401));

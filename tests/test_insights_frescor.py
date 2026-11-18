@@ -31,7 +31,7 @@ from db.pockets import update_pocket_meta
 from db.recurring import create_recurring_expense
 from db.recurring_income import create_recurring_income
 from test_api_app_sessao import completo
-from test_insights_contrato import _orcamento_apertando, _usuario, llm  # noqa: F401
+from test_insights_contrato import _orcamento_apertando, _usuario, llm, saldo_de_sobra  # noqa: F401
 from test_insights_estado import MERCADO, _linhas, _put
 from tests._fusao_of_helpers import ia_fora, manda  # noqa: F401 (fixture)
 from tests.test_api_v2_eventos_escrita import _sql, barreira, ouvindo
@@ -75,10 +75,12 @@ def geracoes(monkeypatch):
 ])
 def test_t1_gasto_na_conversa_e_o_proximo_pedido_ja_recalcula(ia_fora, llm, monkeypatch, texto, primeiro):
     uid = _usuario("pro")
+    saldo_de_sobra(uid)
     monkeypatch.setenv("DASHBOARD_V2_BETA_EMAILS", "")
     monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", str(uid))
     manda(uid, "gastei 85 no mercado")
-    (cat,) = {r["categoria"] for r in _sql("select categoria from launches where user_id = %s", uid)}
+    (cat,) = {r["categoria"] for r in _sql("select categoria from launches where user_id = %s and not is_internal_movement",
+                                           uid)}
     db.upsert_budget(uid, cat, 100)  # 85 %: warning
     assert _feed(uid) == [("budget_warning", "warning")]
     assert _titulos_v2(uid) == [f"{cat.capitalize()} tá apertando"]  # do cache

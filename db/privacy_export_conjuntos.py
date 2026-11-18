@@ -211,6 +211,7 @@ EXPORTADAS: dict[str, tuple[str, str]] = {
                          "select kind, created_at from checkout_funnel_events where user_id = %(uid)s"),
     "remarketing_envios": ("remarketing_envios", "select * from remarketing_envios where user_id = %(uid)s"),
     "remarketing_regua": ("remarketing_regua", "select * from remarketing_regua where user_id = %(uid)s"),
+    "remarketing_black_friday": ("remarketing_bf", "select * from remarketing_bf where user_id = %(uid)s"),
     "reconquista_teste": ("reconquista_trial", "select * from reconquista_trial where user_id = %(uid)s"),
     "auditoria_conta": ("audit_events", "select * from audit_events where user_id = %(uid)s"),
     # Sem `email_enc`, `jti`, `token`/`session_jti` e `secret_encrypted`: credenciais.

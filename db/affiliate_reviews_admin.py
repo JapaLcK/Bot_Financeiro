@@ -53,10 +53,11 @@ def listar_historico(limite: int = 50) -> list[dict]:
             """
             select e.id, e.review_id, e.action, e.actor, e.before_cents, e.after_cents, e.payout_id, e.event_on,
                    e.receipt_ref, e.justification, e.created_at, r.tipo, c.id as commission_id,
-                   coalesce(a.code, r.affiliate_code, p.affiliate_code) as code
+                   coalesce(a.code, r.affiliate_code, e.affiliate_code, p.affiliate_code) as code
               from affiliate_refund_review_events e
               left join affiliate_refund_reviews r on r.id = e.review_id
-              left join affiliate_commissions c on c.id = r.commission_id
+              -- A decisão na conferência (#1538) ancora na comissão, sem pendência.
+              left join affiliate_commissions c on c.id = coalesce(r.commission_id, e.commission_id)
               left join affiliates a on a.id = c.affiliate_id
               left join affiliate_payouts p on p.id = e.payout_id
              order by e.id desc limit %s

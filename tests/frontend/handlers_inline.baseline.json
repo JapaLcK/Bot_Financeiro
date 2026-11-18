@@ -11,6 +11,7 @@
       "dismissEvent",
       "editAffiliateCommission",
       "navigateToFilter",
+      "openCheckForm",
       "openRecordedForm",
       "openRecoveryForm",
       "openReviewForm",
@@ -40,7 +41,7 @@
   "dashboard.html": {
     "funcoes": [
       "_clearHistoryFilters",
-      "_dismissInsight",
+      "_dispensarInsight",
       "_onEditCategoriaChange",
       "_pickCardColor",
       "_setCatColor",

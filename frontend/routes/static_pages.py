@@ -612,6 +612,24 @@ async def serve_lp():
     return _pagina_lp(sem_teste=not demo_ligado())
 
 
+_BF_BLOCO = {t: re.compile(rf"<!--{t}:([a-z,]+)-->(.*?)<!--/{t}-->", re.S) for t in "ev"}   # `e:` seção, `v:` trecho dentro dela
+
+
+@router.get("/black-friday")
+async def serve_black_friday():
+    # O estado sai do relógio do SERVIDOR (nunca o do aparelho): blocos `e:`/`v:` de outro estado saem do HTML.
+    from core.services.oferta_campanha import campanha_estado  # noqa: PLC0415
+
+    estado = campanha_estado()
+    resp = html_file(FRONTEND_DIR / "black-friday.html", clarity=True, inline_css=("brand.css",))
+    html = resp.body.decode()
+    for bloco in _BF_BLOCO.values():   # `e:` primeiro (contém os `v:`)
+        html = bloco.sub(lambda m: m[2] if estado in m[1].split(",") else "", html)
+    resp.body = html.encode()
+    resp.headers["content-length"] = str(len(resp.body))
+    return resp
+
+
 @router.get("/vsl")
 async def serve_vsl():
     # A mesma VSL da /lp, depois do XQuiz (a /q sem plano manda pra cá): o botão vai à
@@ -1520,6 +1538,9 @@ async def cupom_submit(request: Request, body: CupomBody, background_tasks: Back
     Resposta idêntica para e-mail novo e repetido (não revela quem já pediu)."""
     if (body.website or "").strip():  # honeypot: finge sucesso, não faz nada
         return {"ok": True}
+    from core.services.oferta_campanha import campanha_estado  # noqa: PLC0415
+    if campanha_estado() == "oferta":   # Black Friday: o 5% não soma com a campanha e não sai o código
+        raise HTTPException(status_code=503, detail="Cupom indisponível no momento.")
     email = (body.email or "").strip().lower()
     if len(email) > 120 or not _CUPOM_EMAIL.fullmatch(email) or not body.consent:
         raise HTTPException(status_code=400, detail="Informe um e-mail válido e aceite os termos.")
@@ -1544,6 +1565,12 @@ async def cupom_submit(request: Request, body: CupomBody, background_tasks: Back
         # Envio fora da resposta: novo e repetido respondem no mesmo tempo (sem oráculo).
         background_tasks.add_task(_cupom_enviar, email, codigo)
     return {"ok": True}
+
+
+@router.get("/excecao-trial-bf.js")
+async def serve_excecao_trial_bf_js(request: Request):
+    return FileResponse(FRONTEND_DIR / "excecao-trial-bf.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
 
 
 @router.get("/cupom-popup.js")

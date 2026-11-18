@@ -481,7 +481,7 @@ def test_pagamento_realizado_sem_pendencia_registra(adm):
 @pytest.mark.parametrize("campos", [
     {"paid_on": _hoje(1)}, {"paid_on": _hoje(-1)}, {"paid_on": "2026-02-30"}, {"paid_on": "05/11/2026"},
     {"paid_on": _hoje().replace("-", "")}, {"paid_on": ""}, {"paid_on": None}, {"paid_on": 20261105}, {"paid_on": "2026-11-05\x00"},
-    {"justification": ""}, {"justification": "curta"}, {"justification": "x" * 501}, {"justification": None},
+    {"justification": ""}, {"justification": "curta"}, {"justification": "\u200b" * 20}, {"justification": "x" * 501}, {"justification": None},
     {"justification": ["texto bem longo aqui"]}, {"justification": 1234567890},
     {"receipt_ref": ""}, {"receipt_ref": "abc"}, {"receipt_ref": "x" * 121}, {"receipt_ref": "E 123 456"},
     {"receipt_ref": "E1234\x00567"}, {"receipt_ref": None}, {"receipt_ref": 12345678},
@@ -1212,7 +1212,8 @@ def test_rota_pix_recusa(adm):
     assert next(p for p in adm.get(OVERVIEW).json()["payouts"] if p["id"] == saque)["blocked"] is False
 
 
-@pytest.mark.parametrize("caminho", ["payouts/1/payment-recorded", "refund-reviews/1/approve", "refund-reviews/1/close-recovery"])
+@pytest.mark.parametrize("caminho", ["payouts/1/payment-recorded", "refund-reviews/1/approve", "refund-reviews/1/close-recovery",
+                                     "commissions/1/check-reverse", "commissions/1/check-conclude"])
 def test_rotas_exigem_admin(adm, caminho):
     c = _afiliado()
     anonimo = TestClient(dashboard.app, base_url="https://testserver")

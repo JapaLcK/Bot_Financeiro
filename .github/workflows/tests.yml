@@ -40,10 +40,10 @@ jobs:
     # cortar não é teste lento: é DEADLOCK — um `asyncio.Lock` de módulo preso a
     # um event loop morto pendura o pytest para sempre (ver
     # tests/test_pool_async_entre_loops.py). Foi o que travou a suíte no #211.
-    # RE-MEDIDO em 03/09/2026 sobre as 12 execuções verdes mais recentes do job
-    # `pytest` (started_at/completed_at da API): 3m53s a 4m39s, mediana 4m09s.
-    # 15 min = 3,2x o pior caso, e o mesmo número do job `frontend-shard` abaixo.
-    timeout-minutes: 15
+    # RE-MEDIDO em 18/11/2026 (PR #1605): o passo de testes levou 14m24s
+    # (28238 passed) e o job estourou os 15 min antigos sem nenhuma falha.
+    # 25 min deixa folga; remeça pela API antes de mexer de novo.
+    timeout-minutes: 25
 
     services:
       postgres:

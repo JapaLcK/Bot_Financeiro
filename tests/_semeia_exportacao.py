@@ -44,6 +44,7 @@ _FIXOS = {
     "ia_declaracao_livro": {"papel": "sim", "estado": None},
     "remarketing_envios": {"status": "enviado"},
     "remarketing_regua": {"origem": "precos"},
+    "remarketing_bf": {"tipo": "oferta", "status": "enviado"},
     "recurring_expenses": {"payment_type": "account"},
     "family_members": {"role": "member"},
     "family_access_log": {"scope": "aggregates"},

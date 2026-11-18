@@ -28,16 +28,11 @@ RAIZ = Path(__file__).resolve().parent
 def test_textos_exatos_do_plano(monkeypatch):
     _relogio(monkeypatch, DENTRO)
     c = campanha_config()
-    assert c["frase"] == ("Black Friday: 40% OFF nos planos Plus e Pro, anual a partir de R$ 119,40, "
-                          "só até 30 de novembro.")
-    assert c["frase_assinante"] == ("Black Friday: o anual no Pix sai com 40% OFF nos planos Plus e Pro, "
-                                    "só até 30 de novembro.")
-    for nome, anual, mensal, cheio_m in (("Plus", "R$ 119,40", "R$ 11,94", "R$ 19,90"),
-                                         ("Pro", "R$ 299,40", "R$ 29,94", "R$ 49,90")):
+    assert c["faixa"] == "Black Friday do PigBank. 12 meses de Plus pelo preço de 6, só até segunda, 30/11."
+    for nome, anual in (("Plus", "R$ 119,40"), ("Pro", "R$ 299,40")):
         t = c["textos"][nome.lower()]
         assert t["frase_anual"] == f"12 meses de {nome} pelo preço de 6, {anual} no plano anual, só até 30 de novembro."
-        assert t["frase_mensal"] == f"1º mês do {nome} por {mensal}, depois {cheio_m} por mês. Só até 30 de novembro."
-        assert t["linha_mensal"] == f"1º mês por {mensal}, depois {cheio_m} por mês"
+        assert set(t) == {"anual", "anual_mes", "linha_anual", "frase_anual"}   # nada de mensal
 
 
 # ── relógio: o corpo real de `_agora` (a fixture do conftest o congela em todo teste) ──────────────────────
@@ -74,14 +69,14 @@ def test_agora_real_devolve_horario_com_fuso_e_decide_a_janela_em_brasilia(monke
 
 # ── Pix: migração do cartão, caderno e crédito ──────────────────────────────────────────────────────────────
 
-def test_pix_migracao_do_cartao_na_campanha_sai_com_40_e_o_link_nao_migra(monkeypatch, vendavel, asaas_falso):
+def test_pix_migracao_do_cartao_na_campanha_sai_a_preco_cheio_e_o_link_nao_migra(monkeypatch, vendavel, asaas_falso):
     a, _ = _conta("l-migra")
     _relogio(monkeypatch, DENTRO)
     monkeypatch.setattr(pix_checkout, "_stripe_vivo", lambda uid: ("sub_9", datetime.now(timezone.utc) + timedelta(days=20)))
     assert _pix(_cliente(painel=a), plan="plus").status_code == 409          # sem confirmar não migra
     assert _linhas(a) == []
     r = _pix(_cliente(painel=a), plan="plus", confirm_cancel_stripe=True)
-    assert r.status_code == 200 and r.json()["amount_cents"] == 11940        # 40%, não os 19900
+    assert r.status_code == 200 and r.json()["amount_cents"] == 19900        # assinante do cartão: SEM os 40%
     assert [l["stripe_subscription_id"] for l in _linhas(a)] == ["sub_9"]
     b, _ = _conta("l-migra-link")
     r = _pix(_cliente(b, 3), plan="plus", confirm_cancel_stripe=True)        # o link nunca migra
@@ -108,7 +103,7 @@ def test_pix_upgrade_credita_sobre_o_valor_pago_e_nao_sobre_o_cheio(monkeypatch,
     linha = _linhas(a)[-1]
     esperado = round(11940 * 364 / 365)                                        # 11907; sobre o cheio seria 19845
     assert linha["credit_cents"] == esperado
-    assert linha["amount_cents"] == 29940 - esperado
+    assert linha["amount_cents"] == 49900 - esperado                           # o upgrade é de assinante: preço cheio
 
 
 # ── o mock do front é o servidor (CLAUDE.md §0.7) ───────────────────────────────────────────────────────────
@@ -119,7 +114,7 @@ def test_mock_da_campanha_do_front_e_igual_ao_campanha_config(monkeypatch):
         ["node", "-e", "import('./tests/frontend/_campanha.mjs').then(m => console.log(JSON.stringify(m.CAMP)))"],
         cwd=RAIZ.parent, capture_output=True, text=True, check=True, timeout=60).stdout
     mock, real = json.loads(out), campanha_config()
-    for k in ("desconto_pct", "trial", "frase", "frase_assinante", "textos"):
+    for k in ("desconto_pct", "trial", "faixa", "textos"):
         assert mock[k] == real[k], k
     assert mock["precos"] == real["precos"]   # o dict inteiro: a tela lê `p.pct` e `p.pix` também
 
@@ -130,8 +125,8 @@ def test_cartao_ex_cliente_logado_leva_os_40_e_pelo_link_leva_409(monkeypatch):
     a, _ = _conta("l-ex")
     fake, _x = _cartao(monkeypatch), _relogio(monkeypatch, DENTRO)
     monkeypatch.setattr(dashboard, "ja_comprou", lambda uid: True)
-    assert _checkout(_cliente(auth=a), plan="plus").status_code == 200
+    assert _checkout(_cliente(auth=a), plan="plus", interval="annual").status_code == 200
     k = fake.last_session_kwargs
-    assert k["discounts"] == [{"coupon": "rm_e0_40_prod_x"}] and k["metadata"]["rm_desc"] == "40"
-    r = _checkout(_cliente(a, 3), plan="plus")
+    assert k["discounts"] == [{"coupon": "bf_40_once_prod_x"}] and k["metadata"]["rm_desc"] == "40"
+    r = _checkout(_cliente(a, 3), plan="plus", interval="annual")
     assert r.status_code == 409 and r.json()["detail"]["error"] == "ja_comprou"

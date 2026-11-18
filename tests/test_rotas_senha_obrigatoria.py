@@ -96,7 +96,7 @@ TABELA = {
     ("GET", "/d/{code}"): (P, "magic link"), ("GET", "/r/{code}"): (P, "link de afiliado"),
     ("GET", "/i/{code}"): (P, "link de prospect"), ("GET", "/wa"): (P, "abre o WhatsApp"),
     ("GET", "/teste"): (P, "teste do Piggy"), ("GET", "/t/{code}"): (P, "link do teste"),
-    ("POST", "/cupom"): (P, "pop-up do cupom"), ("GET", "/cupom-popup.js"): (P, "asset"),
+    ("POST", "/cupom"): (P, "pop-up do cupom"), ("GET", "/cupom-popup.js"): (P, "asset"), ("GET", "/excecao-trial-bf.js"): (P, "asset"),
     ("POST", "/contact"): (P, "formulário"), ("GET", "/health"): (P, "health"),
     ("GET", "/unsubscribe"): (P, "descadastro"), ("POST", "/unsubscribe"): (P, "descadastro"),
     ("GET", "/api/commands-catalog"): (P, "catálogo"), ("GET", "/api/blog/news"): (P, "blog"),
@@ -233,7 +233,7 @@ TABELA = {
 _HTML_PUBLICO = (
     "/", "/login", "/cadastro", "/q", "/recuperar-senha", "/suporte/contato", "/privacy",
     "/termos", "/blog", "/whatsapp", "/funcionalidades", "/comandos", "/comandos-app",
-    "/agents", "/como-funciona", "/precos", "/lp", "/quiz", "/oferta", "/inicio-antiga", "/vsl", "/continuar-compra", "/assinar", "/suporte",
+    "/agents", "/como-funciona", "/precos", "/lp", "/quiz", "/oferta", "/inicio-antiga", "/vsl", "/black-friday", "/continuar-compra", "/assinar", "/suporte",
     "/reset-password", "/redefinir-senha", "/completar-cadastro", "/familia/entrar",
     "/.well-known/apple-app-site-association",
 )
