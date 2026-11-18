@@ -294,6 +294,7 @@
      conta logada e o clique em "Assinar" caía em "Faça login". -->
 <script src="/static/auth-refresh.js?v=1"></script>
 <script src="/purchase-intent.js?v=1"></script>
+<script src="/excecao-trial-bf.js?v=1"></script>
 <link href="/site-redesign.css?v=1" rel="stylesheet"/><link href="/site-plans.css?v=1" rel="stylesheet"/></head>
 <body id="topo" class="lp lp-plans"><a class="lp-skip-link" href="#conteudo">Pular para o conteúdo</a>
 
@@ -599,17 +600,7 @@ function faixaDeOferta(frase) {
 }
 // Na campanha o anual de Plus/Pro é cobrado na hora: os dois textos que prometem trial ganham a exceção.
 // Idempotente e chamada pelos dois lados (faixa e applyPlanGateCopy, que é async e reescreve o texto).
-function excecaoTrialBF() {
-  if (document.getElementById("oferta-faixa")?.hidden !== false) return;
-  for (const id of ["precos-sub", "plans-note-v2"]) {
-    const el = document.getElementById(id);
-    if (!el || el.querySelector("[data-bf-trial]") || !/7 dias/.test(el.textContent)) continue;
-    const t = document.createElement("span");
-    t.dataset.bfTrial = "";
-    t.textContent = " Exceção: o anual do Plus e do Pro na Black Friday é cobrado na hora, sem período grátis; nos outros planos, os 7 dias continuam.";
-    el.append(t);
-  }
-}
+const excecaoTrialBF = () => PBExcecaoTrialBF("#precos-sub, #plans-note-v2");
 
 /* Valor numérico do plano pros eventos do GA4 (`value`/`price`), lido do
    PLAN_PRICES acima em vez de uma segunda tabela: preço só é editado num lugar,

@@ -1567,6 +1567,12 @@ async def cupom_submit(request: Request, body: CupomBody, background_tasks: Back
     return {"ok": True}
 
 
+@router.get("/excecao-trial-bf.js")
+async def serve_excecao_trial_bf_js(request: Request):
+    return FileResponse(FRONTEND_DIR / "excecao-trial-bf.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
 @router.get("/cupom-popup.js")
 async def serve_cupom_popup_js(request: Request):
     return FileResponse(FRONTEND_DIR / "cupom-popup.js", media_type="application/javascript",

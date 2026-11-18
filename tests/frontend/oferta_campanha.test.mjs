@@ -330,3 +330,21 @@ for (const [rotulo, sub, pinta] of [["degraded", { active: false, degraded: true
     await ctx.close();
   });
 }
+
+// Exceção do trial na home: garantia, FAQ e fecho prometem os 7 dias; com a faixa, cada um ganha a exceção (uma vez).
+// Controle: sem o `PBExcecaoTrialBF("[data-trial]")` do oferta.js o caso "com campanha" fica vermelho; sem campanha e assinante são o positivo.
+test("/ com campanha: garantia, FAQ e fecho trazem a exceção; sem campanha e assinante, só o trial", async () => {
+  const textosHome = (page) => page.evaluate(() => [...document.querySelectorAll("[data-trial]")].map((e) => e.textContent.replace(/\s+/g, " ")));
+  let { ctx, page } = await home({ viewport: VP[0][1] });
+  let ts = await textosHome(page);
+  assert.equal(ts.length, 3);
+  for (const t of ts) { assert.match(t, EXC); assert.equal(t.match(/Exceção/g).length, 1); }
+  await ctx.close();
+  for (const opts of [{ campanha: null }, { assinante: true }]) {
+    ({ ctx, page } = await home({ viewport: VP[0][1], ...opts }));
+    ts = await textosHome(page);
+    assert.equal(ts.length, 3);
+    for (const t of ts) { assert.match(t, /7 dias/); assert.doesNotMatch(t, /Exceção/); }
+    await ctx.close();
+  }
+});

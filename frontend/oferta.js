@@ -43,6 +43,7 @@
     ver.style.cssText = "color:inherit;text-decoration:underline;font-weight:800";
     f.append(ver);
     f.hidden = false;
+    PBExcecaoTrialBF("[data-trial]");   // garantia, FAQ e fecho prometem os 7 dias: o anual da campanha é a exceção
     for (const [tier, t] of Object.entries(textosCampanha.textos)) {
       const card = $(`[data-plano="${tier}"]`, planos);
       const poe = (sel, txt) => { const e = card && $(sel, card); if (e) e.textContent = txt; };
