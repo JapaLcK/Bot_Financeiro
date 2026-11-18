@@ -1813,7 +1813,7 @@ FOTO dos cadernos escolhidos, `[{price, url, nome, valor_cents}]`, gravada só p
 no alerta do estorno parcial, no GA4/CAPI e no `total_cents` do poll. O dreno ganhou o
 efeito `ebook` logo depois do `grant`: uma linha em `ebook_entregas` por caderno, com
 `session_id` = `external_reference` (`pix:<id>`) e `ebook_price` = o Price do Stripe;
-sem cadernos é no-op registrado, e ele herda D3 (estorno antes do `RECEIVED` não grava)
+sem cadernos é no-op registrado, e ele herda D3 (estorno recebido antes do `RECEIVED` não grava)
 e o órfão (nada). O e-mail de confirmação discrimina plano, cada caderno e o total
 (dono, Q4); sem cadernos é o de antes. O job entrega a linha `pix:` ANTES de qualquer
 chamada ao Stripe (`pix_extras.conferir_entrega`): cobrança do dono por `user_id` +
@@ -1880,8 +1880,9 @@ em /admin, aprovar o valor da comissão que cabe (revisão parcial, com a justif
 `afiliado_estorno` roda no `PAYMENT_REFUNDED` e, com a
 cobrança em `refunded`, grava o pagamento antes de rotular, sem comissão: se o `afiliado` ficou
 pendente, a guarda D3 fecha a retentativa da compra e ele não roda mais; o pagamento fica no
-histórico e encerra a elegibilidade. Em outro status (`chargeback`, que só reparo manual grava, ou o
-estorno fora de ordem em `pending`) ele roda a mesma máquina sobre o que existir: rótulo da linha e
+histórico e encerra a elegibilidade. Em outro status (`chargeback`, que só reparo manual grava; o
+estorno antes do pagamento, que deixa a cobrança `canceled`; ou `creating`/`pending` quando ela não é
+cancelada) ele roda a mesma máquina sobre o que existir: rótulo da linha e
 estorno ou pendência da comissão. Os eventos de chargeback/MED não transicionam e não mexem na
 comissão: o admin usa "Estornar". `afiliado_estorno_parcial` roda no parcial,
 só com a cobrança em `refunded_partial` e com id, A CADA evento (`_REPETEM` em `pix_drain.py`): o
@@ -1890,9 +1891,51 @@ reabre a pendência e a reentrega não muda nada. São
 dois nomes porque o dreno deduplica por `(pagamento, efeito)`, e com um só o total depois do
 parcial seria pulado. O parcial sem id fecha sem retentativa, como antes. Titular excluído
 (`_orfao`) não roda efeito: `rotular_reembolso` passa pela mesma máquina direto, por ser idempotente.
-Estorno que chega com a cobrança ainda `pending` não vira pagante, nem no boot: ela nunca foi
+Estorno que chega antes do pagamento (a cobrança vai a `canceled`) não vira pagante, nem no boot: ela nunca foi
 `paid`.
 Limite: em `chargeback` o estorno não grava pagante; nenhum código grava esse status, só reparo manual, e o boot repara.
+A D3 pergunta se o estorno CHEGOU, não se o `revoke` rodou (#1437, `db/pix_estornos.py`): todo
+`PAYMENT_REFUNDED` autenticado com `payment.id` válido (`[A-Za-z0-9_-]`, até 100) grava uma linha em
+`pix_estornos_recebidos` na mesma transação da outbox (`registrar_evento`, antes do 200; se falhar,
+nada entra e o Asaas reentrega), sem exigir a nossa referência. A linha guarda só o id, a origem
+(`sandbox|producao:<ASAAS_CONTA>`, ambiente por `ASAAS_BASE_URL`; `ASAAS_CONTA` é o walletId), a
+classe (`nosso`: há cobrança com o id ou com a referência `pix:<id>`; `alheio`: referência de outro
+formato e nenhuma cobrança com o id; `nao_identificado`: o resto; o dreno promove a `nosso`), o
+`event_id` e as datas. **O bloqueio é só pelo id**, sem olhar origem nem classe, e nada é apagado (a
+limpeza dos `alheio` é issue à parte). Todo `RECEIVED`/`CONFIRMED` lê o marcador (ou o `revoke`) na
+D3, antes de cada efeito de compra (sob a trava), em `reconciliar_grant` e na própria transição para
+`paid` (`transicionar(..., sem_estorno=True)`, mesma instrução, pelo id do EVENTO). Com o `revoke`
+falhando, nenhuma retentativa ou evento antigo concede, manda Purchase/e-mail ou cria comissão.
+Recompra e 2º pagamento (id novo) não são afetados, e o parcial não marca. A cobrança estornada ANTES
+do pagamento (`draft`/`creating`/`pending`/`canceling` com o mesmo id, ou sem id fora de `creating`,
+que é emissão em voo e fica para a reconciliação da saga) vai a `canceled` e perde o QR: libera a
+recompra sem `DELETE` remoto e não grava pagante. A cobrança órfã (titular excluído) não passa por
+aí: `_orfao` retorna antes, e a órfã em `pending` com `PAYMENT_REFUNDED` continua `pending` (não há
+titular a quem conceder; um `RECEIVED` depois a leva a `paid_orphan` sem efeito de compra, como antes). A varredura drena o
+`PAYMENT_REFUNDED` antes da compra mais velha (`eventos_pendentes`), complemento da pausa. Limite,
+para o PR-4 (#1587, prazo de 45 s por rodada): a fila pega 100 por vez com o estorno na frente, então
+cerca de 100 `PAYMENT_REFUNDED` que falham para sempre (o `revoke` quebrado) ocupam a rodada inteira e
+deixam as compras com fome na varredura; o webhook novo continua drenando na hora.
+**Deploy do #1437.** A versão anterior não gravava o marcador, e a outbox não guarda o `payment.id`
+em coluna pesquisável (só no `payload_enc`, Fernet). Nesta ordem:
+1. o #1574 (pausa da concessão do Pix) mergeado, implantado e com o passo 0 do roteiro dele conferido
+   (os gatilhos existem e estão ativos);
+2. configurar `ASAAS_CONTA` (o walletId da conta) no Railway, para a origem do marcador;
+3. ativar a pausa ANTES do merge deste PR, se o merge na `main` implanta sozinho (conferir no Railway
+   se o deploy é automático);
+4. merge e deploy deste PR;
+5. confirmar que a versão anterior saiu: no Railway, só o deployment novo ativo;
+6. `scripts/pix_estornos_pendentes.py` em simulação, depois `--aplicar`, depois simulação de novo,
+   até `sem_marcador: 0` e código 0. Ele lê os `PAYMENT_REFUNDED` não purgados da outbox e a listagem
+   `status=REFUNDED` do Asaas, grava o marcador que falta e drena os abertos. A saída tem só
+   contagens, mais o `event_id` (id opaco do Asaas) de cada linha da fila que não decifra (o cabeçalho
+   do script diz como resolver). O filtro e a paginação ainda não foram conferidos no sandbox: item da
+   listagem com `status` diferente de `REFUNDED` não vira marcador e segura o código 1
+   (`asaas_status_inesperado`), e a paginação por `offset` pode pular um item que mude durante a
+   execução, o que se resolve rodando a simulação de novo. Pendência do sandbox: se o estorno parcial
+   aparecer como `REFUNDED` na listagem, o script o marcaria (a D1 diz que o parcial nunca bloqueia);
+7. retomar (roteiro do #1574). O estorno aberto com o `revoke` ainda falhando não segura a retomada
+   (P-R3b): o marcador já impede nova concessão.
 
 `PAYMENT_RECEIVED_IN_CASH_UNDONE` (baixa manual desfeita, #1267; `core/services/pix_baixa_desfeita.py`):
 UNDONE com id diferente do `asaas_payment_id` de cobrança `paid`/`paid_orphan`/`refunded_partial` é de um pagamento secundário: só alerta, nada muda.

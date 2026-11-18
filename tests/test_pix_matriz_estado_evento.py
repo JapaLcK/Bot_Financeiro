@@ -71,17 +71,20 @@ def _paga_tudo(grants_final=1):
 # (status final, efeitos NOVOS, grants pix ativos). Escrita à mão, linha a linha.
 TABELA = {
     # sem id remoto: RECEIVED paga mesmo assim (o dinheiro entrou, §8.2); o QR nunca saiu.
-    "draft": _linha("draft", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("draft", MARCA, 0), PAYMENT_REFUNDED=("draft", REVOKE, 0)),
+    # #1437 R3.3: o estorno do mesmo id ANTES do pagamento leva draft/pending/canceling a `canceled`
+    # (sem QR), o que libera a recompra; o RECEIVED atrasado segue barrado pela D3. `creating` sem id
+    # é emissão em voo: fica, e a reconciliação da saga resolve.
+    "draft": _linha("draft", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("draft", MARCA, 0), PAYMENT_REFUNDED=("canceled", REVOKE, 0)),
     "creating": _linha("creating", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("creating", MARCA, 0),
                        PAYMENT_REFUNDED=("creating", REVOKE, 0)),
     "pending": _linha("pending", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("pending", MARCA, 0),
                       PAYMENT_OVERDUE=("expired", NADA, 0),
                       PAYMENT_DELETED=("canceled", NADA, 0),
-                      PAYMENT_REFUNDED=("pending", REVOKE, 0)),
+                      PAYMENT_REFUNDED=("canceled", REVOKE, 0)),
     "canceling": _linha("canceling", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("canceling", MARCA, 0),
                         PAYMENT_OVERDUE=("expired", NADA, 0),
                         PAYMENT_DELETED=("canceled", NADA, 0),
-                        PAYMENT_REFUNDED=("canceling", REVOKE, 0)),
+                        PAYMENT_REFUNDED=("canceled", REVOKE, 0)),
     "canceled": _linha("canceled", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("canceled", MARCA, 0),
                        PAYMENT_REFUNDED=("canceled", REVOKE, 0)),
     "expired": _linha("expired", 0, **_paga_tudo(), PAYMENT_RECEIVED_IN_CASH_UNDONE=("expired", MARCA, 0),
@@ -96,7 +99,7 @@ TABELA = {
                           PAYMENT_PARTIALLY_REFUNDED=("refunded_partial", NADA, 0)),
     "refunded_partial": _linha("refunded_partial", 1, PAYMENT_RECEIVED_IN_CASH_UNDONE=("refunded", MARCA | {"revoke"}, 0),
                                PAYMENT_REFUNDED=("refunded", REVOKE, 0)),
-    # `revoke` já registrado: o RECEIVED atrasado NÃO reconcede (a célula positiva).
+    # estorno já registrado: o RECEIVED atrasado NÃO reconcede (a célula positiva).
     "refunded": _linha("refunded", 0),
     # só se chega a `chargeback` por reconciliação manual (a linha do §11).
     "chargeback": _linha("chargeback", 1, PAYMENT_REFUNDED=("chargeback", REVOKE, 0)),

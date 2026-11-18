@@ -424,12 +424,13 @@ def test_e5_parcial_depois_partially_refunded_nao_muda_nada(user_id, externo):
     assert ler(cob["id"])["status"] == "pending" and _pix(user_id) == []
 
 
-def test_e6_parcial_depois_refunded_fica_pending_e_received_tardio_nao_concede(user_id, externo):
+def test_e6_parcial_depois_refunded_fica_canceled_e_received_tardio_nao_concede(user_id, externo):
     conta(user_id, "free", None)
     cob = nova_cobranca(user_id)
     entregar("PAYMENT_RECEIVED", cob, valor=0.01)
     entregar("PAYMENT_REFUNDED", cob)
-    assert ler(cob["id"])["status"] == "pending" and _pix(user_id) == []
+    # #1437 R3.3: estornada antes de virar `paid` vai a `canceled` (era `pending`, com o QR morto)
+    assert ler(cob["id"])["status"] == "canceled" and _pix(user_id) == []
     entregar("PAYMENT_RECEIVED", cob)  # integral, mas o pagamento já foi estornado
     assert _pix(user_id) == []
 
@@ -723,3 +724,21 @@ def test_j3_payment_id_novo_em_cobranca_pending_concede(user_id, externo):
     entregar("PAYMENT_RECEIVED", cob, payment_id=novo)
     assert ler(cob["id"])["status"] == "paid" and len(_pix(user_id)) == 1
     assert COMPRA <= efeitos(novo) and externo["alerta"] == []
+
+
+def test_j4_estorno_do_id_antigo_nao_barra_o_pagamento_de_id_novo(user_id, externo):
+    """#1437 R3.4: marcador de estorno no id A (gravado direto, sem drenar o `REFUNDED`, que
+    cancelaria a cobrança) e `RECEIVED` com id B na mesma cobrança `pending`: concede. A condição
+    `sem_estorno` da transição lê o id do EVENTO, não `pix_charges.asaas_payment_id`."""
+    from db.pix_estornos import gravar
+
+    conta(user_id, "free", None)
+    cob = nova_cobranca(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            gravar(cob["asaas_payment_id"], None, "evt_j4", cur)
+        conn.commit()
+    novo = f"pay_{uuid.uuid4().hex[:12]}"
+    entregar("PAYMENT_RECEIVED", cob, payment_id=novo)
+    assert ler(cob["id"])["status"] == "paid" and len(_pix(user_id)) == 1
+    assert COMPRA <= efeitos(novo)
