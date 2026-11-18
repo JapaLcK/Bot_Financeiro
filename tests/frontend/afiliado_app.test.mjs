@@ -74,7 +74,7 @@ test("afiliado 0%: 'sem comissão neste programa', sem nenhum percentual", async
 });
 
 // mutação: tirar o `confirmModal` de requestAffiliatePayout: o POST sai no primeiro clique, sem valor nem chave à vista
-test("saque no /app: a confirmação mostra valor e chave antes do POST; o corpo é exatamente {pix_key}", async () => {
+test("saque no /app: a confirmação mostra valor e chave antes do POST; o corpo é exatamente {pix_key, account_id}", async () => {
   const { ctx, page } = await abrir();
   try {
     const posts = [];
@@ -86,7 +86,25 @@ test("saque no /app: a confirmação mostra valor e chave antes do POST; o corpo
     await page.locator("#generic-confirm-ok").click();
     await page.waitForFunction(() => !document.querySelector("#generic-confirm-overlay.open"));
     await page.waitForTimeout(150);
-    assert.deepEqual(posts, [JSON.stringify({ pix_key: CHAVE })]);
+    assert.deepEqual(posts, [JSON.stringify({ pix_key: CHAVE, account_id: 42 })]);
+  } finally { await ctx.close(); }
+});
+
+// mutação: tirar o `res.status === 409` de requestAffiliatePayout: cai no `data.detail` cru, sem recarga
+test("saque no /app: 409 (conta mudou no servidor) mostra o aviso e recarrega depois do OK", async () => {
+  const { ctx, page } = await abrir();
+  try {
+    let recargas = 0;
+    page.on("framenavigated", (f) => { if (f === page.mainFrame()) recargas += 1; });
+    await ctx.route("**/api/affiliate/payout", (r) => r.fulfill({ status: 409, json: { detail: "A conta conectada mudou. Esta solicitação de saque não foi enviada." } }));
+    await naArea(page);
+    await page.locator("#affiliate-pix-input").fill(CHAVE);
+    await page.locator("#affiliate-payout-btn").click();
+    await page.waitForTimeout(450); // a confirmação ignora o ponteiro nos primeiros 400 ms (#1411)
+    await page.locator("#generic-confirm-ok").click();
+    await page.locator("#generic-confirm-overlay.open #generic-confirm-body").filter({ hasText: /A conta conectada mudou/ }).waitFor();
+    assert.equal(recargas, 0, "a recarga espera o OK");
+    await Promise.all([page.waitForEvent("framenavigated", (f) => f === page.mainFrame()), page.locator("#generic-confirm-ok").click()]);
   } finally { await ctx.close(); }
 });
 

@@ -12,7 +12,7 @@ const campo = (page) => page.locator("#afil-pix");
 const sacar = (page) => page.getByRole("button", { name: /^Sacar/ });
 
 // mutação: mandar `{ pix_key, amount }` em solicitarSaque, ou tirar a confirmação: o corpo muda ou o POST sai sem ela
-test("confirmação com valor e chave; o corpo é exatamente {pix_key}, com CSRF; sucesso limpa a chave e relê", async () => {
+test("confirmação com valor e chave; o corpo é exatamente {pix_key, account_id=pb_conta}, com CSRF; sucesso limpa a chave e relê", async () => {
   await comAfiliado(browser(), {}, async (t) => {
     await t.page.locator("#afil-pix").waitFor();
     const dlg = await pedirSaque(t.page, `  ${CHAVE} `);
@@ -24,7 +24,7 @@ test("confirmação com valor e chave; o corpo é exatamente {pix_key}, com CSRF
     await confirmar(t.page).click();
     await t.page.getByText("Saque solicitado.").waitFor();
     assert.equal(t.s.posts.length, 1);
-    assert.equal(t.s.posts[0].corpo, JSON.stringify({ pix_key: CHAVE }));
+    assert.equal(t.s.posts[0].corpo, JSON.stringify({ pix_key: CHAVE, account_id: 1 }));
     assert.equal(t.s.posts[0].csrf, "tok-123");
     assert.equal(new URL(t.s.posts[0].url).pathname, "/api/affiliate/payout");
     await ate(() => t.s.gets > antes);
@@ -219,6 +219,18 @@ test("uma releitura com a tela aberta não apaga o que foi digitado", async () =
   });
 });
 
+// mutação: tirar o ramo 409 de `falhaSaque` (api.ts): a tela mostra o texto genérico de "confira o histórico" em vez do da conta trocada
+test("409 (a sessão é de outra conta): alerta com o texto da conta mudou e a chave digitada fica", async () => {
+  await comAfiliado(browser(), {}, async (t) => {
+    t.s.post = (r) => r.fulfill({ status: 409, json: { detail: "A conta conectada mudou. Esta solicitação de saque não foi enviada." } });
+    await pedirSaque(t.page);
+    await confirmar(t.page).click();
+    await t.page.getByRole("alert").filter({ hasText: /^A conta conectada mudou\. Esta solicitação de saque não foi enviada\. Recarregue a página/ }).waitFor();
+    assert.equal(await campo(t.page).inputValue(), "ana@pix.com");
+    assert.equal(t.s.posts.length, 1);
+  });
+});
+
 // mutação: tirar `api\/affiliate` do `urlDe` (lib/v2.ts): vira /api/v2/api/affiliate/payout e a tela nem carrega
 test("401 de sessão no POST: o auth-refresh renova, repete e o saque sai uma vez só", async () => {
   await comAfiliado(browser(), {}, async (t) => {
@@ -230,7 +242,7 @@ test("401 de sessão no POST: o auth-refresh renova, repete e o saque sai uma ve
     await t.page.getByText("Saque solicitado.").waitFor();
     assert.equal(refresh, 1);
     assert.equal(t.s.posts.length, 2, "o 401 não criou saque: a repetição é a primeira que passa");
-    assert.equal(t.s.posts[1].corpo, JSON.stringify({ pix_key: CHAVE }));
+    assert.equal(t.s.posts[1].corpo, JSON.stringify({ pix_key: CHAVE, account_id: 1 }));
   });
 });
 

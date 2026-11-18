@@ -33,7 +33,7 @@ test("o saque funciona na página sem plano, com confirmação e releitura", asy
     await pedirSaque(t.page);
     await confirmar(t.page).click();
     await t.page.getByText("Saque solicitado.").waitFor();
-    assert.equal(t.s.posts[0].corpo, JSON.stringify({ pix_key: "ana@pix.com" }));
+    assert.equal(t.s.posts[0].corpo, JSON.stringify({ pix_key: "ana@pix.com", account_id: 1 }));
     assert.equal(t.s.corpo, COM_SAQUE);
     await t.page.getByText("Você já tem um saque em análise.").waitFor();
     assert.deepEqual(t.v2, []);

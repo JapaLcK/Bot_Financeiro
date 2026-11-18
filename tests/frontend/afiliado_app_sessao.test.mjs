@@ -48,7 +48,7 @@ for (const [nome, marca, mexe] of [
     const t = await confirmarCom({ marca }, ({ page }) => page.evaluate(mexe));
     try {
       await ate(() => t.posts.length > 0);
-      assert.deepEqual(t.posts, [JSON.stringify({ pix_key: CHAVE })]);
+      assert.deepEqual(t.posts, [JSON.stringify({ pix_key: CHAVE, account_id: 42 })]);
       assert.equal(t.recargas(), 0);
       await semAlerta(t.page);
     } finally { await t.ctx.close(); }
@@ -136,7 +136,7 @@ test("C: o validate volta 401, o refresh renova a mesma conta e o validate refei
   try {
     await ate(() => t.posts.length > 0);
     await t.page.waitForTimeout(200); // e nenhum 2º
-    assert.deepEqual(t.posts, [JSON.stringify({ pix_key: CHAVE })]);
+    assert.deepEqual(t.posts, [JSON.stringify({ pix_key: CHAVE, account_id: 42 })]);
     assert.deepEqual([validates, refreshes], [2, 1], "validate, refresh, validate");
     await semAlerta(t.page);
     assert.equal(t.recargas(), 0);

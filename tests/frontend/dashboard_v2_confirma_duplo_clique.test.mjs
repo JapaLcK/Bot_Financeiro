@@ -113,7 +113,7 @@ test("passada a janela, o 'Confirmar saque' manda 1 POST", async () => {
     await t.page.waitForTimeout(JANELA);
     await confirmar(t.page).click();
     await t.page.getByText("Saque solicitado.").waitFor();
-    assert.deepEqual(t.s.posts.map((p) => p.corpo), [JSON.stringify({ pix_key: CHAVE })]);
+    assert.deepEqual(t.s.posts.map((p) => p.corpo), [JSON.stringify({ pix_key: CHAVE, account_id: 1 })]);
   });
 });
 
