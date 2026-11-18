@@ -2822,7 +2822,7 @@ nova) e clique novo em `/r/<código>`, no mesmo host do cadastro.
 
 A área do próprio afiliado é `GET /api/affiliate/me` e `POST /api/affiliate/payout`
 (`frontend/routes/affiliates.py`), sem gate de plano: o `affiliate_id` sai sempre de
-`get_affiliate_by_user` com o usuário da sessão, e o corpo do saque só tem `pix_key`.
+`get_affiliate_by_user` com o usuário da sessão, e o corpo do saque é `pix_key` mais `account_id` opcional (a conta que a tela mostrava; 409 se difere da sessão, 422 se não for inteiro; ausente/null = cliente antigo, sem conferência, #1545).
 Conta desativada lê e saca o que já acumulou; só deixa de acumular. O `/me` devolve
 `stats.generated`, `hold_days` (`COMMISSION_HOLD_DAYS`), `commissions[].payout_id`,
 `commissions[].in_review`, `commissions[].paid_months` e `commissions[].original_amount` (nulo sem ajuste), e nunca dado do

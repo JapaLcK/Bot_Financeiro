@@ -138,7 +138,7 @@ for (const ms of [0, 120, 250]) {
 
 // ── positivos: o conserto não virou recusa ──
 for (const [w, h] of TAMANHOS) {
-  test(`${w}x${h}: passada a janela, o "Confirmar saque" manda 1 POST com {pix_key}`, async () => {
+  test(`${w}x${h}: passada a janela, o "Confirmar saque" manda 1 POST com {pix_key, account_id}`, async () => {
     const { ctx, page, posts } = await naTela({ width: w, height: h });
     try {
       await page.locator("#affiliate-payout-btn").click();
@@ -147,7 +147,7 @@ for (const [w, h] of TAMANHOS) {
       await page.waitForFunction(() => !document.querySelector("#generic-confirm-overlay.open"));
       await ate(() => posts.length > 0); // o validate e o POST, sem prazo fixo
       await page.waitForTimeout(200); // e nenhum 2º
-      assert.deepEqual(posts, [JSON.stringify({ pix_key: CHAVE })]);
+      assert.deepEqual(posts, [JSON.stringify({ pix_key: CHAVE, account_id: 42 })]);
     } finally { await ctx.close(); }
   });
 }
@@ -186,7 +186,7 @@ test("Enter no 'Confirmar saque' passada a janela confirma", async () => {
     await page.keyboard.press("Enter");
     await ate(() => posts.length > 0);
     await page.waitForTimeout(200);
-    assert.deepEqual(posts, [JSON.stringify({ pix_key: CHAVE })]);
+    assert.deepEqual(posts, [JSON.stringify({ pix_key: CHAVE, account_id: 42 })]);
   } finally { await ctx.close(); }
 });
 
