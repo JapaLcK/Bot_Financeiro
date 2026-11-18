@@ -52,7 +52,8 @@ def test_migracao_no_banco_da_main():
         _sem_gatilhos()
         _sql("drop table if exists pix_pausa_concessao")  # leva junto o gatilho do `delete`
         for funcao in ("pix_pausa_recusa()", "pix_pausa_ativar(text)", "pix_pausa_retem(text)",
-                       "pix_pausa_guarda(text, text, integer)", "pix_pausa_ativa()", "pix_pausa_sem_delete()"):
+                       "pix_pausa_guarda(text, text, integer)", "pix_pausa_ativa()", "pix_pausa_sem_delete()",
+                       "pix_pausa_segura_parcial()"):
             _sql(f"drop function if exists {funcao}")
         db.init_db()
         assert _gatilhos() == TODOS

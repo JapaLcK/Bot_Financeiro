@@ -1956,11 +1956,17 @@ a linha única de `pix_pausa_concessao` (ativa = `retomada_em` nulo) e três gat
 `trg_pix_pausa_*`) que recusam, com SQLSTATE `PBPAU`, só a transição da cobrança para `paid`/`paid_orphan`, o
 grant `source='pix'` ficando `active` e o insert de comissão `pix:%`. Valem para qualquer processo, inclusive o
 da versão anterior ainda no ar durante o deploy. O código novo nem lista nem reserva `PAYMENT_RECEIVED`/
-`CONFIRMED` (`pix_pausa_retem`, em `eventos_pendentes` e `reservar_evento`): o evento fica aberto com `attempts`
+`CONFIRMED` (`pix_pausa_retem`, em `eventos_pendentes` e `reservar_evento`): a compra fica aberta com `attempts`
 parado e não ocupa o lote da varredura, então estorno, parcial e baixa desfeita seguem drenando na ordem de
-chegada. Exceção: o estorno parcial de cobrança ainda antes do pagamento espera a retomada como a compra
-(`last_error = 'PausaPix'`, #1600), senão ele fecharia sem efeito e a compra retida daria comissão cheia, sem
-revisão. Recusa do gatilho que ainda chegue ao código novo (dreno em voo na ativação, baixa desfeita que
+chegada. Exceção: o estorno parcial de cobrança ainda antes do pagamento espera como a compra
+(`last_error = 'PausaPix'`, #1600), enquanto a pausa está ativa **e por 24 h depois da retomada**
+(`pix_pausa_segura_parcial`, `JANELA_DO_PARCIAL_H`): sem isso ele fecharia sem efeito e a compra retida daria
+comissão cheia, sem revisão. A janela existe porque, na retomada, a compra retida ainda pode drenar depois do
+parcial (passada listada antes da retomada, outro drenador com a compra reservada, compra que falha uma vez).
+Esse parcial segurado **ocupa o lote**: é listado, reservado e decifrado a cada passada de 60 s (com uma linha
+de `pii_access_log` cada vez). Custo da janela: um parcial fora de ordem de verdade (chegou antes da compra no
+Asaas; sem pausa ele fecha sem efeito, D1-a) a menos de 24 h de uma retomada espera a janela fechar e só então
+fecha sem efeito. Recusa do gatilho que ainda chegue ao código novo (dreno em voo na ativação, baixa desfeita que
 reconcede) fica aberta com `last_error = 'PausaPix'`, sem somar tentativa e sem alerta de travado. A versão
 anterior bate no gatilho e soma 1 tentativa por passada, só enquanto viver. Stripe e admin seguem normalmente.
 **Retenção:** o evento aberto que a pausa segura (compra `RECEIVED`/`CONFIRMED` sem `processed_at`, ou

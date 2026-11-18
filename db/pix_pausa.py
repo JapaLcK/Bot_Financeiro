@@ -13,10 +13,11 @@ estreito, recusam com o SQLSTATE `SQLSTATE_PAUSA` só:
 - o grant `source='pix'` nascendo ou voltando a `active` (dois gatilhos: o `WHEN` de insert não cita `old`);
 - o insert de comissão `pix:%`.
 Estorno, revogação, Stripe e admin passam. O código novo nem lista nem reserva `PAYMENT_RECEIVED`/
-`CONFIRMED` com a pausa ativa (`pix_pausa_retem`, em `db/webhook_outbox.py`): o evento fica aberto, sem
+`CONFIRMED` com a pausa ativa (`pix_pausa_retem`, em `db/webhook_outbox.py`): a compra fica aberta, sem
 tentativa, e não ocupa o lote da varredura. Recusa do gatilho que ainda chegue ao código novo (dreno
 reservado antes da ativação, baixa desfeita que reconcede) vira `FALHA_PAUSA`, sem contar tentativa; o
-estorno parcial de cobrança ainda não paga também espera assim (`pix_drain`, #1600). A
+estorno parcial de cobrança ainda não paga também espera assim (`pix_drain`, #1600), na pausa e por
+`JANELA_DO_PARCIAL_H` depois da retomada, e esse ocupa o lote (é listado e reservado a cada passada). A
 versão antiga bate no gatilho e conta uma tentativa por passada, só enquanto ela viver.
 
 O evento que a pausa segura não se perde na purga da outbox (`pix_pausa_guarda`): enquanto a pausa está
@@ -32,6 +33,7 @@ SQLSTATE_PAUSA = "PBPAU"
 FALHA_PAUSA = "PausaPix"  # o `last_error` da recusa; `registrar_falha` não conta tentativa com ele
 AVISO_APOS_MIN = 30  # decisão do dono: avisa o admin, sem retomada automática
 AVISO_A_CADA_H, AVISO_NO_FIM_H = 6, 1  # depois do 1º aviso; de hora em hora no último dia antes dos 7 dias
+JANELA_DO_PARCIAL_H = 24  # depois da retomada, o parcial de cobrança não paga ainda espera a compra (#1600)
 EVENTOS_DE_COMPRA = ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED")  # os que o dreno leva aos efeitos de compra
 
 # (nome, tabela, evento, condição). O roteiro confere estes 4 nomes em `pg_trigger`.
@@ -120,6 +122,15 @@ def ddl() -> list[str]:
              where retomada_em is null or retomada_em > now() - make_interval(days => p_dias))
         $$
         """,
+        # O estorno parcial de cobrança ainda não paga espera (`pix_drain`): pausa ativa ou retomada há menos de
+        # `JANELA_DO_PARCIAL_H`. Na retomada a compra retida drena DEPOIS (passada já listada, outro drenador com a
+        # compra reservada, compra que falha uma vez); só a pausa ativa deixava o parcial fechar sem efeito aí.
+        f"""
+        create or replace function pix_pausa_segura_parcial() returns boolean language sql stable as $$
+          select exists (select 1 from pix_pausa_concessao
+                          where retomada_em is null or retomada_em > now() - make_interval(hours => {JANELA_DO_PARCIAL_H}))
+        $$
+        """,
         # Ativar pela função, não pelo `insert` cru: a trava espera a escrita que já passou pelo gatilho
         # (sem pausa) terminar, então quando ela volta nada mais concede. `ativa_desde` é o fim da espera.
         f"""
@@ -169,9 +180,9 @@ def ddl() -> list[str]:
     ]
 
 
-def pausa_ativa() -> bool:
+def segura_parcial() -> bool:
     with get_conn() as conn:
-        return bool(conn.execute("select pix_pausa_ativa() as a").fetchone()["a"])
+        return bool(conn.execute("select pix_pausa_segura_parcial() as s").fetchone()["s"])
 
 
 def falha_de(exc: Exception) -> tuple[str, str | None]:
