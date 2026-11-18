@@ -1957,8 +1957,8 @@ a linha única de `pix_pausa_concessao` (ativa = `retomada_em` nulo) e três gat
 grant `source='pix'` ficando `active` e o insert de comissão `pix:%`. Valem para qualquer processo, inclusive o
 da versão anterior ainda no ar durante o deploy. O código novo nem lista nem reserva `PAYMENT_RECEIVED`/
 `CONFIRMED` (`pix_pausa_retem`, em `eventos_pendentes` e `reservar_evento`): a compra fica aberta com `attempts`
-parado e não ocupa o lote da varredura, então estorno, parcial e baixa desfeita seguem drenando na ordem de
-chegada. Exceção: o estorno parcial de cobrança ainda antes do pagamento espera como a compra
+parado e não ocupa o lote da varredura, então estorno, parcial e baixa desfeita seguem drenando na ordem do
+lote (`eventos_pendentes`: estorno total primeiro, depois a chegada). Exceção: o estorno parcial de cobrança ainda antes do pagamento espera como a compra
 (`last_error = 'PausaPix'`, #1600), enquanto a pausa está ativa **e por 24 h depois da retomada**
 (`pix_pausa_segura_parcial`, `JANELA_DO_PARCIAL_H`): sem isso ele fecharia sem efeito e a compra retida daria
 comissão cheia, sem revisão. A janela existe porque, na retomada, a compra retida ainda pode drenar depois do
@@ -1966,8 +1966,9 @@ parcial (passada listada antes da retomada, outro drenador com a compra reservad
 Esse parcial segurado **ocupa o lote**: é listado, reservado e decifrado a cada passada de 60 s (com uma linha
 de `pii_access_log` cada vez), mas vai para o fim dele (`eventos_pendentes`: estorno total primeiro, depois a ordem
 de chegada, e o parcial com `last_error = 'PausaPix'` por último), para não deixar a compra retida fora do lote.
-Limite: com tantos parciais segurados quanto o lote (100), o da compra recém-drenada espera a janela fechar e só
-então é aplicado (a comissão está na carência de 30 dias, então não sai antes). Parcial que chegou antes da compra no Asaas (fora de ordem de verdade; sem pausa
+Limite: se os eventos não segurados mais os parciais segurados mais antigos que ele enchem o lote (100), o parcial
+da compra recém-drenada espera a janela fechar e só então é aplicado (a comissão está na carência de 30 dias,
+então não sai antes). Parcial que chegou antes da compra no Asaas (fora de ordem de verdade; sem pausa
 ele fecha sem efeito, D1-a) a menos de 24 h de uma retomada também espera, com dois desfechos: se a compra chega
 dentro da janela, ela drena e o parcial AGE depois dela (`refunded_partial`, revisão `open`/`partial`, comissão em
 revisão), diferente do D1-a e para melhor (divergência aceita pelo dono); se a compra não chega, o parcial fecha sem efeito ao fim da janela,
@@ -2021,10 +2022,13 @@ escrevem; o resto é leitura.
 5. Confirmar a retomada: `select pix_pausa_ativa();` dá `false`, e a fila de compra da consulta do passo 2
    esvazia a 100 eventos por passada da varredura do dreno, que roda a cada 60 s (mais antigos primeiro, com o parcial segurado no fim). Quem
    pagou durante a pausa recebe o acesso quando a compra dele é drenada. **Dentro das 24 h depois da
-   retomada**, a contagem de `PAYMENT_PARTIALLY_REFUNDED` aberto do passo 2 tem de chegar a `0`. Se não
-   chegar, olhe a compra travada antes de a janela fechar (a fila de compra do passo 2 com `max(attempts)`
-   subindo, e o alerta de evento travado no canal do admin): passadas as 24 h, o parcial fecha sem efeito e a
-   compra, quando passar, dá comissão cheia sem revisão.
+   retomada**, o sinal de compra travada é a fila de compra do passo 2: ela tem de zerar sem `max(attempts)`
+   subindo; olhe também o alerta de evento travado no canal do admin. Compra travada tem de ser resolvida
+   antes de a janela fechar: passadas as 24 h, o parcial dela fecha sem efeito e a compra, quando passar, dá
+   comissão cheia sem revisão. A contagem de `PAYMENT_PARTIALLY_REFUNDED` aberto do passo 2 **não** serve de
+   sinal dentro da janela: o parcial sem compra fica segurado e aberto a janela inteira, e o de compra já
+   drenada pode ficar aberto até ela fechar (lote cheio). Ela só zera depois da janela (algumas passadas depois
+   de `retomada_em` + 24 h); se não zerar aí, investigue. Só contagens: o roteiro não lê `last_error` nem o payload.
 
 **PR B: emitir com os cadernos (backend; invisível até o modal mandar `extras`).** O
 `POST /billing/pix/checkout` aceita `extras: list[str]` (ids de Price, até 3, sem

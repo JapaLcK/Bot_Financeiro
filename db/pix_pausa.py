@@ -17,7 +17,7 @@ Estorno, revogação, Stripe e admin passam. O código novo nem lista nem reserv
 tentativa, e não ocupa o lote da varredura. Recusa do gatilho que ainda chegue ao código novo (dreno
 reservado antes da ativação, baixa desfeita que reconcede) vira `FALHA_PAUSA`, sem contar tentativa; o
 estorno parcial de cobrança ainda não paga também espera assim (`pix_drain`, #1600), na pausa e por
-`JANELA_DO_PARCIAL_H` depois da retomada, e esse ocupa o lote (é listado e reservado a cada passada). A
+`JANELA_DO_PARCIAL_H` depois da retomada, e esse ocupa o lote (a ordem: `eventos_pendentes`, webhook_outbox). A
 versão antiga bate no gatilho e conta uma tentativa por passada, só enquanto ela viver.
 
 O evento que a pausa segura não se perde na purga da outbox (`pix_pausa_guarda`): enquanto a pausa está
