@@ -83,6 +83,36 @@ for (const [nome, viewport] of VP) {
   });
 }
 
+// Exceção do trial: o anual da campanha é cobrado na hora; vale em qualquer ordem entre a faixa e o /auth/me.
+// Controle: sem `excecaoTrialBF()` no precos.html os casos "com campanha" ficam vermelhos; o sem campanha é o positivo.
+const EXC = /Exceção: o anual do Plus e do Pro na Black Friday é cobrado na hora, sem período grátis; nos outros planos, os 7 dias continuam/;
+const textos = (page) => page.evaluate(() => ["precos-sub", "plans-note-v2"].map((i) => document.getElementById(i).textContent.replace(/\s+/g, " ")));
+for (const [ordem, opts] of [["faixa antes do /auth/me", { atrasoMe: 800 }], ["/auth/me antes da faixa", { atrasoSub: 800 }]]) {
+  test(`/precos com campanha, logado sem plano (${ordem}): os dois textos trazem a exceção do anual`, async () => {
+    const ctx = await ctxCom({ viewport: VP[0][1], atrasoSub: opts.atrasoSub });
+    await ctx.route("**/auth/me", async (r) => { await new Promise((ok) => setTimeout(ok, opts.atrasoMe || 0));
+      return json(r, { user_id: 7, needs_plan_selection: true, app_access: false }); });
+    const page = await ctx.newPage();
+    await page.goto(`${ORIGIN}/precos.html`);
+    await page.waitForSelector("#plans-v2 .plan");
+    await page.waitForTimeout(2000);
+    const [sub, nota] = await textos(page);
+    assert.match(sub, /Escolha um plano pra continuar: 7 dias grátis/);   // a perna needs_plan_selection rodou
+    for (const t of [sub, nota]) { assert.match(t, EXC); assert.equal(t.match(/Exceção/g).length, 1); }
+    await ctx.close();
+  });
+}
+test("/precos com campanha, deslogado: exceção nos dois textos; sem campanha: só o trial, sem exceção", async () => {
+  let { ctx, page } = await precos({ viewport: VP[0][1] });
+  for (const t of await textos(page)) assert.match(t, EXC);
+  await ctx.close();
+  ({ ctx, page } = await precos({ campanha: null, viewport: VP[0][1] }));
+  const [sub, nota] = await textos(page);
+  assert.match(sub, /7 dias grátis no cartão/); assert.match(nota, /7 dias grátis pra testar/);
+  for (const t of [sub, nota]) assert.doesNotMatch(t, /Exceção/);
+  await ctx.close();
+});
+
 // Link de retomada + campanha: preço pintado pelo link (maior %), faixa da campanha, um selo por card.
 const LINK = { email: "l•••@dominio.com", desconto_pct: 40, trial: true, precos: {
   essencial: { pct: 20, pct_mensal: 20, monthly: 792, annual: 7920, pix: 7920, na_hora: false },

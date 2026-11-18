@@ -337,6 +337,8 @@ def test_pix_pricing_so_e_importado_pelo_checkout_e_pela_rota():
         # a retomada (remarketing 6b) lê só `PRECOS_ANUAIS_CENTS` para mostrar o preço
         # com desconto; não emite cobrança. É o 2º leitor: o gatilho acima vale (issue própria).
         "frontend/routes/retomada.py",
+        # o e-mail da Black Friday lê só `PRECOS_ANUAIS_CENTS` para a copy do preço; não emite cobrança
+        "core/services/remarketing_emails.py",
         # o efeito `afiliado` do próprio dreno do Pix lê `MESES_DO_PIX`, o divisor da comissão;
         # não emite cobrança
         "core/services/afiliado_pix.py",

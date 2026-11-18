@@ -115,7 +115,8 @@ def test_rotas_institucionais_e_precos_fazem_opt_in():
     # blog.html entra por decisão explícita: a /blog é página pública de
     # marketing (conteúdo do Soro, sem credencial nem formulário do usuário) —
     # mesmo critério das institucionais e da /precos. lp.html (a /lp, landing
-    # de anúncio) também, a pedido do dono.
+    # de anúncio) também, a pedido do dono. black-friday.html (a /black-friday, página de campanha
+    # pública, sem formulário nem credencial) entra pelo mesmo critério da /lp: é destino de anúncio e e-mail.
     assert _paginas_com_clarity() == {
         "index.html",
         "whatsapp.html",
@@ -126,6 +127,7 @@ def test_rotas_institucionais_e_precos_fazem_opt_in():
         "precos.html",
         "blog.html",
         "lp.html",
+        "black-friday.html",
         "inicio-antiga.html",
     }
 

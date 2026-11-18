@@ -134,6 +134,7 @@ ASSUNTOS_SEGUROS: dict[tuple[str, str], str] = {
     ("core/services/email_service.py", "send_subscription_canceled_email"): _PLANO,
     ("core/services/email_service.py", "send_free_plan_sunset_email"): "data do corte",
     ("core/services/remarketing.py", "send_remarketing_email"): "texto fixo por etapa (`_TEXTOS`)",
+    ("core/services/remarketing.py", "send_black_friday_email"): "texto fixo por tipo (`_BF_ASSUNTO`)",
     ("frontend/finance_bot_websocket_custom.py", "export_email"): "datas do período",
     ("scripts/send_update_email.py", "main"): "constante `SUBJECT`",
     ("api/v2/feedback.py", "enviar"):

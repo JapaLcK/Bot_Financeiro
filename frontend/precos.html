@@ -595,6 +595,20 @@ function faixaDeOferta(frase) {
   ver.style.cssText = "color:inherit;text-decoration:underline;font-weight:800";
   f.append(ver);
   f.hidden = false;
+  excecaoTrialBF();
+}
+// Na campanha o anual de Plus/Pro é cobrado na hora: os dois textos que prometem trial ganham a exceção.
+// Idempotente e chamada pelos dois lados (faixa e applyPlanGateCopy, que é async e reescreve o texto).
+function excecaoTrialBF() {
+  if (document.getElementById("oferta-faixa")?.hidden !== false) return;
+  for (const id of ["precos-sub", "plans-note-v2"]) {
+    const el = document.getElementById(id);
+    if (!el || el.querySelector("[data-bf-trial]") || !/7 dias/.test(el.textContent)) continue;
+    const t = document.createElement("span");
+    t.dataset.bfTrial = "";
+    t.textContent = " Exceção: o anual do Plus e do Pro na Black Friday é cobrado na hora, sem período grátis; nos outros planos, os 7 dias continuam.";
+    el.append(t);
+  }
 }
 
 /* Valor numérico do plano pros eventos do GA4 (`value`/`price`), lido do
@@ -983,6 +997,7 @@ async function cancelChange() {
     sub.textContent =
       "Escolha um plano pra continuar: 7 dias grátis no cartão pra testar (um teste por número). "
       + "O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.";
+    excecaoTrialBF();
     return;
   }
   if (me.app_access === false) {

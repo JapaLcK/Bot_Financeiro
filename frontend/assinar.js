@@ -39,8 +39,7 @@
     sair: "Não deu para sair da conta atual. Tente de novo.", expirou: "O tempo para pagar acabou. Toque em Tentar de novo.",
     abrir: "Não deu para abrir o pagamento agora.",
   };
-  let estado = "c-carga";
-  let campanhaAnual = false;   // a oferta da Black Friday vale para ESTE plano e ciclo (plans-config)
+  let estado = "c-carga", campanhaAnual = false;   // campanhaAnual: a Black Friday vale para ESTE plano e ciclo
   let gen = 0;          // muda a cada tela: a resposta de um pedido velho é descartada
   let voo = false;      // uma ação do usuário por vez (2º clique, Enter)
   let me = null;        // a sessão que JÁ estava no navegador, de outra conta (S1a)
@@ -178,10 +177,8 @@
     const t = c?.campanha?.textos?.[plano];
     campanhaAnual = !!t && ciclo === "annual";   // só o anual tem oferta: mensal não mostra frase
     if (!campanhaAnual) return;
-    // Sem trial na campanha: o S1 não pode prometer os 7 dias grátis (a S4 e a /black-friday dizem cobrança na hora).
     $("s1-titulo").textContent = "Seu " + window.PBPurchaseIntent.summary({ plan: plano, cycle: ciclo, method: "card" }).split(" · ")[0] + " anual com 40% de desconto";
-    $("s1-sub").textContent = "A cobrança é feita na hora, no próximo passo, sem período grátis. O desconto vale só no primeiro ano.";
-    $("s1-hint").textContent = "Oferta da Black Friday, só até 30 de novembro";
+    $("s1-sub").textContent = "A cobrança é feita na hora, no próximo passo, sem período grátis. O desconto vale só no primeiro ano."; $("s1-hint").textContent = "Oferta da Black Friday, só até 30 de novembro";
     ["s1-oferta", "s4-oferta"].forEach(function (id) { $(id).textContent = t.frase_anual; $(id).hidden = false; });
   }
 
