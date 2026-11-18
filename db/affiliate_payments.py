@@ -6,7 +6,8 @@ pendurada na referral, sem `user_id`. Nada aqui lê `affiliate_commissions` nem
 `commission_bps`; afiliado 0%, desativado ou Pix contam do mesmo jeito.
 
 Quem grava: o webhook da Stripe e o dreno do Pix. Estorno de comissão não toca esta
-tabela, e a linha nunca é apagada por reembolso: `refund_status` só a rotula.
+tabela, e a linha nunca é apagada por reembolso: `refund_status` só a rotula, exceto baixa em dinheiro
+desfeita: o pagamento nunca existiu (#1448, `reabrir_baixa`).
 """
 from datetime import datetime
 

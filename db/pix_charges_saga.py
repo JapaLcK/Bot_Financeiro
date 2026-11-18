@@ -292,11 +292,11 @@ def rezerar_rastreio_de_orfas() -> int:
 def reabrir_baixa(charge_id: int, payment_id: str, status: str) -> bool:
     """Baixa manual desfeita (#1267): `paid`/`paid_orphan` volta a `status`
     (`pending`, ou `expired` se outra cobrança já ocupa o índice de ativa), sem
-    janela de acesso, e o efeito `grant` do pagamento sai da tabela para o
-    `RECEIVED` real conceder de novo. UMA transação. Devolve True se aplicou.
+    janela de acesso; os efeitos `grant`/`afiliado` e a linha pix de `affiliate_referral_payments`
+    saem: baixa desfeita é pagamento que nunca existiu, não reembolso (#1448). UMA transação.
 
     Sem `user_id` no `where`, como `transicionar` (tabela de exceções em
-    `db/pix_charges.py`): chaveada por `charge_id` que veio do evento assinado.
+    `db/pix_charges.py`): chaveada por `charge_id` do evento assinado.
     O `qr_payload_enc` foi apagado em `paid`; a cobrança reaberta não tem QR, por
     isso `qr_expires_at = now()`. O marcador `baixa_desfeita` NUNCA é apagado.
     """
@@ -314,8 +314,13 @@ def reabrir_baixa(charge_id: int, payment_id: str, status: str) -> bool:
             if aplicou:
                 cur.execute(
                     "delete from pix_payment_effects"
-                    " where asaas_payment_id = %s and effect = 'grant'",
+                    " where asaas_payment_id = %s and effect in ('grant', 'afiliado')",
                     (payment_id,),
+                )
+                cur.execute(
+                    "delete from affiliate_referral_payments"
+                    " where source = 'pix' and payment_ref = %s",
+                    (str(int(charge_id)),),
                 )
         conn.commit()
     return aplicou
