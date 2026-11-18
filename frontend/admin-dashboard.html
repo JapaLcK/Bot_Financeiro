@@ -2763,6 +2763,8 @@ const AFF_MOTIVO = { disputa_aberta: 'Disputa aberta', forma_inesperada: 'Pago f
 const affMotivo = m => m === null ? 'Aguardando a 1ª conferência'
   : AFF_MOTIVO[m] || (/^stripe_\d+$/.test(m) ? `Stripe recusou a consulta (${m.slice(7)})` : m);
 const AFF_DECISAO = {
+  release: { rotulo: 'Liberar', classe: 'btn-primary', titulo: 'Liberar comissão',
+    hint: 'Entra no saldo disponível do afiliado.' },
   conclude: { rotulo: 'Concluir conferência', classe: 'btn-primary', titulo: 'Concluir conferência',
     hint: 'Só encerra a conferência: nada de saldo, saque ou recuperação muda.' },
   reverse: { rotulo: 'Estornar', classe: 'btn-danger', titulo: 'Estornar comissão',
@@ -2786,7 +2788,8 @@ function renderRefundBlocks(data) {
     const acoes = Object.entries(r.actions || {}).map(([acao, porque]) => porque === null && AFF_DECISAO[acao]
       ? `<button class="${AFF_DECISAO[acao].classe} btn-xs" type="button" onclick="openCheckForm(${r.id}, '${acao}')"
           aria-label="${AFF_DECISAO[acao].rotulo}: comissão ${r.id} de ${esc(r.code)}, ${fmtCents(r.amount_cents)}">${AFF_DECISAO[acao].rotulo}</button>`
-      : `<span class="meta">${esc(porque || '')}</span>`).join(' ');
+      : `<span class="meta">${esc(porque || '')}</span>`).join(' ')
+      + (r.has_stripe_invoice ? ` <a class="meta" href="/admin/api/affiliates/commissions/${Number(r.id)}/stripe-invoice" target="_blank" rel="noopener noreferrer">Ver fatura</a>` : '');
     return `
       <tr>
         <td data-primary data-label="Afiliado"><code>${esc(r.code)}</code></td>

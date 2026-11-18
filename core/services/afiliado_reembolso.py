@@ -21,6 +21,7 @@ from core.observability import log_system_event_sync
 from core.pg_text import limpa_para_pg
 from core.services import admin_notify
 from core.services.extras_assinar import _ler
+from db.affiliate_conferencia_admin import comissoes_liberadas
 from db.affiliate_reviews import faturas_do_saque, marcar_avisada, registrar_reembolso, reivindicar
 from db.affiliate_reviews_manutencao import (
     adiar_conferencia,
@@ -255,16 +256,14 @@ def _adiada(commission_id: int, motivo: str, event_id: str | None = None) -> Non
 def conferir_comissao(commission_id: int, fatura: str, *, adiar: bool = False, lido=None) -> bool | None:
     """Confere na Stripe a comissão que nasceu sem linha da fatura (A5). True se a marca saiu.
 
-    Fora de transação. Reembolso vira pendência pela mesma máquina do webhook; sem reembolso a
-    comissão segue o fluxo normal. A marca fica, e o worker tenta de novo, em dois casos:
-    False quando a fatura ainda não permite concluir (`SemConfirmacao`, ou 4xx da própria fatura: 400,
-    403, 404), e None quando a Stripe falhou para todas (conexão, prazo, chave, limite, 5xx) ou não há
+    Fora de transação. Reembolso vira pendência pela mesma máquina do webhook; sem reembolso a comissão segue
+    o fluxo normal. A marca fica, e o worker tenta de novo, em dois casos: False quando a fatura ainda não permite concluir
+    (`SemConfirmacao`, ou 4xx da própria fatura: 400, 403, 404), e None quando a Stripe falhou para todas (conexão, prazo, chave, limite, 5xx) ou não há
     chave. Erro de banco sobe para quem chamou.
     `adiar`, do worker e do "Concluir conferência" do admin (#1538): o False grava a hora e o motivo, e a
     comissão espera 1 h (#1497). `lido`: a marca que quem confere leu (None na que acabou de nascer); marca
     mais nova fica (#1498)."""
     import stripe  # noqa: PLC0415
-
     chave = os.getenv("STRIPE_SECRET_KEY")
     if not chave:
         return None
@@ -305,24 +304,23 @@ class StripeIndisponivel(Exception):
 
 def _consultar(fatura: str, chave: str) -> tuple:
     """(tipo, devolvido, motivo de sem confirmação, erro). Erro da Stripe não sobe: a passada decide."""
+    import stripe  # noqa: PLC0415
     try:
         tipo, devolvido, _ = devolvido_na_stripe(fatura, chave)
         return tipo, devolvido, None, None
     except SemConfirmacao as exc:
         return None, 0, str(exc), None
     except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer a fatura
+        if isinstance(exc, stripe.InvalidRequestError) and exc.http_status in (400, 404):  # D4; 403 e sem status: Stripe fora
+            return None, 0, f"stripe_{exc.http_status}", None
         return None, 0, None, type(exc).__name__
 
 
 def conferir_saque(payout_id: int) -> dict:
-    """Confere na Stripe cada fatura do saque antes de o dinheiro sair: QR, "Marcar pago" e "Pagamento já
-    realizado", porque o `charge.refunded` pode se perder. HTTP fora de transação e de trava, 4 em paralelo.
-
-    Reembolso achado vira pendência por `registrar_reembolso`, cada um na própria transação; quem recusa é a
-    regra de bloqueio que já existe. Fatura sem confirmação (disputa aberta) marca a comissão (D10); a que
-    confirmou agora tira a marca lida antes da consulta, e a posta durante ela fica e segura o saque (#1498).
-    Devolve `{"reembolso", "disputa"}`; sem chave ou com erro da Stripe, levanta `StripeIndisponivel`,
-    depois de gravar o que achou."""
+    """Confere na Stripe cada fatura do saque antes de o dinheiro sair (QR, "Marcar pago", "Pagamento já realizado"),
+    em HTTP fora de transação, 4 em paralelo. Reembolso vira pendência (`registrar_reembolso`); sem confirmação
+    marca a comissão (D10), salvo a liberada à mão (#1538) sem disputa; a que confirmou tira a marca lida antes
+    (#1498). Devolve `{"reembolso", "disputa"}`; sem chave ou Stripe fora: `StripeIndisponivel`, depois de gravar."""
     faturas = faturas_do_saque(payout_id)
     if not faturas:  # só comissão Pix: nada a perguntar à Stripe, nem chave
         return {"reembolso": False, "disputa": False}
@@ -331,6 +329,9 @@ def conferir_saque(payout_id: int) -> dict:
         raise StripeIndisponivel("sem_chave")
     with ThreadPoolExecutor(4) as pool:
         lidas = list(zip(faturas, pool.map(lambda f: _consultar(f["fatura"], chave), faturas)))
+    soltas = comissoes_liberadas([f["commission_id"] for f, _ in lidas if f["commission_id"]])
+    lidas = [(f, (t, d, None if m != "disputa_aberta" and f["commission_id"] in soltas else m, e))  # Liberar vale (#1538)
+             for f, (t, d, m, e) in lidas]
     agora = datetime.now(timezone.utc)
     for f, (tipo, devolvido, _, _) in lidas:
         if tipo:

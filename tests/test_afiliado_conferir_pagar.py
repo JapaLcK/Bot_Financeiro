@@ -41,8 +41,8 @@ from test_afiliado_reembolso import _evento, _logs, _segura, mundo  # noqa: F401
 PIX = "/admin/api/affiliates/payouts/{}/pix"
 FORA = "Não foi possível conferir reembolsos na Stripe agora. Tente de novo em instantes."
 PENDENCIA = "Este saque tem reembolso de cliente em análise. Resolva a pendência antes."
-DISPUTA = ("Uma comissão deste saque tem disputa aberta na Stripe. Rejeite o saque para liberar as outras; "
-           "ela volta quando a disputa fechar.")
+DISPUTA = ("Uma comissão deste saque está em conferência na Stripe (disputa aberta ou fatura sem confirmação). "
+           "Rejeite o saque para liberar as outras; ela fica na lista de conferência do admin.")
 
 
 def _pix(adm, saque):
@@ -231,8 +231,7 @@ def test_disputa_aberta(adm, mundo):
     mundo.stripe.disputas[a.fatura] = [{"status": "needs_response", "amount": 100_000}]
     r = _pix(adm, saque)
     assert r.status_code == 409
-    assert r.json()["detail"] == ("Uma comissão deste saque tem disputa aberta na Stripe. Rejeite o saque para liberar "
-                                  "as outras; ela volta quando a disputa fechar.")
+    assert r.json()["detail"] == DISPUTA
     assert _marcada(a) and not _marcada(b)
     r = _pagar(adm, saque)  # "Marcar pago" também recusa: sem pendência, só a consulta vê a disputa
     assert (r.status_code, r.json()["detail"]) == (409, DISPUTA) and _saque(saque)["status"] == "requested"
