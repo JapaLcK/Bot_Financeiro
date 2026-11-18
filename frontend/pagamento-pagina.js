@@ -103,6 +103,8 @@
 
       /** Leva ao Stripe o conjunto marcado na tela. true = o carrinho é o da tela; senão "fechada" (sessão
        *  paga ou expirada), "recusado" (o Stripe recusou o extra) ou false. Nunca lança. */
+      // Prazo vencido com o /bump talvez aplicado: a carteira (que não sincroniza) espera um sincroniza que dê certo.
+      let incerto = false;
       async function sincroniza() {
         const posicoes = marcadas().map(function (c) { return Number(c.dataset.pos); });
         let erro = false, vencido = false;
@@ -115,11 +117,12 @@
             const e = resp && resp.status === 409 && resp.d.detail && resp.d.detail.error;
             erro = e === "sessao_fechada" ? "fechada" : e === "extra_recusado" ? "recusado" : false;
             throw new Error("bump");
-          }), espera(BUMP_MS + 10000).then(function () { vencido = true; return null; })]);
+          }), espera(BUMP_MS + 10000).then(function () { vencido = true; incerto = true; return null; })]);
           // Sem resposta do SDK (null): falha. A callback que o SDK chamar depois não posta (`vencido`); um /bump
           // que já estava no ar no prazo é anterior ao do Pagar, que sincroniza de novo antes do confirm.
           if (!r || r.type === "error") return erro;
           confirmado = marcadas();
+          incerto = false;
           return true;
         } catch (_) {
           return erro;
@@ -161,7 +164,7 @@
       function carteira(ev) {
         const aberta = folha;
         folha = false;
-        if ((viuClick && !aberta) || voo || !actions || !temTotal) {
+        if ((viuClick && !aberta) || voo || incerto || !actions || !temTotal) {
           if (ev && typeof ev.paymentFailed === "function") ev.paymentFailed();
           aviso("pp-erro", "Pagamento não iniciado. Tente de novo.");
           return pinta();
