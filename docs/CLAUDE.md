@@ -1964,9 +1964,13 @@ chegada. Exceção: o estorno parcial de cobrança ainda antes do pagamento espe
 comissão cheia, sem revisão. A janela existe porque, na retomada, a compra retida ainda pode drenar depois do
 parcial (passada listada antes da retomada, outro drenador com a compra reservada, compra que falha uma vez).
 Esse parcial segurado **ocupa o lote**: é listado, reservado e decifrado a cada passada de 60 s (com uma linha
-de `pii_access_log` cada vez). Custo da janela: um parcial fora de ordem de verdade (chegou antes da compra no
-Asaas; sem pausa ele fecha sem efeito, D1-a) a menos de 24 h de uma retomada espera a janela fechar e só então
-fecha sem efeito. Recusa do gatilho que ainda chegue ao código novo (dreno em voo na ativação, baixa desfeita que
+de `pii_access_log` cada vez). Parcial que chegou antes da compra no Asaas (fora de ordem de verdade; sem pausa
+ele fecha sem efeito, D1-a) a menos de 24 h de uma retomada também espera, com dois desfechos: se a compra chega
+dentro da janela, ela drena e o parcial AGE depois dela (`refunded_partial`, revisão `open`/`partial`, comissão em
+revisão), diferente do D1-a e para melhor; se a compra não chega, o parcial fecha sem efeito ao fim da janela,
+como no D1-a. Limite medido: compra que segue falhando por mais de 24 h depois da retomada deixa o parcial fechar
+sem efeito, e a compra, quando passa, dá comissão cheia sem revisão. O único sinal é o alerta de evento travado
+da compra (a partir da 6ª tentativa); o alerta do parcial é idêntico ao de um parcial aplicado. Recusa do gatilho que ainda chegue ao código novo (dreno em voo na ativação, baixa desfeita que
 reconcede) fica aberta com `last_error = 'PausaPix'`, sem somar tentativa e sem alerta de travado. A versão
 anterior bate no gatilho e soma 1 tentativa por passada, só enquanto viver. Stripe e admin seguem normalmente.
 **Retenção:** o evento aberto que a pausa segura (compra `RECEIVED`/`CONFIRMED` sem `processed_at`, ou
