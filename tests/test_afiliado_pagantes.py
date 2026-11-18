@@ -136,10 +136,9 @@ def _admin(monkeypatch):
 
 @pytest.mark.parametrize("corpo,esperado", [
     ({"commission_bps": 0}, 0), ({"commission_bps": "0"}, 0),
-    ({}, 10_000), ({"commission_bps": None}, 10_000), ({"commission_bps": ""}, 10_000),
-    ({"commission_bps": False}, 10_000), ({"commission_bps": 2500}, 2500),
-], ids=["zero", "zero_texto", "ausente", "null", "vazio", "false", "positivo_normal"])
-def test_admin_grava_zero_como_zero_e_ausente_como_padrao(monkeypatch, corpo, esperado):
+    ({"commission_bps": 10_000}, 10_000), ({"commission_bps": 2500}, 2500),
+], ids=["zero", "zero_texto", "cem_por_cento", "positivo_normal"])
+def test_admin_grava_zero_como_zero_e_o_valor_enviado(monkeypatch, corpo, esperado):
     c = _conta(plano=False)
     admin = _admin(monkeypatch)
     r = admin.post("/admin/api/affiliates", headers=csrf(admin), json={"email": c.email, **corpo})
@@ -147,7 +146,30 @@ def test_admin_grava_zero_como_zero_e_ausente_como_padrao(monkeypatch, corpo, es
     assert get_affiliate_by_user(c.uid)["commission_bps"] == esperado
 
 
-@pytest.mark.parametrize("bps", [0.5, 0.99, -0.5, 1.5, 2500.5])
+@pytest.mark.parametrize("corpo", [{}, {"commission_bps": None}, {"commission_bps": ""}, {"commission_bps": False}],
+                         ids=["ausente", "null", "vazio", "false"])
+def test_admin_recusa_criar_sem_percentual(monkeypatch, corpo):
+    """Sem padrão de 100%: ausente/null/"" -> 422 e nenhuma linha em affiliates."""
+    c = _conta(plano=False)
+    admin = _admin(monkeypatch)
+    r = admin.post("/admin/api/affiliates", headers=csrf(admin), json={"email": c.email, **corpo})
+    assert r.status_code == 422, r.text
+    assert get_affiliate_by_user(c.uid) is None
+
+
+def test_admin_valida_percentual_antes_de_buscar_o_email(monkeypatch):
+    """Ordem pinada: e-mail inexistente + sem percentual -> 422, não 404."""
+    admin = _admin(monkeypatch)
+    r = admin.post("/admin/api/affiliates", headers=csrf(admin), json={"email": f"nao-existe-{uuid.uuid4().hex}@example.com"})
+    assert r.status_code == 422, r.text
+
+
+def test_create_affiliate_exige_commission_bps():
+    with pytest.raises(TypeError):
+        create_affiliate(1)
+
+
+@pytest.mark.parametrize("bps", [10001, 0.5, 0.99, -0.5, 1.5, 2500.5])
 def test_admin_recusa_percentual_nao_inteiro(monkeypatch, bps):
     c = _conta(plano=False)
     admin = _admin(monkeypatch)
@@ -806,3 +828,70 @@ def test_conversa_do_link_ate_a_exclusao(cobrar, externo, monkeypatch):
 
     db.delete_user_data(novo)
     assert _numeros(c) == (1, 1, 1, 1, 0)
+
+
+# ── Baixa em dinheiro desfeita (#1448): o pagamento nunca existiu ────────────
+
+_UNDONE = "PAYMENT_RECEIVED_IN_CASH_UNDONE"
+
+
+def _paga_e_desfaz(c):
+    cobranca = _pix(_indicado(c))
+    entregar("PAYMENT_RECEIVED", cobranca)
+    assert _numeros(c)[:2] == (1, 1)
+    entregar(_UNDONE, cobranca)
+    return cobranca
+
+
+def _comissoes_pix(cobranca):
+    with get_conn() as conn:
+        return conn.execute("select count(*) as n from affiliate_commissions where stripe_invoice_id = %s",
+                            (f"pix:{cobranca['id']}",)).fetchone()["n"]
+
+
+def test_undone_tira_o_cliente_de_pagantes(externo):
+    c = _afiliado()
+    cobranca = _paga_e_desfaz(c)
+    assert _numeros(c)[1] == 0 and _linhas(c) == []
+    assert "afiliado" not in efeitos(cobranca["asaas_payment_id"])
+
+
+def test_undone_so_apaga_a_linha_pix_daquela_cobranca(externo):
+    c = _afiliado()
+    outro = _pix(_indicado(c))
+    entregar("PAYMENT_RECEIVED", outro)
+    desfeita = _pix(_indicado(c))
+    entregar("PAYMENT_RECEIVED", desfeita)
+    registrar_pagamento(_indicado(c).uid, "stripe", str(desfeita["id"]), 100, AGORA)  # mesmo ref, outra fonte
+    assert _numeros(c)[1] == 3
+    entregar(_UNDONE, desfeita)
+    assert sorted((x["source"], x["payment_ref"]) for x in _linhas(c)) == sorted(
+        [("pix", str(outro["id"])), ("stripe", str(desfeita["id"]))])
+    assert _numeros(c)[1] == 2
+
+
+def test_undone_seguido_do_pix_real_conta_uma_vez(externo):
+    c = _afiliado()
+    cobranca = _paga_e_desfaz(c)
+    externo["get_status"] = "RECEIVED"
+    entregar("PAYMENT_RECEIVED", cobranca)
+    assert _numeros(c)[1] == 1 and len(_linhas(c)) == 1
+    assert _comissoes_pix(cobranca) == 1
+    assert "afiliado" in efeitos(cobranca["asaas_payment_id"])
+
+
+def test_undone_entregue_duas_vezes_nao_levanta_e_segue_em_zero(externo):
+    c = _afiliado()
+    cobranca = _paga_e_desfaz(c)
+    entregar(_UNDONE, cobranca)
+    assert _numeros(c)[1] == 0 and _linhas(c) == []
+
+
+def test_undone_depois_de_parcial_rotula_total_e_nao_apaga(externo):
+    c = _afiliado()
+    cobranca = _pix(_indicado(c))
+    entregar("PAYMENT_RECEIVED", cobranca)
+    externo["refunds"] = [{"value": 10.0, "status": "DONE"}]
+    entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)
+    entregar(_UNDONE, cobranca)
+    assert [(x["payment_ref"], x["refund_status"]) for x in _linhas(c)] == [(str(cobranca["id"]), "total")]

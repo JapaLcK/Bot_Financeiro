@@ -63,23 +63,27 @@ for (const [entrada, esperado] of [["30", { commission_bps: 3000 }], ["0", { com
   });
 }
 
-// mutação: tirar `commission_bps` do corpo da criação, ou mandar `pct` sem `* 100`
-test("criar sem mexer no campo envia 10000; com 25 envia 2500; 101 não envia", async () => {
+// mutação: voltar o `value="100"` do campo ou o `|| 100` no envio; ou mandar `pct` sem `* 100`
+test("criar: campo nasce vazio; vazio não envia; 25 envia 2500; 101 não envia; esvazia depois de criar", async () => {
   const { page, posts } = await abrir();
   try {
-    assert.equal(await page.locator("#aff-new-pct").inputValue(), "100");
+    assert.equal(await page.locator("#aff-new-pct").inputValue(), "");
+    const alertas = [];
+    page.on("dialog", (d) => alertas.push(d.message()));
     await page.locator("#aff-new-email").fill("nova@x.com");
     await page.getByRole("button", { name: "+ Criar afiliado" }).click();
     await page.waitForTimeout(200);
-    await page.locator("#aff-new-email").fill("outra@x.com");
+    assert.deepEqual(posts, []);
+    assert.equal(alertas[0], "Informe a comissão: número inteiro de 0 a 100.");
     await page.locator("#aff-new-pct").fill("25");
     await page.getByRole("button", { name: "+ Criar afiliado" }).click();
     await page.waitForTimeout(200);
+    assert.equal(await page.locator("#aff-new-pct").inputValue(), "");
     await page.locator("#aff-new-email").fill("errada@x.com");
     await page.locator("#aff-new-pct").fill("101");
     await page.getByRole("button", { name: "+ Criar afiliado" }).click();
     await page.waitForTimeout(200);
-    assert.deepEqual(posts.map((p) => p.corpo), [{ email: "nova@x.com", commission_bps: 10000 }, { email: "outra@x.com", commission_bps: 2500 }]);
+    assert.deepEqual(posts.map((p) => p.corpo), [{ email: "nova@x.com", commission_bps: 2500 }]);
   } finally { await page.close(); }
 });
 

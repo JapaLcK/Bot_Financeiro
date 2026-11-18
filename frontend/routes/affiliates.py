@@ -8,10 +8,11 @@ O gate de assinatura NÃO se aplica aqui de propósito: o afiliado precisa ver o
 próprio painel e sacar mesmo que não seja assinante Pro.
 """
 import asyncio
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictInt
 
 from core.pg_text import detalhe_seguro
 from db.affiliates import (
@@ -127,12 +128,16 @@ async def affiliate_me(request: Request):
 
 class PayoutRequestBody(BaseModel):
     pix_key: str
+    # A conta que a tela mostrava ao pedir (#1545). Ausente/null = cliente antigo, sem conferência.
+    account_id: Optional[StrictInt] = None
 
 
 @router.post("/api/affiliate/payout")
 @shared.limiter.limit("10/hour")
 async def affiliate_request_payout(request: Request, body: PayoutRequestBody):
     user_id = shared.resolve_dashboard_user_id(request)
+    if body.account_id is not None and body.account_id != user_id:
+        raise HTTPException(status_code=409, detail="A conta conectada mudou. Esta solicitação de saque não foi enviada.")
     shared.raise_if_account_scheduled_for_deletion(user_id)
     await asyncio.to_thread(shared.exigir_credencial, user_id)
 

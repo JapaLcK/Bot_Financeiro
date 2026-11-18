@@ -12203,9 +12203,14 @@ async function requestAffiliatePayout() {
       method: "POST",
       credentials: "same-origin",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ pix_key: pixKey }),
+      body: JSON.stringify({ pix_key: pixKey, account_id: Number(USER_ID) || undefined }),
     });
     const data = await readResponsePayload(res);
+    if (res.status === 409) { // o servidor viu outra conta que a desta tela (#1545): nada foi enviado
+      await alertModal("A conta conectada mudou. Esta solicitação de saque não foi enviada. A página será recarregada; confira a conta antes de tentar novamente.", { title: "Saque" });
+      location.reload();
+      return;
+    }
     if (!res.ok) {
       await alertModal(data.detail || "Não foi possível solicitar o saque.", { title: "Saque" });
       return;

@@ -145,7 +145,7 @@ def test_positivo_d_magic_link_do_bot_ainda_loga(user_id):
 def test_positivo_r_afiliado_valido_seta_cookie_e_atribui(user_id):
     """302 + cookie NÃO bastam: o que paga comissão é a ATRIBUIÇÃO. Este é o
     caso que morre se a guarda nova recusar código legítimo."""
-    code = create_affiliate(user_id)["code"]
+    code = create_affiliate(user_id, commission_bps=10_000)["code"]
     resp = _client().get(f"/r/{code.lower()}", follow_redirects=False)
 
     assert resp.status_code == 302
@@ -238,13 +238,13 @@ def test_codigo_escolhido_a_mao_continua_achavel_pela_leitura(user_id):
     resolve e a comissão nunca é paga.
 
     O caso extremo é o código escolhido à mão pelo admin
-    (`core/admin_dashboard.py:2078` chama `create_affiliate(user_id, code, bps)`
+    (`core/admin_dashboard.py:2317` chama `create_affiliate(user_id, code, commission_bps=bps)`
     com o que veio do formulário), porque só ele escapa do `_generate_code`.
     Os dois lados passam pelo mesmo `_normalize_code` antes do mesmo `_CODE_RE`
     — este teste é o que fica vermelho no dia em que um dos dois mudar sozinho.
     """
     escolhido = f" a{uuid.uuid4().hex[:6]} "   # espaço e minúscula: o que o form manda
-    aff = create_affiliate(user_id, code=escolhido)
+    aff = create_affiliate(user_id, code=escolhido, commission_bps=10_000)
     try:
         assert aff["code"] == escolhido.strip().upper()
         achado = db_affiliates.get_affiliate_by_code(escolhido.lower())

@@ -188,7 +188,7 @@ def test_a1_trial_com_pix_vigente_cancela_e_nao_materializa(cena):
 
 def test_a2_sem_trial_alerta_e_a_fatura_nao_materializa_nem_comissiona(cena, user_id):
     c = cena
-    assert record_referral(create_affiliate(user_id)["code"], c.uid)
+    assert record_referral(create_affiliate(user_id, commission_bps=10_000)["code"], c.uid)
     antes = _pix_pago(c)
     _sub(c.fake, "sub_a2", "active")
     assert _post(c.client, c.fake, _checkout(c.uid, "sub_a2", amount=4990)).status_code == 200

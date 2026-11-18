@@ -7140,11 +7140,16 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     # segue dentro de `_comissao_da_primeira`, sob as travas.
                     ref = await asyncio.to_thread(get_referral_for_user, user_id)
                     if ref and not ref["first_charge_ref"]:
+                        # Auto-indicação (#1506): cartão do afiliado. Falha da Stripe cai no except (fail-closed).
+                        from core.services.afiliado_cartao import cartao_do_afiliado
+                        mesmo_cartao = await asyncio.to_thread(
+                            cartao_do_afiliado, user_id, invoice_id, STRIPE_SECRET_KEY)
                         commission = await asyncio.to_thread(
                             record_commission_for_invoice,
                             user_id, invoice_id, int(amount_cents),
                             datetime.fromtimestamp(event["created"], timezone.utc),
                             await _meses_do_plano(invoice, _precos, sub, user_id, _linhas if _precos else None),
+                            mesmo_cartao,
                         )
                 except Exception as exc:
                     # 200 de qualquer jeito: a Stripe não reentrega, e a renovação não vira

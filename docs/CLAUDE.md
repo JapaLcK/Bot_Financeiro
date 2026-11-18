@@ -1835,6 +1835,10 @@ da primeira cobrança do cartão: chave `pix:<id>` (`external_reference`) em `st
 em `core/services/pix_pricing.py` ao lado de `DURACAO_DIAS`), sem conferência A5. Falha levanta e
 vira retentativa; o marcador e o `unique` seguram o reprocessamento. Pix e cartão do mesmo cliente
 se serializam por `trava_indicado`: o primeiro pago decide.
+UNDONE (baixa em dinheiro desfeita, #1448) em `paid`/`paid_orphan`: `reabrir_baixa` apaga na mesma transação a
+linha de `affiliate_referral_payments` (`pix`, `payment_ref` = id da cobrança) e os efeitos `grant` e `afiliado`:
+o pagamento nunca existiu, então o cliente deixa de contar e o `RECEIVED` real conta de novo. Não é reembolso
+(esse só rotula). Em `refunded_partial`, `desfazer_baixa` rotula `total`.
 Reembolso do Pix passa pela máquina do cartão: `marcar` chama `registrar_reembolso` com a chave
 `pix:<id>` (rótulo, pendência e estorno numa transação) e `avisar_pendencia`. Devolvido no total: o
 cobrado (plano + cadernos, `total_cents`), sem rede. No parcial, só quando o valor decide algo
@@ -2903,7 +2907,7 @@ nova) e clique novo em `/r/<código>`, no mesmo host do cadastro.
 
 A área do próprio afiliado é `GET /api/affiliate/me` e `POST /api/affiliate/payout`
 (`frontend/routes/affiliates.py`), sem gate de plano: o `affiliate_id` sai sempre de
-`get_affiliate_by_user` com o usuário da sessão, e o corpo do saque só tem `pix_key`.
+`get_affiliate_by_user` com o usuário da sessão, e o corpo do saque é `pix_key` mais `account_id` opcional (a conta que a tela mostrava; 409 se difere da sessão, 422 se não for inteiro; ausente/null = cliente antigo, sem conferência, #1545).
 Conta desativada lê e saca o que já acumulou; só deixa de acumular. O `/me` devolve
 `stats.generated`, `hold_days` (`COMMISSION_HOLD_DAYS`), `commissions[].payout_id`,
 `commissions[].in_review`, `commissions[].paid_months` e `commissions[].original_amount` (nulo sem ajuste), e nunca dado do
@@ -3270,7 +3274,7 @@ cai em `_orfao`, que não registra compra, e sem titular o backfill não acha a 
 `lock_timeout` de 1s: qualquer falha vira `logger.error` só com o tipo e o sqlstate, não impede a
 subida, e o próximo boot repete. Fatura Stripe sem comissão não tem histórico para ele.
 **Comissão: percentual individual, uma vez por cliente** (`db/affiliates.py`, `_comissao_da_primeira`).
-Padrão 100% (`DEFAULT_COMMISSION_BPS = 10000`); só o admin muda, pela coluna "%" e pelo botão "Editar
+Obrigatória na criação, sem padrão (`create_affiliate(..., commission_bps=)` e `POST /admin/api/affiliates` recusam sem ela); só o admin muda depois, pela coluna "%" e pelo botão "Editar
 comissão" (`POST /admin/api/affiliates/{id}/commission`, corpo `{"commission_bps": 0..10000}`, log
 `affiliate_commission_changed` com antes e depois). Vale o percentual vigente quando o pagamento é processado;
 comissão já registrada não muda. Base é o valor pago na primeira cobrança confirmada (o plano já com cupom,

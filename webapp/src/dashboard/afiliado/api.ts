@@ -2,6 +2,7 @@
 // resposta fora do contrato vira ErroApi(200, "contrato"), nunca uma tela quebrada. O dinheiro chega em reais (número) e só é exibido: a tela não faz conta.
 import { queryOptions } from "@tanstack/react-query";
 import { DEMO, ErroApi, FUSO, chamar, escrever, instante, meQuery, sessaoDe } from "../lib/v2";
+import { contaVista } from "../lib/sessao";
 import { contrato, inteiro, objeto, texto, validade } from "../familia/api";
 
 const STATUS_COMISSAO = ["pending", "paid", "reversed"] as const;
@@ -49,8 +50,11 @@ export const afiliadoQuery = queryOptions({
   enabled: !DEMO,
 });
 
-// O corpo é só a chave: valor e dono o servidor decide pela sessão. Função solta e não `useMutation`: a chave Pix não entra no cache do TanStack.
-export const solicitarSaque = (pix_key: string) => escrever<unknown>("POST", "/api/affiliate/payout", { pix_key });
+// O corpo é a chave e a conta que a tela mostra (`pb_conta`): o servidor recusa com 409 se a sessão é de outra (#1545); valor e dono ele decide pela sessão. Sem o marcador, o campo some (cliente antigo = sem conferência). Função solta e não `useMutation`: a chave Pix não entra no cache do TanStack.
+export function solicitarSaque(pix_key: string) {
+  const conta = Number(contaVista());
+  return escrever<unknown>("POST", "/api/affiliate/payout", Number.isSafeInteger(conta) && conta > 0 ? { pix_key, account_id: conta } : { pix_key });
+}
 
 // O único 403 com texto para a tela (`raise_if_account_scheduled_for_deletion`): os outros sem `error` são de sessão, como o do CSRF. tests/test_pagina_afiliado.py prende o prefixo.
 const exclusao = (e: unknown) => (e instanceof ErroApi && e.status === 403 && e.detalhe?.startsWith("Esta conta está agendada") ? e.detalhe : undefined);
@@ -60,6 +64,7 @@ export const falhaLeitura = (e: unknown) => exclusao(e) ?? "Não foi possível c
 export function falhaSaque(e: unknown) {
   if (e instanceof ErroApi && e.status === 429) return "Muitos pedidos de saque. Tente de novo mais tarde.";
   if (e instanceof ErroApi && e.status === 400 && e.detalhe) return e.detalhe;
+  if (e instanceof ErroApi && e.status === 409) return "A conta conectada mudou. Esta solicitação de saque não foi enviada. Recarregue a página e confira a conta antes de tentar novamente.";
   const agendada = exclusao(e);
   if (agendada) return agendada;
   if (sessaoDe(e)) return "Sua sessão terminou. Recarregue a página.";

@@ -6,7 +6,7 @@ O Pix entra no PR seguinte (`tests/test_afiliado_comissao_pix.py`).
 
 Controles negativos (rodados à mão, §3 do `CLAUDE.md`; o que fica vermelho está no relato do PR):
   T0  `//` no lugar do ROUND_HALF_UP             → 413 e 1000 viram 412 e 999.
-  T1  DEFAULT_COMMISSION_BPS = 1000             → comissão 499.
+  T1  percentual 1000 no lugar de 10000         → comissão 499.
   T1a `_meses_do_plano` sempre 1                 → 19900.
   T1c divisor só pela assinatura                 → a fatura anual reprocessada paga 19900 (os dois formatos);
       sem o `Price.retrieve` do formato dahlia     → idem, só no dahlia;
@@ -72,9 +72,9 @@ def _logs():
     garantir_system_event_logs()
 
 
-def _afiliado(bps=None):
+def _afiliado(bps=10_000):
     c = _conta()
-    c.aff = create_affiliate(c.uid) if bps is None else create_affiliate(c.uid, commission_bps=bps)
+    c.aff = create_affiliate(c.uid, commission_bps=bps)
     return c
 
 
@@ -114,10 +114,10 @@ def test_t0_valor_da_comissao(base, bps, meses, esperado):
 
 # ── T1, T1a, T1b, T2, T3: valor, base, percentual e divisor ─────────────────
 
-def test_t1_padrao_100_pelo_admin_e_mensal_sem_divisao(cobrar, monkeypatch):
+def test_t1_100_pelo_admin_e_mensal_sem_divisao(cobrar, monkeypatch):
     c = _conta()
     admin = _admin(monkeypatch)
-    assert admin.post("/admin/api/affiliates", headers=csrf(admin), json={"email": c.email}).status_code == 200
+    assert admin.post("/admin/api/affiliates", headers=csrf(admin), json={"email": c.email, "commission_bps": 10_000}).status_code == 200
     c.aff = get_affiliate_by_user(c.uid)
     assert c.aff["commission_bps"] == 10_000
     ind = _indicado(c)

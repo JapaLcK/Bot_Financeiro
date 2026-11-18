@@ -18,6 +18,9 @@ let logout: string | null = null; // o destino da saída do logout, já pedida: 
 // e travada. O dono aceitou perder os códigos na tela. É ele que consulta isto: um ouvinte de `beforeunload` aqui, desde a carga,
 // atrasaria toda navegação do /painel (o navegador consulta a página antes de sair), e um registrado só na saída rodaria depois do dele
 // (no `window`, a ordem é a de registro, com ou sem captura).
+// A conta que a tela mostra agora: o marcador visto na carga, ou a dona confirmada pelo servidor.
+export const contaVista = () => vista ?? dona;
+
 export const deSaida = () => saindo || logout !== null;
 
 function trocou(): never {

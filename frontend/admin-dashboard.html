@@ -1000,7 +1000,7 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
         <input id="aff-new-email" class="field" type="email" placeholder="email da conta" aria-label="E-mail da conta que vira afiliado" />
         <input id="aff-new-code" class="field field-sm" type="text" placeholder="código (opcional)" aria-label="Código do afiliado (opcional)" />
         <label class="meta" for="aff-new-pct">Comissão (%)</label>
-        <input id="aff-new-pct" class="field field-sm" type="number" min="0" max="100" step="1" value="100" inputmode="numeric" />
+        <input id="aff-new-pct" class="field field-sm" type="number" min="0" max="100" step="1" required placeholder="ex.: 30" inputmode="numeric" />
         <button class="btn-primary" type="button" onclick="createAffiliate()">+ Criar afiliado</button>
         <span class="meta" id="aff-meta">—</span>
       </div>
@@ -2678,7 +2678,7 @@ async function createAffiliate() {
   const code = ($id('aff-new-code')?.value || '').trim();
   if (!email) { alert('Informe o email da conta que vira afiliado.'); return; }
   const pct = percentualInteiro($id('aff-new-pct')?.value);
-  if (pct === null) { alert('A comissão é um número inteiro de 0 a 100.'); return; }
+  if (pct === null) { alert('Informe a comissão: número inteiro de 0 a 100.'); return; }
   const res = await fetch('/admin/api/affiliates', {
     method: 'POST',
     headers: { ...authH(), 'Content-Type': 'application/json' },
@@ -2688,7 +2688,7 @@ async function createAffiliate() {
   if (!res.ok) { alert(data.detail || 'Erro ao criar afiliado.'); return; }
   $id('aff-new-email').value = '';
   $id('aff-new-code').value = '';
-  $id('aff-new-pct').value = '100';
+  $id('aff-new-pct').value = '';
   alert('Afiliado criado! Link: ' + location.origin + '/r/' + data.affiliate.code);
   loadAffiliates();
 }

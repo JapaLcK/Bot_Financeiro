@@ -185,6 +185,46 @@ def test_isolamento_id_do_cliente_nao_muda_de_quem_e_o_saque():
     assert r.json()["payout"]["amount"] == 70
 
 
+def _chave_pix(c):
+    with get_conn() as conn:
+        return tuple(conn.execute("select pix_key_hash, pix_key_enc from affiliates where id = %s",
+                                  (c.aff["id"],)).fetchone().values())
+
+
+def test_saque_account_id_de_outra_conta_e_409_sem_gravar_nada():
+    a, b = _afiliado(), _afiliado()
+    _comissao(a, 100)
+    _comissao(b, 70)
+    antes = _chave_pix(a)
+
+    r = _sacar(a, account_id=b.uid)  # a aba mostrava B; a sessão agora é de A
+    assert r.status_code == 409, r.text
+    assert "conta conectada mudou" in r.json()["detail"]
+    assert _saques(a) == [] and _saques(b) == []
+    assert _chave_pix(a) == antes
+
+    r = _sacar(a, account_id=a.uid)  # positivo: a própria conta passa
+    assert r.status_code == 200, r.text
+    assert [p["amount_cents"] for p in _saques(a)] == [100_00] and _saques(b) == []
+
+
+def test_saque_account_id_ausente_ou_nulo_e_cliente_antigo():
+    a, b = _afiliado(), _afiliado()
+    _comissao(a, 100)
+    _comissao(b, 50)
+    assert _sacar(a).status_code == 200  # ausente
+    assert _sacar(b, account_id=None).status_code == 200  # nulo
+    assert len(_saques(a)) == 1 and len(_saques(b)) == 1
+
+
+@pytest.mark.parametrize("ruim", ["7", True, 1.5, "abc"])
+def test_saque_account_id_nao_inteiro_e_422(ruim):
+    a = _afiliado()
+    _comissao(a, 100)
+    assert _sacar(a, account_id=ruim).status_code == 422
+    assert _saques(a) == []
+
+
 def test_sem_sessao_e_cookies_de_contas_diferentes_sao_401():
     a, b = _afiliado(), _afiliado()
     _comissao(a, 100)

@@ -40,7 +40,7 @@ def _attrs(cookie):
 
 @pytest.fixture
 def affiliate_code(user_id):
-    return create_affiliate(user_id)["code"]
+    return create_affiliate(user_id, commission_bps=10_000)["code"]
 
 
 def test_link_valido_seta_cookie(affiliate_code):
@@ -88,7 +88,7 @@ def test_codigo_inexistente_nao_seta_cookie():
 def test_afiliado_desativado_nao_seta_cookie(user_id):
     """O código EXISTE e mesmo assim não atribui: é o caso que o `status ==
     "active"` do handler decide sozinho (com `if affiliate:` fica vermelho)."""
-    aff = create_affiliate(user_id)
+    aff = create_affiliate(user_id, commission_bps=10_000)
     assert set_affiliate_status(aff["id"], "disabled")
     client = TestClient(dashboard.app)
     resp = client.get(f"/r/{aff['code']}", follow_redirects=False)

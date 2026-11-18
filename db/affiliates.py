@@ -37,9 +37,11 @@ from .affiliate_reviews import (
     trava_fatura,
     trava_indicado,
 )
+from core.system_event_log import log_system_event_sync
+
+from .affiliate_vinculo import compartilha_identificador
 from .connection import get_conn
 
-DEFAULT_COMMISSION_BPS = 10_000     # 100%
 COMMISSION_HOLD_DAYS = 30           # carência anti-estorno antes de ficar sacável
 MIN_PAYOUT_CENTS = 50_00            # saque mínimo R$ 50
 REF_COOKIE_MAX_AGE_DAYS = 30        # janela de atribuição do link
@@ -82,9 +84,8 @@ def _validar_bps(bps) -> int:
     return int(bps)
 
 
-def create_affiliate(user_id: int, code: str | None = None,
-                     commission_bps: int = DEFAULT_COMMISSION_BPS) -> dict:
-    """Cria (ou retorna, se já existe) o afiliado do user_id."""
+def create_affiliate(user_id: int, code: str | None = None, *, commission_bps: int) -> dict:
+    """Cria (ou retorna, se já existe) o afiliado do user_id. Comissão é obrigatória: sem padrão."""
     if code is not None:
         code = _normalize_code(code)
         if not _CODE_RE.match(code):
@@ -243,7 +244,7 @@ def valor_da_comissao(base_cents: int, bps: int, meses: int) -> int:
 
 
 def _comissao_da_primeira(referred_user_id: int, chave: str, base_cents: int, paid_months: int,
-                          paid_at: datetime, conferir: bool) -> dict | None:
+                          paid_at: datetime, conferir: bool, cartao_compartilhado: bool = False) -> dict | None:
     """A regra única da primeira cobrança paga (cartão e Pix). Devolve a comissão criada ou None.
 
     Quem decide grava `first_charge_ref`, gerando ou não (0%, desativado, valor 0): depois
@@ -257,7 +258,7 @@ def _comissao_da_primeira(referred_user_id: int, chave: str, base_cents: int, pa
             trava_indicado(cur, referred_user_id)
             cur.execute(
                 """
-                select r.id, r.affiliate_id, r.first_charge_ref, a.commission_bps, a.status
+                select r.id, r.affiliate_id, r.first_charge_ref, a.commission_bps, a.status, a.user_id
                   from affiliate_referrals r
                   join affiliates a on a.id = r.affiliate_id
                  where r.referred_user_id = %s
@@ -285,6 +286,14 @@ def _comissao_da_primeira(referred_user_id: int, chave: str, base_cents: int, pa
             created = None
             bps = int(ref["commission_bps"])
             amount_cents = valor_da_comissao(base_cents, bps, paid_months) if ref["status"] == "active" else 0
+            if amount_cents > 0 and (motivo := "cartao" if cartao_compartilhado else
+                                     compartilha_identificador(cur, ref["user_id"], referred_user_id)):
+                # Auto-indicação (#1506): bloqueia sem revisão, mas grava o marcador abaixo. Sem PII no log.
+                amount_cents = 0
+                log_system_event_sync("warning", "affiliate_commission_blocked",
+                                      "Comissao bloqueada: indicado compartilha identificador com o afiliado.",
+                                      source="affiliates", user_id=referred_user_id,
+                                      details={"motivo": motivo, "affiliate_id": int(ref["affiliate_id"]), "chave": chave})
             if amount_cents > 0:
                 # Sem linha da fatura, ninguém viu reembolso dela, e a linha pode ter sido limpa (A5): a
                 # comissão do cartão nasce marcada, fora do disponível, até `conferir_comissao` olhar a
@@ -314,7 +323,7 @@ def _comissao_da_primeira(referred_user_id: int, chave: str, base_cents: int, pa
 
 def record_commission_for_invoice(referred_user_id: int, stripe_invoice_id: str,
                                   invoice_amount_cents: int, paid_at: datetime | None = None,
-                                  paid_months: int = 1) -> dict | None:
+                                  paid_months: int = 1, cartao_compartilhado: bool = False) -> dict | None:
     """Comissão da fatura Stripe paga, pela regra da primeira cobrança.
 
     Fatura zerada (trial, extras que cobrem tudo) não decide nada: nem comissão, nem marcador.
@@ -323,7 +332,8 @@ def record_commission_for_invoice(referred_user_id: int, stripe_invoice_id: str,
     if not stripe_invoice_id or int(invoice_amount_cents) <= 0:
         return None
     return _comissao_da_primeira(referred_user_id, stripe_invoice_id, int(invoice_amount_cents),
-                                 paid_months, paid_at or _now(), conferir=True)
+                                 paid_months, paid_at or _now(), conferir=True,
+                                 cartao_compartilhado=cartao_compartilhado)
 
 
 def record_commission_for_pix(cobranca: dict, meses: int) -> dict | None:
