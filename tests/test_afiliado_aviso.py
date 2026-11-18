@@ -200,3 +200,18 @@ def test_log_aviso_entregue_e_warning_e_worker_sem_evento(canal, monkeypatch):
     assert reenviar_pendentes() == 0
     nivel, detalhes = _logs(b.id)[-1]
     assert nivel == "error" and "event_id" not in detalhes
+
+
+def test_log_sem_canal_nao_afirma_saque_e_com_canal_traz_o_saque(canal, monkeypatch):
+    """#1524: a linha crua (sem canal) não tem `payout_id`; `None` leria "fora de saque". Ausente."""
+    _limpa_fila()
+    c = _afiliado()
+    a = _paga(c)
+    saque = request_payout(c.aff["id"])["id"]
+    monkeypatch.delenv("ADMIN_NOTIFY_WEBHOOK_URL")
+    assert _reembolso(a, "parcial").status_code == 200
+    [(_, sem_canal)] = _logs(a.id)
+    assert "payout_id" not in sem_canal
+    monkeypatch.setenv("ADMIN_NOTIFY_WEBHOOK_URL", URL)
+    assert reenviar_pendentes() == 1
+    assert _logs(a.id)[-1][1]["payout_id"] == saque
