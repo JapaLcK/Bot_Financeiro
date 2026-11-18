@@ -47,15 +47,16 @@ from core.admin_dashboard import ensure_admin_tables
 from core.services.ai_chat import runner
 from db import ensure_user, get_conn, privacy_export
 from db.open_finance import update_pluggy_open_finance_item_status
+from db.privacy import delete_user_data, reset_user_data
 from db.privacy_export import _segredo_do_webhook, build_user_export_zip
 from db.privacy_export_conjuntos import COLUNAS_SEM_SEGREDO, EXPORTADAS, NAO_EXPORTADAS
+from db.users import _hash_password
 from tests._semeia_exportacao import semeia
 
-# Isenção nomeada da guarda de órfãos: os 3 datasets legados apontam para tabelas que não existem no
-# schema e saem sempre vazios. Tirar daqui (e de EXPORTADAS) quando o dono rodar a Q-DP9.
-ORFAS_PENDENTES_DP9 = dict.fromkeys(
-    ("user_category_triggers", "user_trigger_candidates", "user_category_feedback"),
-    "pendente DP9: existência em produção não confirmada")
+# Isenção nomeada da guarda de órfãos: a tabela existe só em produção, fora do schema do repositório;
+# preservada no ZIP, no reset e na exclusão por decisão do dono de 2026-11-18, titularidade não confirmada.
+# Sai daqui quando o dono decidir sobre a feedback (#1556). Quem a cobre aqui: `test_feedback_dp9_*`.
+ORFAS_PENDENTES_DP9 = {"user_category_feedback": "pendente DP9: só em produção, aguardando decisão do dono (#1556)"}
 
 # Isenção nomeada do T3: `CHECK (member_user_id <> viewer_user_id)`, e o semeador põe o mesmo uid nas duas.
 SEMEADOR_NAO_ALCANCA = {"family_consents": "CHECK member<>viewer: coberto por tests/test_exportacao_familia.py"}
@@ -115,8 +116,48 @@ def test_t1_guarda_acusa_falta_orfa_e_duplicada():
     assert _nao_classificadas(sem_lanc, NAO_EXPORTADAS, fecho)[0] == ["launches"]
     assert _nao_classificadas(EXPORTADAS, {**NAO_EXPORTADAS, "tabela_fantasma": "x"}, fecho)[1] == ["tabela_fantasma"]
     assert _nao_classificadas(EXPORTADAS, {**NAO_EXPORTADAS, "pockets": "x"}, fecho)[2] == ["pockets"]
-    # A isenção DP9 é estreita: são exatamente as três, e elas não existem neste schema.
+    # A isenção DP9 é estreita: é exatamente ela, e ela não existe neste schema.
     assert set(ORFAS_PENDENTES_DP9) == {t for t, _ in EXPORTADAS.values()} - fecho
+
+
+@pytest.fixture
+def _feedback_dp9():
+    """A `user_category_feedback` com as colunas do insert de 88a21b61, SEM FK de propósito: prova a varredura
+    explícita das listas, não a cascata, e fica fora do fecho do T1/T2/T3. Cada worker do xdist tem o próprio
+    database (`tests/conftest.py`), e o teardown roda mesmo com o teste vermelho."""
+    _q("create table user_category_feedback (id bigserial primary key, user_id bigint not null, launch_id bigint,"
+       " text_base text, source text, chosen_category text, inferred_category text,"
+       " created_at timestamptz default now())")
+    yield
+    _q("drop table if exists user_category_feedback")
+
+
+def _feedback(uid: int, marca: str | None = None) -> list[str]:
+    if marca:
+        _q("insert into user_category_feedback (user_id, text_base, source, chosen_category)"
+           " values (%s, %s, 'teste', 'Mercado')", (uid, marca))
+    return [r["text_base"] for r in _q("select text_base from user_category_feedback where user_id = %s order by id",
+                                       (uid,), fetch=True)]
+
+
+def test_feedback_dp9_segue_no_zip_no_reset_e_na_exclusao(_feedback_dp9):
+    """Decisão do dono (2026-11-18): a feedback fica no ZIP, no reset e na exclusão até a #1556. Sem esta tabela
+    todo caminho a pula calado; com ela, cada lista é provada e o vizinho mantém a linha dele."""
+    senha = "senha-dp9"
+    a, b = (int(uuid.uuid4().int % 900_000_000) + 1 for _ in range(2))
+    for uid, marca in ((a, "FBA"), (b, "FBB")):
+        ensure_user(uid)
+        _q("insert into auth_accounts (user_id, email, password_hash) values (%s, %s, %s)",
+           (uid, f"{marca}_{uid}@x.com", _hash_password(senha)))
+        _feedback(uid, f"{marca}_feedback")
+    dados, texto, _ = _zip(a)
+    assert [r["text_base"] for r in dados["feedback_categorias"]] == ["FBA_feedback"]  # EXPORTADAS
+    assert "FBB_feedback" not in texto
+    reset_user_data(a, senha)
+    assert (_feedback(a), _feedback(b)) == ([], ["FBB_feedback"])  # _RESET_TABLES
+    _feedback(a, "FBA_depois_do_reset")
+    delete_user_data(b)
+    assert (_feedback(b), _feedback(a)) == ([], ["FBA_depois_do_reset"])  # user_owned_tables de delete_user_data
 
 
 def _sql_ruim(exportadas) -> list[str]:
@@ -296,10 +337,11 @@ def test_t4_valor_do_segredo_do_webhook_nao_sai_em_forma_nenhuma(monkeypatch):
     assert _segredo_do_webhook() is None
 
 
-# Datasets da `main` (51e2e861), na ordem. Os três de categoria seguem até a DP9.
+# Datasets da `main` (51e2e861), na ordem. Os dois de gatilhos de categoria saíram na DP9 (#1556);
+# `feedback_categorias` fica.
 DATASETS_DA_MAIN = (
     "usuario conta_login identidades contas lancamentos declaracoes_bancarias saques_depositos_dinheiro"
-    " cobertura_open_finance orcamentos regras_categorias gatilhos_categorias candidatos_gatilhos_categorias"
+    " cobertura_open_finance orcamentos regras_categorias"
     " feedback_categorias acoes_pendentes caixinhas investimentos historico_patrimonio lotes_investimentos"
     " cartoes faturas_cartao transacoes_cartao preferencias_resumo_diario marcacoes_assinaturas insights_estado"
     " guia_do_painel metas importacoes_ofx sessoes_dashboard conexoes_open_finance contas_open_finance"

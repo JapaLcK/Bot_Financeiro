@@ -37,11 +37,8 @@ EXPORTADAS: dict[str, tuple[str, str]] = {
     "cobertura_open_finance": ("of_cash_coverage", "select * from of_cash_coverage where user_id = %(uid)s"),
     "orcamentos": ("category_budgets", "select * from category_budgets where user_id = %(uid)s"),
     "regras_categorias": ("user_category_rules", "select * from user_category_rules where user_id = %(uid)s"),
-    # As três próximas não existem no schema e saem sempre vazias: pendente DP9 (consulta em produção).
-    "gatilhos_categorias": ("user_category_triggers",
-                            "select * from user_category_triggers where user_id = %(uid)s"),
-    "candidatos_gatilhos_categorias": ("user_trigger_candidates",
-                                       "select * from user_trigger_candidates where user_id = %(uid)s"),
+    # Fora do `db/schema.py`: legado que só existe em produção (DP9, #1556). Fica no ZIP, na exclusão e no
+    # reset até o dono decidir sobre o dado (titularidade não confirmada, 2026-11-18).
     "feedback_categorias": ("user_category_feedback",
                             "select * from user_category_feedback where user_id = %(uid)s"),
     "acoes_pendentes": ("pending_actions", "select * from pending_actions where user_id = %(uid)s"),

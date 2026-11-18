@@ -412,8 +412,6 @@ _RESET_TABLES = (
     "category_budgets",
     # Categorias (regra ≠ categoria: tabelas diferentes, as duas somem)
     "user_category_rules",
-    "user_category_triggers",
-    "user_trigger_candidates",
     "user_category_feedback",
     "user_categories",
     # Agentes
@@ -782,8 +780,6 @@ def delete_user_data(
         "category_budgets",
         "pending_actions",
         "user_category_rules",
-        "user_category_triggers",
-        "user_trigger_candidates",
         "user_category_feedback",
         "daily_report_prefs",
         "ofx_imports",
