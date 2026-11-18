@@ -2548,28 +2548,6 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         )
         return {"ok": True}
 
-    @app.post("/admin/api/affiliates/commissions/{commission_id}/reverse")
-    async def admin_affiliate_commission_reverse(
-        commission_id: int, username: str = Depends(_get_current_admin)
-    ):
-        """Estorna uma comissão (fatura reembolsada/chargeback no Stripe)."""
-        from db.affiliates import reverse_commission
-
-        ok = await asyncio.to_thread(reverse_commission, commission_id, username)
-        if not ok:
-            raise HTTPException(
-                status_code=409,
-                detail="Comissão não encontrada, já paga ou dentro de um saque em andamento.",
-            )
-        await log_system_event(
-            "warning",
-            "affiliate_commission_reversed",
-            f"Comissão {commission_id} estornada.",
-            source="affiliates",
-            details={"commission_id": commission_id},
-        )
-        return {"ok": True}
-
     def _decisao_da_conferencia(payload: dict) -> dict:
         """Corpo comum das decisões na conferência (#1538): justificativa, evidência e a versão vista (`marked_at`,
         `reason` e `amount_cents` da lista). A versão só é comparada em Python, nunca vai ao SQL. Inválido dá 422."""

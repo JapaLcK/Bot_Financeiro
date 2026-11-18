@@ -3012,7 +3012,7 @@ marcada não tem `marked_at`: a versão dela é (None, None) antes e depois de a
 `commission_id`, o código no ato e o estado antes e depois (`state_before`, `state_after`, chaves fixas); os
 logs levam só o id. Liberar fica para o PR 2 (`stripe_404`) e o PR 3 (`sem_cobranca` e `forma_inesperada`,
 depois do roteiro na Stripe de teste); até lá esses dois motivos mostram "Liberar indisponível". Todo estorno
-tira a marca (`SEM_MARCA`, `db/affiliate_reviews.py`): o manual e a rota antiga `/reverse` (`_estornar`), o
+tira a marca (`SEM_MARCA`, `db/affiliate_reviews.py`): o manual (`/check-reverse`; a rota antiga `/reverse` foi removida no #1581), o
 automático da solta (D9), a revisão parcial aprovada com 0 e o "Rejeitar" do saque, só na que ele estorna
 (`sem_marca_se`): a que volta ao saldo segue em conferência. "A mais antiga" do cabeçalho e a ordem da lista
 contam desde a marca (`MARCADA_DESDE_SQL`), e não desde o nascimento da comissão.

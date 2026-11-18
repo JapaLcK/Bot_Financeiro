@@ -192,6 +192,15 @@ def test_estornar_solta_sem_cobranca(adm, formas, monkeypatch):
     assert _linha(adm, com) is None
 
 
+def test_estornar_grava_o_admin_logado_como_autor(fonte, monkeypatch):
+    """Com usuário diferente do padrão, o evento do estorno manual leva quem agiu (não um "admin" fixo)."""
+    monkeypatch.setattr(admin_dashboard, "ADMIN_DASHBOARD_USERNAME", "lucas")
+    adm = _admin(monkeypatch)
+    com = _marca(_comissao(_afiliado(), 100))
+    assert _decide(adm, com, "reverse").status_code == 200
+    assert [e["actor"] for e in _eventos(com)] == ["lucas"]
+
+
 @ORIGENS
 def test_estornar_sem_tentativa_vale(adm, origem):
     """Estornar não espera a 1ª conferência (§3): a marca nova, de motivo nulo, estorna."""
@@ -255,12 +264,12 @@ def test_estornar_fecha_a_pendencia_aberta(adm, fonte):
     assert acoes == ["commission_reversed", "check_reversed"]
 
 
-def test_rota_antiga_reverse_tira_a_marca(adm):
+def test_rota_antiga_reverse_foi_removida(adm):
+    """#1581: estornar sem justificativa nem evento não existe mais; o caminho é o /check-reverse."""
     com = _marca(_comissao(_afiliado(), 100))
     r = adm.post(f"/admin/api/affiliates/commissions/{com.id}/reverse", headers=csrf(adm))
-    assert r.status_code == 200, r.text
-    assert (_db(com)["status"], _db(com)["payment_check_pending"], _db(com)["payment_check_marked_at"]) == (
-        "reversed", False, None)
+    assert r.status_code in (404, 405), r.text
+    assert _db(com)["status"] != "reversed"
 
 
 # ── Concluir conferência (paga) ──────────────────────────────────────────────
