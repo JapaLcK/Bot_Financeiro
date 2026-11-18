@@ -279,3 +279,17 @@ test("runServerUpdate vencido: a carteira não cobra até um /bump dar certo (o 
   assert.match(await page.locator("#pp-erro").innerText(), /não iniciado/);
   await ctx.close();
 });
+
+test("runServerUpdate que deu certo: o prazo que perdeu a corrida não bloqueia a carteira 25 s depois", async () => {
+  const { ctx, page, posts } = await abrirPagina({ relogio: true });
+  await page.clock.runFor(1_000);
+  await pronta(page);
+  await caixas(page).nth(0).click();
+  await ate(() => posts(BUMP).length > 0);
+  await pronta(page);
+  await page.clock.runFor(30_000);
+  await clicaCarteira(page);
+  await ate(() => posts(CONFIRM).length > 0);
+  assert.equal(await page.locator("#pp-erro.show").count(), 0);
+  await ctx.close();
+});

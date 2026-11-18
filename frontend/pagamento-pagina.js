@@ -107,7 +107,7 @@
       let incerto = false;
       async function sincroniza() {
         const posicoes = marcadas().map(function (c) { return Number(c.dataset.pos); });
-        let erro = false, vencido = false;
+        let erro = false, vencido = false, acabou = false;
         try {
           const r = await Promise.race([actions.runServerUpdate(async function () {
             if (vencido) throw new Error("vencido");  // o SDK chamou depois do prazo: não grava carrinho velho
@@ -117,7 +117,8 @@
             const e = resp && resp.status === 409 && resp.d.detail && resp.d.detail.error;
             erro = e === "sessao_fechada" ? "fechada" : e === "extra_recusado" ? "recusado" : false;
             throw new Error("bump");
-          }), espera(BUMP_MS + 10000).then(function () { vencido = true; incerto = true; return null; })]);
+          }), espera(BUMP_MS + 10000).then(function () { if (!acabou) { vencido = true; incerto = true; } return null; })]);
+          acabou = true;  // o prazo que perde a corrida não marca nada depois
           // Sem resposta do SDK (null): falha. A callback que o SDK chamar depois não posta (`vencido`); um /bump
           // que já estava no ar no prazo é anterior ao do Pagar, que sincroniza de novo antes do confirm.
           if (!r || r.type === "error") return erro;
@@ -125,6 +126,7 @@
           incerto = false;
           return true;
         } catch (_) {
+          acabou = true;
           return erro;
         }
       }
