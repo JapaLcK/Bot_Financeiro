@@ -13,7 +13,7 @@
   const ERRO_BUMP = "Não deu para atualizar seu pedido. Ele continua como estava.";
   const ERRO_SYNC = "Não deu para confirmar seu pedido agora. Tente de novo ou use a página segura do Stripe, logo abaixo.";
   // O loadActions sem prazo prenderia o botão (o relógio do assinar.js só olha o iframe, que já existe); o /bump
-  // tem o seu abaixo dos 20 s do runServerUpdate.
+  // tem o seu abaixo dos 20 s do runServerUpdate, e o runServerUpdate em si, 10 s acima do /bump.
   const ACOES_MS = 10000, BUMP_MS = 15000;
   const $ = function (id) { return document.getElementById(id); };
   /** A mensagem do Stripe num `{type:"error", error}`, ou a padrão. */
@@ -103,22 +103,30 @@
 
       /** Leva ao Stripe o conjunto marcado na tela. true = o carrinho é o da tela; senão "fechada" (sessão
        *  paga ou expirada), "recusado" (o Stripe recusou o extra) ou false. Nunca lança. */
+      // Prazo vencido com o /bump talvez aplicado: a carteira (que não sincroniza) espera um sincroniza que dê certo.
+      let incerto = false;
       async function sincroniza() {
         const posicoes = marcadas().map(function (c) { return Number(c.dataset.pos); });
-        let erro = false;
+        let erro = false, vencido = false, acabou = false;
         try {
-          const r = await actions.runServerUpdate(async function () {
+          const r = await Promise.race([actions.runServerUpdate(async function () {
+            if (vencido) throw new Error("vencido");  // o SDK chamou depois do prazo: não grava carrinho velho
             const resp = await Promise.race([
               ctx.post("/billing/checkout/bump", { sid: actions.getSession().id, posicoes: posicoes }), espera(BUMP_MS)]);
             if (resp && resp.ok) return;
             const e = resp && resp.status === 409 && resp.d.detail && resp.d.detail.error;
             erro = e === "sessao_fechada" ? "fechada" : e === "extra_recusado" ? "recusado" : false;
             throw new Error("bump");
-          });
-          if (r && r.type === "error") return erro;
+          }), espera(BUMP_MS + 10000).then(function () { if (!acabou) { vencido = true; incerto = true; } return null; })]);
+          acabou = true;  // o prazo que perde a corrida não marca nada depois
+          // Sem resposta do SDK (null): falha. A callback que o SDK chamar depois não posta (`vencido`); um /bump
+          // que já estava no ar no prazo é anterior ao do Pagar, que sincroniza de novo antes do confirm.
+          if (!r || r.type === "error") return erro;
           confirmado = marcadas();
+          incerto = false;
           return true;
         } catch (_) {
+          acabou = true;
           return erro;
         }
       }
@@ -158,7 +166,7 @@
       function carteira(ev) {
         const aberta = folha;
         folha = false;
-        if ((viuClick && !aberta) || voo || !actions || !temTotal) {
+        if ((viuClick && !aberta) || voo || incerto || !actions || !temTotal) {
           if (ev && typeof ev.paymentFailed === "function") ev.paymentFailed();
           aviso("pp-erro", "Pagamento não iniciado. Tente de novo.");
           return pinta();

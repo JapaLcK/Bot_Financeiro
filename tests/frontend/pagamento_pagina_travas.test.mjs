@@ -180,6 +180,42 @@ test("/bump pendurado: 15 s e as caixas voltam com o aviso", async () => {
   await ctx.close();
 });
 
+test("runServerUpdate pendurado: 25 s e as caixas e o Pagar voltam, com o aviso e a seleção de antes", async () => {
+  const { ctx, page } = await abrirPagina({ sdk: { updatePendura: true }, relogio: true });
+  await caixas(page).nth(0).click();
+  await page.clock.runFor(24_000);
+  assert.equal(await page.locator("#pp-erro.show").count(), 0);
+  assert.equal(await page.locator("#pp-pagar").isDisabled(), true);
+  await page.clock.runFor(1_000);
+  await page.locator("#pp-erro.show").waitFor();
+  assert.deepEqual(await marcadas(page), [false, false, false]);
+  assert.equal(await page.locator("#pp-pagar").isDisabled(), false);
+  assert.equal(await caixas(page).nth(0).isDisabled(), false);
+  await ctx.close();
+});
+
+test("runServerUpdate que chama a callback depois do prazo: ela não posta o extra desfeito", async () => {
+  const { ctx, page, posts } = await abrirPagina({ sdk: { updateAtrasa: 30_000 }, relogio: true });
+  await caixas(page).nth(0).click();
+  await page.clock.runFor(25_000);
+  await page.locator("#pp-erro.show").waitFor();
+  await page.clock.runFor(10_000);
+  await page.waitForTimeout(200);
+  assert.deepEqual(posts(BUMP), []);
+  await ctx.close();
+});
+
+test("runServerUpdate normal (controle do de cima): o /bump confirma e o Pagar fica habilitado", async () => {
+  const { ctx, page, posts } = await abrirPagina({ relogio: true });
+  await caixas(page).nth(0).click();
+  await ate(() => posts(BUMP).length > 0);
+  await destravou(page);
+  assert.deepEqual(await marcadas(page), [true, false, false]);
+  assert.equal(await page.locator("#pp-erro.show").count(), 0);
+  assert.equal(await page.locator("#pp-pagar").isDisabled(), false);
+  await ctx.close();
+});
+
 test("sem o pagamento-pagina.js: o embutido de hoje monta normal; a página própria cai no plano B", async () => {
   const sem = { "GET /pagamento-pagina.js": [404, {}] };
   const a = await abrir(browser, { api: { "GET /auth/me": ME("ana@x.com"), ...sem } });
