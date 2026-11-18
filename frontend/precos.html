@@ -294,6 +294,7 @@
      conta logada e o clique em "Assinar" caía em "Faça login". -->
 <script src="/static/auth-refresh.js?v=1"></script>
 <script src="/purchase-intent.js?v=1"></script>
+<script src="/excecao-trial-bf.js?v=1"></script>
 <link href="/site-redesign.css?v=1" rel="stylesheet"/><link href="/site-plans.css?v=1" rel="stylesheet"/></head>
 <body id="topo" class="lp lp-plans"><a class="lp-skip-link" href="#conteudo">Pular para o conteúdo</a>
 
@@ -544,22 +545,23 @@ function aplicarDescontoRetomada(r, diasTrial) {
     card.classList.add("rm-on");
     [["monthly", "data-price-monthly", "copyMonthly"], ["annual", "data-price-annual", "copyAnnual"]].forEach(([ciclo, attr, copia]) => {
       const el = card.querySelector(`.price [${attr}]`);
-      if (!el) return;
+      if (!el || p[ciclo] == null) return;   // campanha: só o anual tem desconto
+      const pct = ciclo === "monthly" ? p.pct_mensal : p.pct;
       const cheio = document.createElement("s");
       cheio.className = "rm-cheio";
       cheio.textContent = el.firstChild.textContent;
       const selo = document.createElement("span");
       selo.className = "rm-selo";
-      selo.textContent = p.pct + "% OFF";
+      selo.textContent = pct + "% OFF";
       const per = el.querySelector(".per");
       el.textContent = "";
       el.append(cheio, fmt(p[ciclo]), per, selo);
       // O desconto vale só na 1ª cobrança: a frase diz isso com ou sem trial.
       const txt = card.querySelector(".price-cycle-copy");
       if (!txt) return;
-      txt.dataset[copia] = r.trial && diasTrial
-        ? `${diasTrial} dias grátis no cartão, ${p.pct}% OFF na 1ª cobrança, depois ${cheio.textContent.trim()}`
-        : `${p.pct}% OFF na 1ª cobrança, depois ${cheio.textContent.trim()}`;
+      txt.dataset[copia] = r.trial && diasTrial && !(ciclo === "annual" && p.na_hora)   // anual da campanha: cobrança na hora
+        ? `${diasTrial} dias grátis no cartão, ${pct}% OFF na 1ª cobrança, depois ${cheio.textContent.trim()}`
+        : `${pct}% OFF na 1ª cobrança, depois ${cheio.textContent.trim()}`;
       if (currentCycle === ciclo) txt.textContent = txt.dataset[copia];
     });
   });
@@ -567,7 +569,7 @@ function aplicarDescontoRetomada(r, diasTrial) {
   Object.entries(r.precos).forEach(([tier, p]) => {
     [["monthly", "data-price-monthly"], ["annual", "data-price-annual"]].forEach(([ciclo, attr]) => {
       const el = document.querySelector(`#cmp-v2 [data-plano="${tier}"] [${attr}]`);
-      if (!el || el.dataset.rm) return;
+      if (!el || el.dataset.rm || p[ciclo] == null) return;
       el.dataset.rm = "1";
       const cheio = document.createElement("s");
       cheio.style.cssText = "display:block;font-size:.75rem;font-weight:500;opacity:.6";
@@ -586,8 +588,19 @@ const aposMontagem = fn => document.readyState === "loading"
   ? document.addEventListener("DOMContentLoaded", fn, { once: true }) : fn();
 function faixaDeOferta(frase) {
   const f = document.getElementById("oferta-faixa");
-  if (f) { f.textContent = frase; f.hidden = false; }
+  if (!f) return;
+  f.textContent = frase + " ";
+  const ver = document.createElement("a");
+  ver.href = "/black-friday";
+  ver.textContent = "Ver a oferta";
+  ver.style.cssText = "color:inherit;text-decoration:underline;font-weight:800";
+  f.append(ver);
+  f.hidden = false;
+  excecaoTrialBF();
 }
+// Na campanha o anual de Plus/Pro é cobrado na hora: os dois textos que prometem trial ganham a exceção.
+// Idempotente e chamada pelos dois lados (faixa e applyPlanGateCopy, que é async e reescreve o texto).
+const excecaoTrialBF = () => PBExcecaoTrialBF("#precos-sub, #plans-note-v2");
 
 /* Valor numérico do plano pros eventos do GA4 (`value`/`price`), lido do
    PLAN_PRICES acima em vez de uma segunda tabela: preço só é editado num lugar,
@@ -975,6 +988,7 @@ async function cancelChange() {
     sub.textContent =
       "Escolha um plano pra continuar: 7 dias grátis no cartão pra testar (um teste por número). "
       + "O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.";
+    excecaoTrialBF();
     return;
   }
   if (me.app_access === false) {
@@ -1064,18 +1078,16 @@ async function cancelChange() {
       window.pbPlanAuthState = "retomada"; publicarPix(null, true);
       // Link + campanha: só a faixa. Repintar com a campanha sobrescreveria os preços do link e, se o link
       // for maior (ex.: 45% contra 40%), perderia o desconto.
-      if (cfgPlanos.campanha) aposMontagem(() => faixaDeOferta(cfgPlanos.campanha.frase));
+      if (cfgPlanos.campanha) aposMontagem(() => faixaDeOferta(cfgPlanos.campanha.faixa));
       return;
     }
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
     const resolvida = await loadSubscription();
     refreshPlanButtons();
-    // Campanha: só com a assinatura RESOLVIDA. Assinante ativo (cartão, trial ou Pix) não ganha preço de
-    // oferta no cartão, só a frase do Pix; vitalício não vê nada.
+    // Campanha: só com a assinatura RESOLVIDA. Assinante (cartão, trial, Pix ou vitalício) não vê oferta nenhuma.
     const campanha = cfgPlanos?.campanha;
     if (campanha && resolvida && !subState?.degraded) {   // degraded: Stripe falhou, não se sabe se assina; a / também deixa como está
-      if (!subState?.active) aposMontagem(() => { faixaDeOferta(campanha.frase); aplicarDescontoRetomada(campanha, cfgPlanos.trial_days); });
-      else if (!subState.lifetime) faixaDeOferta(campanha.frase_assinante);
+      if (!subState?.active) aposMontagem(() => { faixaDeOferta(campanha.faixa); aplicarDescontoRetomada(campanha, cfgPlanos.trial_days); });
     }
     // `resolvida`, não `true`: 5xx, rede fora e JSON malformado guardam o mesmo
     // `subState = null` do 401 do deslogado. Chamar de resolvido revelava a

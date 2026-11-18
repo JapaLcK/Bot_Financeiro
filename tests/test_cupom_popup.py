@@ -144,3 +144,19 @@ def test_marcar_enviado_quebrado_nao_remove_nem_erra(envios, monkeypatch):
     e = _email()
     assert _post(_client(), e).status_code == 200
     assert len(envios) == 1 and _linha(e) is not None and _linha(e)["sent_at"] is None
+
+
+def test_na_black_friday_o_post_recusa_e_nao_entrega_o_codigo(envios, monkeypatch):
+    """Dentro da janela da campanha o 5% não sai: 503, sem e-mail e sem linha em `cupom_leads` (o desconto da
+    campanha não soma com cupom). Controle negativo: tirar o `campanha_estado` da rota deixa este teste vermelho;
+    positivo: fora da janela (os testes acima, relógio do conftest) o código segue saindo."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from core.services import oferta_campanha as camp
+    monkeypatch.setattr(camp, "_agora", lambda: datetime(2026, 11, 25, 12, tzinfo=ZoneInfo("America/Sao_Paulo")))
+    e = _email()
+    assert _post(_client(), e).status_code == 503
+    assert envios == [] and _linha(e) is None
+    monkeypatch.setattr(camp, "_agora", lambda: datetime(2026, 12, 1, tzinfo=ZoneInfo("America/Sao_Paulo")))
+    assert _post(_client(), e).status_code == 200 and len(envios) == 1

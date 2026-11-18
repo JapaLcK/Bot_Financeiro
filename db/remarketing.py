@@ -227,3 +227,42 @@ def fechar(user_id: int, etapa: int, email_ok: bool | None, whatsapp_ok: bool | 
             {"e": email_ok, "w": whatsapp_ok, "m": motivo, "uid": int(user_id), "etapa": int(etapa)},
         )
         conn.commit()
+
+
+# ── Black Friday: um e-mail por pessoa e tipo, no lugar dos degraus (core/services/remarketing.py) ────────
+
+def candidatos_bf(desde, agora, tipo: str, limite: int = 200) -> list[int]:
+    """`user_id`s da régua que ainda não têm linha do `tipo` ("oferta" | "ultimo_dia"). Mesma varredura sem
+    dado do `candidatos`: só chaves. Entra quem tem 30 min de T0 (não se manda em cima de quem acabou de chegar).
+    # ponytail: teto de 200 por tick (300 s), como o `candidatos`; quem comprou/saiu é fechado pelo `_um_bf`."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select r.user_id from remarketing_regua r where r.t0 >= %(desde)s"
+            " and r.t0 <= %(agora)s - interval '30 minutes'"
+            " and not exists (select 1 from remarketing_bf b where b.user_id = r.user_id and b.tipo = %(tipo)s)"
+            " order by r.t0 limit %(limite)s",
+            {"desde": desde, "agora": agora, "tipo": tipo, "limite": limite})
+        linhas = cur.fetchall()
+        conn.commit()
+    return [int(r["user_id"]) for r in linhas]
+
+
+def reivindicar_bf(user_id: int, tipo: str) -> bool:
+    """Claim atômico (user, tipo): só quem insere a linha envia, e uma retentativa nunca reenvia."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "insert into remarketing_bf (user_id, tipo, status) values (%s, %s, 'enviando')"
+            " on conflict (user_id, tipo) do nothing returning user_id", (int(user_id), tipo))
+        ganhou = cur.fetchone() is not None
+        conn.commit()
+    return ganhou
+
+
+def fechar_bf(user_id: int, tipo: str, email_ok: bool | None, motivo: str | None) -> None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update remarketing_bf set status = case when coalesce(%(e)s::boolean, false) then 'enviado' else 'sem_canal' end,"
+            " email_ok = %(e)s, motivo = left(%(m)s, 120), fechado_em = now()"
+            " where user_id = %(uid)s and tipo = %(tipo)s",
+            {"e": email_ok, "m": motivo, "uid": int(user_id), "tipo": tipo})
+        conn.commit()

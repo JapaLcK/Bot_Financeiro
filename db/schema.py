@@ -3402,6 +3402,20 @@ def init_db():
           unique (user_id, etapa)
         )
         """,
+        # Black Friday 2026: um e-mail por pessoa e tipo no lugar dos degraus (`oferta`) e o do último
+        # dia (`ultimo_dia`). A PK é a reivindicação atômica; sai com a conta (cascade); fora do export.
+        """
+        create table if not exists remarketing_bf (
+          user_id bigint not null references users(id) on delete cascade,
+          tipo text not null check (tipo in ('oferta', 'ultimo_dia')),
+          status text not null check (status in ('enviando', 'enviado', 'sem_canal')),
+          email_ok boolean,
+          motivo text,
+          criado_em timestamptz not null default now(),
+          fechado_em timestamptz,
+          primary key (user_id, tipo)
+        )
+        """,
         # Reconquista de trial vencido sem pagamento (um e-mail, 2 dias depois). Fila de
         # reivindicação atômica: pendente -> enviando -> enviado|pulado. Sai com a conta.
         """
