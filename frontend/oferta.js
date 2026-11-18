@@ -36,15 +36,18 @@
     if (pintada || !semAssinatura || !textosCampanha) return;
     pintada = true;
     const f = $("#oferta-faixa");
-    f.textContent = textosCampanha.frase;
+    f.textContent = textosCampanha.faixa + " ";
+    const ver = document.createElement("a");   // só o anual tem oferta: os preços mensais ficam como estão
+    ver.href = "/black-friday";
+    ver.textContent = "Ver a oferta";
+    ver.style.cssText = "color:inherit;text-decoration:underline;font-weight:800";
+    f.append(ver);
     f.hidden = false;
     for (const [tier, t] of Object.entries(textosCampanha.textos)) {
       const card = $(`[data-plano="${tier}"]`, planos);
       const poe = (sel, txt) => { const e = card && $(sel, card); if (e) e.textContent = txt; };
       poe(".pb-d.so-anual", t.anual_mes);
-      poe(".pb-d.so-mensal", t.mensal);
       poe("span.so-anual:not(.pb-d)", t.linha_anual);
-      poe("span.so-mensal:not(.pb-d)", t.linha_mensal);
     }
     $('[data-set="anual"]', planos)?.click();   // na campanha o #planos abre em Anual
   };

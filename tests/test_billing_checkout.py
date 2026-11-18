@@ -175,12 +175,14 @@ class _FakeStripe:
                     outer.coupon_race = False
                     outer.coupons.setdefault(kw["id"], {
                         "id": kw["id"], "valid": True, "percent_off": float(kw["percent_off"]),
-                        "duration": kw["duration"], "duration_in_months": kw["duration_in_months"],
+                        "duration": kw["duration"], "duration_in_months": kw.get("duration_in_months"),
+                        "redeem_by": kw.get("redeem_by"),
                         "applies_to": kw["applies_to"]})
                     raise _FakeInvalidRequestError("Coupon already exists", code="resource_already_exists")
                 outer.coupons[kw["id"]] = {
                     "id": kw["id"], "valid": True, "percent_off": float(kw["percent_off"]),
-                    "duration": kw["duration"], "duration_in_months": kw["duration_in_months"],
+                    "duration": kw["duration"], "duration_in_months": kw.get("duration_in_months"),
+                        "redeem_by": kw.get("redeem_by"),
                     "applies_to": kw["applies_to"]}
                 return outer._visivel(outer.coupons[kw["id"]], kw)
 

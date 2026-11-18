@@ -40,6 +40,7 @@ from core.crypto import encrypt_pii_optional
 from core.observability import log_system_event_sync
 from core.services import asaas
 from core.services.oferta_campanha import pct_da_oferta
+from core.services.retomada import com_desconto
 from core.services.pix_checkout_resposta import (
     VENCIMENTO_DIAS, expira, qr_da_linha, qr_vivo, resposta)
 from core.services.pix_extras import escolher, total_cents
@@ -206,14 +207,14 @@ def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
     if preco is None:
         raise CheckoutIndisponivel("preco_anual_nao_configurado")
 
-    if desconto_pct := pct_da_oferta(plan_stored, desconto_pct):   # o maior (link, campanha); ANTES do piso; cadernos cheios
-        from core.services.retomada import com_desconto  # noqa: PLC0415
-        preco = com_desconto(preco, desconto_pct)
-
     stripe_sub = _stripe_vivo(user_id)
     if stripe_sub and not confirm_cancel_stripe:
         raise StripeAtivo(stripe_sub[1])
 
+    from core.services.cartao_recusado_por_pix import pix_cobre_agora  # noqa: PLC0415
+    if desconto_pct := pct_da_oferta(plan_stored, desconto_pct, interval="annual",   # o maior (link, campanha: só de quem não assina); ANTES do piso
+                                     elegivel=not (stripe_sub or pix_cobre_agora(user_id))):
+        preco = com_desconto(preco, desconto_pct)
     # A recusa do §7 (`CoberturaJaPaga`) sai daqui, de uma função PURA, antes de
     # qualquer escrita e antes de qualquer chamada ao Asaas.
     from db.pix_charges_saga import grants_para_precificar  # noqa: PLC0415

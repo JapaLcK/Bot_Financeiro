@@ -10,8 +10,11 @@
 
   function agendar() {
     // Logado não é público-alvo; falha da rede = trata como deslogado (pior caso: um pop-up a mais).
-    fetch("/auth/validate", { credentials: "same-origin" }).then(function (r) {
-      if (r.ok) return;
+    // Na Black Friday (plans-config traz `campanha`) o 5% não abre: o desconto da campanha não soma com cupom.
+    const campanha = fetch("/billing/plans-config", { credentials: "same-origin" })
+      .then(function (x) { return x.ok ? x.json() : null; }).catch(function () { return null; });
+    Promise.all([fetch("/auth/validate", { credentials: "same-origin" }), campanha]).then(function (v) {
+      if (v[0].ok || (v[1] && v[1].campanha)) return;
       timer = setTimeout(mostrar, 15000);
       if (window.matchMedia && matchMedia("(pointer:fine)").matches) {
         document.addEventListener("mouseout", saida);

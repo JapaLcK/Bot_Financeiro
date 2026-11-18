@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Black Friday do PigBank: 12 meses de Plus pelo preço de 6</title>
+<meta name="robots" content="noindex"/>
+<meta name="theme-color" content="#111111"/>
+<link href="/favicon.png?v=3" rel="icon" type="image/png"/>
+<!-- /black-friday. O ESTADO (antes, oferta, depois) é escolhido PELO SERVIDOR, pelo relógio dele
+     (`campanha_estado`): os blocos marcados com e: (seção) e v: (trecho) que não são do estado atual saem
+     do HTML antes de ele chegar ao navegador (`serve_black_friday`). Os preços daqui são texto do PDF da Blue Ocean; o
+     tests/test_black_friday_pagina.py os compara com a conta do servidor (uma fonte de verdade). -->
+<link rel="stylesheet" href="/brand.css?v=4" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html { background: var(--bg-page); color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh; min-height: 100dvh;
+    background: var(--bg-page); color: var(--text);
+    font-family: var(--font-brand, "Inter", system-ui, sans-serif);
+    -webkit-font-smoothing: antialiased; line-height: 1.5;
+  }
+  :focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+  .bf { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+  .bf-topo { padding: 20px 0 0; }
+  .bf-logo { display: block; height: 28px; width: auto; }
+  h1, h2, h3, p { margin: 0; }
+  h1 { font-size: clamp(2rem, 1.2rem + 4vw, 3.75rem); line-height: 1.04; font-weight: 900; letter-spacing: -.03em; text-wrap: balance; }
+  h2 { font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.25rem); line-height: 1.12; font-weight: 800; letter-spacing: -.02em; text-wrap: balance; }
+  .bf section { padding: 56px 0 0; }
+
+  /* Topo */
+  .bf-hero { display: grid; gap: 28px; align-items: center; padding-top: 32px !important; }
+  .bf-selo { display: inline-block; padding: 6px 12px; border-radius: 999px; background: var(--pig-pink); color: #fff; font-size: .8125rem; font-weight: 800; letter-spacing: .02em; }
+  .bf-hero h1 { margin: 14px 0 14px; }
+  .bf-sub { color: var(--text-muted); font-size: 1.0625rem; max-width: 52ch; }
+  .bf-preco { margin: 22px 0 18px; padding: 18px 20px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-elev); max-width: 420px; }
+  .bf-preco small { display: block; color: var(--text-muted); font-size: .875rem; }
+  .bf-preco s { color: var(--text-subtle); }
+  .bf-preco strong { display: block; font-size: 2.25rem; line-height: 1.1; font-weight: 900; letter-spacing: -.02em; margin: 2px 0; }
+  .bf-preco .bf-mes { color: var(--pig-neon); font-weight: 700; font-size: .9375rem; }
+  .bf-acao { max-width: 420px; }
+  .bf-cta {
+    display: block; width: 100%; padding: 17px 24px; border: 0; border-radius: 14px; text-align: center;
+    background: var(--pig-pink); color: #fff; font: inherit; font-size: 1.125rem; font-weight: 800; letter-spacing: -.01em; text-decoration: none; cursor: pointer;
+    box-shadow: 0 12px 32px -12px rgba(255, 45, 142, .7);
+    transition: background-color 160ms ease, transform 120ms ease;
+  }
+  @media (hover: hover) and (pointer: fine) { .bf-cta:hover { background: var(--pig-pink-600); } }
+  .bf-cta:active { transform: scale(.98); }
+  .bf-cta:disabled { background: var(--bg-elev-2); color: var(--text-muted); box-shadow: none; cursor: not-allowed; transform: none; }
+  .bf-cta.bf-sec { background: transparent; border: 1.5px solid var(--border-strong); box-shadow: none; }
+  .bf-nota { margin-top: 10px; color: var(--text-muted); font-size: .875rem; }
+  .bf-prazo { margin-top: 6px; font-size: .875rem; font-weight: 700; }
+  .bf-assinante { margin-top: 0; padding: 14px 16px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg-elev); font-size: .9375rem; }
+  .bf-assinante[hidden] { display: none; }
+  .bf-assina .bf-cta, .bf-assina .bf-nota, .bf-assina .bf-prazo { display: none; }
+  .bf-hero img { width: min(260px, 60%); height: auto; justify-self: center; }
+
+  /* Planos */
+  .bf-planos { display: grid; gap: 16px; margin-top: 22px; }
+  .bf-plano { display: flex; flex-direction: column; gap: 12px; padding: 22px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elev); }
+  .bf-plano.bf-dest { border-color: var(--pig-pink); }
+  .bf-plano h3 { font-size: 1.375rem; font-weight: 800; }
+  .bf-etq { align-self: flex-start; padding: 3px 10px; border-radius: 999px; background: var(--pig-neon); color: #111; font-size: .75rem; font-weight: 800; }
+  .bf-plano .bf-desc { color: var(--text-muted); font-size: .9375rem; }
+  .bf-plano .bf-de { color: var(--text-subtle); font-size: .9375rem; }
+  .bf-plano .bf-por { font-size: 1.75rem; font-weight: 900; letter-spacing: -.02em; line-height: 1.1; }
+  .bf-plano .bf-por small { display: block; font-size: .875rem; font-weight: 500; color: var(--text-muted); letter-spacing: 0; margin-top: 2px; }
+  .bf-plano ul { margin: 0 0 6px; padding: 0; list-style: none; display: grid; gap: 6px; font-size: .9375rem; }
+  .bf-plano li::before { content: "\2713"; color: var(--pig-neon); font-weight: 800; margin-right: 8px; }
+  .bf-plano .bf-acao { margin-top: auto; max-width: none; }
+  .bf-rodape-planos { margin-top: 14px; color: var(--text-muted); font-size: .875rem; }
+
+  /* Texto corrido */
+  .bf-lista { margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 12px; max-width: 64ch; }
+  .bf-lista li { padding-left: 18px; border-left: 3px solid var(--pig-pink); color: var(--text-muted); }
+  .bf-passos { display: grid; gap: 14px; margin-top: 22px; }
+  .bf-passo { padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elev); }
+  .bf-passo h3 { font-size: 1.0625rem; font-weight: 800; margin-bottom: 4px; }
+  .bf-passo p { color: var(--text-muted); font-size: .9375rem; }
+  .bf-aval { display: grid; gap: 14px; margin-top: 22px; }
+  .bf-aval blockquote { margin: 0; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elev); }
+  .bf-aval blockquote p { font-size: 1rem; }
+  .bf-aval footer { margin-top: 10px; color: var(--text-muted); font-size: .8125rem; }
+  .bf-garantia { padding: 24px; border: 1px solid var(--pig-neon); border-radius: var(--radius-lg); }
+  .bf-garantia p { margin-top: 10px; color: var(--text-muted); max-width: 64ch; }
+
+  /* Perguntas */
+  .bf-faq { margin-top: 20px; display: grid; gap: 10px; }
+  .bf-faq details { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elev); }
+  .bf-faq summary { padding: 16px 18px; font-weight: 700; cursor: pointer; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+  .bf-faq summary::-webkit-details-marker { display: none; }
+  .bf-faq summary::after { content: "+"; color: var(--pig-pink); font-weight: 800; font-size: 1.25rem; line-height: 1; }
+  .bf-faq details[open] summary::after { content: "\2212"; }
+  .bf-faq details p { padding: 0 18px 16px; color: var(--text-muted); font-size: .9375rem; }
+
+  /* Fim */
+  .bf-fim { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .bf-fim img { width: 150px; height: auto; }
+  .bf-fim p { color: var(--text-muted); max-width: 54ch; }
+  .bf-fim .bf-acao { width: 100%; }
+  .bf-regras { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--text-subtle); font-size: .75rem; }
+  .bf-depois { min-height: 60vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 16px; }
+  .bf-depois .bf-cta { width: auto; min-width: 240px; }
+  .bf-pe { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; padding: 40px 20px 24px; font-size: .75rem; color: var(--text-subtle); }
+  .bf-pe a { color: var(--text-muted); text-underline-offset: 3px; }
+  .bf-pe p { margin: 0; }
+
+  @media (min-width: 760px) {
+    .bf-hero { grid-template-columns: 1.4fr 1fr; }
+    .bf-planos, .bf-aval { grid-template-columns: 1fr 1fr; }
+    .bf-passos { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) { .bf-cta { transition: none; } .bf-cta:active { transform: none; } }
+</style>
+</head>
+<body>
+<div class="bf">
+<header class="bf-topo"><a href="/"><img class="bf-logo" src="/brand/landing-logo.webp?v=1" alt="PigBank" width="142" height="42"></a></header>
+<main>
+
+<!--e:depois-->
+<section class="bf-depois">
+  <h1>A Black Friday do PigBank acabou.</h1>
+  <p class="bf-sub">Os planos seguem com o teste de 7 dias no cartão. Se quiser, começa por lá.</p>
+  <a class="bf-cta" href="/precos">Ver os planos</a>
+</section>
+<!--/e-->
+
+<!--e:antes,oferta-->
+<section class="bf-hero">
+  <div>
+    <span class="bf-selo">Black Friday do PigBank</span>
+    <h1>12 meses de Plus pelo preço de 6.</h1>
+    <p class="bf-sub"><!--v:oferta-->Até segunda, 30 de novembro, o primeiro ano de Plus e Pro anuais sai com 40% de desconto. No Plus, são R$ 119,40 pelo ano inteiro.<!--/v--><!--v:antes-->De segunda, dia 23, à 0h, até segunda, dia 30, o primeiro ano de Plus e Pro anuais sai com 40% de desconto. No Plus, são R$ 119,40 pelo ano inteiro.<!--/v--></p>
+    <div class="bf-preco">
+      <small>Plus anual</small>
+      <small>de <s>R$ 199</s></small>
+      <strong>R$ 119,40 <span style="font-size:1rem;font-weight:600">no primeiro ano</span></strong>
+      <span class="bf-mes">Dá R$ 9,95 por mês.</span>
+    </div>
+    <div class="bf-acao">
+      <!--v:oferta--><a class="bf-cta" data-utm href="/assinar?plano=plus&amp;ciclo=annual">Garantir meu Plus anual</a>
+      <p class="bf-nota">Cartão ou Pix. Se não fizer sentido, você tem 7 dias pra pedir 100% de volta.</p>
+      <p class="bf-prazo">Termina segunda, 30 de novembro, às 23h59.</p><!--/v-->
+      <!--v:antes--><button class="bf-cta" type="button" disabled>Começa segunda, dia 23, à 0h</button>
+      <p class="bf-prazo">Vale de 23 a 30 de novembro, no cartão ou no Pix.</p><!--/v-->
+      <p class="bf-assinante" hidden>A Black Friday é para quem ainda não tem assinatura. Se você já assina e quer passar para o anual, fala com o suporte.</p>
+    </div>
+  </div>
+  <img src="/brand/stickers/hello.webp" alt="" width="260" height="260">
+</section>
+
+<section>
+  <h2>Escolha o seu ano.</h2>
+  <div class="bf-planos">
+    <article class="bf-plano bf-dest" data-plano="plus">
+      <span class="bf-etq">Mais escolhido</span>
+      <h3>Plus</h3>
+      <p class="bf-desc">Mais de um banco e o time de agentes</p>
+      <p class="bf-de">de <s>R$ 199</s></p>
+      <p class="bf-por">R$ 119,40 <small>no primeiro ano. Dá R$ 9,95 por mês.</small></p>
+      <ul>
+        <li>Piggy no WhatsApp e painel completo</li>
+        <li>2 bancos conectados</li>
+        <li>Agentes e alertas de gastos</li>
+        <li>Previsão de saldo de 30 dias</li>
+      </ul>
+      <div class="bf-acao">
+        <!--v:oferta--><a class="bf-cta" data-utm href="/assinar?plano=plus&amp;ciclo=annual">Quero o Plus com 40%</a><!--/v-->
+        <!--v:antes--><button class="bf-cta" type="button" disabled>Começa segunda, dia 23, à 0h</button><!--/v-->
+        <p class="bf-assinante" hidden>A Black Friday é para quem ainda não tem assinatura. Se você já assina e quer passar para o anual, fala com o suporte.</p>
+      </div>
+    </article>
+    <article class="bf-plano" data-plano="pro">
+      <h3>Pro</h3>
+      <p class="bf-desc">Casal, família e investimentos</p>
+      <p class="bf-de">de <s>R$ 499</s></p>
+      <p class="bf-por">R$ 299,40 <small>no primeiro ano. Dá R$ 24,95 por mês.</small></p>
+      <ul>
+        <li>Tudo do Plus</li>
+        <li>5 bancos conectados</li>
+        <li>Plano Família, com acesso pra até 2 pessoas</li>
+        <li>Previsão de 90 dias</li>
+      </ul>
+      <div class="bf-acao">
+        <!--v:oferta--><a class="bf-cta bf-sec" data-utm href="/assinar?plano=pro&amp;ciclo=annual">Quero o Pro com 40%</a><!--/v-->
+        <!--v:antes--><button class="bf-cta" type="button" disabled>Começa segunda, dia 23, à 0h</button><!--/v-->
+        <p class="bf-assinante" hidden>A Black Friday é para quem ainda não tem assinatura. Se você já assina e quer passar para o anual, fala com o suporte.</p>
+      </div>
+    </article>
+  </div>
+  <p class="bf-rodape-planos">Preço do primeiro ano, no cartão ou no Pix. Na renovação, em novembro de 2027, volta ao preço normal do anual.</p>
+</section>
+
+<section>
+  <h2>Um ano inteiro comigo de olho no seu dinheiro.</h2>
+  <ul class="bf-lista">
+    <li>Cartão, parcela e fatura chegam sozinhos. Você vê o dia em que a fatura fecha antes do susto.</li>
+    <li>Você pergunta no WhatsApp quanto sobrou e eu respondo na hora.</li>
+    <li>O Xerife avisa quando um gasto sai do padrão. O Carteiro lembra do boleto antes de virar juros.</li>
+    <li>Previsão de saldo pros próximos 30 dias e o resumo da semana no automático.</li>
+    <li>Gastou em dinheiro? Me manda um áudio ou a foto que eu anoto.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Em 2 minutos você está dentro.</h2>
+  <div class="bf-passos">
+    <div class="bf-passo"><h3>Garante o preço</h3><p>Escolhe o plano e paga no cartão ou no Pix. Se você já tem conta, é só entrar com ela.</p></div>
+    <div class="bf-passo"><h3>Conecta o banco uma vez</h3><p>Pelo Open Finance, o sistema regulado pelo Banco Central. Você autoriza no app do seu banco, eu só leio os gastos e nunca vejo sua senha.</p></div>
+    <div class="bf-passo"><h3>Pergunta e recebe</h3><p>No WhatsApp você conversa. No painel você enxerga o mês inteiro.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Eles também achavam que gastavam pouco.</h2>
+  <div class="bf-aval">
+    <blockquote>
+      <p>Muito bom! É ótimo ter uma IA para facilitar meu dia a dia e minha organização financeira. Agora consigo fazer coisas que antes não sobrava tempo, ou tinha dificuldade.</p>
+      <footer>Maria Santos, usuária do PigBank, ago. 2026. Avaliação no Trustpilot</footer>
+    </blockquote>
+    <blockquote>
+      <p>Eles são muito atenciosos, trabalho ótimo, uso muito</p>
+      <footer>Barbara Meireles, usuária do PigBank, ago. 2026. Avaliação no Trustpilot</footer>
+    </blockquote>
+  </div>
+</section>
+
+<section>
+  <div class="bf-garantia">
+    <h2>7 dias pra ter certeza.</h2>
+    <p>O anual da Black Friday é cobrado na hora, sem os 7 dias grátis. Se em 7 dias não fizer sentido, você pede pelo suporte e recebe 100% de volta. Sem pergunta e sem ligação. No Pix, os 7 dias contam da confirmação do pagamento.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Ainda com dúvida? Eu respondo.</h2>
+  <div class="bf-faq">
+    <details><summary>Dá pra pagar no Pix?</summary><p>Dá. O desconto é o mesmo no cartão e no Pix. No Pix, o seu ano começa quando o pagamento é confirmado.</p></details>
+    <details><summary>E quando o ano acabar?</summary><p>Em novembro de 2027 o plano volta ao preço normal do anual, hoje R$ 199 no Plus. Os 40% valem só no primeiro ano. Se não quiser renovar, você cancela pelo painel antes.</p></details>
+    <details><summary>Já testei e cancelei. Posso?</summary><p>Pode. Entra com a sua conta de sempre e escolhe o plano. O desconto já aparece no pagamento.</p></details>
+    <details><summary>Já tenho conta. Preciso criar outra?</summary><p>Não. Toca no botão, entra com o seu e-mail e o desconto aparece no pagamento.</p></details>
+    <details><summary>Já assino o mensal. Vale pra mim?</summary><p>A Black Friday é pra quem ainda não tem assinatura. Se você já assina e quer passar pro anual, fala com o suporte.</p></details>
+    <details><summary>Preciso conectar o banco?</summary><p>Pra cartão, parcela e fatura entrarem sozinhos, sim. É com o banco que eu organizo tudo. Sem banco, eu anoto só o gasto em dinheiro, por áudio ou foto no WhatsApp.</p></details>
+    <details><summary>É seguro conectar meu banco?</summary><p>É. A conexão é pelo Open Finance, via Pluggy, só de leitura. Eu nunca vejo sua senha, não movimento seu dinheiro e você desconecta quando quiser, direto no painel.</p></details>
+    <details><summary>E se eu não gostar?</summary><p>Pede pelo suporte em até 7 dias e recebe 100% de volta. No Pix, os 7 dias contam da confirmação do pagamento.</p></details>
+  </div>
+</section>
+
+<section class="bf-fim">
+  <img src="/brand/stickers/success.webp" alt="" width="150" height="150" loading="lazy">
+  <h2>Você já conhece o Piggy. Agora o ano sai pelo preço de 6 meses.</h2>
+  <p>Daqui a 30 dias, você vai saber pra onde foi cada real. O Plus anual sai por R$ 119,40 no primeiro ano, só até segunda, 30 de novembro.</p>
+  <div class="bf-acao">
+    <!--v:oferta--><a class="bf-cta" data-utm href="/assinar?plano=plus&amp;ciclo=annual">Garantir meu Plus anual</a>
+    <p class="bf-nota">Cartão ou Pix. 7 dias pra pedir 100% de volta. Termina segunda, 30 de novembro, às 23h59.</p><!--/v-->
+    <!--v:antes--><button class="bf-cta" type="button" disabled>Começa segunda, dia 23, à 0h</button>
+    <p class="bf-nota">Vale de 23 a 30 de novembro, no cartão ou no Pix.</p><!--/v-->
+    <p class="bf-assinante" hidden>A Black Friday é para quem ainda não tem assinatura. Se você já assina e quer passar para o anual, fala com o suporte.</p>
+  </div>
+</section>
+
+<p class="bf-regras">Oferta válida de 23 de novembro de 2026, à 0h, até 30 de novembro de 2026, às 23h59, no horário de Brasília, só para os planos anuais Plus e Pro. O desconto de 40% vale só para a primeira cobrança anual. Depois de 12 meses, a renovação é cobrada pelo preço do plano anual em vigor. A cobrança acontece na hora, no cartão ou no Pix, sem os 7 dias grátis. O reembolso integral vale se for pedido pelo suporte em até 7 dias da cobrança, ou da confirmação do Pix. Não soma com outros cupons. Válida para quem não tem assinatura ativa. O PigBank não é banco nem instituição financeira. Não guarda, não transfere e não movimenta dinheiro.</p>
+<!--/e-->
+
+</main>
+</div>
+<footer class="bf-pe">
+  <a href="/termos">Termos de uso</a>
+  <a href="/privacy">Privacidade</a>
+  <p>© 2026 PigBank</p>
+</footer>
+<script src="/teste-piggy.js?v=1" defer></script>
+<script>
+  /* Quem já assina (ou tem acesso vitalício) não é público da oferta: no lugar dos botões, o aviso do suporte.
+     O servidor é a trava de verdade (create-checkout responde 409); aqui é só para não prometer o que ele recusa.
+     Resposta incerta (anônimo, erro, `degraded`) não mexe em nada. */
+  fetch("/billing/subscription", { credentials: "same-origin" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (s) {
+      if (!s || s.degraded || !(s.active || s.lifetime)) return;
+      document.body.classList.add("bf-assina");
+      document.querySelectorAll(".bf-assinante").forEach(function (e) { e.hidden = false; });
+    })
+    .catch(function () {});
+</script>
+</body>
+</html>

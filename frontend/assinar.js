@@ -40,6 +40,7 @@
     abrir: "Não deu para abrir o pagamento agora.",
   };
   let estado = "c-carga";
+  let campanhaAnual = false;   // a oferta da Black Friday vale para ESTE plano e ciclo (plans-config)
   let gen = 0;          // muda a cada tela: a resposta de um pedido velho é descartada
   let voo = false;      // uma ação do usuário por vez (2º clique, Enter)
   let me = null;        // a sessão que JÁ estava no navegador, de outra conta (S1a)
@@ -175,15 +176,21 @@
   /** Frase da campanha (Black Friday) do plano e ciclo da URL, no S1 e no S4. Texto pronto do servidor; Essencial não tem chave. */
   function oferta(c) {
     const t = c?.campanha?.textos?.[plano];
-    if (!t) return;
-    ["s1-oferta", "s4-oferta"].forEach(function (id) { $(id).textContent = ciclo === "annual" ? t.frase_anual : t.frase_mensal; $(id).hidden = false; });
+    campanhaAnual = !!t && ciclo === "annual";   // só o anual tem oferta: mensal não mostra frase
+    if (!campanhaAnual) return;
+    // Sem trial na campanha: o S1 não pode prometer os 7 dias grátis (a S4 e a /black-friday dizem cobrança na hora).
+    $("s1-titulo").textContent = "Seu " + window.PBPurchaseIntent.summary({ plan: plano, cycle: ciclo, method: "card" }).split(" · ")[0] + " anual com 40% de desconto";
+    $("s1-sub").textContent = "A cobrança é feita na hora, no próximo passo, sem período grátis. O desconto vale só no primeiro ano.";
+    $("s1-hint").textContent = "Oferta da Black Friday, só até 30 de novembro";
+    ["s1-oferta", "s4-oferta"].forEach(function (id) { $(id).textContent = t.frase_anual; $(id).hidden = false; });
   }
 
   /** Desfecho de um create-checkout que não deu certo, embutido (S3) ou hospedado (H). */
   function falhaCheckout(r, deNovo) {
     const d = r.d.detail && typeof r.d.detail === "object" ? r.d.detail : {};
     if (r.status === 409 && ["already_subscribed", "lifetime", "pix_active"].includes(d.error)) {
-      if (d.error === "pix_active" && typeof d.message === "string") $("f1-msg").textContent = d.message;
+      if (campanhaAnual && d.error !== "lifetime") $("f1-msg").textContent = "A Black Friday é para quem ainda não tem assinatura. Se você já assina e quer passar para o anual, fala com o suporte.";
+      else if (d.error === "pix_active" && typeof d.message === "string") $("f1-msg").textContent = d.message;
       mostra("f1");
       return;
     }

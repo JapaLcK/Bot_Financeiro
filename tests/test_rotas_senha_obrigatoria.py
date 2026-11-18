@@ -233,7 +233,7 @@ TABELA = {
 _HTML_PUBLICO = (
     "/", "/login", "/cadastro", "/q", "/recuperar-senha", "/suporte/contato", "/privacy",
     "/termos", "/blog", "/whatsapp", "/funcionalidades", "/comandos", "/comandos-app",
-    "/agents", "/como-funciona", "/precos", "/lp", "/quiz", "/oferta", "/inicio-antiga", "/vsl", "/continuar-compra", "/assinar", "/suporte",
+    "/agents", "/como-funciona", "/precos", "/lp", "/quiz", "/oferta", "/inicio-antiga", "/vsl", "/black-friday", "/continuar-compra", "/assinar", "/suporte",
     "/reset-password", "/redefinir-senha", "/completar-cadastro", "/familia/entrar",
     "/.well-known/apple-app-site-association",
 )
