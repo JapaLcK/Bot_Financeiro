@@ -43,6 +43,7 @@ import re
 
 import pytest
 
+from db.pix_pausa import INSTALAR_GATILHOS
 from db.schema import BACKFILL_AFILIADO_PAGAMENTOS_SQL
 
 # Lista IMPORTADA, não recopiada (§0.7): ver o comentário na fonte. Precedente
@@ -77,9 +78,11 @@ def escreve_nas_tabelas_novas(sql: str) -> bool:
     A exceção é o TEXTO exato do backfill do afiliado, que lê `pix_charges` e grava em
     outra tabela. Igualdade, de propósito: procurar o alvo da escrita deixou passar
     `do` dinâmico, `only (tabela)`, `public . tabela` e `U&"tabela"`. O que o texto
-    faz está preso em `test_backfill_so_escreve_na_propria_tabela`.
+    faz está preso em `test_backfill_so_escreve_na_propria_tabela`. A outra exceção, pelo mesmo
+    critério, é o bloco que instala os gatilhos da pausa do Pix (`db/pix_pausa.py`): cria gatilho em
+    `pix_charges`, não grava linha (preso em `test_gatilhos_da_pausa_nao_gravam_linha`).
     """
-    if sql == BACKFILL_AFILIADO_PAGAMENTOS_SQL:
+    if sql in (BACKFILL_AFILIADO_PAGAMENTOS_SQL, INSTALAR_GATILHOS):
         return False
     limpo = sem_comentarios(sql)
     return bool(VERBOS_DE_ESCRITA.match(limpo)) and any(t in limpo for t in TABELAS_NOVAS)
@@ -254,6 +257,7 @@ SABOTAGENS = [
     ("backfill + delete", BACKFILL_AFILIADO_PAGAMENTOS_SQL + "; delete from pix_charges"),
     ("backfill com CTE que apaga", "with d as (delete from pix_charges) " + BACKFILL_AFILIADO_PAGAMENTOS_SQL),
     ("backfill + espaço", BACKFILL_AFILIADO_PAGAMENTOS_SQL + " "),
+    ("gatilhos da pausa + delete", INSTALAR_GATILHOS.replace("end $$", "delete from pix_charges; end $$")),
 ]
 
 
@@ -275,6 +279,7 @@ INOCENTES = [
     ("índice parcial", "create unique index uniq_pix_charge_ativa on pix_charges (user_id)"),
     ("insert do resync do 1a", "insert into plan_grants (user_id) select 1"),
     ("backfill do afiliado", BACKFILL_AFILIADO_PAGAMENTOS_SQL),
+    ("gatilhos da pausa do Pix", INSTALAR_GATILHOS),
 ]
 
 
@@ -296,6 +301,14 @@ def test_backfill_so_escreve_na_propria_tabela():
     assert texto.strip().startswith("insert into affiliate_referral_payments")
     assert ";" not in texto and "$$" not in texto and texto.count("insert") == 1
     assert not re.search(r"\b(update|delete|merge|copy|truncate|execute)\b", texto)
+
+
+def test_gatilhos_da_pausa_nao_gravam_linha():
+    """O que sustenta a exceção da pausa: fora das cláusulas `before <evento> on` e `execute function`
+    dos gatilhos, o texto não tem verbo de escrita. Mudá-lo para gravar no Pix cairia no detector."""
+    texto = re.sub(r"before (insert|update) on|execute function", " ", INSTALAR_GATILHOS.lower())
+    assert texto.count("create trigger") == 4 and "lock table" in texto
+    assert not re.search(r"\b(insert|update|delete|merge|copy|truncate|execute|drop|alter)\b", texto)
 
 
 def _contagens() -> dict[str, int]:

@@ -143,6 +143,9 @@ MARCAS_PERMITIDAS: dict[str, tuple[str, ...]] = {
     # INFRAESTRUTURA — só o nome das tabelas, nunca o host nem a env.
     "db/schema.py": TABELAS_NOVAS,            # o DDL das quatro tabelas
     "db/schema_repairs.py": ("pix_charges",),  # a linha do _USER_FK_SET_NULL_TABLES
+    # A pausa da concessão (#1574): cria o gatilho em `pix_charges` e a trava dele; não grava linha
+    # nem lê cobrança, e não fala com o Asaas.
+    "db/pix_pausa.py": ("pix_charges",),
     # `db/privacy.py` fala de UMA tabela e só dela: a exclusão de conta zera o
     # rastreio/QR/customer de `pix_charges`, e o export (`db/privacy_export_conjuntos.py`)
     # leva a cobrança (§13.2, caso 43). Entrada mínima de propósito —
