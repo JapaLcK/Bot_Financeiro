@@ -331,3 +331,66 @@ for (const [width, height] of [[390, 844], [320, 568]]) {
     } finally { await ctx.close(); }
   });
 }
+
+// mutação: voltar o `_renderAffiliatePreservandoPix(data)` do ramo normal do `loadAffiliateView` para `_renderAffiliateView(data)`: a chave digitada durante o fetch some, e o foco com ela (#1548)
+test("a chave Pix digitada enquanto o /api/affiliate/me responde fica, com foco e cursor", async () => {
+  const { ctx, page } = await abrir();
+  try {
+    await page.waitForFunction(() => document.getElementById("sidenav-affiliate")?.style.display !== "none");
+    let soltar;
+    const solta = new Promise((r) => { soltar = r; });
+    await ctx.route("**/api/affiliate/me", async (r) => { await solta; await r.fulfill({ json: ATIVA }); });
+    await page.evaluate(() => window.navigateTo("affiliate"));
+    await page.locator("#affiliate-pix-input").waitFor(); // o cache já pintou
+    await page.evaluate(() => { document.getElementById("affiliate-pix-input").dataset.velho = "1"; });
+    await page.locator("#affiliate-pix-input").pressSequentially(CHAVE);
+    soltar();
+    await page.waitForFunction(() => !document.getElementById("affiliate-pix-input")?.dataset.velho); // o input foi refeito
+    const el = page.locator("#affiliate-pix-input");
+    assert.equal(await el.inputValue(), CHAVE);
+    assert.equal(await el.evaluate((e) => document.activeElement === e && e.selectionStart === e.value.length), true, "foco e cursor");
+    await page.keyboard.type("!");
+    assert.equal(await el.inputValue(), CHAVE + "!");
+  } finally { await ctx.close(); }
+});
+
+// mutação: voltar `if (!el || !pending) return;` no _renderAffiliatePreservandoPix: o campo apagado durante o fetch perde o foco (BODY) e o teclado do iOS fecha (#1548)
+test("a chave Pix apagada enquanto o /api/affiliate/me responde continua vazia e com foco", async () => {
+  const { ctx, page } = await abrir();
+  try {
+    await page.waitForFunction(() => document.getElementById("sidenav-affiliate")?.style.display !== "none");
+    let soltar;
+    const solta = new Promise((r) => { soltar = r; });
+    await ctx.route("**/api/affiliate/me", async (r) => { await solta; await r.fulfill({ json: ATIVA }); });
+    await page.evaluate(() => window.navigateTo("affiliate"));
+    await page.locator("#affiliate-pix-input").waitFor();
+    await page.evaluate(() => { document.getElementById("affiliate-pix-input").dataset.velho = "1"; });
+    await page.locator("#affiliate-pix-input").pressSequentially(CHAVE);
+    await page.locator("#affiliate-pix-input").fill("");
+    soltar();
+    await page.waitForFunction(() => !document.getElementById("affiliate-pix-input")?.dataset.velho);
+    const el = page.locator("#affiliate-pix-input");
+    assert.equal(await el.inputValue(), "");
+    assert.equal(await el.evaluate((e) => document.activeElement === e), true, "foco");
+  } finally { await ctx.close(); }
+});
+
+// mutação: voltar o ramo `background` do loadAffiliateView para `_renderAffiliateView(data)`: o puxar-pra-atualizar apaga a chave digitada e o foco (#1548)
+test("puxar pra atualizar (background) com a chave Pix digitada: valor, foco e cursor ficam", async () => {
+  const { ctx, page } = await abrir();
+  try {
+    await naArea(page);
+    let soltar;
+    const solta = new Promise((r) => { soltar = r; });
+    await ctx.route("**/api/affiliate/me", async (r) => { await solta; await r.fulfill({ json: ATIVA }); });
+    await page.evaluate(() => { document.getElementById("affiliate-pix-input").dataset.velho = "1"; });
+    await page.evaluate(() => { window.__bg = loadAffiliateView(false, { background: true }); });
+    await page.locator("#affiliate-pix-input").pressSequentially(CHAVE);
+    soltar();
+    await page.evaluate(() => window.__bg);
+    const el = page.locator("#affiliate-pix-input");
+    assert.equal(await el.evaluate((e) => e.dataset.velho), undefined, "o input foi refeito");
+    assert.equal(await el.inputValue(), CHAVE);
+    assert.equal(await el.evaluate((e) => document.activeElement === e && e.selectionStart === e.value.length), true, "foco e cursor");
+  } finally { await ctx.close(); }
+});
