@@ -73,7 +73,7 @@ def _varredura(monkeypatch, *ids):
 
     real = outbox.eventos_pendentes
     monkeypatch.setattr(outbox, "eventos_pendentes",
-                        lambda limite=100: [e for e in real(limite) if e in ids])
+                        lambda limite, falhas: [e for e in real(limite, falhas) if e in ids])
 
 
 def _retida(uid, cob, event_id, externo, *, alertas=1):

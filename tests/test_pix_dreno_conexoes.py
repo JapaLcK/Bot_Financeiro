@@ -124,6 +124,8 @@ def test_quatro_drenos_simultaneos_cabem_num_pool_de_cinco(user_id, externo, mon
 
         monkeypatch.setitem(ef.EXECUTORES, "ga4", _ga4)
         pool_de(5)
+        # #1587: o teto real é 2; aqui sobe a 4 para seguir medindo a conta do pool com 4 drenos.
+        monkeypatch.setattr("core.services.pix_drain._DRENOS", threading.BoundedSemaphore(4))
         erros = []
 
         def _roda(eid):

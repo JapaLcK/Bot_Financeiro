@@ -50,6 +50,7 @@ inofensiva: outra passada refaz o trabalho e cada efeito é pulado pelo registro
 from __future__ import annotations
 
 import json
+import threading
 
 from psycopg import errors
 
@@ -116,23 +117,36 @@ _REPETEM = ("afiliado_estorno_parcial",)
 TENTATIVAS_ATE_TRAVAR = 5  # §8.2: na 6ª passada o `stripe_cancel` desiste e o parcial do afiliado para de esperar o Asaas
 
 
-def drenar_evento(event_id: str) -> None:
+# #1587 ponytail: teto por processo; N processos drenam 2N de uma vez.
+_DRENOS = threading.BoundedSemaphore(2)
+
+
+def drenar_evento(event_id: str) -> bool:
     """Drena UM evento da outbox. Nunca levanta — falha vira `attempts`.
+
+    `False` (sem tocar o banco) se já há 2 drenos no processo: a linha segue pendente (#1587).
 
     `reservar_evento` rende `None` para evento inexistente, já processado ou
     travado por outra passada: nos três a ação é a mesma, sair.
     """
+    if not _DRENOS.acquire(blocking=False):
+        return False
+    try:
+        _drenar(event_id)
+    finally:
+        _DRENOS.release()
+    return True
+
+
+def _drenar(event_id: str) -> None:
     with reservar_evento(event_id) as evt:
         if evt is None:
             return
         try:
             falha = _decidir(event_id, evt)
         except Exception as exc:  # noqa: BLE001 — a promessa do docstring é ESTA
-            # Só o laço de efeitos convertia exceção em `(tipo, code)`. Sem
-            # isto, decifrar o payload, buscar a cobrança, gravar
-            # `pix_unmatched_payments` ou transicionar subiam POR CIMA de
-            # `drenar_pendentes`: o evento mais velho abortava a passada inteira,
-            # com `attempts` parado em zero e sem alerta de travado.
+            # Sem isto, exceção fora do laço de efeitos (ex.: gravar `pix_unmatched_payments`) subia POR CIMA de `drenar_pendentes`:
+            # o evento mais velho abortava a passada inteira, com `attempts` parado em zero.
             falha = (type(exc).__name__, getattr(exc, "code", None))
     # Fora do `with` de propósito — ver o cabeçalho do módulo.
     if falha is None:
@@ -245,17 +259,14 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
             try:
                 EXECUTORES[efeito](cobranca, evt)
             except Exception as exc:  # noqa: BLE001 — vira attempts, não 500 mudo
-                # FALLBACK do §8.2, e ele existe porque `stripe_cancel` é o
-                # PRIMEIRO efeito: Stripe fora do ar barrava o `grant` em TODA
-                # retentativa. `continue` sem `registrar_efeito` — o efeito não
-                # rodou, e é o alerta que vira trabalho manual.
+                # FALLBACK do §8.2: `stripe_cancel` é o PRIMEIRO efeito, e Stripe fora do ar
+                # barrava o `grant`. `continue` sem `registrar_efeito`: o alerta vira trabalho manual.
                 if efeito == "stripe_cancel" and int(evt["attempts"] or 0) >= TENTATIVAS_ATE_TRAVAR:
                     alertar_stripe_desistido(cobranca)
                     continue
                 return (type(exc).__name__, getattr(exc, "code", None))
             registrar_efeito(payment_id, efeito, event_id)
-    # Depois do laço: um alerta por evento, na passada que conclui. Antes dele, cada retentativa (o
-    # parcial com o Asaas fora) repetia o alerta; só na 1ª tentativa, a que morresse antes perdia o dela.
+    # Depois do laço: um alerta por evento, na passada que conclui (antes dele, cada retentativa o repetia).
     if evt["event_type"] in _ALERTAM:
         alertar(evt["event_type"], cobranca, payment_id, memo=evt)
     return None
@@ -264,11 +275,8 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
 def _payload(payload_enc: str) -> dict:
     """Decifra o corpo minimizado da outbox.
 
-    **`subject_user_id=None` é o único valor honesto aqui, e não um esquecimento.**
-    O dono só se descobre DEPOIS de casar o evento com a cobrança, e casar exige
-    o `externalReference`, que está dentro deste texto — inventar um sujeito (0,
-    -1) gravaria linha falsa em `pii_access_log`, que é registro de compliance.
-    A coluna é anulável no DDL justamente para "sujeito desconhecido".
+    `subject_user_id=None` é o único valor honesto: o dono só se descobre DEPOIS de casar o
+    evento, e inventar um sujeito (0, -1) gravaria linha falsa em `pii_access_log`.
     """
     bruto = decrypt_pii_optional(payload_enc, ctx=PiiAccessContext(
         purpose="pix_webhook_drain", actor="system:pix_drain",
@@ -283,10 +291,8 @@ def _payload(payload_enc: str) -> dict:
 def _sem_cobranca(referencia, pagamento: dict) -> None:
     """Ramo A do §8.2 — pagamento sem linha nossa.
 
-    Fora do formato `^pix:[0-9]+$` é dinheiro de TERCEIRO (a conta Asaas é a do
-    negócio e recebe outros Pix): log com contagem, **sem alerta e sem linha**.
-    Alerta que dispara por dinheiro que não é problema é alerta que ninguém lê
-    no dia em que for.
+    Fora do formato `^pix:[0-9]+$` é dinheiro de TERCEIRO (a conta Asaas recebe outros Pix):
+    log com contagem, **sem alerta e sem linha**.
     """
     if not isinstance(referencia, str) or not REFERENCIA_NOSSA.match(referencia):
         log_system_event_sync(
@@ -305,9 +311,7 @@ def _sem_cobranca(referencia, pagamento: dict) -> None:
 def _orfao(event_id, cobranca, destino, origens, payment_id, tentativas=0):
     """Titular excluído: a transição acontece, os efeitos de compra NÃO.
 
-    O destino de pagamento vira `paid_orphan`, e é o `user_id is null` que
-    dispensa a janela — a exceção do `CHECK` é por titular ausente, não por
-    status (§17.1, pendência 3).
+    O destino de pagamento vira `paid_orphan`; o `user_id is null` dispensa a janela (§17.1, pendência 3).
     """
     if destino and origens:
         alvo = "paid_orphan" if destino == "paid" else destino
@@ -330,9 +334,8 @@ def _transicionar(cobranca, origens, destino, payment_id):
 
     Devolve `(linha nova ou None, falha ou None)`.
 
-    `CheckViolation` (o `pix_charges_pago_tem_janela`, §17.1 pendência 3) é
-    falha RETENTÁVEL: vira `attempts` e o evento fica aberto na outbox. Engoli-la
-    e carimbar `processed_at` seria dinheiro dentro e acesso nenhum, para sempre.
+    `CheckViolation` (`pix_charges_pago_tem_janela`) é falha RETENTÁVEL: vira `attempts`;
+    engoli-la seria dinheiro dentro e acesso nenhum, para sempre.
     """
     janela: dict = {}
     if destino == "paid":

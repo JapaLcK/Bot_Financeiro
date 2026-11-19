@@ -273,7 +273,7 @@ def test_drenar_pendentes_recupera_o_que_o_background_task_perdeu(user_id, monke
 
     drenados = []
     import core.services.pix_drain as dreno
-    monkeypatch.setattr(dreno, "drenar_evento", lambda eid: drenados.append(eid))
+    monkeypatch.setattr(dreno, "drenar_evento", lambda eid: drenados.append(eid) or True)
     pix_sweeps.drenar_pendentes()
     assert aberto in drenados
     assert fechado not in drenados, "drenou evento já concluído"
