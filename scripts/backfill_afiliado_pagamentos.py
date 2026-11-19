@@ -53,7 +53,7 @@ from core.services.extras_assinar import (  # noqa: E402
     extras_liquido_cents,
     linhas_da_fatura,
 )
-from db.affiliate_payments import marcar_reembolso, registrar_pagamento  # noqa: E402
+from db.affiliate_payments import CHAVE_NAO_PIX_SQL, marcar_reembolso, registrar_pagamento  # noqa: E402
 from db.affiliate_reviews import registrar_reembolso  # noqa: E402
 from db.connection import get_conn  # noqa: E402
 
@@ -63,13 +63,13 @@ from db.connection import get_conn  # noqa: E402
 def _comissoes() -> list[dict]:
     with get_conn() as conn:
         return conn.execute(
-            """
+            f"""
             select c.id, c.stripe_invoice_id as fatura, c.status, c.payout_id, c.amount_cents,
                    r.tipo as registrada_tipo, r.refunded_cents as registrada_cents, false as sem_comissao
               from affiliate_commissions c
               left join affiliate_refund_reviews r on r.stripe_invoice_id = c.stripe_invoice_id
              where c.status <> 'reversed'
-               and left(c.stripe_invoice_id, 4) <> 'pix:'  -- a do Pix não é fatura Stripe; o dreno cuida
+               and {CHAVE_NAO_PIX_SQL.format(c='c')}  -- a do Pix não é fatura Stripe; o dreno cuida
             union all
             -- A comissão saiu com o afiliado (N5): a linha da fatura guarda o que foi pago ou o saque órfão
             -- ainda aberto. Órfão rejeitado fica fora: a comissão nunca foi paga.
@@ -77,7 +77,7 @@ def _comissoes() -> list[dict]:
                    r.orphan_payout_id, coalesce(r.paid_cents, r.commission_cents), r.tipo, r.refunded_cents, true
               from affiliate_refund_reviews r
              where r.commission_id is null
-               and left(r.stripe_invoice_id, 4) <> 'pix:'
+               and {CHAVE_NAO_PIX_SQL.format(c='r')}
                and (r.paid_cents is not null
                     or exists (select 1 from affiliate_payouts p where p.id = r.orphan_payout_id and p.status = 'requested'))
              order by sem_comissao, id

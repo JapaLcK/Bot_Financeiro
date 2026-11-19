@@ -1662,3 +1662,22 @@ def test_p25_positivo_estorno_total_entre_grant_e_afiliado_registra_pagamento_se
     with get_conn() as conn:
         assert conn.execute("select count(*) n from affiliate_referral_payments where source = 'pix' and payment_ref = %s",
                             (str(cobranca["id"]),)).fetchone()["n"] == 1
+
+
+def test_p14_prefixo_pix_em_sql_so_na_fonte():
+    """#1523: o filtro `... stripe_invoice_id ... 'pix:'` mora só em `db/affiliate_payments.py`."""
+    import re
+    from pathlib import Path
+    from db.affiliate_payments import CHAVE_NAO_PIX_SQL, PREFIXO_PIX
+    raiz = Path(__file__).resolve().parent.parent
+    assert CHAVE_NAO_PIX_SQL.format(c="c") == "left(c.stripe_invoice_id, 4) <> 'pix:'"
+    achados = []
+    for p in raiz.rglob("*.py"):
+        rel = p.relative_to(raiz).as_posix()
+        if rel.startswith(("tests/", ".venv", ".claude", "node_modules")) or rel == "db/affiliate_payments.py":
+            continue
+        for n, linha in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"stripe_invoice_id[^\n]*'pix:|'pix:[^\n]*stripe_invoice_id", linha) \
+                    or rel.startswith("db/") and re.search(rf"startswith\(\s*['\"]{re.escape(PREFIXO_PIX)}['\"]", linha):
+                achados.append(f"{rel}:{n}")
+    assert not achados, f"use CHAVE_NAO_PIX_SQL / PREFIXO_PIX: {achados}"
