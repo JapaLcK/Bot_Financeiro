@@ -785,14 +785,14 @@ def test_p20_total_reentregue_segue_deduplicado(externo, avisos):
 
 
 @pytest.mark.parametrize("refunds,texto", [
-    ([{"value": 50.0, "status": "PENDING"}], "R$ 50.00"),
-    ([{"value": 50.0}, {"status": "DONE"}], "R$ 50.00"),
-    ([{"value": 30.0, "status": "DONE"}, {"value": 20.0, "status": "CANCELLED"}], "R$ 50.00"),
+    ([{"value": 50.0, "status": "PENDING"}], "R$ 0.00 + R$ 50.00 em andamento"),
+    ([{"value": 50.0}, {"status": "DONE"}], "acumulado indisponível"),
+    ([{"value": 30.0, "status": "DONE"}, {"value": 20.0, "status": "CANCELLED"}], "R$ 30.00"),
     (None, "acumulado indisponível"),
     ([{"value": "abc"}], "acumulado indisponível"),
 ], ids=["pendente", "item_sem_value", "cancelado", "sem_lista", "lixo"])
 def test_p21_texto_do_alerta_do_parcial_e_o_de_antes(externo, refunds, texto):
-    """O alerta ao operador soma todo `value`, como no 200baa01; só o dinheiro do afiliado usa a regra estrita.
+    """O alerta usa a mesma regra estrita do dinheiro do afiliado (#1504): DONE soma, CANCELLED fica fora, o resto aparece como "em andamento".
     `lixo` antes derrubava o evento (o `float` levantava); agora vira "indisponível"."""
     u = _conta(plano=False)
     cobranca = _anual(u)
