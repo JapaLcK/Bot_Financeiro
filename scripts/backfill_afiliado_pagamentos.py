@@ -45,6 +45,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.services.afiliado_reembolso import SemConfirmacao, devolvido_na_stripe  # noqa: E402
+from core.services import ebook_entrega  # noqa: E402
 from core.services.cartao_recusado_por_pix import MARCA  # noqa: E402
 from core.services.extras_assinar import (  # noqa: E402
     _ler,
@@ -84,11 +85,13 @@ def _comissoes() -> list[dict]:
             """).fetchall()
 
 
-def _datas_de_reembolso(stripe, cobranca) -> list[int]:
-    return [r["created"] for r in stripe.Refund.list(charge=cobranca["id"], limit=100)["data"]]
+def _datas_de_reembolso(chave: str, cobranca) -> list[int]:
+    # Cliente com prazo curto e sem retentativa (#1533): a falha sobe e vira `clientes_com_falha`/`sem_confirmacao`.
+    params = {"charge": cobranca["id"], "limit": 100}
+    return [r["created"] for r in ebook_entrega.cliente_stripe(chave).v1.refunds.list(params=params)["data"]]
 
 
-def _reembolso_confirmado(stripe, fatura_id: str, chave: str, lidas: dict) -> tuple[str | None, int, datetime | None]:
+def _reembolso_confirmado(fatura_id: str, chave: str, lidas: dict) -> tuple[str | None, int, datetime | None]:
     """O tipo, o devolvido e a data, pela regra da conferência (uma só, §0.7): disputa perdida conta
     como devolvida, ganha não conta, aberta é `SemConfirmacao`. Total exige todas devolvidas.
     `lidas` guarda, na rodada, o resultado ou a `SemConfirmacao` de cada fatura; erro da API não fica."""
@@ -98,7 +101,7 @@ def _reembolso_confirmado(stripe, fatura_id: str, chave: str, lidas: dict) -> tu
         except SemConfirmacao as exc:
             lidas[fatura_id] = exc
             raise
-        datas = [d for c in cobrancas if c["amount_refunded"] for d in _datas_de_reembolso(stripe, c)]
+        datas = [d for c in cobrancas if c["amount_refunded"] for d in _datas_de_reembolso(chave, c)]
         lidas[fatura_id] = tipo, devolvido, datetime.fromtimestamp(max(datas), timezone.utc) if datas else None
     if isinstance(lidas[fatura_id], SemConfirmacao):
         raise lidas[fatura_id]
@@ -117,8 +120,8 @@ def _categoria(c: dict, linha: dict | None) -> str:
     return "segue_revisao" if linha and linha["status"] in ("open", "recovery") else "ja_registrada"
 
 
-def _comissao(stripe, c: dict, chave: str, aplicar: bool, n: Counter, lidas: dict) -> None:
-    tipo, devolvido, quando = _reembolso_confirmado(stripe, c["fatura"], chave, lidas)
+def _comissao(c: dict, chave: str, aplicar: bool, n: Counter, lidas: dict) -> None:
+    tipo, devolvido, quando = _reembolso_confirmado(c["fatura"], chave, lidas)
     if tipo is None:
         return
     if aplicar:
@@ -140,13 +143,13 @@ def _quem(c: dict) -> str:
     return f"pendência {c['id']}" if c["sem_comissao"] else f"comissão {c['id']}"
 
 
-def _passar_comissoes(stripe, chave: str, aplicar: bool, n: Counter, lidas: dict) -> None:
+def _passar_comissoes(chave: str, aplicar: bool, n: Counter, lidas: dict) -> None:
     for c in _comissoes():
         if c["registrada_tipo"] == "total":  # nunca reabre: nem relê a Stripe
             n["ja_registrada"] += 1
             continue
         try:
-            _comissao(stripe, c, chave, aplicar, n, lidas)
+            _comissao(c, chave, aplicar, n, lidas)
         except SemConfirmacao as exc:
             n["sem_confirmacao"] += 1
             print(f"sem_confirmacao: {_quem(c)} · {exc}")
@@ -172,7 +175,7 @@ def _ja_registrado(fatura: str) -> bool:
                             " where source = 'stripe' and payment_ref = %s", (fatura,)).fetchone() is not None
 
 
-def _valor_do_plano(stripe, fatura) -> int:
+def _valor_do_plano(cliente, fatura) -> int:
     """O mesmo cálculo do webhook: a fatura menos os extras. 0 = não é pagamento de plano.
 
     Cartão recusado com Pix cobrindo fica fora, como no webhook, pela `MARCA` que a recusa
@@ -180,18 +183,18 @@ def _valor_do_plano(stripe, fatura) -> int:
     id_assinatura = assinatura_da_fatura(fatura)
     if not id_assinatura:
         return 0
-    assinatura = stripe.Subscription.retrieve(id_assinatura)
+    assinatura = cliente.v1.subscriptions.retrieve(id_assinatura)
     if _ler(_ler(assinatura, "cancellation_details"), "comment") == MARCA:
         return 0
     precos = {p for p, _ in da_metadata(_ler(assinatura, "metadata"))}
-    linhas = linhas_da_fatura(fatura) if precos else []
+    linhas = linhas_da_fatura(fatura, cliente) if precos else []
     return max(0, (_ler(fatura, "amount_paid") or 0) - extras_liquido_cents(linhas, precos))
 
 
-def _reembolso(stripe, fatura_id: str, chave: str, n: Counter, lidas: dict) -> tuple[str | None, datetime | None]:
+def _reembolso(fatura_id: str, chave: str, n: Counter, lidas: dict) -> tuple[str | None, datetime | None]:
     """O tipo e a data do reembolso mais recente da fatura, pela regra da primeira passada."""
     try:
-        tipo, _, quando = _reembolso_confirmado(stripe, fatura_id, chave, lidas)
+        tipo, _, quando = _reembolso_confirmado(fatura_id, chave, lidas)
     except SemConfirmacao as exc:
         if str(exc) == "forma_inesperada":
             raise  # `payment_record`: o cliente inteiro vai para `clientes_com_falha`
@@ -200,14 +203,14 @@ def _reembolso(stripe, fatura_id: str, chave: str, n: Counter, lidas: dict) -> t
     return tipo, quando
 
 
-def _fatura(stripe, fatura, uid: int, chave: str, aplicar: bool, n: Counter, lidas: dict) -> None:
-    valor = _valor_do_plano(stripe, fatura)
+def _fatura(cliente, fatura, uid: int, chave: str, aplicar: bool, n: Counter, lidas: dict) -> None:
+    valor = _valor_do_plano(cliente, fatura)
     if valor <= 0:
         n["faturas_fora_da_regra"] += 1
         return
     fatura_id = fatura["id"]
     n["faturas_ja_no_registro" if _ja_registrado(fatura_id) else "faturas_novas"] += 1
-    tipo, devolvido_em = _reembolso(stripe, fatura_id, chave, n, lidas)
+    tipo, devolvido_em = _reembolso(fatura_id, chave, n, lidas)
     n[f"reembolsos_{tipo}"] += bool(tipo)
     if aplicar:
         pago_em = _ler(_ler(fatura, "status_transitions"), "paid_at") or fatura["created"]
@@ -218,18 +221,17 @@ def _fatura(stripe, fatura, uid: int, chave: str, aplicar: bool, n: Counter, lid
 
 def rodar(aplicar: bool = False) -> Counter:
     """Falha de um cliente não para os outros; quem chama lê `clientes_com_falha`."""
-    import stripe  # noqa: PLC0415
-
     chave = os.environ["STRIPE_SECRET_KEY"]
-    stripe.api_key = chave
     n: Counter = Counter()
+    cliente = ebook_entrega.cliente_stripe(chave)
     lidas: dict = {}  # uma leitura por fatura na rodada: a 2ª passada não relê a fatura de comissão
-    _passar_comissoes(stripe, chave, aplicar, n, lidas)
+    _passar_comissoes(chave, aplicar, n, lidas)
     for linha in _clientes():
         n["clientes"] += 1
         try:
-            for fatura in stripe.Invoice.list(customer=linha["cliente"], status="paid", limit=100).auto_paging_iter():
-                _fatura(stripe, fatura, int(linha["uid"]), chave, aplicar, n, lidas)
+            params = {"customer": linha["cliente"], "status": "paid", "limit": 100}
+            for fatura in cliente.v1.invoices.list(params=params).auto_paging_iter():
+                _fatura(cliente, fatura, int(linha["uid"]), chave, aplicar, n, lidas)
         except Exception as exc:  # noqa: BLE001 — o tipo basta; o texto pode trazer o id do cliente
             n["clientes_com_falha"] += 1
             n[f"erro_{type(exc).__name__}"] += 1

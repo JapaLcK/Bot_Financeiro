@@ -1006,16 +1006,15 @@ def _fetch_stripe_billing_sync() -> dict[str, Any]:
     normalizados pra base mensal (unit_amount/12)."""
     if not STRIPE_SECRET_KEY:
         return {"available": False, "reason": "stripe_not_configured"}
-    import stripe
+    from core.services.ebook_entrega import cliente_stripe
 
-    stripe.api_key = STRIPE_SECRET_KEY
     counts = {"active": 0, "trialing": 0, "past_due": 0, "canceled": 0, "other": 0}
     mrr = 0.0
     trial_mrr = 0.0
     active_amounts: list[float] = []
     scanned = 0
     try:
-        subs = stripe.Subscription.list(status="all", limit=100)
+        subs = cliente_stripe(STRIPE_SECRET_KEY).v1.subscriptions.list(params={"status": "all", "limit": 100})
         for sub in subs.auto_paging_iter():
             scanned += 1
             if scanned > 1000:  # guarda contra base gigante; hoje são <10

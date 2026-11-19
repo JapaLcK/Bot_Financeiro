@@ -331,7 +331,6 @@ class _FakeSub:
 
 
 def test_stripe_billing_summary_normaliza_mrr(monkeypatch):
-    import sys
     import types
 
     subs = [
@@ -347,11 +346,9 @@ def test_stripe_billing_summary_normaliza_mrr(monkeypatch):
         def auto_paging_iter(self):
             return iter(subs)
 
-    fake_stripe = types.SimpleNamespace(
-        api_key=None,
-        Subscription=types.SimpleNamespace(list=lambda **kw: _FakeList()),
-    )
-    monkeypatch.setitem(sys.modules, "stripe", fake_stripe)
+    fake = types.SimpleNamespace(v1=types.SimpleNamespace(
+        subscriptions=types.SimpleNamespace(list=lambda params: _FakeList())))
+    monkeypatch.setattr("core.services.ebook_entrega.cliente_stripe", lambda key: fake)
     monkeypatch.setattr(admin_dashboard, "STRIPE_SECRET_KEY", "sk_test_fake")
 
     data = admin_dashboard._fetch_stripe_billing_sync()
