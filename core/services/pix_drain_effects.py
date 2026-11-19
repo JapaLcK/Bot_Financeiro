@@ -73,10 +73,14 @@ def alertar(tipo: str, cobranca, payment_id: str, memo: dict | None = None) -> N
     extra = ""
     if tipo == "PAYMENT_PARTIALLY_REFUNDED":
         extra = f" · devolvido: {_acumulado_estornado(payment_id, memo)}"
+    from db.pix_effects import efeito_registrado
+    # #1503: parcial atrasado depois do total. 'refunded' é gravado ANTES do `revoke`, então só o efeito prova.
+    acesso = ("o acesso já foi revogado pelo estorno total." if efeito_registrado(payment_id, "revoke")
+              else "estorno total registrado; a revogação do acesso ainda está pendente."
+              if cobranca["status"] == "refunded" else "o acesso NÃO foi alterado.")
     admin_notify.notify_pix_alerta(
         f"⚠️ **Pix: {tipo}** cobrança `{cobranca['id']}` · "
-        f"valor R$ {total_cents(cobranca) / 100:.2f}{extra} · "
-        "o acesso NÃO foi alterado."
+        f"valor R$ {total_cents(cobranca) / 100:.2f}{extra} · {acesso}"
     )
 
 
