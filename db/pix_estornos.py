@@ -95,16 +95,29 @@ def estorno_registrado(asaas_payment_id: str) -> bool:
             return bool(cur.fetchone()["sim"])
 
 
+def gravado_pelo_evento(asaas_payment_id: str, event_id: str) -> bool:
+    """O marcador deste pagamento foi gravado por ESTE evento (#1571: parcial já promovido a total)."""
+    with get_conn() as conn:
+        return conn.execute("select 1 from pix_estornos_recebidos where asaas_payment_id = %s"
+                            " and event_id = %s", (asaas_payment_id, event_id)).fetchone() is not None
+
+
+def gravar_no_dreno(cobranca: dict, payment_id: str, event_id: str) -> None:
+    """Só o marcador `nosso`, numa transação própria. O órfão usa isto antes do `_orfao`: um parcial
+    promovido a total (#1571) que falhe depois da transição precisa do marcador na retentativa."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            gravar(payment_id, cobranca["external_reference"], event_id, cur)
+        conn.commit()
+
+
 def estorno_no_dreno(cobranca: dict, payment_id: str, event_id: str) -> dict:
     """O dreno do `PAYMENT_REFUNDED`, antes de transição e efeito: grava o marcador como `nosso` (o
     evento recebido antes do deploy chega aqui sem ele) e cancela a cobrança estornada antes do
     pagamento, se o id é o dela (ou ela ainda não tem id e não está em emissão). Devolve a cobrança como ficou."""
     from .pix_charges import transicionar
 
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            gravar(payment_id, cobranca["external_reference"], event_id, cur)
-        conn.commit()
+    gravar_no_dreno(cobranca, payment_id, event_id)
     # O id e o "fora de `creating`" no próprio `UPDATE`, nunca no dicionário lido antes: o checkout
     # pode levar a linha a `creating` ou a `pending` com id novo nesse meio-tempo (Codex, #1595).
     return transicionar(cobranca["id"], de=ANTES_DO_PAGAMENTO, para="canceled", apagar_qr=True,

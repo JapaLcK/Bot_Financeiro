@@ -104,10 +104,11 @@ def test_estorno_total_revoga_o_acesso(user_id, externo):
     assert _grants_ativos(user_id) == []
 
 
-def test_dois_parciais_somando_tudo_alertam_com_o_acumulado(user_id, externo,
-                                                            monkeypatch):
-    """D1-d. Sem limiar percentual em código: dois parciais de 50% mantêm o
-    acesso e produzem DOIS alertas, o segundo com o acumulado = valor da cobrança.
+def test_dois_parciais_somando_tudo_viram_estorno_total(user_id, externo,
+                                                        monkeypatch):
+    """D1-d, reescrito pelo #1571. Sem limiar percentual: o 1º parcial (50%) mantém
+    o acesso e alerta com o acumulado; o 2º, com o acumulado = valor da cobrança,
+    é tratado como TOTAL (revoga). Detalhes em `test_pix_parciais_somam_total.py`.
 
     O acumulado vem do Asaas (`buscar_pagamento`), porque ele não é derivável do
     que sobrevive à minimização e à purga da outbox.
@@ -127,18 +128,19 @@ def test_dois_parciais_somando_tudo_alertam_com_o_acumulado(user_id, externo,
 
     monkeypatch.setattr(asaas, "buscar_pagamento", _pagamento)
     entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)
+    assert len(_grants_ativos(user_id)) == 1
+    assert len(externo["alerta"]) == 1 and "R$ 249.50" in externo["alerta"][0]
     entregar("PAYMENT_PARTIALLY_REFUNDED", cobranca)
 
-    assert ler(cobranca["id"])["status"] == "refunded_partial"
-    assert len(_grants_ativos(user_id)) == 1, "dinheiro todo de volta e acesso vivo"
-    assert len(externo["alerta"]) == 2
-    assert "R$ 249.50" in externo["alerta"][0]
-    assert "R$ 499.00" in externo["alerta"][1]
+    assert ler(cobranca["id"])["status"] == "refunded"
+    assert _grants_ativos(user_id) == [], "dinheiro todo de volta e acesso vivo"
+    assert {"revoke", "afiliado_estorno"} <= efeitos(cobranca["asaas_payment_id"])
 
 
 def test_asaas_fora_do_ar_nao_inventa_numero(user_id, externo, monkeypatch):
     """O alerta do parcial sai com `acumulado indisponível` quando o provedor
-    não responde — nunca com um número derivado do que temos, que seria errado."""
+    não responde — nunca com um número derivado do que temos, que seria errado.
+    #1571: a leitura que falha não promove nem prende o evento: fecha como parcial."""
     import core.services.asaas as asaas
 
     conta(user_id, "free", None)

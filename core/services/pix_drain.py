@@ -18,7 +18,7 @@ lista na retentativa).
 
 ## As decisões do dono que estão em CÓDIGO aqui, e não em prosa
 
-  * **estorno parcial nunca revoga E nunca concede** — `PARTIALLY_REFUNDED` só
+  * **estorno parcial nunca revoga E nunca concede** (salvo #1571: parciais que somam o devido viram TOTAL) — só
     transiciona de `paid`/`paid_orphan`; de qualquer outro estado é zero
     transição e zero efeito. É o que resolve a divergência §11 × §8.2 a favor do
     §11 e fecha a pendência 1: o parcial fora de ordem encontra a cobrança em
@@ -61,11 +61,11 @@ from core.services.afiliado_pix import efeitos_do_laco, rotular_reembolso
 from core.services.pix_drain_effects import EXECUTORES, alertar, alertar_stripe_desistido, janela_de_acesso
 from core.services.pix_baixa_desfeita import desfazer_baixa, pagamento_confirmado, reconciliar_grant, veto_afiliado, veto_grant
 from core.services.pix_pago_sem_qr import avisar as avisar_pago_sem_qr
-from core.services.pix_valor import conferir_valor, estorno_de_outro_pagamento
+from core.services.pix_valor import conferir_valor, estorno_de_outro_pagamento, parcial_vira_total
 from db.pix_charges import buscar_por_asaas_payment_id, buscar_por_external_reference, transicionar
 from db.pix_charges_saga import registrar_nao_casado
 from db.pix_effects import efeito_registrado, lock_efeito, registrar_efeito
-from db.pix_estornos import REFERENCIA_NOSSA, estorno_no_dreno, estorno_registrado
+from db.pix_estornos import REFERENCIA_NOSSA, estorno_no_dreno, estorno_registrado, gravar_no_dreno
 from db.webhook_outbox import marcar_processado, registrar_falha, reservar_evento
 
 # `ebook` logo depois do `grant`: pendência dos cadernos da foto, no-op sem cadernos.
@@ -180,18 +180,16 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
         _sem_cobranca(referencia, pagamento)
         return None
 
-    rota = ROTEAMENTO.get(evt["event_type"])
-    if rota is None:
-        log_system_event_sync(
-            "warning", "asaas_evento_desconhecido",
-            f"Tipo de evento do Asaas sem rota: {evt['event_type']}",
-            source="pix", details={"event_type": evt["event_type"]},
-        )
-        return None
-    origens, destino, efeitos = rota
     payment_id = (payment_id if isinstance(payment_id, str) else "") or cobranca["asaas_payment_id"]
     if estorno_de_outro_pagamento(evt["event_type"], cobranca, payment_id):
         return None
+    evt = parcial_vira_total(evt, cobranca, payment_id)  # #1571: antes do ROTEAMENTO
+    rota = ROTEAMENTO.get(evt["event_type"])
+    if rota is None:
+        log_system_event_sync("warning", "asaas_evento_desconhecido", f"Tipo de evento do Asaas sem rota: {evt['event_type']}",
+                              source="pix", details={"event_type": evt["event_type"]})
+        return None
+    origens, destino, efeitos = rota
     if set(efeitos) - {"afiliado_estorno_parcial"} and not payment_id:  # sem id o efeito não se registra e repete sem fim
         return ("PagamentoSemId", None)
     if evt["event_type"] == "PAYMENT_RECEIVED_IN_CASH_UNDONE":
@@ -214,6 +212,8 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
     # B) GUARDA DE ÓRFÃO, antes do laço: titular excluído (§13.4). Nenhum efeito
     # de compra — não há a quem conceder —, e o `CHECK` da janela não se aplica.
     if cobranca["user_id"] is None:
+        if evt["event_type"] == "PAYMENT_REFUNDED":  # #1571: o parcial promovido se lembra na retentativa
+            gravar_no_dreno(cobranca, payment_id, event_id)
         return _orfao(event_id, cobranca, destino, origens, payment_id, int(evt["attempts"] or 0))
 
     if evt["event_type"] == "PAYMENT_REFUNDED":  # #1437: marcador `nosso`; não paga vai a `canceled`

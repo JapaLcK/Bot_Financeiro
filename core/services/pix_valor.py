@@ -191,3 +191,33 @@ def conferir_valor(cobranca, origens, valor, payment_id, event_id) -> bool:
         " devolva o valor no Asaas ou cobre a diferença à parte. Depois feche a"
         " cobrança (runbook em docs/CLAUDE.md).", marcador="valor_alertado")
     return False
+
+
+def parcial_vira_total(evt, cobranca, payment_id) -> dict:
+    """#1571: parciais DONE que somam >= o devido são estorno TOTAL (marcador, revoke, afiliado).
+
+    Marcador do #1437 gravado POR ESTE evento (retentativa depois da transição): promove sem ler, em
+    qualquer status, senão o `revoke` que falhou seria perdido. Parcial atrasado depois de um REFUNDED
+    real (marcador de outro evento) segue parcial (#1503). Cobrança refunded/canceled/expired: não lê.
+    Lê `refunds[]` uma vez por evento (memo no `evt`, #1504). Leitura falhou (Asaas fora, forma
+    inesperada): segue parcial, com o alerta "acumulado indisponível" (contrato do #1504; revisão manual).
+    """
+    from core.services import afiliado_pix
+    from db.pix_estornos import gravado_pelo_evento
+
+    if evt["event_type"] != "PAYMENT_PARTIALLY_REFUNDED" or not payment_id:
+        return evt
+    if gravado_pelo_evento(payment_id, evt["event_id"]):  # já promovido; a passada anterior falhou
+        return {**evt, "event_type": "PAYMENT_REFUNDED", "promovido": True}
+    if cobranca["status"] == "refunded":  # expirada/cancelada antes do RECEIVED atrasado: lê (Codex #1632)
+        return evt
+    try:
+        concluido, _ = afiliado_pix.somar_estornos(afiliado_pix.ler_estornos(payment_id, evt))
+    except Exception:  # noqa: BLE001
+        return evt
+    if concluido < total_cents(cobranca):
+        return evt
+    log_system_event_sync(
+        "warning", "pix_parciais_somam_total", "Estornos parciais somam o valor devido: tratados como total.",
+        source="pix", user_id=cobranca["user_id"], details={"charge_id": cobranca["id"]})
+    return {**evt, "event_type": "PAYMENT_REFUNDED", "promovido": True}
