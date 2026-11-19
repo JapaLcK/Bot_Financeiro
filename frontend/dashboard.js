@@ -11923,6 +11923,21 @@ async function initAffiliateNav() {
   } catch {}
 }
 
+// O _renderAffiliateView reconstrói o input Pix: lê-se valor, foco e cursor VIVOS
+// no último instante antes do render e restauram-se no input novo. Só em memória
+// (a chave nunca vai a storage, URL nem log).
+function _renderAffiliatePreservandoPix(data) {
+  const old = document.getElementById("affiliate-pix-input");
+  const pending = old ? old.value : "";
+  const focado = !!old && document.activeElement === old;
+  const { selectionStart: ini, selectionEnd: fim } = old || {};
+  _renderAffiliateView(data);
+  const el = document.getElementById("affiliate-pix-input");
+  if (!el) return;
+  if (pending) el.value = pending;
+  if (focado) { el.focus(); el.setSelectionRange(ini, fim); }
+}
+
 async function loadAffiliateView(forceFresh = false, { background = false } = {}) {
   const stats = document.getElementById("affiliate-stats");
   const body = document.getElementById("affiliate-body");
@@ -11947,14 +11962,8 @@ async function loadAffiliateView(forceFresh = false, { background = false } = {}
   if (background) {
     const data = await _fetchAffiliate({ force: true });
     if (data === undefined) return;
-    const pix = document.getElementById("affiliate-pix-input");
-    const pending = pix ? pix.value : "";
     _affiliateCache = data;
-    _renderAffiliateView(data);
-    if (pending) {
-      const el = document.getElementById("affiliate-pix-input");
-      if (el) el.value = pending;
-    }
+    _renderAffiliatePreservandoPix(data);
     return;
   }
 
@@ -11988,7 +11997,7 @@ async function loadAffiliateView(forceFresh = false, { background = false } = {}
     const data = await _fetchAffiliate({ force: true });
     if (data === undefined) return;
     _affiliateCache = data;
-    _renderAffiliateView(data);
+    _renderAffiliatePreservandoPix(data);
   } catch (err) {
     if (_sessaoExpirou(err, body)) { if (esqueleto) stats.innerHTML = ""; return; }
     body.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;color:var(--red)">Erro: ${esc(String(err.message || err))}</div>`;
