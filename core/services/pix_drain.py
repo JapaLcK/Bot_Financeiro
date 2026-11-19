@@ -60,12 +60,8 @@ from core.services.afiliado_pix import efeitos_do_laco, rotular_reembolso
 from core.services.pix_drain_effects import EXECUTORES, alertar, alertar_stripe_desistido, janela_de_acesso
 from core.services.pix_baixa_desfeita import desfazer_baixa, pagamento_confirmado, reconciliar_grant, veto_afiliado, veto_grant
 from core.services.pix_pago_sem_qr import avisar as avisar_pago_sem_qr
-from core.services.pix_valor import conferir_valor
-from db.pix_charges import (
-    buscar_por_asaas_payment_id,
-    buscar_por_external_reference,
-    transicionar,
-)
+from core.services.pix_valor import conferir_valor, estorno_de_outro_pagamento
+from db.pix_charges import buscar_por_asaas_payment_id, buscar_por_external_reference, transicionar
 from db.pix_charges_saga import registrar_nao_casado
 from db.pix_effects import efeito_registrado, lock_efeito, registrar_efeito
 from db.pix_estornos import REFERENCIA_NOSSA, estorno_no_dreno, estorno_registrado
@@ -180,6 +176,8 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
         return None
     origens, destino, efeitos = rota
     payment_id = (payment_id if isinstance(payment_id, str) else "") or cobranca["asaas_payment_id"]
+    if estorno_de_outro_pagamento(evt["event_type"], cobranca, payment_id):
+        return None
     if set(efeitos) - {"afiliado_estorno_parcial"} and not payment_id:  # sem id o efeito não se registra e repete sem fim
         return ("PagamentoSemId", None)
     if evt["event_type"] == "PAYMENT_RECEIVED_IN_CASH_UNDONE":

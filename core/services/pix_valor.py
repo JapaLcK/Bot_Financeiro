@@ -84,6 +84,34 @@ def _alertar_uma_vez(cobranca, payment_id, event_id, mensagem: str, *,
             registrar_efeito(payment_id, marcador, event_id)
 
 
+ESTORNOS_E_CHARGEBACK = (
+    "PAYMENT_REFUNDED", "PAYMENT_PARTIALLY_REFUNDED", "PAYMENT_REFUND_IN_PROGRESS",
+    "PAYMENT_REFUND_DENIED", "PAYMENT_CHARGEBACK_REQUESTED", "PAYMENT_CHARGEBACK_DISPUTE",
+    "PAYMENT_AWAITING_CHARGEBACK_REVERSAL")
+
+
+def estorno_de_outro_pagamento(tipo, cobranca, payment_id) -> bool:
+    """#1435: estorno/chargeback do pagamento DUPLICADO (id que a cobrança nunca registrou).
+
+    Sem isto o evento caía em `external_reference`, achava a cobrança boa e a revogava.
+    `True` = alerta e o dreno FECHA o evento sem transição nem efeito.
+    """
+    antigo = cobranca["asaas_payment_id"]
+    if tipo not in ESTORNOS_E_CHARGEBACK or not payment_id or not antigo or payment_id == antigo:
+        return False
+    log_system_event_sync(
+        "warning", "pix_estorno_de_outro_pagamento",
+        "Estorno/chargeback de OUTRO pagamento da cobrança: nada alterado.",
+        source="pix", user_id=cobranca["user_id"],
+        details={"charge_id": cobranca["id"], "status": cobranca["status"],
+                 "payment_id": payment_id, "event_type": tipo})
+    admin_notify.notify_pix_alerta(
+        f"⚠️ **Pix: {tipo} de outro pagamento** na cobrança `{cobranca['id']}`"
+        f" (`{cobranca['status']}`) — pagamento `{payment_id}`; a cobrança foi paga por"
+        f" `{antigo}`. Acesso e afiliado NÃO foram alterados. Confira no Asaas.")
+    return True
+
+
 def conferir_valor(cobranca, origens, valor, payment_id, event_id) -> bool:
     """`True` = o dreno segue; `False` = RETIDO (o dreno fecha o evento)."""
     if cobranca["status"] not in origens:
