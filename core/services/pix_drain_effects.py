@@ -59,7 +59,7 @@ def janela_de_acesso(cobranca) -> tuple[datetime, datetime]:
     return inicio, inicio + timedelta(days=int(cobranca["duration_days"]))
 
 
-def alertar(tipo: str, cobranca, payment_id: str) -> None:
+def alertar(tipo: str, cobranca, payment_id: str, memo: dict | None = None) -> None:
     """Alerta acionável para o que NÃO tem efeito automático.
 
     No estorno parcial vai o **devolvido acumulado × o valor da cobrança** — e o
@@ -72,7 +72,7 @@ def alertar(tipo: str, cobranca, payment_id: str) -> None:
     """
     extra = ""
     if tipo == "PAYMENT_PARTIALLY_REFUNDED":
-        extra = f" · devolvido: {_acumulado_estornado(payment_id)}"
+        extra = f" · devolvido: {_acumulado_estornado(payment_id, memo)}"
     admin_notify.notify_pix_alerta(
         f"⚠️ **Pix: {tipo}** cobrança `{cobranca['id']}` · "
         f"valor R$ {total_cents(cobranca) / 100:.2f}{extra} · "
@@ -103,20 +103,13 @@ def alertar_stripe_desistido(cobranca) -> None:
     )
 
 
-def _acumulado_estornado(payment_id: str) -> str:
-    """Texto do alerta, mais frouxo que `afiliado_pix.estornado_cents` (que decide dinheiro): soma todo `value`."""
-    from core.services.asaas import buscar_pagamento
-
+def _acumulado_estornado(payment_id: str, memo: dict | None = None) -> str:
+    """Texto do alerta: a mesma leitura do efeito (`memo`), com o pendente à parte. Falha vira texto."""
     try:
-        estornos = buscar_pagamento(payment_id).get("refunds")
-    except Exception:  # noqa: BLE001 — provedor fora não pode virar número
+        feito, pendente = afiliado_pix.somar_estornos(afiliado_pix.ler_estornos(payment_id, memo))
+    except Exception:  # noqa: BLE001 — provedor fora ou lixo no `value` não derruba o evento por um texto
         return "acumulado indisponível"
-    if not isinstance(estornos, list):
-        return "acumulado indisponível"
-    try:  # lixo no `value` não pode derrubar o evento por causa de um texto
-        return f"R$ {sum(float(e.get('value') or 0) for e in estornos if isinstance(e, dict)):.2f}"
-    except (TypeError, ValueError):
-        return "acumulado indisponível"
+    return f"R$ {feito / 100:.2f}" + (f" + R$ {pendente / 100:.2f} em andamento" if pendente else "")
 
 
 # ── os efeitos ───────────────────────────────────────────────────────────────
@@ -340,4 +333,4 @@ def _afiliado(cobranca, evt):
 EXECUTORES = {"stripe_cancel": _stripe_cancel, "grant": _grant, "ebook": _ebook, "ga4": _ga4,
                "capi": _capi, "email": _email, "afiliado": _afiliado, "revoke": _revoke,
                "afiliado_estorno": afiliado_pix.estornar,
-               "afiliado_estorno_parcial": lambda c, evt: afiliado_pix.marcar(c, "partial", int(evt["attempts"] or 0))}
+               "afiliado_estorno_parcial": lambda c, evt: afiliado_pix.marcar(c, "partial", int(evt["attempts"] or 0), memo=evt)}

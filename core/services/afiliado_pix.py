@@ -39,33 +39,53 @@ def registrar(cobranca, evt) -> None:
     soltar_baixa_desfeita(cobranca)
 
 
-def estornado_cents(payment_id: str) -> int:
-    """O devolvido acumulado do pagamento, em centavos: a soma de `refunds[].value` do Asaas
-    (`buscar_pagamento`). Item com `status` conta só se `DONE` (sem diferenciar maiúscula); `CANCELLED` é
-    pulado; qualquer outro (`PENDING`...) levanta, pois o acumulado ainda vai crescer; sem `status`, conta
-    (forma a conferir no sandbox). Cada `value` passa pela regra
-    do `value` do webhook (`centavos_do_valor`: número finito, >= 0, até 2 casas). Levanta com o Asaas
-    fora ou com qualquer forma inesperada: nunca um número inventado."""
+def ler_estornos(payment_id: str, memo: dict | None = None) -> list:
+    """`refunds[]` do pagamento no Asaas, numa leitura só por evento: com `memo` (o `evt` do dreno), a
+    resposta fica em `memo["_estornos"]` e o efeito e o alerta leem o mesmo número (#1504). Levanta com o
+    Asaas fora ou com forma inesperada."""
+    if isinstance(memo, dict) and "_estornos" in memo:
+        return memo["_estornos"]
     from core.services.asaas import buscar_pagamento
-    from core.services.pix_valor import centavos_do_valor
 
     estornos = buscar_pagamento(payment_id).get("refunds")
     if not isinstance(estornos, list) or not all(isinstance(e, dict) for e in estornos):
         raise ValueError("refunds do Asaas em forma inesperada")
-    total = 0
+    if isinstance(memo, dict):
+        memo["_estornos"] = estornos
+    return estornos
+
+
+def somar_estornos(estornos: list) -> tuple[int, int]:
+    """`(concluído, pendente)` em centavos. Sem `status` ou `DONE` conta como concluído (forma a conferir no
+    sandbox); `CANCELLED` é pulado; qualquer outro (`PENDING`...) é pendente. Cada `value` passa pela regra
+    do `value` do webhook (`centavos_do_valor`: finito, >= 0, até 2 casas); inválido levanta."""
+    from core.services.pix_valor import centavos_do_valor
+
+    concluido = pendente = 0
     for e in estornos:
-        if (st := str(e["status"]).upper() if e.get("status") is not None else "DONE") != "DONE":
-            if st == "CANCELLED":
-                continue
-            raise ValueError("estorno do Asaas ainda não concluído")
-        cents = centavos_do_valor(e.get("value"))
-        if cents is None:
+        st = str(e["status"]).upper() if e.get("status") is not None else "DONE"
+        if st == "CANCELLED":
+            continue
+        if (cents := centavos_do_valor(e.get("value"))) is None:
             raise ValueError("value de refunds do Asaas inválido")
-        total += cents
-    return total
+        if st == "DONE":
+            concluido += cents
+        else:
+            pendente += cents
+    return concluido, pendente
 
 
-def marcar(cobranca, tipo: str, tentativas: int = 0) -> None:
+def estornado_cents(payment_id: str, memo: dict | None = None) -> int:
+    """O devolvido acumulado do pagamento, em centavos (`somar_estornos` sobre `ler_estornos`). Levanta com
+    o Asaas fora, forma inesperada ou refund ainda não concluído (o acumulado vai crescer): nunca um número
+    inventado."""
+    concluido, pendente = somar_estornos(ler_estornos(payment_id, memo))
+    if pendente > 0:
+        raise ValueError("estorno do Asaas ainda não concluído")
+    return concluido
+
+
+def marcar(cobranca, tipo: str, tentativas: int = 0, memo: dict | None = None) -> None:
     """Reembolso do Pix pela máquina do cartão: rótulo do pagamento, pendência e estorno da
     comissão numa transação (`registrar_reembolso`), e o aviso ao admin. Sempre, como na Stripe:
     sem comissão vira `no_commission`, que `promover` resolve se ela nascer depois.
@@ -95,7 +115,7 @@ def marcar(cobranca, tipo: str, tentativas: int = 0) -> None:
         devolvido = total_cents(cobranca)
     elif precisa_do_acumulado(cobranca["external_reference"]):
         try:
-            devolvido = estornado_cents(cobranca["asaas_payment_id"])
+            devolvido = estornado_cents(cobranca["asaas_payment_id"], memo)
             if devolvido <= 0:
                 raise ValueError("estorno parcial sem refunds concluídos no Asaas")
         except Exception:

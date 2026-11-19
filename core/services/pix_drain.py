@@ -257,7 +257,7 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
     # Depois do laço: um alerta por evento, na passada que conclui. Antes dele, cada retentativa (o
     # parcial com o Asaas fora) repetia o alerta; só na 1ª tentativa, a que morresse antes perdia o dela.
     if evt["event_type"] in _ALERTAM:
-        alertar(evt["event_type"], cobranca, payment_id)
+        alertar(evt["event_type"], cobranca, payment_id, memo=evt)
     return None
 
 
