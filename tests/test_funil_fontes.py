@@ -481,12 +481,13 @@ def test_resumo_do_admin_nao_vaza_nem_no_log_nem_no_cache_nem_no_json(monkeypatc
         yield SimpleNamespace(status="active", items=None)
         raise erro
 
-    def lista(**kw):
+    def lista(params):
         if onde == "inicio":
             raise erro
         return SimpleNamespace(auto_paging_iter=itera)
 
-    monkeypatch.setattr(stripe.Subscription, "list", lista)
+    fake = SimpleNamespace(v1=SimpleNamespace(subscriptions=SimpleNamespace(list=lista)))
+    monkeypatch.setattr("core.services.ebook_entrega.cliente_stripe", lambda key: fake)
     with caplog.at_level(logging.DEBUG):
         r = asyncio.run(admin_dashboard.fetch_billing_summary(force=True))
     assert r["available"] is False and r["reason"] == type(erro).__name__

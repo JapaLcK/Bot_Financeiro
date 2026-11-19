@@ -18,6 +18,13 @@ Controles (rodados, ver o relato do PR):
   · `stripe_fora = (...)` sem o `or`                          → `test_j9` do Pix vermelho;
   · `PRAZO_STRIPE_S`/`PRAZO_PASSADA_S` trocados               → constantes vermelho.
   Positivo: a Stripe que responde devolve o mesmo resultado de hoje, e o e-book entrega.
+  #1533 (o script de backfill e o resumo de cobrança do admin):
+  · `_datas_de_reembolso` de volta a `stripe.Refund.list` (módulo)      → script/reembolso vermelho;
+  · `rodar` de volta a `stripe.Invoice.list` (módulo)                  → script/faturas vermelho;
+  · `_fetch_stripe_billing_sync` de volta a `stripe.Subscription.list`  → admin/desiste vermelho (e o positivo).
+  · `_valor_do_plano` de volta a `stripe.Subscription.retrieve`          → script/assinatura vermelho;
+  · `linhas_da_fatura(fatura, cliente)` sem o `cliente=` (global, sem chave) → script/has_more vermelhos;
+  Positivo: a Stripe que responde devolve os mesmos dados nos três.
 """
 from __future__ import annotations
 
@@ -374,3 +381,106 @@ def test_ebook_orcamento_da_passada(local, monkeypatch, _logs):  # noqa: F811
     local.atraso = 0.0
     _em_thread(ebook_entrega.entregar_pendentes)
     assert _para(enviados, contas) == sorted(email for _, _, email in contas)  # um e-mail cada
+
+
+# ── #1533: script de backfill e resumo de cobrança do admin ──────────────────
+
+def _script(monkeypatch):
+    import backfill_afiliado_pagamentos as modulo
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+    monkeypatch.setattr(modulo, "_passar_comissoes", lambda *a: None)
+    monkeypatch.setattr(modulo, "_clientes", lambda: [{"cliente": "cus_x", "uid": 1}])
+    return modulo
+
+
+def test_script_reembolso_desiste_no_prazo(pendurada, monkeypatch):
+    modulo = _script(monkeypatch)
+    _na_rede(monkeypatch, pendurada.url)
+    fim = _em_thread(lambda: modulo._datas_de_reembolso("sk_test_x", {"id": "ch_1"}))
+    assert isinstance(fim.get("erro"), stripe.APIConnectionError), fim
+    assert fim["s"] < 2, fim["s"]
+    assert len(pendurada.conexoes) == 1  # sem retentativa
+
+
+def test_script_faturas_desistem_no_prazo_e_a_rodada_acusa_falha(pendurada, monkeypatch):
+    modulo = _script(monkeypatch)
+    _na_rede(monkeypatch, pendurada.url)
+    fim = _em_thread(modulo.rodar)
+    n = fim["valor"]
+    assert (n["clientes_com_falha"], n["erro_APIConnectionError"]) == (1, 1), fim  # main() sai com 1
+    assert fim["s"] < 2, fim["s"]
+    assert len(pendurada.conexoes) == 1
+
+
+def test_script_assinatura_desiste_no_prazo(pendurada, monkeypatch):
+    modulo = _script(monkeypatch)
+    _na_rede(monkeypatch, pendurada.url)
+    fatura = {"id": "in_1", "subscription": "sub_1"}
+    fim = _em_thread(lambda: modulo._valor_do_plano(
+        ebook_entrega.cliente_stripe("sk_test_x"), fatura))
+    assert isinstance(fim.get("erro"), stripe.APIConnectionError), fim
+    assert fim["s"] < 2, fim["s"]
+    assert len(pendurada.conexoes) == 1
+
+
+def test_script_com_stripe_que_responde_le_o_mesmo(local, monkeypatch):
+    modulo = _script(monkeypatch)
+    _na_rede(monkeypatch, local.url)
+    local.rotas |= {"/v1/refunds": _lista("/v1/refunds", {"object": "refund", "created": 1_790_000_001}),
+                    "/v1/invoices": _lista("/v1/invoices", {"object": "invoice", "id": "in_1"})}
+    lidas = []
+    monkeypatch.setattr(modulo, "_fatura", lambda s, f, *a: lidas.append(f["id"]))
+    assert modulo._datas_de_reembolso("sk_test_x", {"id": "ch_1"}) == [1_790_000_001]
+    n = modulo.rodar()
+    assert (lidas, n["clientes"], n["clientes_com_falha"]) == (["in_1"], 1, 0)
+    assert _so(local.pedidos, "/v1/refunds") == [{"charge": ["ch_1"], "limit": ["100"]}]
+    assert _so(local.pedidos, "/v1/invoices") == [{"customer": ["cus_x"], "status": ["paid"], "limit": ["100"]}]
+
+
+def test_resumo_de_cobranca_do_admin_desiste_no_prazo(pendurada, monkeypatch):
+    _na_rede(monkeypatch, pendurada.url)
+    monkeypatch.setattr(admin_dashboard, "STRIPE_SECRET_KEY", "sk_test_x")
+    fim = _em_thread(admin_dashboard._fetch_stripe_billing_sync)
+    assert fim["valor"] == {"available": False, "reason": "APIConnectionError"}, fim
+    assert fim["s"] < 2, fim["s"]
+    assert len(pendurada.conexoes) == 1
+
+
+def test_resumo_de_cobranca_do_admin_com_stripe_que_responde(local, monkeypatch):
+    _na_rede(monkeypatch, local.url)
+    monkeypatch.setattr(admin_dashboard, "STRIPE_SECRET_KEY", "sk_test_x")
+    preco = {"object": "price", "unit_amount": 1990, "recurring": {"interval": "month", "interval_count": 1}}
+    sub = {"object": "subscription", "status": "active", "items": {"object": "list", "data": [{"price": preco}]}}
+    local.rotas["/v1/subscriptions"] = _lista("/v1/subscriptions", sub)
+    r = admin_dashboard._fetch_stripe_billing_sync()
+    assert (r["available"], r["subscriptions"]["active"], r["mrr"]) == (True, 1, 19.9), r
+    assert _so(local.pedidos, "/v1/subscriptions") == [{"status": ["all"], "limit": ["100"]}]
+
+
+def _fatura_com_mais_linhas(local, linhas="prende"):
+    """Assinatura com um extra na metadata e fatura cujas linhas embutidas estão truncadas (`has_more`)."""
+    local.rotas["/v1/subscriptions/sub_1"] = {"object": "subscription", "id": "sub_1",
+                                              "metadata": {"ebook_price": "price_x"}}
+    local.rotas["/v1/invoices/in_1/lines"] = linhas
+    return {"id": "in_1", "subscription": "sub_1", "amount_paid": 10_000,
+            "lines": {"data": [], "has_more": True}}
+
+
+def test_script_fatura_com_has_more_le_as_linhas_pelo_cliente(local, monkeypatch):
+    """Sem `stripe.api_key` global, as linhas que faltam saem pelo cliente do script (positivo)."""
+    modulo = _script(monkeypatch)
+    _na_rede(monkeypatch, local.url)
+    extra = {"object": "line_item", "amount": 4_000, "pricing": {"price_details": {"price": "price_x"}}}
+    fatura = _fatura_com_mais_linhas(local, _lista("/v1/invoices/in_1/lines", extra))
+    assert modulo._valor_do_plano(ebook_entrega.cliente_stripe("sk_test_x"), fatura) == 6_000
+    assert _so(local.pedidos, "/v1/invoices/in_1/lines") == [{"limit": ["100"]}]
+
+
+def test_script_linhas_da_fatura_desistem_no_prazo(local, monkeypatch):
+    modulo = _script(monkeypatch)
+    _na_rede(monkeypatch, local.url)
+    fatura = _fatura_com_mais_linhas(local)
+    fim = _em_thread(lambda: modulo._valor_do_plano(ebook_entrega.cliente_stripe("sk_test_x"), fatura))
+    assert isinstance(fim.get("erro"), stripe.APIConnectionError), fim
+    assert fim["s"] < 2, fim["s"]
+    assert len(_so(local.pedidos, "/v1/invoices/in_1/lines")) == 1  # sem retentativa

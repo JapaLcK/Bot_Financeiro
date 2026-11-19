@@ -22,6 +22,9 @@ class ClienteDoModulo:
             payment_intents=SimpleNamespace(
                 retrieve=lambda pi, params: _stripe().PaymentIntent.retrieve(pi, **params, **k)),
             disputes=SimpleNamespace(list=lambda params: _stripe().Dispute.list(**params, **k)),
+            refunds=SimpleNamespace(list=lambda params: _stripe().Refund.list(**params)),
+            invoices=SimpleNamespace(list=lambda params: _stripe().Invoice.list(**params)),
+            subscriptions=SimpleNamespace(retrieve=lambda sid: _stripe().Subscription.retrieve(sid)),
             charges=SimpleNamespace(retrieve=lambda ch: _stripe().Charge.retrieve(ch, **k)),
             checkout=SimpleNamespace(sessions=SimpleNamespace(
                 retrieve=lambda sid: sessao().retrieve(sid, **k),

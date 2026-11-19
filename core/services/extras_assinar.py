@@ -53,15 +53,18 @@ def extras_liquido_cents(linhas, precos: set[str]) -> int:
     return total
 
 
-def linhas_da_fatura(invoice) -> list:
+def linhas_da_fatura(invoice, cliente=None) -> list:
     """Todas as linhas da fatura. O objeto embute no máximo 10 (plano + 10
     extras = 11); com `has_more`, busca pela API. Sem try: no webhook, falha
-    vira 5xx e o Stripe reentrega. Usa o `stripe.api_key` global que o webhook
-    seta, por isso só serve dentro dele."""
+    vira 5xx e o Stripe reentrega. Sem `cliente`, usa o `stripe.api_key` global que o
+    webhook seta; o script de backfill passa o seu (prazo curto, sem global)."""
     linhas = _ler(invoice, "lines")
     if _ler(linhas, "has_more"):
-        import stripe
-        linhas = stripe.Invoice.list_lines(_ler(invoice, "id"), limit=100)
+        if cliente:
+            linhas = cliente.v1.invoices.line_items.list(_ler(invoice, "id"), params={"limit": 100})
+        else:
+            import stripe
+            linhas = stripe.Invoice.list_lines(_ler(invoice, "id"), limit=100)
     return _ler(linhas, "data") or []
 
 
