@@ -1,9 +1,8 @@
 """
 core/services/pix_drain.py — o dreno da outbox do webhook do Asaas (§8.2).
 
-O handler grava o evento e responde 200; **tudo o que acontece com o dinheiro
-acontece aqui**: casar o evento com a cobrança, avançar a máquina de estados do
-§11 e rodar os efeitos.
+O handler grava o evento e responde 200; **tudo o que acontece com o dinheiro acontece aqui**:
+casar o evento com a cobrança, avançar a máquina de estados do §11 e rodar os efeitos.
 
 Plano: docs/plano_pix_anual_asaas.md §8.2, §11, §12 e §17.1.
 
@@ -43,8 +42,7 @@ pool durante o `with` é um bloqueio que o detector de deadlock do Postgres não
 enxerga — do lado dele há um só esperador; o outro lado espera em Python. Por
 isso o desfecho é decidido dentro do `with` e ESCRITO depois dele.
 
-A janela entre soltar a reserva e carimbar `processed_at` é reentrante e
-inofensiva: outra passada refaz o trabalho e cada efeito é pulado pelo registro.
+A janela entre soltar a reserva e carimbar `processed_at` é reentrante e inofensiva (cada efeito é pulado pelo registro).
 """
 
 from __future__ import annotations
@@ -126,8 +124,7 @@ def drenar_evento(event_id: str) -> bool:
 
     `False` (sem tocar o banco) se já há 2 drenos no processo: a linha segue pendente (#1587).
 
-    `reservar_evento` rende `None` para evento inexistente, já processado ou
-    travado por outra passada: nos três a ação é a mesma, sair.
+    `reservar_evento` rende `None` para evento inexistente, já processado ou travado: sair.
     """
     if not _DRENOS.acquire(blocking=False):
         return False
@@ -214,7 +211,10 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
     if cobranca["user_id"] is None:
         if evt["event_type"] == "PAYMENT_REFUNDED":  # #1571: o parcial promovido se lembra na retentativa
             gravar_no_dreno(cobranca, payment_id, event_id)
-        return _orfao(event_id, cobranca, destino, origens, payment_id, int(evt["attempts"] or 0))
+        _orfao(event_id, cobranca, destino, origens, payment_id, int(evt["attempts"] or 0))
+        if evt["event_type"] in _ALERTAM:  # #1505: chargeback/parcial de titular excluído também avisa (sem PII)
+            alertar(evt["event_type"], cobranca, payment_id, memo=evt)
+        return None
 
     if evt["event_type"] == "PAYMENT_REFUNDED":  # #1437: marcador `nosso`; não paga vai a `canceled`
         cobranca = estorno_no_dreno(cobranca, payment_id, event_id)
@@ -266,7 +266,7 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
                     continue
                 return (type(exc).__name__, getattr(exc, "code", None))
             registrar_efeito(payment_id, efeito, event_id)
-    # Depois do laço: um alerta por evento, na passada que conclui (antes dele, cada retentativa o repetia).
+    # Depois do laço: um alerta por evento, na passada que conclui.
     if evt["event_type"] in _ALERTAM:
         alertar(evt["event_type"], cobranca, payment_id, memo=evt)
     return None
