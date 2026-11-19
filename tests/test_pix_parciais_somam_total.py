@@ -196,6 +196,40 @@ def test_orfao_que_falha_no_rotulo_e_refeito_como_total(user_id, externo, monkey
     assert vistos == ["refunded", "refunded"]
 
 
+def test_parcial_mais_velho_que_o_grant_ainda_revoga(user_id, externo):
+    """Codex #1632: parcial enfileirado ANTES do RECEIVED atrasado, drenado depois. A decisão vem do GET
+    ao Asaas, não da versão do evento: a guarda de versão do `revoke_grant` não pode descartá-lo."""
+    import uuid
+
+    from core.services.pix_drain import drenar_evento
+    from db.webhook_outbox import registrar_evento
+
+    cobranca = _paga(user_id)
+    externo["refunds"] = DOIS
+    eid = f"evt_{uuid.uuid4().hex[:16]}"
+    registrar_evento(eid, PARCIAL, {"id": eid, "event": PARCIAL, "payment": {
+        "id": cobranca["asaas_payment_id"], "externalReference": cobranca["external_reference"],
+        "value": 499.0, "status": "PARTIALLY_REFUNDED"}}, 1)
+    drenar_evento(eid)
+    assert ler(cobranca["id"])["status"] == "refunded" and _ativos(user_id) == []
+
+
+@pytest.mark.parametrize("status", ["expired", "canceled"])
+def test_expirada_ou_cancelada_com_parciais_somando_tudo_barra_o_received(user_id, externo, status):
+    """Codex #1632: OVERDUE/DELETED drenado antes do RECEIVED; os parciais somam tudo e o RECEIVED
+    atrasado não pode conceder (nem gerar comissão)."""
+    conta(user_id, "free", None)
+    cobranca = nova_cobranca(user_id)
+    with get_conn() as conn:
+        conn.execute("update pix_charges set status = %s where id = %s", (status, cobranca["id"]))
+        conn.commit()
+    externo["refunds"] = DOIS
+    entregar(PARCIAL, cobranca)
+    assert estorno_registrado(cobranca["asaas_payment_id"])
+    entregar("PAYMENT_RECEIVED", cobranca)
+    assert _ativos(user_id) == []
+
+
 _CADERNOS = [{"price": "price_cad_a", "url": "https://drive.test/a", "nome": "Caderno A", "valor_cents": 1990}]
 
 

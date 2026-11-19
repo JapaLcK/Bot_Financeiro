@@ -307,7 +307,8 @@ def _revoke(cobranca, evt) -> None:
     revoke_grant(cobranca["user_id"], "pix", str(cobranca["id"]),
                  f"asaas:{evt['event_type']}", int(evt["event_version"]),
                  last_event_id=evt["event_id"],
-                 sem_guarda_de_versao=evt["event_type"] == "PAYMENT_RECEIVED_IN_CASH_UNDONE")
+                 sem_guarda_de_versao=evt["event_type"] == "PAYMENT_RECEIVED_IN_CASH_UNDONE"
+                 or bool(evt.get("promovido")))  # #1571: a ordem vem do GET ao Asaas, não da versão
     recompute_entitlement(cobranca["user_id"], origem="pix_estorno")
     if evt["event_type"] == "PAYMENT_REFUNDED":
         # Estorno total (ou chargeback perdido) é ato: retira a adesão ao aviso de insight na hora, sem a margem

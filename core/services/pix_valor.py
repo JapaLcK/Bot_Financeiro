@@ -208,8 +208,8 @@ def parcial_vira_total(evt, cobranca, payment_id) -> dict:
     if evt["event_type"] != "PAYMENT_PARTIALLY_REFUNDED" or not payment_id:
         return evt
     if gravado_pelo_evento(payment_id, evt["event_id"]):  # já promovido; a passada anterior falhou
-        return {**evt, "event_type": "PAYMENT_REFUNDED"}
-    if cobranca["status"] in ("refunded", "canceled", "expired"):
+        return {**evt, "event_type": "PAYMENT_REFUNDED", "promovido": True}
+    if cobranca["status"] == "refunded":  # expirada/cancelada antes do RECEIVED atrasado: lê (Codex #1632)
         return evt
     try:
         concluido, _ = afiliado_pix.somar_estornos(afiliado_pix.ler_estornos(payment_id, evt))
@@ -220,4 +220,4 @@ def parcial_vira_total(evt, cobranca, payment_id) -> dict:
     log_system_event_sync(
         "warning", "pix_parciais_somam_total", "Estornos parciais somam o valor devido: tratados como total.",
         source="pix", user_id=cobranca["user_id"], details={"charge_id": cobranca["id"]})
-    return {**evt, "event_type": "PAYMENT_REFUNDED"}
+    return {**evt, "event_type": "PAYMENT_REFUNDED", "promovido": True}
