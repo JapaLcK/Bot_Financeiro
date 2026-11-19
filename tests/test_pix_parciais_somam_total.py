@@ -12,7 +12,9 @@ CONTROLES NEGATIVOS MEDIDOS (um a um, com o resto do grupo verde):
   * `parcial_vira_total` devolvendo sempre `evt` -> os mesmos + `test_parcial_unico_...` VERMELHOS
     (6 no total, com o D1-d); `test_asaas_fora_...` segue verde por desenho (fecha parcial igual);
   * `if promovido` desligado (marcador #1437 gravado por este evento não vale como promoção) ->
-    `test_revoke_que_falha_na_1a_passada_e_refeito_na_retentativa` VERMELHO.
+    `test_revoke_que_falha_na_1a_passada_e_refeito_na_retentativa` VERMELHO;
+  * `gravar_no_dreno` tirado da guarda de órfão em `_decidir` ->
+    `test_orfao_que_falha_no_rotulo_e_refeito_como_total` VERMELHO.
 
 POSITIVOS do grupo: `test_abaixo_do_devido_ou_pendente_segue_parcial` (498,99 e DONE+PENDING mantêm o
 acesso) e o `assert` do `_paga` (RECEIVED sem estorno concede, em todo teste); sem eles o grupo passaria num dreno que revoga tudo.
@@ -166,6 +168,32 @@ def test_paid_orphan_com_parciais_somando_tudo_vira_refunded(user_id, externo):
     externo["refunds"] = DOIS
     entregar(PARCIAL, cobranca)
     assert ler(cobranca["id"])["status"] == "refunded"
+
+
+def test_orfao_que_falha_no_rotulo_e_refeito_como_total(user_id, externo, monkeypatch):
+    """Codex #1632: no órfão o `_orfao` volta antes do `estorno_no_dreno`; sem o marcador gravado antes,
+    a retentativa (já `refunded`) relia o evento como parcial e rotulava `refunded_partial`."""
+    from core.services import pix_drain
+
+    cobranca = _paga(user_id)
+    with get_conn() as conn:
+        conn.execute("update pix_charges set status = 'paid_orphan', user_id = null where id = %s",
+                     (cobranca["id"],))
+        conn.commit()
+    externo["refunds"] = DOIS
+    vistos = []
+
+    def _rotulo(cob, status, tentativas=0):
+        vistos.append(status)
+        if len(vistos) == 1:
+            raise RuntimeError("rótulo fora")
+
+    monkeypatch.setattr(pix_drain, "rotular_reembolso", _rotulo)
+    evt = entregar(PARCIAL, cobranca)
+    assert evento(evt)["processed_at"] is None
+    pix_drain.drenar_evento(evt)
+    assert evento(evt)["processed_at"] is not None
+    assert vistos == ["refunded", "refunded"]
 
 
 _CADERNOS = [{"price": "price_cad_a", "url": "https://drive.test/a", "nome": "Caderno A", "valor_cents": 1990}]

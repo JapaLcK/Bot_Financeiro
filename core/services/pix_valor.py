@@ -203,14 +203,11 @@ def parcial_vira_total(evt, cobranca, payment_id) -> dict:
     inesperada): segue parcial, com o alerta "acumulado indisponível" (contrato do #1504; revisão manual).
     """
     from core.services import afiliado_pix
-    from db.connection import get_conn
+    from db.pix_estornos import gravado_pelo_evento
 
     if evt["event_type"] != "PAYMENT_PARTIALLY_REFUNDED" or not payment_id:
         return evt
-    with get_conn() as conn:  # marcador gravado POR ESTE evento: ele já foi promovido e a passada falhou
-        promovido = conn.execute("select 1 from pix_estornos_recebidos where asaas_payment_id = %s"
-                                 " and event_id = %s", (payment_id, evt["event_id"])).fetchone()
-    if promovido:
+    if gravado_pelo_evento(payment_id, evt["event_id"]):  # já promovido; a passada anterior falhou
         return {**evt, "event_type": "PAYMENT_REFUNDED"}
     if cobranca["status"] in ("refunded", "canceled", "expired"):
         return evt

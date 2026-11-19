@@ -65,7 +65,7 @@ from core.services.pix_valor import conferir_valor, estorno_de_outro_pagamento, 
 from db.pix_charges import buscar_por_asaas_payment_id, buscar_por_external_reference, transicionar
 from db.pix_charges_saga import registrar_nao_casado
 from db.pix_effects import efeito_registrado, lock_efeito, registrar_efeito
-from db.pix_estornos import REFERENCIA_NOSSA, estorno_no_dreno, estorno_registrado
+from db.pix_estornos import REFERENCIA_NOSSA, estorno_no_dreno, estorno_registrado, gravar_no_dreno
 from db.webhook_outbox import marcar_processado, registrar_falha, reservar_evento
 
 # `ebook` logo depois do `grant`: pendência dos cadernos da foto, no-op sem cadernos.
@@ -212,6 +212,8 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
     # B) GUARDA DE ÓRFÃO, antes do laço: titular excluído (§13.4). Nenhum efeito
     # de compra — não há a quem conceder —, e o `CHECK` da janela não se aplica.
     if cobranca["user_id"] is None:
+        if evt["event_type"] == "PAYMENT_REFUNDED":  # #1571: o parcial promovido se lembra na retentativa
+            gravar_no_dreno(cobranca, payment_id, event_id)
         return _orfao(event_id, cobranca, destino, origens, payment_id, int(evt["attempts"] or 0))
 
     if evt["event_type"] == "PAYMENT_REFUNDED":  # #1437: marcador `nosso`; não paga vai a `canceled`
