@@ -192,7 +192,7 @@ def test_fila_poe_o_estorno_antes_da_compra_mais_velha(user_id, receber):
     pagamento = {"id": cobranca["asaas_payment_id"], "externalReference": cobranca["external_reference"]}
     compra = receber("PAYMENT_RECEIVED", pagamento)
     estorno = receber("PAYMENT_REFUNDED", pagamento)
-    fila = [e for e in eventos_pendentes(10_000) if e in (compra, estorno)]
+    fila = [e for e in eventos_pendentes(10_000, 6) if e in (compra, estorno)]
     assert fila == [estorno, compra] and efeitos(cobranca["asaas_payment_id"]) == set()
 
 

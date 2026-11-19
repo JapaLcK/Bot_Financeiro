@@ -33,6 +33,8 @@ saídas possíveis por linha são, e são só estas:
 
 from __future__ import annotations
 
+import time
+
 from core.observability import log_system_event_sync
 from core.services import admin_notify, asaas
 
@@ -47,6 +49,9 @@ ALERTA_APOS_HORAS = 24
 
 _VIVA_NO_ASAAS = ("PENDING", "AWAITING_RISK_ANALYSIS", "CONFIRMED", "RECEIVED",
                   "RECEIVED_IN_CASH", "OVERDUE")
+
+
+PRAZO_RODADA_S = 45  # #1587: abaixo dos 60 s do laço, para a rodada não atravessar a seguinte
 
 
 def drenar_pendentes(limite: int = 100) -> int:
@@ -64,13 +69,16 @@ def drenar_pendentes(limite: int = 100) -> int:
     `drenar_evento` nunca levanta (falha vira `attempts`), então um evento
     travado não segura a fila dos outros.
     """
-    from core.services.pix_drain import drenar_evento
+    from core.services.pix_drain import TENTATIVAS_ATE_TRAVAR, drenar_evento
     from db.webhook_outbox import eventos_pendentes
 
-    pendentes = eventos_pendentes(limite)
-    for event_id in pendentes:
-        drenar_evento(event_id)
-    return len(pendentes)
+    inicio = time.monotonic()
+    n = 0
+    for event_id in eventos_pendentes(limite, TENTATIVAS_ATE_TRAVAR + 1):  # backoff só DEPOIS da 6ª passada: é nela que o fallback e o alerta disparam
+        if time.monotonic() - inicio >= PRAZO_RODADA_S:  # #1587: o resto fica para a próxima passada
+            break
+        n += drenar_evento(event_id)
+    return n
 
 
 def purgar_retencao() -> dict:

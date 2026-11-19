@@ -166,7 +166,7 @@ def reservar_evento(event_id: str):
     mesma). O `payload_enc` sai **cifrado**: decifrar é do dreno (ver o cabeçalho).
 
     `ponytail:` teto — a conexão fica presa pelo dreno inteiro, HTTP incluído, e o
-    `lock_efeito` a reusa (`conexao_da_reserva`, #1413); drenos simultâneos sem teto ainda.
+    `lock_efeito` a reusa (`conexao_da_reserva`, #1413); o teto é `_DRENOS` em `pix_drain` (por processo).
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -281,7 +281,7 @@ def registrar_falha(event_id: str, tipo: str, codigo: str | None = None) -> int:
         with conn.cursor() as cur:
             cur.execute(
                 "update pix_webhook_events"
-                "   set attempts = attempts + 1, last_error = %s"
+                "   set attempts = attempts + 1, last_error = %s, last_attempt_at = now()"
                 " where event_id = %s and purged_at is null"
                 " returning attempts",
                 (_erro_seguro(tipo, codigo), event_id),
@@ -319,7 +319,7 @@ def _erro_seguro(tipo: str, codigo: str | None) -> str:
     return f"{base}({_codigo_seguro(codigo, '?')})" if codigo else base
 
 
-def eventos_pendentes(limite: int = 100) -> list[str]:
+def eventos_pendentes(limite: int, falhas_ate_backoff: int) -> list[str]:
     """`event_id` dos eventos ainda abertos, mais antigos primeiro.
 
     É o que o laço de 60 s do monólito drena. O `background_tasks` do handler é
@@ -330,14 +330,19 @@ def eventos_pendentes(limite: int = 100) -> list[str]:
     `skip locked`, uma linha de cada vez. Uma lista morna é o certo aqui — dois
     workers pegando a mesma lista disputam a reserva, e o perdedor sai.
 
+    #1587: com `falhas_ate_backoff` falhas ou mais, o evento só volta 1 h depois da última.
+
     Indexado por `idx_pix_webhook_pendentes` (`processed_at is null`).
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "select event_id from pix_webhook_events"
-                " where processed_at is null"  # #1437: o estorno antes, complemento da pausa (#1574)
+                " where processed_at is null"
+                " and (attempts < %s or last_attempt_at is null"
+                "      or last_attempt_at < now() - interval '1 hour')"
+                # #1437: o estorno antes, complemento da pausa (#1574)
                 " order by (event_type = 'PAYMENT_REFUNDED') desc, received_at asc limit %s",
-                (int(limite),),
+                (int(falhas_ate_backoff), int(limite)),
             )
             return [r["event_id"] for r in cur.fetchall()]

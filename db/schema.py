@@ -3236,6 +3236,8 @@ def init_db():
           last_error text
         )
         """,
+        # #1587: o backoff do dreno (`eventos_pendentes`) lê a hora da última falha.
+        """alter table pix_webhook_events add column if not exists last_attempt_at timestamptz""",
         # A fila do dreno: parcial porque o interesse é só o que falta processar.
         """
         create index if not exists idx_pix_webhook_pendentes
