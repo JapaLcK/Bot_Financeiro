@@ -49,7 +49,7 @@ export function rotaDoToque(resposta: Notifications.NotificationResponse): Href 
  * O desregistro mora no cofre (`storage/secure.ts`), não aqui.
  */
 export function Push() {
-  const { estado } = useSessao();
+  const { estado, leitor } = useSessao();
   const trava = useBloqueio().estado.fase;
   const router = useRouter();
   const navegacaoPronta = Boolean(useRootNavigationState()?.key);
@@ -57,10 +57,12 @@ export function Push() {
   const autenticado = fase === "autenticado";
   // Com a trava em `lendo`/`travado` não há prompt: colidiria com o Face ID.
   const livre = (trava === "livre" || trava === "inerte") && (fase === "anonimo" || autenticado);
+  // Leitor (condômino): o aparelho dele NÃO recebe as notificações do dono/síndico. Sem prompt de permissão e sem registro; a rota do toque segue valendo para quem já tem um push.
+  const semPush = leitor;
 
   const pediu = useRef(false);
   useEffect(() => {
-    if (!livre || pediu.current) return;
+    if (!livre || semPush || pediu.current) return;
     pediu.current = true;
     void (async () => {
       try {
@@ -70,12 +72,12 @@ export function Push() {
         // Sem permissão o push não chega; o app segue igual.
       }
     })();
-  }, [livre]);
+  }, [livre, semPush]);
 
   // Registra com a sessão E a trava livres: com `lendo`/`travado` nenhum pedido sai antes do
   // desbloqueio (a abertura com sessão salva não faz rede até liberar). Ao liberar, a borda
   // de subida dispara o registro.
-  const registravel = autenticado && livre;
+  const registravel = autenticado && livre && !semPush;
   useEffect(() => {
     if (registravel) void registrarAparelho();
   }, [registravel]);

@@ -284,6 +284,8 @@ export const useAgentesLigados = () => useQuery(meQuery).data?.agents_ui_enabled
 /** Tem cadastro de afiliado, ativo ou desativado. Ligado SÓ com `afiliado: true`: ausente (protótipo, resposta antiga) = fora do menu, falha fechada. */
 export const useAfiliado = () => useQuery(meQuery).data?.afiliado === true;
 /** O freio do chat com a IA (`PAINEL_CHAT_IA_USER_IDS`): ligado SÓ com `chat_ia: true`; ausente (protótipo, resposta antiga) = desligado. Com ele a conversa do Piggy vai ao servidor (lib/conversaIa.ts); sem ele é a de exemplo. */
+/** Sessão de leitor (credencial de visualização do condomínio): só leitura. Ausente (protótipo, resposta antiga) = dono, falha aberta SÓ aqui porque quem barra a escrita é o servidor (leitura_guard); esconder é cortesia. */
+export const useLeitor = () => useQuery(meQuery).data?.somente_leitura === true;
 export const useChatIa = () => useQuery(meQuery).data?.chat_ia === true;
 
 export const categoriasQuery = {

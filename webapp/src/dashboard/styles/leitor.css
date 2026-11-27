@@ -1,0 +1,14 @@
+/* Faixa do leitor (parts/FaixaLeitura.tsx): sticky no topo; `--faixa-h` desce o trilho e a barra do topo, também fixos. */
+html[data-leitor] { --faixa-h: calc(32px + env(safe-area-inset-top, 0px)); }
+.faixa-leitura {
+  position: sticky; top: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  height: var(--faixa-h, 32px); box-sizing: border-box;
+  padding: env(safe-area-inset-top, 0px) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px));
+  background: var(--plane-3); border-bottom: 1px solid var(--rule-strong);
+  color: var(--ink-2); font-size: 13px; font-weight: 500; white-space: nowrap;
+}
+html[data-leitor] .topbar { top: var(--faixa-h); }
+html[data-leitor] .rail { top: var(--faixa-h); height: calc(100vh - var(--faixa-h)); height: calc(100dvh - var(--faixa-h)); }
+
+html[data-leitor] .tabbar { grid-template-columns: repeat(4, 1fr); } /* sem a aba do Piggy */

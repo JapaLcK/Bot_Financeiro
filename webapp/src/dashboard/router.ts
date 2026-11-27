@@ -50,7 +50,9 @@ export const CONTA: Path[] = ["/conta/perfil", "/conta/cobranca", "/conta/config
 export const ATIVAS = ROUTES.filter((r) => !(DEMO && (CONTA.includes(r.path) || r.path === "/simulador/compra" || r.path === "/casa" || r.path === "/ajuda" || r.path === "/afiliado")));
 export const RAIL: Path[] = ATIVAS.map((r) => r.path).filter((p) => p !== "/piggy" && p !== "/ajuda" && p !== "/simulador/compra" && p !== "/orcamento" && p !== "/orcamentos-categoria" && p !== "/milhao" && p !== "/agentes" && !CONTA.includes(p));
 // O único filtro dos três menus (lateral, Menu do celular e ⌘K): o item "Afiliado" só para quem é (`useAfiliado`). Só esconde: quem protege é o 404 do backend.
-export const noMenu = (p: Path, afiliado: boolean) => afiliado || p !== "/afiliado";
+// Telas fechadas à sessão de leitor (credencial de visualização): a Conta (perfil, cobrança, configurações, bancos, família: o servidor nega o GET ou o dado é do dono), a Casa e o Afiliado (idem), e as que escrevem ou conversam (Piggy, Agentes, simuladores).
+export const FECHADAS_AO_LEITOR: readonly Path[] = [...CONTA, "/afiliado", "/casa", "/piggy", "/agentes", "/simulador", "/simulador/compra"];
+export const noMenu = (p: Path, afiliado: boolean, leitor = false) => (afiliado || p !== "/afiliado") && !(leitor && FECHADAS_AO_LEITOR.includes(p));
 // Telas que o card de Ferramentas abre (pages.tsx, TOOLS): abrir uma delas é o passo "Ferramentas" do guia.
 // `as const`: o `to` de cada ferramenta em TOOLS é desse tipo, então ferramenta fora da lista não compila.
 export const FERRAMENTAS = ["/simulador", "/orcamento", "/orcamentos-categoria", "/simulador/compra", "/milhao", "/agentes"] as const satisfies readonly Path[];

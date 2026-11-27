@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ICON } from "../lib/brand";
-import { ErroApi, apiPost, guiaQuery } from "../lib/v2";
+import { ErroApi, apiPost, guiaQuery, useLeitor } from "../lib/v2";
 import { href, origemDaTela, route } from "../router";
 import { dicaDe, pedirDica } from "./Dica";
 import { abrirGuia } from "./Guia";
@@ -101,13 +101,14 @@ export function AjudaTela() {
   // De onde a pessoa veio (router.ts): a linha "Como funciona" só existe quando aquela tela tem dica para o plano.
   const origem = origemDaTela();
   const guia = useQuery(guiaQuery).data;
-  const comDica = origem && dicaDe(guia, origem) ? origem : null;
+  const leitor = useLeitor(); // leitor: sem Piggy, sem guia e sem feedback (POST); fica o contato e a central de ajuda
+  const comDica = !leitor && origem && dicaDe(guia, origem) ? origem : null;
   return (
     <div className="span-12 ajuda-grade">
       <section className="ajuda-card ajuda-contato" aria-labelledby="ajuda-t-contato">
         <h2 id="ajuda-t-contato">Fale com a gente</h2>
         <ul>
-          <Item href={href("/piggy")} interna titulo="Converse com o Piggy" sub="Tira dúvidas aqui no painel" icone={<img src={ICON} alt="" width={28} height={28} />} />
+          {!leitor && <Item href={href("/piggy")} interna titulo="Converse com o Piggy" sub="Tira dúvidas aqui no painel" icone={<img src={ICON} alt="" width={28} height={28} />} />}
           <Item href="/wa" nova titulo="WhatsApp do Piggy" sub="O mesmo Piggy, no seu WhatsApp" icone={<i className="ph ph-whatsapp-logo" />} />
           <Item href="mailto:suporte@pigbankai.com" titulo="suporte@pigbankai.com" sub="Respondemos em até 1 dia útil" icone={<i className="ph ph-envelope" />} />
           <Item href="/suporte/contato" titulo="Formulário de contato" sub="Escreva pelo site" icone={<i className="ph ph-note-pencil" />} />
@@ -117,13 +118,13 @@ export function AjudaTela() {
       <section className="ajuda-card ajuda-aprender" aria-labelledby="ajuda-t-aprender">
         <h2 id="ajuda-t-aprender">Aprenda a usar</h2>
         <ul>
-          <Item onClick={abrirGuia} titulo="Guia do painel" icone={<i className="ph ph-question" />} />
+          {!leitor && <Item onClick={abrirGuia} titulo="Guia do painel" icone={<i className="ph ph-question" />} />}
           {comDica && <Item onClick={() => pedirDica(comDica)} titulo={`Como funciona ${route(comDica).label}`} icone={<i className="ph ph-info" />} />}
           <Item href="/suporte" titulo="Central de ajuda" icone={<i className="ph ph-lifebuoy" />} />
           <Item href="/comandos" titulo="O que pedir ao Piggy" icone={<i className="ph ph-chat-circle" />} />
         </ul>
       </section>
-      <Feedback />
+      {!leitor && <Feedback />}
     </div>
   );
 }

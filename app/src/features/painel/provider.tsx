@@ -172,7 +172,8 @@ export function PainelProvider({ children }: { children: ReactNode }) {
       }
     };
     void Promise.all(recursos.map(carregar));
-    if (completa && !emVoo.current) {
+    // Leitor: o GET /api/app/perfil é negado a ele (403) e o PUT escreve; fica o perfil padrão, sem o seletor.
+    if (completa && !emVoo.current && !sessaoRef.current.leitor) {
       leituraPerfil.current?.abort(); // a leitura de perfil de uma carga completa supera a anterior (como `leituras`, fora dele: não conta em `atualizando`)
       const c = new AbortController(); leituraPerfil.current = c; controladores.current.add(c);
       const atual = () => !c.signal.aborted && g === geracao.current && dono.current === uid && leituraPerfil.current === c;
@@ -196,7 +197,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     return { controlador, atual: () => !controlador.signal.aborted && g === geracao.current && uid === dono.current };
   };
   const mudarPerfil = async (p: S.PerfilPainel) => {
-    if (emVoo.current || !usuario) return;
+    if (emVoo.current || !usuario || sessaoRef.current.leitor) return;
     emVoo.current = true; setSalvandoPerfil(true); setAviso(null);
     const anterior = perfil, uid = usuario.user_id;
     const op = operacao(); setPerfil(p); setEscolhendo(false);
@@ -209,6 +210,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     const valor = sanitizarLayout(ids, perfil), chave = chaveLayout(usuario.user_id, perfil);
     layouts.current.set(perfil, valor); setLayout(valor);
     const uid = usuario.user_id;
+    if (sessaoRef.current.leitor) return; // leitor não grava na chave do dono (user_id é o mesmo): vale só nesta visita
     filaStorage.current = filaStorage.current.catch(() => {}).then(() => SecureStore.setItemAsync(chave, JSON.stringify(valor))).catch(() => { if (dono.current === uid) setAviso("Organização mantida nesta visita. Não conseguimos salvar neste aparelho."); });
   };
   // O erro do Descartar não tem botão de fechar: sai quando a pendência some, por qualquer caminho (descarte, prazo, Retomar, foco).
@@ -237,7 +239,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
   // Chave nova com a revalidação do refoco em voo: o efeito de carga espera o acesso, então o dado velho sairia sob o rótulo novo. Marca "carregando"; a carga que vem depois lê o novo.
   const trocouChave = (recursos: Recurso[]) => { if (acessoValidando.current) setDados((d) => ({ ...d, ...Object.fromEntries(recursos.map((k) => [k, { fase: "carregando" }])) })); };
   // atualizar cancela no pedido, não no efeito: o efeito do pai roda depois do dos filhos e mataria a página recém-pedida (#849).
-  return <Contexto.Provider value={{ usuario, gate, erroGate, ativo, travado, voltarAoPortao: () => setGate("negado"), pendente: pendente !== null, descartarPendente, mes, mudarMes: (m) => { setMes(m); if (m !== mes) trocouChave(MENSAIS); }, oculto, alternarPrivacidade, perfil, escolhendo, salvandoPerfil, mudarPerfil, layout, organizar, dados, aviso, atualizar: () => { cancelar(); pediuAtualizar.current = true; setVersao((v) => v + 1); }, atualizando, dias, mudarDias: (d) => { setDias(d); if (d !== dias) trocouChave(["previsao"]); }, relerPrevisao: () => setReleitura((v) => v + 1), relerMetas, versao, operacao, falhou }}>{children}</Contexto.Provider>;
+  return <Contexto.Provider value={{ usuario, gate, erroGate, ativo, travado, voltarAoPortao: () => setGate("negado"), pendente: pendente !== null, descartarPendente, mes, mudarMes: (m) => { setMes(m); if (m !== mes) trocouChave(MENSAIS); }, oculto, alternarPrivacidade, perfil, escolhendo, salvandoPerfil, mudarPerfil, layout: sessao.leitor ? layout.filter((id) => id !== "simulador") : layout, organizar, dados, aviso, atualizar: () => { cancelar(); pediuAtualizar.current = true; setVersao((v) => v + 1); }, atualizando, dias, mudarDias: (d) => { setDias(d); if (d !== dias) trocouChave(["previsao"]); }, relerPrevisao: () => setReleitura((v) => v + 1), relerMetas, versao, operacao, falhou }}>{children}</Contexto.Provider>;
 }
 /** Navigator permanece montado; nenhuma tela financeira monta antes do portão. */
 export function PortaoPainel({ children }: { children: ReactNode }) {

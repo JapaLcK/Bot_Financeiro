@@ -27,6 +27,9 @@ export default function Entrar() {
   const [estado, setEstado] = useState<EstadoEntrar>({ fase: "formulario", aviso: avisoInicial });
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  // Acesso de visualização (condomínio): usuário e senha que o dono definiu, sem Google, sem Apple e sem MFA.
+  const [leitura, setLeitura] = useState(false);
+  const alternarLeitura = () => { setLeitura((v) => !v); setEmail(""); setSenha(""); setEstado({ fase: "formulario" }); };
 
   const enviando = estado.fase === "enviando";
   const google = estado.fase === "google";
@@ -66,14 +69,14 @@ export default function Entrar() {
               <Card>
                 <View style={{ gap: espaco.lg }}>
                   <Input
-                    rotulo="E-mail"
-                    icone="Envelope"
+                    rotulo={leitura ? "Usuário" : "E-mail"}
+                    icone={leitura ? "Eye" : "Envelope"}
                     value={email}
                     onChangeText={digitar(setEmail)}
                     autoCapitalize="none"
                     autoCorrect={false}
-                    keyboardType="email-address"
-                    autoComplete="email"
+                    keyboardType={leitura ? "default" : "email-address"}
+                    autoComplete={leitura ? "username" : "email"}
                     textContentType="username"
                     desativado={ocupado}
                   />
@@ -89,12 +92,14 @@ export default function Entrar() {
                     erro={avisoFormulario}
                   />
                   <View style={{ alignSelf: "flex-end" }}>
-                    <Button
-                      rotulo="Esqueci a senha"
-                      variante="link"
-                      desativado={ocupado}
-                      onPress={() => router.push("/esqueci-senha")}
-                    />
+                    {leitura ? null : (
+                      <Button
+                        rotulo="Esqueci a senha"
+                        variante="link"
+                        desativado={ocupado}
+                        onPress={() => router.push("/esqueci-senha")}
+                      />
+                    )}
                   </View>
                   <Button
                     rotulo="Entrar"
@@ -109,15 +114,24 @@ export default function Entrar() {
                       // durante a espera de verdade (B1). A guarda de UMA
                       // requisição continua sendo o `pendentes` de `tocar()`.
                       aplicar({ fase: "enviando" });
-                      void tocar(() => enviar(email, senha, sessao.autenticar), aplicar);
+                      void tocar(() => enviar(email, senha, leitura ? sessao.autenticarLeitor : sessao.autenticar, leitura), aplicar);
                     }}
                   />
                 </View>
               </Card>
 
-              <Ou />
-
-              <BotoesSociais estado={estado} aplicar={aplicar} autenticar={sessao.autenticar} bloqueado={enviando} />
+              {leitura ? null : (
+                <>
+                  <Ou />
+                  <BotoesSociais estado={estado} aplicar={aplicar} autenticar={sessao.autenticar} bloqueado={enviando} />
+                </>
+              )}
+              <Button
+                rotulo={leitura ? "Entrar com e-mail e senha" : "Entrar com acesso de visualização"}
+                variante="link"
+                desativado={ocupado}
+                onPress={alternarLeitura}
+              />
             </>
           </FasesDaEntrada>
         </View>

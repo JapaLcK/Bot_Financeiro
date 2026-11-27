@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Meta } from "../lib/api-v2.gen";
 import { moneyText } from "../lib/format.js";
 import { MESES_PADRAO, fraseCusto } from "../lib/metas-textos";
-import { ErroApi, metasQuery } from "../lib/v2";
+import { ErroApi, metasQuery, useLeitor } from "../lib/v2";
 import { CRIAR_SENHA } from "../parts/Entrada";
 import { Frame } from "../parts/Frame";
 import { MetaCartao } from "../parts/MetaCartao";
@@ -36,6 +36,7 @@ function Bloqueio({ e }: { e: ErroApi }) {
 
 export function MetasPainel() {
   const q = useQuery(metasQuery);
+  const leitor = useLeitor();
   const [aberto, setAberto] = useState<Aberto | null>(null);
   const e = q.error instanceof ErroApi ? q.error : null;
   const e4 = e && e.status >= 400 && e.status < 500 ? e : null;
@@ -50,7 +51,7 @@ export function MetasPainel() {
   );
   return (
     <div className="panel span-12">
-      <Frame id="metas-painel" title="Suas metas" real aside={e4 ? null : nova}>
+      <Frame id="metas-painel" title="Suas metas" real aside={e4 || leitor ? null : nova}>
         {e4 ? <Bloqueio e={e4} />
           : !d ? (q.isError && !q.isFetching
             ? (
@@ -68,7 +69,7 @@ export function MetasPainel() {
                   <button type="button" className="btn btn-quiet" onClick={() => q.refetch()}>Tentar de novo</button>
                 </div>
               )}
-              {!reserva && (
+              {!reserva && !leitor && (
                 <div className="meta-convite">
                   <p>
                     <b>Reserva de emergência:</b> {MESES_PADRAO} meses das suas contas fixas
@@ -83,13 +84,13 @@ export function MetasPainel() {
               {!d.metas.length ? (
                 <div className="empty">
                   <i className="ph ph-target" aria-hidden="true" />
-                  <p>Você ainda não tem metas. Crie a primeira e eu mostro quanto já tem, quanto falta e se o seu ritmo chega lá.</p>
-                  <button type="button" className="btn btn-ghost" onClick={() => setAberto({})}>Criar minha primeira meta</button>
+                  <p>{leitor ? "Nenhuma meta cadastrada." : "Você ainda não tem metas. Crie a primeira e eu mostro quanto já tem, quanto falta e se o seu ritmo chega lá."}</p>
+                  {!leitor && <button type="button" className="btn btn-ghost" onClick={() => setAberto({})}>Criar minha primeira meta</button>}
                 </div>
               ) : (
                 <div className="metas-lista">
                   {ordem.map((m) => (
-                    <MetaCartao key={m.id} m={m} custo={d.custo_mensal} editar={(valor) => setAberto({ meta: m, comecar: valor ? "valor" : undefined })} />
+                    <MetaCartao key={m.id} m={m} custo={d.custo_mensal} editar={leitor ? undefined : (valor) => setAberto({ meta: m, comecar: valor ? "valor" : undefined })} />
                   ))}
                 </div>
               )}

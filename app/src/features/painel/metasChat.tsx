@@ -13,6 +13,7 @@ import { useBloco } from "./blocoContexto";
 import { avisos, DO_ALVO, fraseChegada, fraseCusto, fraseRitmo, MESES_PADRAO, type MetaV2 } from "./metasTextos";
 import { ContextoNavegacaoPainel } from "./navegacao";
 import { usePainel } from "./provider";
+import { useLeitor } from "@/features/auth/sessao";
 import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 import type { MetasV2 } from "@/api/schemas/painel";
 const VISIVEIS = 5, POR_LINHA = 12, LADO = 20; // metas à mostra (reserva incluída); blocos por linha; largura do bloco
@@ -74,15 +75,16 @@ function LinhaPedido({ icone, rotulo, rotuloAcessivel, pedido, ir, children }: {
 /** Aba Metas e card `metas` do chat (formato v2 de `/api/v2/metas`; `d` vem de `Metas`, o bloco do chat é o fallback): pílulas com ícone, % e barra (blocos na reserva), sem frases; elas só alimentam o VoiceOver. Reserva primeiro, depois as outras na ordem do servidor; mais de `VISIVEIS` linhas (a de "Montar reserva" conta): "+N" expande o resto aqui mesmo. No chat, criar é pedir à IA (`LinhaPedido`); editar e apagar também são com a IA. Na aba (fora do chat) a pílula e a linha "Montar reserva" abrem a folha `meta` (`metaForm.tsx`). */
 export function MetasChat({ d: dado }: { d?: MetasV2 } = {}) {
   const bloco = useBloco(), d = dado ?? bloco?.recursos.metas; const { cores } = useTema(); const navegar = useContext(ContextoNavegacaoPainel)?.navegar; /* uma entrada por vez (o duplo toque não empilha duas folhas); a aba sempre o tem, o chat só-leitura e os testes diretos não o usam */ const [aberto, setAberto] = useState(false);
+  const leitor = useLeitor(); // leitor: só lê, sem "Montar reserva" nem a ida à folha de meta
   if (!d) return <Vazio texto="Dado indisponível neste card." />;
   const ordem = [...d.metas].sort((a, b) => Number(b.tipo === "reserva") - Number(a.tipo === "reserva")), semReserva = !ordem.some((m) => m.tipo === "reserva");
   const visiveis = bloco ? VISIVEIS - Number(semReserva) : ordem.length, resto = ordem.length - visiveis; // no chat, a linha "Montar reserva" ocupa a vaga da reserva; na aba todas as metas aparecem, sem "+N" nem linhas de pedido
   return <View style={{ gap: 8 }}>
     {bloco && semReserva && <LinhaPedido icone="PiggyBank" rotulo="Montar reserva" rotuloAcessivel={`Montar reserva de emergência, ${MESES_PADRAO} meses, ainda não criada`} pedido="Quero montar minha reserva de emergência"><Blocos n={MESES_PADRAO} cheios={0} tom="brand" /></LinhaPedido>}
-    {!bloco && semReserva && <LinhaPedido icone="PiggyBank" rotulo="Montar reserva" rotuloAcessivel="Montar reserva de emergência" pedido="" ir={() => navegar?.("/meta?tipo=reserva" as Href)}><Blocos n={MESES_PADRAO} cheios={0} tom="brand" /></LinhaPedido>}
+    {!bloco && !leitor && semReserva && <LinhaPedido icone="PiggyBank" rotulo="Montar reserva" rotuloAcessivel="Montar reserva de emergência" pedido="" ir={() => navegar?.("/meta?tipo=reserva" as Href)}><Blocos n={MESES_PADRAO} cheios={0} tom="brand" /></LinhaPedido>}
     {!bloco && !ordem.length && <Vazio texto="Nenhuma meta ainda." />}
     {bloco && !ordem.length && <LinhaPedido icone="Plus" rotulo="Criar meta" rotuloAcessivel="Criar meta" pedido="Quero criar uma meta" />}
-    {(aberto ? ordem : ordem.slice(0, visiveis)).map((m) => <Pilula key={m.id} m={m} custo={d.custo_mensal} ir={bloco ? undefined : () => navegar?.(`/meta?id=${m.id}` as Href)} />)}
+    {(aberto ? ordem : ordem.slice(0, visiveis)).map((m) => <Pilula key={m.id} m={m} custo={d.custo_mensal} ir={bloco || leitor ? undefined : () => navegar?.(`/meta?id=${m.id}` as Href)} />)}
     {resto > 0 && <Pressable testID="meta-mais" accessibilityRole="button" accessibilityLabel={aberto ? "Mostrar menos metas" : `+${resto}, mostrar mais ${resto} ${resto === 1 ? "meta" : "metas"}`} onPress={() => { selecao(); setAberto(!aberto); }} style={{ backgroundColor: cores.surfaceControl, borderRadius: raio.pilula, minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }}>
       <Texto variante="rotulo">{aberto ? "Mostrar menos" : `+${resto}`}</Texto>
     </Pressable>}

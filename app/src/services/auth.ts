@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { ErroDeApi, TEMPO_LIMITE_AUTH_MS, _esquecerRotacoes, chamar, comLimite } from "../api/client";
 import {
+  loginLeituraSchema,
   loginSchema,
   pendenteGoogleSchema,
   perfilSchema,
@@ -181,6 +182,17 @@ export async function entrarComApple(identityToken: string, nonceCru: string, no
   );
 }
 
+/**
+ * Entra com a credencial de visualização (usuário e senha que o dono definiu): sessão de leitor, sem MFA.
+ * Mesma `tentativa()` do login: uma entrada mais nova supera esta.
+ */
+export async function entrarLeitura(usuario: string, senha: string): Promise<Entrada> {
+  return tentativa(async (minhaVez, sinal): Promise<Entrada> => {
+    const r = await chamar("/auth/leitura/login", loginLeituraSchema, { metodo: "POST", corpo: { usuario, senha }, semAuth: true, sinal });
+    return { fase: "pronta", perfil: await gravarSessao(minhaVez, r) };
+  });
+}
+
 /** O pré-cadastro do Google. Não grava credencial: fica FORA de `tentativa()`, como `cadastrar`. */
 export async function pendenteGoogle(token: string): Promise<{ email: string; name_hint: string }> {
   return chamar(`/auth/google/pending/${encodeURIComponent(token)}`, pendenteGoogleSchema, {
@@ -221,14 +233,14 @@ export async function completarCadastroSocial(
  * um passo e o outro caberia uma entrada mais nova, e o aparelho ficaria
  * logado nesta enquanto a tela mostra a outra.
  */
-async function gravarSessao(minhaVez: number, r: z.infer<typeof loginSchema>): Promise<Perfil> {
+async function gravarSessao(minhaVez: number, r: z.infer<typeof loginSchema> | z.infer<typeof loginLeituraSchema>): Promise<Perfil> {
   const gravou = await guardarCredenciaisSe(
     () => minhaVez === ultimaTentativa,
     { access: r.access_token, refresh: r.refresh_token },
   );
   if (!gravou) throw new EntradaSuperada();
   _esquecerRotacoes();
-  return { user_id: r.user_id, email: r.email, plan: r.plan };
+  return { user_id: r.user_id, ...("email" in r && { email: r.email, plan: r.plan }) };
 }
 
 /** Completa a entrada de quem tem dois fatores. `backup` usa código de reserva. */

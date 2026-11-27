@@ -10,12 +10,13 @@ import { MenuTelas } from "./parts/MenuTelas";
 import { RailConta } from "./parts/RailConta";
 import { Guia, navGuia } from "./parts/Guia";
 import { Tip } from "./parts/Tip";
+import { FaixaLeitura } from "./parts/FaixaLeitura";
 import { PAGES } from "./pages";
 import { AvisosDoTopo } from "./parts/AvisosDoTopo";
 import { ReceitasProvider } from "./widgets/ReceitasDoBanco";
-import { NO_MONTH, RAIL, TABBAR, href, noMenu, route, useRoute, type Path } from "./router";
+import { FECHADAS_AO_LEITOR, NO_MONTH, RAIL, TABBAR, href, noMenu, route, useRoute, type Path } from "./router";
 import { ICON } from "./lib/brand";
-import { DEMO, MESES, contasQuery, useAfiliado } from "./lib/v2";
+import { DEMO, MESES, contasQuery, useAfiliado, useLeitor } from "./lib/v2";
 
 // Quantos bancos têm conta não pausada na /api/v2/contas. Zero esconde a linha: a rota só
 // traz conta BANK, e quem conectou só cartão ou investimento chega com `contas: []`.
@@ -63,8 +64,13 @@ function Topbar({ s, path }: { s: DashState; path: Path }) {
 
 export function App() {
   const s = useDash() as DashState;
-  const path = useRoute();
+  const rota = useRoute();
   const afiliado = useAfiliado();
+  const leitor = useLeitor();
+  // Leitor em tela fechada a ele (URL direta, #/conta/..., #/familia): renderiza o Resumo e troca o endereço sem entrada no histórico.
+  const barrada = leitor && FECHADAS_AO_LEITOR.includes(rota);
+  const path: Path = barrada ? "/" : rota;
+  useEffect(() => { if (barrada) location.replace("#/"); }, [barrada]);
   const Page = PAGES[path];
   const first = useRef(true);
   const anterior = useRef(path);
@@ -85,7 +91,8 @@ export function App() {
     <>
       <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById("page-title")?.focus(); }}>Pular para o conteúdo</a>
       {/* Logo no começo do DOM: o balão do guia fica no começo da ordem de leitura (o Tab, com o véu, é dele). */}
-      <Guia s={s} path={path} />
+      {!leitor && <Guia s={s} path={path} />}
+      {leitor && <FaixaLeitura />}
       <div className="shell">
         <nav className="rail" aria-label="Páginas do painel">
           <a className="brand" href={href("/")}>
@@ -93,7 +100,7 @@ export function App() {
             <span>PigBank</span>
           </a>
           <ul className="rail-list">
-            {RAIL.filter((p) => noMenu(p, afiliado)).map(route).map((r) => (
+            {RAIL.filter((p) => noMenu(p, afiliado, leitor)).map(route).map((r) => (
               <li key={r.path}>
                 <a href={href(r.path)} aria-current={path === r.path ? "page" : undefined} title={r.label} data-guia={navGuia(r.path)}>
                   <i className={`ph ${r.icon}`} aria-hidden="true" /><span className="rail-label">{r.label}</span>
@@ -120,7 +127,7 @@ export function App() {
         </div>
       </div>
       <nav className="tabbar" aria-label="Páginas do painel">
-        {TABBAR.map((p) => {
+        {TABBAR.filter((p) => noMenu(p, afiliado, leitor)).map((p) => {
           const r = route(p);
           return (
             <a key={p} href={href(p)} aria-current={path === p ? "page" : undefined} data-tab={p === "/piggy" ? "piggy" : undefined} data-guia={navGuia(p)}>
@@ -133,7 +140,7 @@ export function App() {
         })}
         <button type="button" aria-haspopup="dialog" aria-current={TABBAR.includes(path) ? undefined : "true"} data-guia="nav.menu" onClick={() => window.dispatchEvent(new Event("dash:menu"))}><i className="ph ph-list" aria-hidden="true" /><span>Menu</span></button>
       </nav>
-      <AskBar path={path} />
+      {!leitor && <AskBar path={path} />}
       <Tip />
       <Command />
       <MenuTelas />

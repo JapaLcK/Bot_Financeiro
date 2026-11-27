@@ -109,6 +109,30 @@ if(PB_MFA)history.replaceState(null,'',location.pathname+location.search);
 </div>
 <p class="auth-alt">Não tem uma conta? <a href="/cadastro">Cadastre-se</a>
 </p>
+<p class="auth-alt"><a href="#" onclick="showLeitura();return false">Entrar com acesso de visualização</a></p>
+</form>
+<!-- Acesso de visualização (credencial de leitor do condomínio): usuário e senha, sem Google e sem MFA -->
+<form id="form-leitura" novalidate="" onsubmit="doLeitura(event)" style="display:none">
+<h1>Acesso de visualização</h1>
+<p class="auth-sub">Entre com o usuário e a senha de visualização. Você só consulta: não dá para alterar nada.</p>
+<div class="auth-error" id="leitura-error" role="alert">
+</div>
+<div class="field">
+<label for="leitura-usuario">Usuário</label>
+<input autocapitalize="none" autocomplete="username" autocorrect="off" id="leitura-usuario" required="" spellcheck="false" type="text"/>
+</div>
+<div class="field">
+<label for="leitura-senha">Senha</label>
+<div class="lp-password-field">
+<input autocomplete="current-password" id="leitura-senha" required="" type="password"/>
+<button aria-label="Mostrar senha" aria-pressed="false" class="lp-password-toggle" data-password="leitura-senha" type="button">
+<i aria-hidden="true" class="ph ph-eye">
+</i>
+</button>
+</div>
+</div>
+<button class="btn btn-primary btn-block btn-lg" id="btn-leitura" style="margin-top:8px" type="submit">Entrar</button>
+<p class="auth-alt"><a href="#" onclick="cancelLeitura();return false">Voltar</a></p>
 </form>
 <!-- MFA -->
 <form id="form-mfa" onsubmit="doMfa(event)" style="display:none">
@@ -162,7 +186,7 @@ if(PB_MFA)history.replaceState(null,'',location.pathname+location.search);
     return window.PBFamiliaConvite?window.PBFamiliaConvite.destino(depois):depois;
   }
   function err(id,m,ok){var e=document.getElementById(id);e.textContent=m;e.classList.toggle('ok',!!ok);e.classList.add('show')}
-  function clrErr(){['login-error','mfa-error'].forEach(function(i){var e=document.getElementById(i);if(e){e.classList.remove('show','ok');e.textContent=''}})}
+  function clrErr(){['login-error','mfa-error','leitura-error'].forEach(function(i){var e=document.getElementById(i);if(e){e.classList.remove('show','ok');e.textContent=''}})}
 
   // `?aviso=`: a sessão anterior terminou porque a conta não se confirmou
   // (`static/auth-refresh.js`). Com aviso a página fica no login.
@@ -199,6 +223,23 @@ if(PB_MFA)history.replaceState(null,'',location.pathname+location.search);
       goDash(nextParam()||postAuth(d));
     }catch(e){err('login-error','Erro de conexão. Tente novamente.')}
     finally{b.disabled=false;b.textContent=window.PBPurchaseIntent&&window.PBPurchaseIntent.pending()?'Entrar e continuar':'Entrar'}
+  }
+
+  // Acesso de visualização: POST /auth/leitura/login {usuario, senha} (mesmo CSRF do login). 401 é genérico de propósito
+  // (o servidor não diz se o usuário existe); 429 e 422 têm texto próprio. Vai direto ao `dashboard_url`: sem intenção de compra, sem convite.
+  function showLeitura(){clrErr();document.getElementById('form-login').style.display='none';document.getElementById('form-leitura').style.display='';document.getElementById('leitura-usuario').focus()}
+  function cancelLeitura(){clrErr();document.getElementById('form-leitura').style.display='none';document.getElementById('form-login').style.display=''}
+  async function doLeitura(ev){ev.preventDefault();clrErr();
+    var usuario=document.getElementById('leitura-usuario').value.trim(),pass=document.getElementById('leitura-senha').value;
+    if(!usuario||!pass)return err('leitura-error','Preencha usuário e senha.');
+    var b=document.getElementById('btn-leitura');b.disabled=true;b.textContent='Entrando…';
+    try{
+      var res=await fetch('/auth/leitura/login',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({usuario:usuario,senha:pass})});
+      var d=await payload(res);
+      if(!res.ok){err('leitura-error',res.status===429?'Muitas tentativas. Aguarde alguns minutos e tente de novo.':res.status===422?'Confira o usuário e a senha.':'Usuário ou senha incorretos.');return}
+      goDash(d.dashboard_url||'/painel');
+    }catch(e){err('leitura-error','Erro de conexão. Tente novamente.')}
+    finally{b.disabled=false;b.textContent='Entrar'}
   }
 
   var _ch=null;

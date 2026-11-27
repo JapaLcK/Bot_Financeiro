@@ -24,7 +24,7 @@ const bloco = (children: ReactNode) => <View style={{ gap: espaco.lg, paddingVer
 
 /** A tela Progresso ao milhão. 4xx nunca mostra dado guardado (some o corpo); rede, 5xx e contrato com dado: mantém e avisa. Só leitura: nada é gravado. */
 export function ProgressoMilhao() {
-  const { expirou } = useSessao(), { navegar } = useNavegarPainel();
+  const { expirou, leitor } = useSessao(), { navegar } = useNavegarPainel();
   const [dado, setDado] = useState<Dado | null>(null), [falha, setFalha] = useState<Falha | null>(null), [lendo, setLendo] = useState(true);
   const ctl = useRef<AbortController | null>(null), ir = useRef(navegar); ir.current = navegar; // `navegar` muda a cada render: fora das deps de `ler`, senão o foco relê sem parar
   const ler = useCallback(async () => {
@@ -51,7 +51,7 @@ export function ProgressoMilhao() {
     ? <>
       {falha === "erro" ? <Banner tom="warning" mensagem="Não deu para atualizar. Mostrando o que carregou antes." acao={{ rotulo: "Tentar de novo", onPress: () => void ler() }} /> : null}
       {dado.motivos.includes("sem_banco_conectado")
-        ? bloco(<><Texto>Conecte um banco para ver quanto falta para o seu primeiro milhão.</Texto><Button rotulo="Conectar banco" onPress={() => navegar("/conexoes")} /></>)
+        ? bloco(<><Texto>Conecte um banco para ver quanto falta para o seu primeiro milhão.</Texto>{!leitor && <Button rotulo="Conectar banco" onPress={() => navegar("/conexoes")} />}</>)
         : <MilhaoCorpo d={dado} />}
     </>
     : falha === "convite" ? bloco(<Texto>O Progresso ao milhão é do Plus e do Pro.</Texto>)
