@@ -341,6 +341,34 @@ def test_refresh_do_dono_continua_dono(conta):
     assert r.status_code == 200 and payload_de_sessao(r.json()["access_token"])["ro"] is False
 
 
+def _renova(refresh):
+    return TestClient(dashboard.app).post("/auth/refresh", headers={
+        "Authorization": f"Bearer {refresh}", dashboard.APP_CLIENT_HEADER: "app", "Content-Type": "application/json"})
+
+
+def test_replay_de_refresh_do_leitor_derruba_so_os_leitores(conta):
+    from core.sessions import get_active_session
+    dono, leitor = sessao_de(conta), leitor_de(conta)
+    novo = _renova(leitor["refresh"])
+    assert novo.status_code == 200
+    assert _renova(leitor["refresh"]).status_code == 401           # replay do refresh já usado
+    assert _renova(novo.json()["refresh_token"]).status_code == 401  # o leitor inteiro caiu
+    assert get_active_session(leitor["jti"]) is None
+    # o dono segue renovando e com a sessão viva
+    assert get_active_session(dono["jti"]) is not None
+    assert _renova(dono["refresh"]).status_code == 200
+
+
+def test_replay_de_refresh_do_dono_continua_derrubando_tudo_do_usuario(conta):
+    from core.sessions import get_active_session
+    dono, outra, leitor = sessao_de(conta), sessao_de(conta), leitor_de(conta)
+    assert _renova(dono["refresh"]).status_code == 200
+    assert _renova(dono["refresh"]).status_code == 401              # replay do dono
+    assert _renova(outra["refresh"]).status_code == 401
+    assert _renova(leitor["refresh"]).status_code == 401
+    assert get_active_session(dono["jti"]) is None
+
+
 def test_token_de_dono_com_jti_de_leitor_nao_vale(conta):
     """Mesmo jti, marcas diferentes: a linha manda (sem `ro` no token = 401, sem escalar para dono)."""
     leitor = leitor_de(conta)
