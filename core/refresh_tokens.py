@@ -146,11 +146,25 @@ def consume_refresh_token(
 
             # IDLE timeout — checa auth_sessions.last_seen_at
             cur.execute(
-                "select last_seen_at, revoked_at from auth_sessions where jti = %s",
+                """
+                select s.last_seen_at, s.revoked_at, s.somente_leitura,
+                       (not s.somente_leitura or exists (
+                          select 1 from credenciais_leitura c
+                          where c.user_id = s.user_id and c.ativo and c.versao = s.leitura_versao)) as valida
+                from auth_sessions s where s.jti = %s
+                """,
                 (session_jti,),
             )
             sess = cur.fetchone()
             if not sess or sess["revoked_at"] is not None:
+                conn.commit()
+                return None
+            if not sess["valida"]:  # leitor com credencial trocada/desativada: a sessão morre aqui
+                cur.execute("update auth_sessions set revoked_at = now() where jti = %s", (session_jti,))
+                cur.execute(
+                    "update auth_refresh_tokens set revoked_at = now() where session_jti = %s and revoked_at is null",
+                    (session_jti,),
+                )
                 conn.commit()
                 return None
             idle_threshold = now - timedelta(days=REFRESH_IDLE_TIMEOUT_DAYS)
@@ -192,6 +206,7 @@ def consume_refresh_token(
             "user_id": user_id,
             "session_jti": session_jti,
             "new_refresh_token": new_token,
+            "somente_leitura": bool(sess["somente_leitura"]),  # da linha da sessão, nunca do token recebido
         }
     except Exception as exc:
         logger.error("[refresh] erro ao consumir token: %s", exc, exc_info=True)

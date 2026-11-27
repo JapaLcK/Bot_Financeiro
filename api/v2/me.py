@@ -2,7 +2,7 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from api.v2.sessao import usuario_atual
@@ -40,6 +40,9 @@ def _afiliado(uid: int) -> bool:
 
 
 @router.get("/me", response_model=Me)
-def me(uid: int = Depends(usuario_atual)) -> Me:
+def me(request: Request, uid: int = Depends(usuario_atual)) -> Me:
+    # Leitor (credencial de visualização): sem papel de família nem área de afiliado do dono.
+    leitor = bool(getattr(request.state, "somente_leitura", False))
     return Me(plan_tier=get_plan_tier(uid), agents_ui_enabled=agents_ui_enabled(uid),
-              chat_ia=painel_chat_ia(uid), familia=_familia(uid), afiliado=_afiliado(uid))
+              chat_ia=painel_chat_ia(uid), familia=None if leitor else _familia(uid),
+              afiliado=False if leitor else _afiliado(uid))

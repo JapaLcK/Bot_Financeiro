@@ -772,6 +772,7 @@ def delete_user_data(
         "data_export_tokens",
         "auth_refresh_tokens",
         "auth_sessions",
+        "credenciais_leitura",
         "user_categories",
         "pockets",
         "pocket_lots",

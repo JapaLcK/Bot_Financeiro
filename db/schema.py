@@ -1624,6 +1624,29 @@ def init_db():
           on auth_sessions (user_id, revoked_at, last_seen_at desc)
         """,
 
+        # ─── Credencial de visualização (condomínio) ────────────────────────────
+        # Segunda credencial da MESMA conta: usuário + senha próprios, definidos
+        # pelo dono. Login com ela abre sessão `somente_leitura` do mesmo user_id.
+        # `versao` sobe a cada troca: sessão de leitor com versão velha morre.
+        # Funções em db/leitura.py.
+        """
+        create table if not exists credenciais_leitura (
+          user_id bigint primary key references users(id) on delete cascade,
+          username text not null,
+          password_hash text not null,
+          versao int not null default 1,
+          ativo boolean not null default true,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now()
+        )
+        """,
+        """
+        create unique index if not exists uq_credenciais_leitura_username
+          on credenciais_leitura (lower(username))
+        """,
+        "alter table auth_sessions add column if not exists somente_leitura boolean not null default false",
+        "alter table auth_sessions add column if not exists leitura_versao int",
+
         # ─── Alertas de orcamento ja enviados ───────────────────────────────────
         # Dedup: cada (user, categoria, mes, threshold) so dispara uma vez.
         # Helper em core/budget_alerts.py.

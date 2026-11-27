@@ -39,6 +39,7 @@ def create_session(
     *,
     ip: str | None = None,
     user_agent: str | None = None,
+    leitura_versao: int | None = None,
 ) -> str:
     """Cria uma sessao ativa e devolve o jti. Levanta em caso de falha de DB
     (login nao deve completar sem ter sessao registrada)."""
@@ -47,10 +48,11 @@ def create_session(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into auth_sessions (jti, user_id, ip, user_agent)
-                values (%s, %s, %s, %s)
+                insert into auth_sessions (jti, user_id, ip, user_agent, somente_leitura, leitura_versao)
+                values (%s, %s, %s, %s, %s, %s)
                 """,
-                (jti, int(user_id), ip, (user_agent or "")[:512] or None),
+                (jti, int(user_id), ip, (user_agent or "")[:512] or None,
+                 leitura_versao is not None, leitura_versao),
             )
         conn.commit()
     return jti
@@ -65,9 +67,13 @@ def get_active_session(jti: str | None) -> dict | None:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    select jti, user_id, ip, user_agent, created_at, last_seen_at
-                    from auth_sessions
-                    where jti = %s and revoked_at is null
+                    select s.jti, s.user_id, s.ip, s.user_agent, s.created_at, s.last_seen_at,
+                           s.somente_leitura
+                    from auth_sessions s
+                    where s.jti = %s and s.revoked_at is null
+                      and (not s.somente_leitura or exists (
+                            select 1 from credenciais_leitura c
+                            where c.user_id = s.user_id and c.ativo and c.versao = s.leitura_versao))
                     """,
                     (jti,),
                 )

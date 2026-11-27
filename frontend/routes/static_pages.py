@@ -21,6 +21,7 @@ from core.pg_text import recusa_veneno
 from core.secure_compare import constant_time_eq
 from db import conta_sem_credencial
 from db.affiliates import get_affiliate_by_user
+from frontend.routes.leitura_guard import e_leitor
 from frontend.routes.shared import (
     CONTA_COOKIE_NAME,
     FRONTEND_DIR,
@@ -580,13 +581,16 @@ def serve_precos(request: Request):
     from db import record_pricing_viewed
 
     uid = None
+    # Leitor (credencial de visualização) enxerga a página como o dono, mas NÃO gera funil nem
+    # régua de remarketing em nome dele: telemetria de página só para sessão que não é `ro`.
+    telemetria = not e_leitor(request)
     try:
         uid = _resolve_page_user_id(request)
-        if uid is not None:
+        if uid is not None and telemetria:
             record_pricing_viewed(uid)
     except Exception:  # telemetria nunca derruba a página de venda
         logging.getLogger(__name__).warning("viewed_pricing falhou", exc_info=True)
-    if uid is not None:  # T0 da régua de remarketing; try próprio, não derruba a página
+    if uid is not None and telemetria:  # T0 da régua de remarketing; try próprio, não derruba a página
         try:
             from db.remarketing import registrar_t0
 

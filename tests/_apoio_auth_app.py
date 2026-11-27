@@ -128,14 +128,15 @@ def bearer(uid):
 
 @pytest.fixture
 def emails(monkeypatch):
-    """Captura os e-mails da exclusão em vez de enviar. `.codigos`: (para, código);
+    """Captura os e-mails da exclusão em vez de enviar. `.codigos`: (para, código); `.finalidades`: a de cada código;
     `.excluida`: destinatários do "conta excluída"; `.falha`: True faz o envio do
     código falhar. O export também é capturado (`.exports`: URLs do link)."""
     from types import SimpleNamespace
     import core.services.email_service as es
-    cap = SimpleNamespace(codigos=[], excluida=[], exports=[], falha=False)
+    cap = SimpleNamespace(codigos=[], finalidades=[], excluida=[], exports=[], falha=False)
     monkeypatch.setattr(es, "send_account_reauth_code_email",
-                        lambda to, code: cap.codigos.append((to, code)) or not cap.falha)
+                        lambda to, code, finalidade="account_delete": (
+                            cap.codigos.append((to, code)), cap.finalidades.append(finalidade)) and not cap.falha)
     monkeypatch.setattr(es, "send_account_deletion_completed_email",
                         lambda to: cap.excluida.append(to) or True)
     monkeypatch.setattr(es, "send_data_export_link_email",

@@ -517,6 +517,7 @@ _401_RENOVAVEL = {
     (_MONO, "auth_account_export_request", "Senha incorreta."): False,
     # Login: nem chega ao interceptor — login.html não carrega o auth-refresh.js.
     (_MONO, "auth_login", "E-mail ou senha incorretos."): False,
+    (_MONO, "auth_leitura_login", "Usuário ou senha incorretos."): False,  # login do leitor: idem
     # Magic link consumido/expirado. É a pegadinha da lista: parece autenticação
     # e NÃO é renovável — access token novo não ressuscita um link expirado.
     (_MONO, "auth_dashboard_link", "Link de dashboard inválido ou expirado."): False,

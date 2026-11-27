@@ -1056,23 +1056,25 @@ def send_data_export_completed_email(
     )
 
 
-def send_account_reauth_code_email(to: str, code: str) -> bool:
-    """Código de 6 dígitos que autoriza excluir a conta (vale 15 min)."""
+def send_account_reauth_code_email(to: str, code: str, finalidade: str = "account_delete") -> bool:
+    """Código de 6 dígitos que autoriza excluir a conta ou mexer na credencial de visualização (vale 15 min)."""
+    leitura = finalidade != "account_delete"
+    acao = "alterar o acesso de visualização" if leitura else "excluir a conta"
     content = f"""
-      <p>Seu código para excluir a conta: <strong>{code}</strong></p>
+      <p>Seu código para {acao}: <strong>{code}</strong></p>
       <p>Vale 15 minutos.</p>
       <p class="warn">Não foi você? Não passe o código e fale com o suporte:
         <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
     """
-    html = _base_html("Código para excluir a conta — PigBank", content)
+    html = _base_html(f"Código para {acao} — PigBank", content)
     text = (
-        f"Seu código para excluir a conta: {code}. Vale 15 minutos. "
+        f"Seu código para {acao}: {code}. Vale 15 minutos. "
         f"Não foi você? Não passe o código e fale com o suporte: {SUPPORT_EMAIL}."
     )
     # O código vai SÓ no corpo: `send_email` grava assunto e destinatário em log e em
     # `system_event_logs` (user_id nulo, sobrevive à exclusão), então nenhum dos dois
     # pode carregar o código nem o endereço.
-    return send_email(to=to, subject="Seu código para excluir a conta PigBank",
+    return send_email(to=to, subject=f"Seu código para {acao} PigBank",
                       html_body=html, text_body=text, log_recipient=False)
 
 
