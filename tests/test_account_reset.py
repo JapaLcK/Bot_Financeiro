@@ -306,9 +306,9 @@ def _semeia(uid: int) -> None:
         conn.commit()
 
 
-# Contagens por tabela do que o reset APAGA. As três tabelas de gatilho de
-# categoria (user_category_triggers etc.) não existem no schema — o reset as
-# guarda com _table_exists, e aqui elas ficam de fora pelo mesmo motivo.
+# Contagens por tabela do que o reset APAGA. A user_category_feedback não existe
+# no schema do repositório, só em produção (DP9) — o reset a guarda com
+# _table_exists, e aqui ela fica de fora pelo mesmo motivo.
 _OF_JOINS = {
     "open_finance_accounts": (
         "select count(*) as n from open_finance_accounts a "

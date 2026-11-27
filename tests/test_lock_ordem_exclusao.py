@@ -91,8 +91,8 @@ _TABELAS_VARRIDAS = frozenset("""accounts affiliates ai_messages ai_pending_acti
     auth_sessions bill_instances category_budgets credit_cards daily_report_prefs dashboard_sessions data_export_tokens
     ia_declaracao_livro investment_lots investments launches link_codes of_cash_coverage of_cash_links ofx_imports password_reset_tokens
     patrimonio_fotos pending_actions platform_onboarding_tokens pocket_lots pockets recurring_charges recurring_expenses
-    recurring_incomes user_categories user_category_feedback user_category_rules user_category_triggers
-    user_identities user_mfa user_mfa_backup_codes user_trigger_candidates""".split())
+    recurring_incomes user_categories user_category_feedback user_category_rules
+    user_identities user_mfa user_mfa_backup_codes""".split())
 
 
 def test_exclusao_varre_o_mesmo_conjunto_de_tabelas_e_o_pai_antes_do_lote(user_id, monkeypatch):
