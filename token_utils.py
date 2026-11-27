@@ -27,7 +27,7 @@ def motivo_jwt_secret_fraco(secret: str) -> str | None:
     return None
 
 
-def make_dashboard_token(user_id: int, hours: float = 2, *, jti: str | None = None) -> str:
+def make_dashboard_token(user_id: int, hours: float = 2, *, jti: str | None = None, ro: bool = False) -> str:
     """
     Generate a short-lived signed token for dashboard access.
 
@@ -45,6 +45,8 @@ def make_dashboard_token(user_id: int, hours: float = 2, *, jti: str | None = No
     }
     if jti:
         payload["jti"] = jti
+    if ro:  # sessão de leitor (credencial de visualização): marca assinada, só leitura
+        payload["ro"] = True
     return jwt.encode(payload, _require_jwt_secret(), algorithm="HS256")
 
 
@@ -63,7 +65,7 @@ def decode_dashboard_token(token: str):
 def decode_dashboard_token_full(token: str):
     """
     Decode and validate a dashboard token.
-    Returns {"user_id": int, "jti": str | None} on success, None on failure.
+    Returns {"user_id": int, "jti": str | None, "ro": bool} on success, None on failure.
     """
     if not token:
         return None
@@ -76,6 +78,7 @@ def decode_dashboard_token_full(token: str):
         return {
             "user_id": int(payload["sub"]),
             "jti": payload.get("jti"),
+            "ro": bool(payload.get("ro")),
         }
     except Exception:
         return None

@@ -16,6 +16,7 @@ from .connection import get_conn
 from .google_auth import SEM_CREDENCIAL_SQL
 
 EXCLUIR = "account_delete"
+LEITURA = "leitura_credencial"  # definir/desativar a credencial de visualização
 MINUTOS = 15
 MAX_TENTATIVAS = 5
 

@@ -155,6 +155,7 @@ from frontend.routes.ai_chat import AIChatBody, criar_router as criar_ai_chat_ro
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
 from frontend.routes.conta_reauth import router as conta_reauth_router
+from frontend.routes.leitura_guard import LeituraGuardMiddleware, TIPOS_WS_LEITOR
 from frontend.routes.categories import router as categories_router
 from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.open_finance_cash import router as open_finance_cash_router
@@ -177,6 +178,7 @@ from frontend.routes.shared import (
     contas_dos_cookies,
     dashboard_current_cache as _dashboard_current_cache,
     dashboard_current_cache_epoch as _dashboard_current_cache_epoch,
+    barra_leitor as _barra_leitor,
     db_connect,
     decode_jwt as _decode_jwt,
     error_page_response,
@@ -2683,6 +2685,7 @@ EMAIL_RATE_LIMITS = {
     # Teto por e-mail no confirm do código de verificação (6 dígitos): impede
     # brute-force do código mesmo com rotação de IP. 10 tentativas / 15 min.
     "verify-email": (10, 15 * 60),
+    "leitura-login": (5, 60),
 }
 
 
@@ -2925,7 +2928,9 @@ COOKIES_DE_SESSAO = (
     ADMIN_AUTH_COOKIE_NAME,
 )
 
-def _issue_session_token(user_id: int, email: str, request: Request) -> tuple[str, str, str]:
+def _issue_session_token(
+    user_id: int, email: str, request: Request, *, leitura_versao: int | None = None,
+) -> tuple[str, str, str]:
     """Cria uma sessao em auth_sessions + emite access JWT + refresh token.
 
     Retorna (access_jwt, jti, refresh_token_plain). O jti deve ser passado para
@@ -2933,14 +2938,15 @@ def _issue_session_token(user_id: int, email: str, request: Request) -> tuple[st
     deve ser setado no cookie `refresh_token` via `_set_refresh_cookie`.
 
     Use em todo lugar que emite o cookie auth_token (login, OAuth, signup,
-    magic_link, etc).
+    magic_link, etc). É o ÚNICO emissor: `leitura_versao` (só o login de leitor)
+    grava a sessão como somente leitura e marca o access com `ro`.
     """
     from core.refresh_tokens import create_refresh_token
 
     ip = ip_cliente(request) or None
     ua = request.headers.get("user-agent") or None
-    jti = create_session(user_id, ip=ip, user_agent=ua)
-    access = _make_jwt(user_id, email, jti=jti)
+    jti = create_session(user_id, ip=ip, user_agent=ua, leitura_versao=leitura_versao)
+    access = _make_jwt(user_id, email, jti=jti, ro=leitura_versao is not None)
     refresh = create_refresh_token(user_id, session_jti=jti, ip=ip, user_agent=ua)
     return access, jti, refresh
 
@@ -2961,8 +2967,8 @@ def _set_auth_cookie(response: Response, token: str) -> None:
     )
 
 
-def _set_dashboard_cookie(response: Response, user_id: int, *, jti: str | None = None) -> str:
-    token = make_dashboard_token(user_id, hours=DASHBOARD_SESSION_HOURS, jti=jti)
+def _set_dashboard_cookie(response: Response, user_id: int, *, jti: str | None = None, ro: bool = False) -> str:
+    token = make_dashboard_token(user_id, hours=DASHBOARD_SESSION_HOURS, jti=jti, ro=ro)
     response.set_cookie(
         DASHBOARD_COOKIE_NAME,
         token,
@@ -2987,6 +2993,7 @@ def _entrega_sessao(
     access: str,
     jti: str,
     refresh: str,
+    ro: bool = False,
 ) -> dict[str, str | int]:
     """Entrega a sessão pelo canal do cliente. Devolve o que vai no CORPO.
 
@@ -3022,7 +3029,7 @@ def _entrega_sessao(
     if pedido != APP_CLIENT_APP or request.cookies:
         _set_auth_cookie(response, access)
         _set_refresh_cookie(response, refresh)
-        _set_dashboard_cookie(response, int(user_id), jti=jti)
+        _set_dashboard_cookie(response, int(user_id), jti=jti, ro=ro)
         return {}
     # Corpo com refresh token de 14 dias não pode ser guardado por ninguém no
     # caminho. O `/auth/refresh` já fazia `_no_store`; o login, a verificação de
@@ -3032,7 +3039,7 @@ def _entrega_sessao(
         "access_token": access,
         "refresh_token": refresh,
         "dashboard_token": make_dashboard_token(
-            int(user_id), hours=DASHBOARD_SESSION_HOURS, jti=jti
+            int(user_id), hours=DASHBOARD_SESSION_HOURS, jti=jti, ro=ro
         ),
         "expires_in": AUTH_COOKIE_MAX_AGE,
     }
@@ -3164,7 +3171,8 @@ async def _get_current_user(
         raise HTTPException(status_code=401, detail="Token não fornecido.",
                             headers=WWW_AUTHENTICATE_401)
     payload = _decode_jwt(token)
-    if not payload or payload.get("type") != "auth":
+    # Token de leitor (`ro`) sem jti nunca vale: a sessão dele só existe em auth_sessions.
+    if not payload or payload.get("type") != "auth" or (payload.get("ro") and not payload.get("jti")):
         raise HTTPException(status_code=401, detail="Token inválido ou expirado.",
                             headers=WWW_AUTHENTICATE_401)
     request.state.auth_payload = payload
@@ -3175,10 +3183,14 @@ async def _get_current_user(
     jti = payload.get("jti")
     if jti:
         session = await asyncio.to_thread(get_active_session, jti)
-        if not session or int(session.get("user_id") or 0) != user_id:
+        # A linha é a verdade: `ro` do token e `somente_leitura` da sessão têm de bater.
+        if (not session or int(session.get("user_id") or 0) != user_id
+                or bool(session.get("somente_leitura")) != bool(payload.get("ro"))):
             raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.",
                                 headers=WWW_AUTHENTICATE_401)
         request.state.session_jti = jti
+        request.state.somente_leitura = bool(payload.get("ro"))
+        _barra_leitor(request)
         # Atualiza last_seen com debounce; falha silenciosa.
         asyncio.create_task(asyncio.to_thread(touch_session, jti))
     else:
@@ -3664,6 +3676,41 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
     )
 
 
+class LeituraLoginBody(_CorpoSemVeneno):
+    usuario: str
+    senha: str
+
+
+@app.post("/auth/leitura/login")
+@limiter.limit("5/minute")
+async def auth_leitura_login(request: Request, response: Response, body: LeituraLoginBody):
+    """Login com a credencial de visualização: sessão SOMENTE LEITURA do mesmo user_id.
+
+    Não passa por `_desafio_mfa` (o MFA é do dono; esta sessão nunca escreve nem
+    mexe em segurança). Erro genérico, igual ao do login do dono.
+    """
+    from db import verificar_login_leitura
+
+    await _check_auth_rate_limits("leitura-login", request, body.usuario)
+    cred = await asyncio.to_thread(verificar_login_leitura, body.usuario, body.senha)
+    # Rastro em auth_login_events SEM e-mail (nem o do dono nem o usuário digitado) e com
+    # failure_reason preenchido: `is_known_login_ip` só conta success com reason nulo, então o IP
+    # do leitor não "conhece" o IP para o dono. Sem `_concluir_login`: nenhum alerta de novo login.
+    ip, ua = ip_cliente(request), request.headers.get("user-agent")
+    if not cred:
+        await log_auth_login_event("", False, ip_address=ip, user_agent=ua, failure_reason="leitura_invalid_credentials")
+        raise HTTPException(status_code=401, detail="Usuário ou senha incorretos.")
+    user_id = cred["user_id"]
+    await log_auth_login_event("", True, user_id=user_id, ip_address=ip, user_agent=ua, failure_reason="leitura_login")
+    _raise_if_account_scheduled_for_deletion(user_id)
+    token, jti, refresh = _issue_session_token(user_id, "", request, leitura_versao=cred["versao"])
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=token, jti=jti, refresh=refresh, ro=True
+    )
+    return {"user_id": user_id, "somente_leitura": True,
+            "dashboard_url": _post_login_url(user_id, request), **credenciais}
+
+
 async def _mfa_ligado(user_id: int) -> bool:
     from db import get_mfa_status
 
@@ -4017,20 +4064,23 @@ async def auth_refresh(request: Request, response: Response):
     session_jti = result["session_jti"]
     new_refresh = result["new_refresh_token"]
 
+    # `ro` vem da LINHA da sessão (consume_refresh_token), nunca do token recebido:
+    # refresh de leitor não vira sessão de dono. Leitor não leva e-mail no access.
+    ro = bool(result.get("somente_leitura"))
     # Recupera email pra montar o access JWT
     try:
         from db import get_auth_user
-        u = await asyncio.to_thread(get_auth_user, user_id)
+        u = None if ro else await asyncio.to_thread(get_auth_user, user_id)
         email = (u or {}).get("email") or ""
     except Exception:
         email = ""
 
-    access = _make_jwt(user_id, email, jti=session_jti)
+    access = _make_jwt(user_id, email, jti=session_jti, ro=ro)
     # Navegador: renova os três cookies (o dashboard_token com o MESMO jti).
     # App: recebe os três no corpo, e nenhum cookie.
     credenciais = _entrega_sessao(
         request, response, user_id=user_id, access=access, jti=session_jti,
-        refresh=new_refresh,
+        refresh=new_refresh, ro=ro,
     )
     request.state.session_user_id = user_id
     _no_store(response)
@@ -4142,8 +4192,11 @@ def _open_finance_ui_enabled(user_id: int, email: str | None) -> bool:
 
 
 @app.get("/auth/me")
-async def auth_me(user_id: int = Depends(_get_current_user)):
-    """Retorna dados do usuário autenticado."""
+async def auth_me(user_id: int = Depends(_get_current_user), request: Request = None):
+    """Retorna dados do usuário autenticado.
+
+    Sessão de leitor recebe a versão SEM dado pessoal do dono (e-mail, telefone,
+    nome, credencial, MFA): só o que o app precisa para abrir."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import (
@@ -4185,19 +4238,25 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     # decifrado) nem o id de cliente do Stripe (interno). Só o próprio usuário
     # vê a resposta, mas é allowlist por precaução (evita vazar colunas novas).
     _ME_HIDDEN = {"email_enc", "display_name_enc", "phone_enc", "stripe_customer_id"}
-    safe_user = {k: v for k, v in user_dict.items() if k not in _ME_HIDDEN}
+    leitor = bool(getattr(getattr(request, "state", None), "somente_leitura", False))  # request None: chamada direta
+    if leitor:
+        safe_user = {k: user_dict.get(k) for k in ("plan", "plan_expires_at", "created_at")}
+        show_onboarding = False
+    else:
+        safe_user = {k: v for k, v in user_dict.items() if k not in _ME_HIDDEN}
     return {
         "user_id": user_id,
         **safe_user,
+        **({"somente_leitura": True} if leitor else {}),
         "show_mfa_onboarding": show_onboarding,
         # False = conta criada só via Google (password_hash NULL): a UI manda
         # DEFINIR senha em vez de mostrar campo de senha que nunca aceita nada.
         # Lido do banco, não do cache do get_auth_user — uma fonte de verdade.
-        "has_password": await asyncio.to_thread(auth_account_has_password, user_id),
+        "has_password": True if leitor else await asyncio.to_thread(auth_account_has_password, user_id),
         # True = sem senha E sem Google/Apple: o front sobe o "Crie sua senha" e
         # as rotas de dados respondem 403 password_required.
-        "precisa_criar_senha": await asyncio.to_thread(conta_sem_credencial, user_id),
-        "mfa_enabled": bool(mfa.get("enabled")),
+        "precisa_criar_senha": False if leitor else await asyncio.to_thread(conta_sem_credencial, user_id),
+        "mfa_enabled": False if leitor else bool(mfa.get("enabled")),
         # `user=user_dict` pelo mesmo motivo do `needs_plan_selection` da linha
         # de baixo: a linha JÁ está em mão (get_auth_user, :3290). Sem ela o
         # gate faria um SELECT novo — e, pior, um SELECT SÍNCRONO dentro deste
@@ -10080,6 +10139,10 @@ app.include_router(retomada_router)
 app.mount("/api/v2", api_v2_app)
 app.mount("/api/app", api_nativo_app)
 
+# Guard da sessão de leitor: registrado por ÚLTIMO = middleware mais externo, roda
+# antes de todos e cobre os mounts acima (frontend/routes/leitura_guard.py).
+app.add_middleware(LeituraGuardMiddleware, cabecalhos=_SECURITY_HEADERS)
+
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────
 
@@ -10094,9 +10157,14 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
         await ws.close(code=1008)
         return
     jti = payload.get("jti")
+    ro = bool(payload.get("ro"))
+    if ro and not jti:
+        await ws.close(code=1008)
+        return
     if jti:
         session = await asyncio.to_thread(get_active_session, jti)
-        if not session or int(session.get("user_id") or 0) != int(user_id):
+        if (not session or int(session.get("user_id") or 0) != int(user_id)
+                or bool(session.get("somente_leitura")) != ro):
             await ws.close(code=1008)
             return
 
@@ -10132,10 +10200,19 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
 
         while True:
             raw = await ws.receive_text()
+            if ro:  # credencial trocada/desativada ou sessão revogada depois da abertura: fecha, não serve
+                vivo = await asyncio.to_thread(get_active_session, jti)
+                if not vivo or int(vivo.get("user_id") or 0) != int(user_id):
+                    await ws.close(code=4401, reason="sessao_encerrada")
+                    return
             t = None
             try:
                 payload = json.loads(raw) if raw.strip().startswith("{") else {"type": raw}
                 t       = payload.get("type")
+
+                if ro and t not in TIPOS_WS_LEITOR:  # leitor: nega por padrão, nada é processado
+                    await ws.close(code=4403, reason="somente_leitura")
+                    return
 
                 if t == "refresh":
                     y, m = manager.get_month(ws, user_id)

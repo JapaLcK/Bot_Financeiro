@@ -400,6 +400,16 @@ from .google_auth import (
     cleanup_expired_pending_signups,
 )
 
+# ── Credencial de visualização (sessão somente leitura) ──────────────────────
+from .leitura import (
+    LeituraInvalida,
+    UsernameEmUso,
+    definir as definir_credencial_leitura,
+    desativar as desativar_credencial_leitura,
+    obter as obter_credencial_leitura,
+    verificar_login as verificar_login_leitura,
+)
+
 # ── MFA (TOTP) ───────────────────────────────────────────────────────────────
 from .mfa import (
     get_mfa_status,
@@ -614,6 +624,9 @@ __all__ = [
     "auth_account_has_password", "conta_sem_credencial", "email_has_password", "link_google_identity",
     "create_pending_google_signup", "get_pending_google_signup",
     "consume_pending_google_signup", "cleanup_expired_pending_signups",
+    # credencial de visualização (leitor)
+    "LeituraInvalida", "UsernameEmUso", "definir_credencial_leitura", "desativar_credencial_leitura",
+    "obter_credencial_leitura", "verificar_login_leitura",
     # mfa (totp)
     "get_mfa_status", "mfa_setup_secret", "mfa_verify_and_enable",
     "mfa_regenerate_backup_codes", "mfa_verify_totp", "mfa_consume_backup_code",

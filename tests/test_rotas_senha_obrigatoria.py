@@ -209,6 +209,11 @@ TABELA = {
     **{(m, f"{pre}{p}"): (B, "usuario_logado (sem assinatura, com credencial)") for pre in ("/api/v2", "/api/app")
        for m, p in (("POST", "/familia/sair"), ("POST", "/familia/convites/aceitar"),
                     ("DELETE", "/familia/permissoes/{escopo}"))},
+    # credencial de visualização (api/v2/leitura.py): gestão pelo dono, `usuario_sessao` (sessão + credencial, sem plano)
+    **{(m, f"{pre}/conta/leitura"): (B, "usuario_sessao") for pre in ("/api/v2", "/api/app")
+       for m in ("GET", "PUT", "DELETE")},
+    **{("POST", f"{pre}/conta/leitura/codigo"): (B, "usuario_sessao") for pre in ("/api/v2", "/api/app")},
+    ("POST", "/auth/leitura/login"): (P, "login do leitor (credencial de visualização)"),
     # PR 4 (api/v2/familia_dados.py): conceder e ler o histórico pedem plano; as leituras do titular também
     **{(m, f"{pre}{p}"): (B, gate) for pre, gate in (("/api/v2", "usuario_atual"), ("/api/app", "usuario_do_app"))
        for m, p in (("POST", "/familia/permissoes"), ("GET", "/familia/historico"),

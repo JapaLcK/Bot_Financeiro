@@ -940,7 +940,7 @@ async def db_connect():
 
 # ─── Auth-token (JWT de login) deps ──────────────────────────────────────────
 
-def make_jwt(user_id: int, email: str, *, jti: str | None = None) -> str:
+def make_jwt(user_id: int, email: str, *, jti: str | None = None, ro: bool = False) -> str:
     from datetime import timedelta
     payload: dict[str, Any] = {
         "sub": str(user_id),
@@ -950,6 +950,8 @@ def make_jwt(user_id: int, email: str, *, jti: str | None = None) -> str:
     }
     if jti:
         payload["jti"] = jti
+    if ro:  # sessão de leitor: marca assinada que o guard lê sem banco
+        payload["ro"] = True
     return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
@@ -1027,18 +1029,22 @@ def payload_de_sessao(token: str) -> dict | None:
     qual dos dois formatos a identidade chegou. O access token ainda é o mais
     curto dos dois: aceitar 15 minutos onde 12 horas já valiam não afrouxa nada.
 
-    Devolve `{"user_id": int, "jti": str | None}` ou None.
+    Devolve `{"user_id": int, "jti": str | None, "ro": bool}` ou None. Token de
+    leitor (`ro`) sem `jti` é inválido: a sessão dele só existe em `auth_sessions`.
     """
     if not token:
         return None
     dashboard = decode_dashboard_token_full(token)
     if dashboard:
-        return dashboard
+        return dashboard if (dashboard["jti"] or not dashboard["ro"]) else None
     auth = decode_jwt(token) or {}
     if auth.get("type") != "auth":
         return None
+    ro = bool(auth.get("ro"))
+    if ro and not auth.get("jti"):
+        return None
     try:
-        return {"user_id": int(auth["sub"]), "jti": auth.get("jti")}
+        return {"user_id": int(auth["sub"]), "jti": auth.get("jti"), "ro": ro}
     except (KeyError, TypeError, ValueError):
         # `sub` ausente ou não numérico: token malformado é token inválido.
         return None
@@ -1072,6 +1078,14 @@ def sessao_divergente(conn: HTTPConnection) -> bool:
     return True
 
 
+def barra_leitor(request: Request) -> None:
+    """2ª trava da sessão de leitor (a 1ª é o `LeituraGuardMiddleware`): método não seguro = 403.
+    Vale para toda rota que resolve a sessão por `resolve_dashboard_user_id` / `_get_current_user`
+    (inclusive as três dependências da /api/v2 e do /api/app)."""
+    if getattr(request.state, "somente_leitura", False) and request.method not in ("GET", "HEAD", "OPTIONS"):
+        raise HTTPException(status_code=403, detail={"error": "somente_leitura"})
+
+
 def resolve_dashboard_user_id(request: Request) -> int:
     if sessao_divergente(request):
         raise HTTPException(status_code=401, detail="Sessão inconsistente. Faça login novamente.",
@@ -1090,10 +1104,15 @@ def resolve_dashboard_user_id(request: Request) -> int:
     # Tokens sem jti (legacy / rollout) sao grandfathered ate expirarem.
     if jti:
         session = get_active_session(jti)
-        if not session or int(session.get("user_id") or 0) != user_id:
+        # A linha é a verdade: o `ro` do token tem de bater com `somente_leitura` dela
+        # (token de dono com jti de sessão de leitor, ou o inverso, não vale).
+        if (not session or int(session.get("user_id") or 0) != user_id
+                or bool(session.get("somente_leitura")) != bool(payload.get("ro"))):
             raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.",
                                 headers=WWW_AUTHENTICATE_401)
         request.state.session_jti = jti
+        request.state.somente_leitura = bool(payload.get("ro"))
+        barra_leitor(request)
     else:
         # Token de dashboard legado sem jti: se a conta trocou de senha (reset),
         # invalida — senão um token roubado sobrevive ao reset até expirar (12h).
@@ -1362,10 +1381,11 @@ def _resolve_page_user_id(request: Request) -> int | None:
     if payload and payload.get("type") == "auth":
         uid = int(payload["sub"])
         jti = payload.get("jti")
-        if not jti:
+        if not jti and not payload.get("ro"):
             return uid
-        session = get_active_session(jti)
-        if session and int(session.get("user_id") or 0) == uid:
+        session = get_active_session(jti) if jti else None
+        if (session and int(session.get("user_id") or 0) == uid
+                and bool(session.get("somente_leitura")) == bool(payload.get("ro"))):
             return uid
     # 2. dashboard_token (cookie de 12h) — mesma validação de sessão/jti das
     #    rotas de dados. Levanta 401 quando inválido → tratamos como deslogado.

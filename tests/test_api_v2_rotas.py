@@ -29,12 +29,17 @@ from fastapi.sse import EventSourceResponse
 from pydantic import BaseModel
 
 from api.v2 import app as app_v2
-from api.v2.sessao import usuario_atual, usuario_logado
+from api.v2.sessao import usuario_atual, usuario_logado, usuario_sessao
 from test_pix_rota_registrada import _andar_nas_rotas
 
 PREFIXO = "/api/v2"
 # As únicas rotas que dispensam a assinatura (quem não tem plano aceita o convite, sai e revoga o que liberou): `usuario_logado`.
 SEM_ASSINATURA = {("POST", "/familia/convites/aceitar"), ("POST", "/familia/sair"), ("DELETE", "/familia/permissoes/{escopo}")}
+# Credencial de leitura (api/v2/leitura.py): gestão da conta pelo dono, só sessão (`usuario_sessao`), sem o gate de plano.
+COM_SESSAO = {("GET", "/conta/leitura"), ("PUT", "/conta/leitura"), ("DELETE", "/conta/leitura"),
+              ("POST", "/conta/leitura/codigo")}
+# `usuario` do corpo do PUT é o NOME de login da credencial de leitura, não identifica o dono (que vem da sessão).
+NOME_DE_CAMPO_PERMITIDO = {("/conta/leitura", "usuario")}
 _PARAM_DE_USUARIO = re.compile(r"(?i)user|usuario|uid|owner|dono")
 
 
@@ -81,15 +86,19 @@ def violacoes(app_pai, app_v2) -> list[str]:
         usadas = {d.call for d in _dependants(route.dependant)}
         esperada, proibida = ((usuario_logado, usuario_atual) if any((m, path) in SEM_ASSINATURA for m in route.methods)
                               else (usuario_atual, usuario_logado))
+        if any((m, path) in COM_SESSAO for m in route.methods):
+            esperada, proibida = usuario_sessao, usuario_atual
         if esperada not in usadas:
             achados.append(f"{path}: sem a dependência {esperada.__name__}")
         if proibida in usadas:
             achados.append(f"{path}: usa {proibida.__name__}, que não é a desta rota")
+        if usuario_logado in usadas and esperada is not usuario_logado:
+            achados.append(f"{path}: usa usuario_logado, que não é a desta rota")
         # SSE (`EventSourceResponse` + gerador) tipa o ITEM do stream pela anotação de retorno.
         if (route.stream_item_field if route.is_sse_stream else route.response_model) is None:
             achados.append(f"{path}: sem response_model")
         suspeitos = sorted({n for n in _nomes_de_parametro(route)
-                            if n and _PARAM_DE_USUARIO.search(n)})
+                            if n and _PARAM_DE_USUARIO.search(n) and (path, n) not in NOME_DE_CAMPO_PERMITIDO})
         if suspeitos:
             achados.append(f"{path}: parâmetro de usuário {suspeitos}")
 

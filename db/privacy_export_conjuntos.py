@@ -268,6 +268,7 @@ NAO_EXPORTADAS: dict[str, str] = {
         "password_reset_tokens", "platform_onboarding_tokens",
     ), _CREDENCIAL),
     "auth_refresh_tokens": "só `token_hash` e o mesmo IP e aparelho que as sessões de login",
+    "credenciais_leitura": "credencial de visualização: o hash da senha e o usuário de login de terceiros leitores",
     "user_mfa_backup_codes": "só hashes dos códigos de recuperação",
     "family_invites": ("convite do Plano Família: só o hash do token e as datas; a entrada no grupo sai em"
                        " familia_participacao, e quem usou o convite de outra pessoa é dado de terceiro"),

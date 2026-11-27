@@ -19,21 +19,26 @@ router = APIRouter()
 @router.post("/auth/account/reauth-code")
 @shared.limiter.limit("5/hour")
 async def enviar_codigo_de_reautenticacao(request: Request):
-    user_id = shared.resolve_dashboard_user_id(request)
+    return await enviar_codigo(shared.resolve_dashboard_user_id(request), reauth_codes.EXCLUIR)
+
+
+async def enviar_codigo(user_id: int, finalidade: str):
+    """Emite e manda por e-mail o código de `finalidade` (uma linha por usuário e finalidade)."""
     await asyncio.to_thread(shared.raise_if_account_scheduled_for_deletion, user_id)
     modo = await asyncio.to_thread(reauth_codes.modo, user_id)
     if modo is None:
         raise HTTPException(status_code=404, detail="Conta de login não encontrada.")
     if modo == "sem_credencial":   # e-mail não provado: não se manda código a ele
         raise HTTPException(status_code=409, detail=PASSWORD_NOT_SET_MSG)
+    # Teto 3/h SOMA as finalidades (uma chave por usuário): pedir leitura gasta o de exclusão.
     from frontend.finance_bot_websocket_custom import _check_persistent_rate_limit
     await _check_persistent_rate_limit("account-reauth-code", f"user:{user_id}", 3, 3600)
     email = await asyncio.to_thread(get_user_email, user_id)
     if not email:
         raise HTTPException(status_code=400, detail="E-mail não cadastrado para esta conta.")
-    code = await asyncio.to_thread(reauth_codes.emitir, user_id, reauth_codes.EXCLUIR)
+    code = await asyncio.to_thread(reauth_codes.emitir, user_id, finalidade)
     from core.services.email_service import send_account_reauth_code_email
-    if not await asyncio.to_thread(send_account_reauth_code_email, email, code):
+    if not await asyncio.to_thread(send_account_reauth_code_email, email, code, finalidade):
         raise HTTPException(
             status_code=500,
             detail="Não foi possível enviar o código. Tente de novo em alguns minutos.",

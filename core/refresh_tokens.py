@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 from core.pg_text import causa_segura
 from db.connection import get_conn
+from db.leitura import _revogar_sessoes as _revogar_leitores
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ def consume_refresh_token(
     Retorna dict com `user_id`, `session_jti`, `new_refresh_token` em sucesso.
     Retorna None em qualquer um destes casos:
       - token não encontrado / expirado / já revogado
-      - **replay** (token já com used_at) → revoga TODO o user
+      - **replay** (token já com used_at) → revoga TODO o user (replay de sessão de leitor: só os leitores)
       - **idle** (auth_sessions.last_seen_at < now - 7d) → revoga sessão
 
     Sempre falha silenciosa em exceções de DB — o caller trata None como
@@ -132,10 +133,17 @@ def consume_refresh_token(
                     "[refresh] possível replay detectado — revogando todos os refresh tokens",
                     extra={"user_id": user_id},
                 )
-                cur.execute(
-                    "update auth_refresh_tokens set revoked_at = now() where user_id = %s and revoked_at is null",
-                    (user_id,),
-                )
+                cur.execute("select somente_leitura from auth_sessions where jti = %s", (session_jti,))
+                dona = cur.fetchone()
+                if dona and dona["somente_leitura"]:
+                    # Replay de LEITOR derruba só os leitores: o mesmo user_id é do dono,
+                    # e o leitor não pode usar o replay para cortar a renovação dele.
+                    _revogar_leitores(cur, user_id)
+                else:
+                    cur.execute(
+                        "update auth_refresh_tokens set revoked_at = now() where user_id = %s and revoked_at is null",
+                        (user_id,),
+                    )
                 # Revoga também a sessão correspondente (jti)
                 cur.execute(
                     "update auth_sessions set revoked_at = now() where jti = %s and revoked_at is null",
@@ -146,11 +154,25 @@ def consume_refresh_token(
 
             # IDLE timeout — checa auth_sessions.last_seen_at
             cur.execute(
-                "select last_seen_at, revoked_at from auth_sessions where jti = %s",
+                """
+                select s.last_seen_at, s.revoked_at, s.somente_leitura,
+                       (not s.somente_leitura or exists (
+                          select 1 from credenciais_leitura c
+                          where c.user_id = s.user_id and c.ativo and c.versao = s.leitura_versao)) as valida
+                from auth_sessions s where s.jti = %s
+                """,
                 (session_jti,),
             )
             sess = cur.fetchone()
             if not sess or sess["revoked_at"] is not None:
+                conn.commit()
+                return None
+            if not sess["valida"]:  # leitor com credencial trocada/desativada: a sessão morre aqui
+                cur.execute("update auth_sessions set revoked_at = now() where jti = %s", (session_jti,))
+                cur.execute(
+                    "update auth_refresh_tokens set revoked_at = now() where session_jti = %s and revoked_at is null",
+                    (session_jti,),
+                )
                 conn.commit()
                 return None
             idle_threshold = now - timedelta(days=REFRESH_IDLE_TIMEOUT_DAYS)
@@ -192,6 +214,7 @@ def consume_refresh_token(
             "user_id": user_id,
             "session_jti": session_jti,
             "new_refresh_token": new_token,
+            "somente_leitura": bool(sess["somente_leitura"]),  # da linha da sessão, nunca do token recebido
         }
     except Exception as exc:
         logger.error("[refresh] erro ao consumir token: %s", exc, exc_info=True)

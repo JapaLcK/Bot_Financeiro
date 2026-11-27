@@ -123,6 +123,7 @@ ASSUNTOS_SEGUROS: dict[tuple[str, str], str] = {
     ("core/services/email_service.py", "send_welcome_email"): "número de dias do trial",
     ("core/services/email_service.py", "send_tip_email"): "título da lista fixa `_TIPS`",
     ("core/services/email_service.py", "send_password_reset_email"): "dois literais",
+    ("core/services/email_service.py", "send_account_reauth_code_email"): "dois literais (`acao`); o código vai só no corpo",
     ("core/services/email_service.py", "send_pro_welcome_email"): _PLANO,
     ("core/services/email_service.py", "send_ebook_email"):
         "nome do produto: `description` da linha do Stripe ou foto da cobrança Pix",
