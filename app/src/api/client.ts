@@ -32,6 +32,22 @@ export class SessaoExpirada extends ErroDeApi {
   }
 }
 
+export const TEXTO_SOMENTE_LEITURA = "Acesso de visualização: só leitura.";
+
+/** O 403 da credencial de leitor, nos três formatos do servidor: `{error}` (middleware), `{detail:{error}}` (barra_leitor) e o envelope v2 `{error:{code}}` (api/v2/erros.py). */
+export const corpoSomenteLeitura = (corpo: unknown): boolean => {
+  const c = corpo as { error?: unknown; detail?: { error?: unknown } } | null | undefined;
+  return c?.error === "somente_leitura" || c?.detail?.error === "somente_leitura" || (c?.error as { code?: unknown } | null | undefined)?.code === "somente_leitura";
+};
+
+/** Escrita recusada porque a sessão é de leitor: NÃO é fim de sessão, nunca limpa o cofre nem leva ao login. */
+export class SomenteLeitura extends ErroDeApi {
+  constructor(corpo?: unknown) {
+    super(403, TEXTO_SOMENTE_LEITURA, corpo);
+    this.name = "SomenteLeitura";
+  }
+}
+
 /**
  * A sessão que fez o pedido não é mais a do aparelho.
  *
@@ -416,6 +432,7 @@ async function responder(
     // para quem decide por `detail.retryable` (chat dos agentes); o texto do
     // corpo NUNCA vira mensagem em 5xx (ver `mensagemDeErro`).
     const corpo = await resposta.json().catch(() => undefined);
+    if (resposta.status === 403 && corpoSomenteLeitura(corpo)) throw new SomenteLeitura(corpo);
     throw new ErroDeApi(resposta.status, mensagemDeErro(resposta.status, corpo), corpo);
   }
   return resposta;

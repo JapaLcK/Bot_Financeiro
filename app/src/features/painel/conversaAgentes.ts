@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { AccessibilityInfo } from "react-native";
-import { ErroDeApi, RequisicaoSuperada, SessaoExpirada } from "@/api/client";
+import { ErroDeApi, RequisicaoSuperada, SessaoExpirada, SomenteLeitura } from "@/api/client";
 import { ativarAgente, conversarComAgente, lerAgentes } from "@/services/agentes";
 import { TEM_ARROBA, acessoDe, agenteDe, energiaDe, mencaoDe, type Acesso, type Agentes } from "./agentes";
 import type { CardAgente } from "@/api/schemas/agentes";
@@ -76,6 +76,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
       falhou(e);
       if (acesso) atualizar(id, estadoSemChat(kind, acesso, energia));
       else if (semSenha(e)) atualizar(id, { estado: "erro", texto: SEM_SENHA, repetir: false });
+      else if (e instanceof SomenteLeitura) atualizar(id, { estado: "erro", texto: e.message, repetir: false }); // leitor: não é sessão caída (e.message é o TEXTO_SOMENTE_LEITURA)
       else if (e instanceof SessaoExpirada || (e instanceof ErroDeApi && (status === 401 || (status === 403 && !d.error)))) atualizar(id, { estado: "erro", texto: "Sua sessão terminou. Entre de novo.", repetir: false });
       else atualizar(id, {
         estado: "erro",

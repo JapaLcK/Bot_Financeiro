@@ -4,6 +4,7 @@ import {
   ErroDeApi,
   RenovacaoIndisponivel,
   SessaoExpirada,
+  SomenteLeitura,
   chamar,
   _resetRenovacao,
 } from "@/api/client";
@@ -351,5 +352,33 @@ describe("renovação em 401", () => {
       ErroDeApi,
     );
     expect(fetchFalso).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("403 somente_leitura (sessão de leitor)", () => {
+  // Controle negativo: sem o ramo `SomenteLeitura` em `responder`, o erro sai como `ErroDeApi` comum e `toBeInstanceOf` falha.
+  // Controle positivo: o 401 do mesmo cofre continua renovando e limpando (casos acima) e o 403 comum não vira SomenteLeitura.
+  it.each([
+    ["topo (leitura_guard)", { error: "somente_leitura" }],
+    ["detail (barra_leitor)", { detail: { error: "somente_leitura" } }],
+    ["envelope v2", { error: { code: "somente_leitura", message: "Forbidden" } }],
+  ])("%s: erro próprio, sem renovar e sem limpar o cofre", async (_formato, corpo) => {
+    await guardarCredenciais({ access: "a", refresh: "rt" });
+    fetchFalso.mockResolvedValueOnce(resposta(403, corpo));
+
+    const erro = await chamar("/x", schema, { metodo: "POST" }).catch((e) => e);
+
+    expect(erro).toBeInstanceOf(SomenteLeitura);
+    expect(erro).not.toBeInstanceOf(SessaoExpirada);
+    expect(fetchFalso).toHaveBeenCalledTimes(1); // nenhuma renovação
+    expect(await lerCredenciais()).toEqual({ access: "a", refresh: "rt" });
+  });
+
+  it("403 comum não vira SomenteLeitura", async () => {
+    await guardarCredenciais({ access: "a", refresh: "rt" });
+    fetchFalso.mockResolvedValueOnce(resposta(403, { detail: "Token CSRF inválido ou ausente." }));
+    const erro = await chamar("/x", schema, { metodo: "POST" }).catch((e) => e);
+    expect(erro).toBeInstanceOf(ErroDeApi);
+    expect(erro).not.toBeInstanceOf(SomenteLeitura);
   });
 });

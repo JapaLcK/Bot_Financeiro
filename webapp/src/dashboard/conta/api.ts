@@ -2,7 +2,7 @@
 // Dado pessoal: só na memória do React Query, nunca em storage. O contrato é do servidor
 // (frontend/routes/settings.py), então os tipos são escritos aqui, não gerados.
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
-import { DEMO, ErroApi, FUSO, NOME_DO_PLANO, apiGet, chamar, comPrazoLeitura, escrever, instante, lerContaFresca, meQuery } from "../lib/v2";
+import { DEMO, ErroApi, FUSO, NOME_DO_PLANO, apiGet, chamar, comPrazoLeitura, escrever, instante, lerContaFresca, meQuery, somenteLeitura, TEXTO_SOMENTE_LEITURA } from "../lib/v2";
 import type { Conector } from "../lib/bancos";
 import { guardarCodigos } from "./Cofre";
 import type { Refresh } from "../lib/atualizarBanco";
@@ -259,7 +259,7 @@ export const abrirPortal = () => comPrazo((s) => escrever<{ portal_url?: unknown
 export const desfazerTroca = () => comPrazo((s) => escrever<{ ok: boolean }>("POST", "/billing/cancel-change", undefined, s));
 // O 403 desta página é só o CSRF; o texto de `falhaDe` fala em "salvar" e não serve ao portal.
 export function falhaCobranca(e: unknown, reserva: string): Falha {
-  return e instanceof ErroApi && e.status === 403 ? { texto: "Recarregue a página e tente de novo." } : falhaDe(e, reserva, [404, 429, 502, 503]);
+  return e instanceof ErroApi && e.status === 403 && !somenteLeitura(e) ? { texto: "Recarregue a página e tente de novo." } : falhaDe(e, reserva, [404, 429, 502, 503]);
 }
 
 // Cópia de `formatActivityTime` (settings.html): o teste dashboard_v2_conta_sessoes compara as duas (§0.7). Duas diferenças, de propósito:
@@ -299,6 +299,7 @@ export function falhaDe(e: unknown, reserva: string, detalhados = [400, 401, 409
   const s = e instanceof ErroApi ? e.status : 0;
   const d = e instanceof ErroApi ? e.detalhe : undefined;
   if (d && detalhados.includes(s)) return { texto: d, foco: s === 401 ? "senha" : s === 409 ? "valor" : undefined };
+  if (somenteLeitura(e)) return { texto: TEXTO_SOMENTE_LEITURA };
   if (s === 401) return { texto: "Sua sessão terminou.", acao: "recarregar" };
   if (s === 403) return { texto: "Recarregue a página antes de salvar de novo." };
   return { texto: reserva, revalida: true };

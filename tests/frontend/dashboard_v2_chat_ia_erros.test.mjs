@@ -85,6 +85,10 @@ for (const [nome, resp, esperado, antes] of [
   ["401 sem renovação", { status: 401, json: { detail: "Token expirado" }, headers: { "www-authenticate": "Bearer" } }, SESSAO, (ctx) => ctx.route("**/auth/refresh", (r) => r.fulfill({ status: 401, json: { detail: "x" } }))],
   ["403 CSRF", { status: 403, json: { detail: "Token CSRF inválido" } }, SESSAO],
   ["403 password_required", { status: 403, json: { detail: { error: "password_required" } } }, "Crie sua senha"],
+  // mutação: tirar o `!somenteLeitura(e) &&` de `sessaoDe` (lib/v2.ts) ou o `textoSessao` de conversaIa.ts: o leitor lê SESSAO. O "403 CSRF" acima é o controle positivo.
+  ["403 somente_leitura (topo)", { status: 403, json: { error: "somente_leitura" } }, "Acesso de visualização: só leitura."],
+  ["403 somente_leitura (detail)", { status: 403, json: { detail: { error: "somente_leitura" } } }, "Acesso de visualização: só leitura."],
+  ["403 somente_leitura (envelope v2)", { status: 403, json: { error: { code: "somente_leitura", message: "Forbidden" } } }, "Acesso de visualização: só leitura."],
   ["429", { status: 429, json: { error: "Rate limit exceeded: 12 per 1 minute" } }, "Muitas mensagens"],
   ["500", { status: 500, json: { detail: "boom" } }, GENERICO],
 ]) {
@@ -101,6 +105,16 @@ for (const [nome, resp, esperado, antes] of [
     await page.context().close();
   });
 }
+
+test("403 somente_leitura em 390×844: o texto de só leitura cabe na tela, sem SESSAO e sem rolagem lateral", async () => {
+  const { page, flux } = await abrir({ width: 390 });
+  await flux.proxima({ status: 403, json: { error: "somente_leitura" } });
+  await enviar(page, "oi");
+  await ultima(page).getByText("Acesso de visualização: só leitura.").first().waitFor({ timeout: 3000 });
+  assert.equal(await page.getByText(SESSAO).count(), 0);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0);
+  await page.context().close();
+});
 
 test("cota cheia pelo contrato real: o GET do preparo responde 403 pro_required, e isso é a cota (texto, sem POST, Enviar desligado)", async () => {
   const { page, posts } = await abrir({ usage: { used: 100, limit: 100 } });

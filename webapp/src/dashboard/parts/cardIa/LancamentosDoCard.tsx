@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { uidValido } from "../../conta/api";
 import { SESSAO } from "../../lib/conversaIa";
-import { DEMO, ErroApi, apiGet, categoriasQuery, meQuery } from "../../lib/v2";
+import { DEMO, ErroApi, TEXTO_SOMENTE_LEITURA, apiGet, categoriasQuery, meQuery, somenteLeitura } from "../../lib/v2";
 import type { Lancamento } from "../../lib/api-v2.gen";
 import { LancamentoLinha } from "../LancamentoLinha";
 import { textos } from "../../lib/bancos";
@@ -67,7 +67,7 @@ export function LancamentosDoCard({ uid, filtros }: { uid: number; filtros: Filt
       )}
       {e && (
         <div className="ci-erro" role="alert">
-          <p>{sessao ? SESSAO : FALHA}</p>
+          <p>{somenteLeitura(e) ? TEXTO_SOMENTE_LEITURA : sessao ? SESSAO : FALHA}</p>
           {!sessao && <button type="button" className="btn btn-ghost" aria-disabled={q.isFetching} onClick={(ev) => { if (!q.isFetching) { focoNo(ev.currentTarget); de(); } }}>Tentar de novo</button>}
         </div>
       )}

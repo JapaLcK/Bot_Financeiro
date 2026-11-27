@@ -10,7 +10,7 @@
 // única): o envio seguinte espera por ele em vez de abrir outro, que correria com o POST. Falhou ou estourou o teto = o turno falha e o próximo refaz.
 // Só um turno por vez; o que o fecha é o `fim`, um erro, a parada, os 60 s do turno todo ou a troca de conta.
 import { useSyncExternalStore } from "react";
-import { ErroApi, chamar, detalheDe, escrever, semSenha, sessaoDe } from "./v2";
+import { ErroApi, TEXTO_SOMENTE_LEITURA, chamar, detalheDe, escrever, semSenha, sessaoDe, somenteLeitura } from "./v2";
 import { fluxo } from "./sse";
 import type { Msg } from "./conversation";
 
@@ -36,6 +36,8 @@ export const PAROU = "Você parou esta resposta.";
 export const SEM_COTA = "Suas mensagens com o Piggy acabaram por este mês ou não fazem parte do seu plano.";
 const SEM_SENHA = "Crie sua senha para conversar com o Piggy. Depois de criar, volte para o painel novo.";
 export const SESSAO = "Sua sessão terminou. Recarregue a página.";
+/** O texto do erro que já passou por `sessaoDe(e) || somenteLeitura(e)`: sessão caída, senão leitor (só leitura). */
+export const textoSessao = (e: unknown) => sessaoDe(e) ? SESSAO : TEXTO_SOMENTE_LEITURA;
 export const SEM_CARD = "Não foi possível mostrar este card.";
 const PRAZO = "A resposta demorou mais que o esperado. Tente de novo.";
 const REDE = "A conexão foi interrompida antes de recebermos a resposta.";
@@ -92,7 +94,7 @@ function falha(e: unknown): { estado: "erro" | "cota"; text: string } {
   const d = detalheDe(e);
   if (e instanceof ErroApi && e.status === 403 && d.error === "pro_required") return { estado: "cota", text: SEM_COTA };
   if (semSenha(e)) return { estado: "erro", text: SEM_SENHA };
-  if (sessaoDe(e)) return { estado: "erro", text: SESSAO };
+  if (sessaoDe(e) || somenteLeitura(e)) return { estado: "erro", text: textoSessao(e) };
   const status = e instanceof ErroApi ? e.status : -1;
   return { estado: "erro", text: status === 0 ? REDE : status === 429 ? MUITAS : GENERICO };
 }

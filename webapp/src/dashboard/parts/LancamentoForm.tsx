@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Categoria, Conta, Edicao, Lancamento, NovoLancamento } from "../lib/api-v2.gen";
-import { ErroApi } from "../lib/v2";
+import { ErroApi, somenteLeitura, TEXTO_SOMENTE_LEITURA } from "../lib/v2";
 import { ERRO_VALOR, moneyIn, normalizaValor, valorInvalido } from "../lib/format.js";
 import { LancamentoContexto } from "./LancamentoLinha";
 import { NATIVE, useDialogo } from "./dialog";
@@ -64,6 +64,7 @@ export function LancamentoForm({ item, indisponivel, categorias, contas, escrita
       } else if (err.status === 409) setErro("A permissão para alterar este lançamento mudou. Confira os campos disponíveis.");
       else if (err.status === 404) setErro("Este lançamento não está mais disponível.");
       else if (err.status === 403 && err.code === "plan_limit") { setErro("Você atingiu o limite de lançamentos do seu plano."); setLimite(true); }
+      else if (somenteLeitura(err)) setErro(TEXTO_SOMENTE_LEITURA);
       else if (err.status === 403) setErro("Recarregue a página antes de salvar novamente: a autorização de segurança expirou.");
       else setErro("Não foi possível salvar. Seu rascunho foi mantido.");
     }

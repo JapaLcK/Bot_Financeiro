@@ -148,6 +148,11 @@ describe("erros", () => {
     ag.chat = () => erro(403, { error: "password_required" }); await enviar("@Xerife de novo");
     await waitFor(() => expect(screen.getByText("Crie a senha da sua conta pelo link que enviamos por e-mail para conversar com os agentes.")).toBeTruthy());
   });
+  // Controle negativo: sem o ramo `SomenteLeitura` o 1º formato cai em "Sua sessão terminou" e o 2º no genérico. Positivo: o 403 de CSRF acima segue sendo sessão.
+  it.each([["topo (leitura_guard)", { error: "somente_leitura" }], ["detail (barra_leitor)", { detail: { error: "somente_leitura" } }]])("403 somente_leitura, %s: texto de só leitura, sem sessão e sem o botão", async (_f, corpo) => {
+    await falha(() => resposta(403, corpo)); await waitFor(() => expect(screen.getByText("Acesso de visualização: só leitura.")).toBeTruthy());
+    expect(screen.queryByText(/sessão terminou/)).toBeNull(); expect(screen.queryByRole("button", { name: "Tentar de novo" })).toBeNull();
+  });
 });
 
 it("isolamento: Ana pergunta ao Xerife com o POST segurado e a Bela entra; nada da Ana (turno, cota) em render com uid 2, o sinal da Ana aborta e o 1º envio da Bela sai sem o context da Ana", async () => {

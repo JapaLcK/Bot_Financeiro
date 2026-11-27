@@ -4,7 +4,7 @@ import { useId, useRef, useState, type FormEvent } from "react";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { OrcamentoDomestico, PotesIn, RendaIn } from "../lib/api-v2.gen";
 import { normalizaValor } from "../lib/format.js";
-import { ErroApi, apiPost, orcamentoQuery } from "../lib/v2";
+import { ErroApi, TEXTO_SOMENTE_LEITURA, apiPost, orcamentoQuery, somenteLeitura } from "../lib/v2";
 import { CRIAR_SENHA } from "./Entrada";
 import { NATIVE, useDialogo } from "./dialog";
 
@@ -26,6 +26,7 @@ export function falhaDoOrcamento(e: unknown): Falha {
   }
   if (e.code === "pro_required") return { geral: "O Orçamento doméstico é do Plus e do Pro.", acao: "planos" };
   if (e.code === "password_required") return { geral: "Crie sua senha para salvar. Depois de criar, volte para o painel novo.", acao: "senha" };
+  if (somenteLeitura(e)) return { geral: TEXTO_SOMENTE_LEITURA };
   if (e.status === 403) return { geral: "Recarregue a página antes de salvar de novo." };
   return { geral: "Não foi possível salvar. Seu rascunho foi mantido." };
 }

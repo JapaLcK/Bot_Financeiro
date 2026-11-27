@@ -1,6 +1,8 @@
 // Reconectar um banco (W3, plano em docs/plano-bancos-conectados-painel.md): o widget é o do módulo legado /open-finance-connect.js
 // (`PBOpenFinance.reconnect(itemId)`), que a página Bancos já inicia (um `init` só). Aqui ficam a máquina de UM fim por reconexão e os textos de falha.
 
+import { TEXTO_SOMENTE_LEITURA } from "../lib/v2";
+
 const PRAZO = 30000; // do clique até o widget iniciar; depois de aberto não há prazo (a pessoa autoriza no banco)
 
 // Como a reconexão falhou: `status` é o HTTP do servidor (o erro do SDK não tem); `tipo` é a falha que o servidor nunca viu;
@@ -21,6 +23,8 @@ export function textoDoServidor(f: { status?: number; msg?: string }): string {
 }
 export function textoDaFalha(f: Falha, nome: string): { texto: string; semId: boolean } {
   if (f.tipo === "ocupado") return { texto: "Já tem uma conexão com banco aberta. Conclua ou feche e tente de novo.", semId: true };
+  // O `msg` do 403 de leitor é o corpo cru (open-finance-connect.js `apiError`): `{"error":"somente_leitura"}` ou `{"detail":{"error":"somente_leitura"}}`.
+  if (f.status === 403 && f.msg?.includes("somente_leitura")) return { texto: TEXTO_SOMENTE_LEITURA, semId: true };
   if (f.status === 403) return { texto: "Não deu para reconectar. Recarregue a página e tente de novo.", semId: true };
   const servidor = textoDoServidor(f);
   if (servidor) return { texto: servidor, semId: f.status === 404 };
