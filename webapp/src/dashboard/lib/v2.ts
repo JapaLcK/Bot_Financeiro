@@ -72,8 +72,12 @@ export const detalheDe = (e: unknown): { error?: string; message?: string; retry
 };
 /** Conta sem senha: o corpo real das rotas fora da `/api/v2` é `{"detail":{"error":"password_required"}}`; `code` cobre o envelope v2. */
 export const semSenha = (e: unknown) => e instanceof ErroApi && (e.code === "password_required" || detalheDe(e).error === "password_required");
+/** O 403 da credencial de leitor, nos três formatos: `{"error":"somente_leitura"}` (leitura_guard), `{"detail":{"error":"somente_leitura"}}` (barra_leitor) e o envelope v2 `{"error":{"code":"somente_leitura"}}` (api/v2/erros.py). Não é sessão caída. */
+export const somenteLeitura = (e: unknown) =>
+  e instanceof ErroApi && e.status === 403 && (e.code === "somente_leitura" || (e.corpo as { error?: unknown } | undefined)?.error === "somente_leitura" || detalheDe(e).error === "somente_leitura");
+export const TEXTO_SOMENTE_LEITURA = "Acesso de visualização: só leitura.";
 /** Sessão/CSRF: 401 e 403 sem `error` de objeto (o CSRF `{"detail": "Token CSRF…"}` e o "Acesso negado" da troca de conta em outra aba). Repetir não adianta. */
-export const sessaoDe = (e: unknown) => e instanceof ErroApi && (e.status === 401 || (e.status === 403 && !detalheDe(e).error));
+export const sessaoDe = (e: unknown) => e instanceof ErroApi && !somenteLeitura(e) && (e.status === 401 || (e.status === 403 && !detalheDe(e).error));
 
 export async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   let r: Response;

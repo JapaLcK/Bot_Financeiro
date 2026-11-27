@@ -2,8 +2,8 @@ import { createElement, useSyncExternalStore, type ReactNode } from "react";
 import { go } from "../router";
 import { DEMO, answer, type Answer, type TopicId } from "./topics";
 import { agenteDe, ativar, cardDe, conversar, type Acesso, type CardAgente as Cartao, type Encaminhada, type Redirect } from "./agentes";
-import { ErroApi, detalheDe, escrever, semSenha, sessaoDe } from "./v2";
-import { PREPARANDO, SESSAO, abortarIa, enviarIa, iaBloqueada, type CamposIa, type Motivo } from "./conversaIa";
+import { ErroApi, detalheDe, escrever, semSenha, sessaoDe, somenteLeitura } from "./v2";
+import { PREPARANDO, SESSAO, abortarIa, textoSessao, enviarIa, iaBloqueada, type CamposIa, type Motivo } from "./conversaIa";
 import { CardAgente } from "../parts/CardAgente";
 
 // A conversa com o Piggy: vive enquanto a aba está aberta (troca de página não apaga;
@@ -172,7 +172,7 @@ async function enviar(id: number, kind: string, texto: string, uid: number, enca
     const acesso = status === 403 && d.error ? CODIGO_ACESSO[d.error] : undefined;
     if (d.error === "invalid_context") contextos.delete(`${uid}:${kind}`); // o próximo envio recomeça a conversa
     if (acesso) patch(id, estadoSemChat(kind, acesso));
-    else if (semSenha(e) || sessaoDe(e)) patch(id, { estado: "erro", text: semSenha(e) ? SEM_SENHA : SESSAO, repetir: false });
+    else if (semSenha(e) || sessaoDe(e) || somenteLeitura(e)) patch(id, { estado: "erro", text: semSenha(e) ? SEM_SENHA : textoSessao(e), repetir: false });
     else patch(id, {
       estado: "erro",
       text: typeof d.message === "string" ? d.message
@@ -219,7 +219,7 @@ export async function ativarEResponder(id: number, depois: () => void) {
     const d = detalheDe(e), acesso = d.error === "no_energy" ? "no_energy" : d.error === "pro_required" ? "upgrade" : null;
     // Sem os números da bolha: são de quando ela nasceu, e a recusa mostra que a energia mudou depois (Codex no #1157).
     patch(id, acesso ? { ativando: false, ...estadoSemChat(m.agente, acesso) }
-      : semSenha(e) || sessaoDe(e) ? { ativando: false, estado: "erro", text: semSenha(e) ? SEM_SENHA : SESSAO, repetir: false }
+      : semSenha(e) || sessaoDe(e) || somenteLeitura(e) ? { ativando: false, estado: "erro", text: semSenha(e) ? SEM_SENHA : textoSessao(e), repetir: false }
       : { ativando: false, falhaAtivar: true });
     solta(`${m.uid}:${m.agente}`, id);
     return;

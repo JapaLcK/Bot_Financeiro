@@ -2,7 +2,7 @@
 // Cada leitura confere o formato na borda: resposta fora do contrato vira ErroApi(200, "contrato"), nunca uma tela quebrada.
 // O `ref` do membro é opaco: só volta ao servidor (DELETE /familia/membros/{ref}), nunca vira id nem chave de armazenamento.
 import { queryOptions } from "@tanstack/react-query";
-import { DEMO, ErroApi, erroDe, escrever, chamar, instante, meQuery, urlDe, FUSO } from "../lib/v2";
+import { DEMO, ErroApi, TEXTO_SOMENTE_LEITURA, erroDe, escrever, chamar, instante, meQuery, somenteLeitura, urlDe, FUSO } from "../lib/v2";
 import { buscar } from "../lib/sessao";
 
 export const ESCOPOS = ["agregados", "lancamentos"] as const; // a única lista de escopos (permissoesDe, leitor do histórico, doMembro)
@@ -95,6 +95,7 @@ export function falhaFamilia(e: unknown): Falha {
   if (c === "full") return { texto: "Todos os lugares estão ocupados." };
   if (c === "confirmation_mismatch") return { texto: "A família mudou. Confira de novo." };
   if (s === 404) return { texto: "Isso não existe mais." };
+  if (somenteLeitura(e)) return { texto: TEXTO_SOMENTE_LEITURA };
   if (s === 401 || s === 403) return { texto: "Recarregue a página e tente de novo." };
   return { texto: "Não foi possível concluir agora. Tente de novo." };
 }

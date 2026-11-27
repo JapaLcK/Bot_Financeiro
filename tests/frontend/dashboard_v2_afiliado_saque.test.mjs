@@ -109,6 +109,23 @@ test("403 de CSRF é sessão: nada de 'Token CSRF' na tela", async () => {
   });
 });
 
+// mutação: tirar o `!somenteLeitura(e) &&` de `sessaoDe` (lib/v2.ts; o `falhaSaque` pergunta pela sessão ANTES) ou o ramo `somenteLeitura` de `falhaSaque`: o leitor lê "Sua sessão terminou" (topo) ou o genérico. O controle positivo (403 de CSRF segue sendo sessão) é o teste acima.
+for (const [formato, corpo] of [["topo (leitura_guard)", { error: "somente_leitura" }], ["detail (barra_leitor)", { detail: { error: "somente_leitura" } }], ["envelope v2", { error: { code: "somente_leitura", message: "Forbidden" } }]]) {
+  test(`403 somente_leitura (${formato}): texto de só leitura, sem refresh e sem sair do painel`, async () => {
+    await comAfiliado(browser(), {}, async (t) => {
+      let refresh = 0;
+      await t.ctx.route("**/auth/refresh", (r) => { refresh += 1; return r.fulfill({ json: { ok: true, user_id: 1, confirmada: true } }); });
+      t.s.post = (r) => r.fulfill({ status: 403, json: corpo });
+      await pedirSaque(t.page);
+      await confirmar(t.page).click();
+      await t.page.getByRole("alert").getByText("só leitura").waitFor();
+      assert.equal(await t.page.getByText("sessão terminou").count(), 0);
+      assert.equal(refresh, 0);
+      assert.match(new URL(t.page.url()).pathname, /^\/painel/);
+    });
+  });
+}
+
 // mutação: tirar o ramo de `exclusao` de `falhaSaque`: a conta agendada lê "sua sessão terminou", que é falso
 test("403 de conta agendada para exclusão: mostra o motivo", async () => {
   await comAfiliado(browser(), {}, async (t) => {

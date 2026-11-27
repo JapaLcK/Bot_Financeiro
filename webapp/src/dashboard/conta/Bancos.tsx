@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ErroApi, comPrazoLeitura, contaQuery, contasQuery } from "../lib/v2";
+import { ErroApi, TEXTO_SOMENTE_LEITURA, comPrazoLeitura, contaQuery, contasQuery, somenteLeitura } from "../lib/v2";
 import { bancosValidos, disponiveis } from "../lib/bancos";
 import { ICON } from "../lib/brand";
 import { ATUALIZANDO_SOZINHO, FALHA } from "../lib/atualizarBanco";
@@ -160,6 +160,7 @@ export function ContaBancos() {
     } catch (e) {
       const status = e instanceof ErroApi ? e.status : 0;
       if (status === 401) { setFim(true); return; }
+      if (somenteLeitura(e)) { setFalha({ texto: TEXTO_SOMENTE_LEITURA }); return; } // leitor: nada apagado e a conta é a mesma, sem releitura
       // 403, ou a conta já não é a do clique (foco trocou o perfil): nada apagado e a chave do uid velho está inativa, reler o snapshot dele não diria nada
       if (status === 403 || qc.getQueryData<{ user_id?: number }>(contaQuery.queryKey)?.user_id !== a.uid) { setFalha({ texto: "Não deu para desconectar. Recarregue a página e tente de novo." }); conta.refetch(); return; }
       const soltou = await comPrazoLeitura(qc.invalidateQueries({ queryKey: chave })); // null = estourou o prazo: o diálogo não fica preso

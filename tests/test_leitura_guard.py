@@ -228,3 +228,10 @@ def test_precos_do_leitor_nao_grava_funil_nem_regua_e_o_do_dono_grava(mundo):
     assert _linhas_funil(uid) == (0, 0)
     assert c.get("/precos", headers=dono).status_code == 200            # controle positivo
     assert _linhas_funil(uid) == (1, 1)
+
+
+def test_me_do_v2_expoe_somente_leitura_so_ao_leitor(mundo):
+    _, leitor, dono = mundo
+    c = TestClient(dashboard.app)
+    assert c.get("/api/v2/me", headers=leitor["bearer"]).json()["somente_leitura"] is True
+    assert c.get("/api/v2/me", headers=dono).json()["somente_leitura"] is False

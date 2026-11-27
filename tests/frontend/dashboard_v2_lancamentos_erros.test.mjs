@@ -15,8 +15,8 @@ after(async () => {
   await browser?.close();
   if (screenshots) await rm(screenshots, { recursive: true, force: true });
 });
-async function abrir() {
-  const p = await abrirPainel(browser, { espera: '[data-id="l901"]' });
+async function abrir(width) {
+  const p = await abrirPainel(browser, { width, espera: '[data-id="l901"]' });
   await p.ir("/lancamentos");
   return p;
 }
@@ -68,6 +68,18 @@ for (const [status, body, texto] of [
   if (body.error?.code === "plan_limit") assert.equal(await page.locator('.lanc-form a[href="/precos"]').count(), 1);
   await ctx.close();
 });
+
+// mutação: tirar o ramo `somenteLeitura` de LancamentoForm.tsx: o leitor lê "a autorização de segurança expirou". O "erro 403/CSRF" acima é o controle positivo.
+for (const [width, corpo] of [[1440, { error: "somente_leitura" }], [1440, { detail: { error: "somente_leitura" } }], [1440, { error: { code: "somente_leitura", message: "Forbidden" } }], [390, { error: "somente_leitura" }]])
+  test(`403 somente_leitura ${JSON.stringify(corpo)} em ${width}px: texto de só leitura, sem "expirou"/"Recarregue", rascunho mantido`, async () => {
+    const { ctx, page } = await abrir(width);
+    await ctx.route("**/api/v2/lancamentos/carteira", (r) => r.fulfill({ status: 403, json: corpo }));
+    await novo(page); await salvar(page).click();
+    await page.getByText("Acesso de visualização: só leitura.").waitFor();
+    assert.equal(await page.getByText(/expirou|Recarregue/).count(), 0);
+    assert.equal(await page.locator('.lanc-form input[name="descricao"]').inputValue(), "Rascunho preservado");
+    await ctx.close();
+  });
 
 for (const rede of [true, false]) test(`${rede ? "POST grava/perde resposta" : "POST 503"}: não repete; bloqueia até atualização/conferência explícita`, async () => {
   const { ctx, page } = await abrir();

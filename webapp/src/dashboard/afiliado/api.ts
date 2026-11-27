@@ -1,7 +1,7 @@
 // Programa de afiliados (frontend/routes/affiliates.py): rotas fora da /api/v2, sem schema OpenAPI. Os tipos são escritos aqui, à mão, e a leitura confere o formato na borda:
 // resposta fora do contrato vira ErroApi(200, "contrato"), nunca uma tela quebrada. O dinheiro chega em reais (número) e só é exibido: a tela não faz conta.
 import { queryOptions } from "@tanstack/react-query";
-import { DEMO, ErroApi, FUSO, chamar, escrever, instante, meQuery, sessaoDe } from "../lib/v2";
+import { DEMO, ErroApi, FUSO, TEXTO_SOMENTE_LEITURA, chamar, escrever, instante, meQuery, sessaoDe, somenteLeitura } from "../lib/v2";
 import { contaVista } from "../lib/sessao";
 import { contrato, inteiro, objeto, texto, validade } from "../familia/api";
 
@@ -68,6 +68,7 @@ export function falhaSaque(e: unknown) {
   const agendada = exclusao(e);
   if (agendada) return agendada;
   if (sessaoDe(e)) return "Sua sessão terminou. Recarregue a página.";
+  if (somenteLeitura(e)) return TEXTO_SOMENTE_LEITURA; // depois da sessão de propósito: é o `!somenteLeitura` de `sessaoDe` que separa os dois
   return "Não deu para confirmar o saque. Confira o histórico antes de tentar de novo."; // a resposta pode ter se perdido com o saque criado: a releitura mostra
 }
 

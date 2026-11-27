@@ -23,6 +23,7 @@ class Me(BaseModel):
     chat_ia: bool  # o freio do chat com a IA no /painel: PAINEL_CHAT_IA_USER_IDS lista quem o vê (desligado por padrão)
     familia: FamiliaMe | None = None  # Plano Família: só o papel. Acréscimo: o app instalado não atualiza com o deploy
     afiliado: bool = False  # tem cadastro de afiliado, ativo ou desativado: mostra a área no /painel
+    somente_leitura: bool = False  # sessão de leitor (claim `ro`): o front trata o 403 `somente_leitura` como aviso, não como sessão caída
 
 
 def _familia(uid: int) -> FamiliaMe | None:
@@ -45,4 +46,4 @@ def me(request: Request, uid: int = Depends(usuario_atual)) -> Me:
     leitor = bool(getattr(request.state, "somente_leitura", False))
     return Me(plan_tier=get_plan_tier(uid), agents_ui_enabled=agents_ui_enabled(uid),
               chat_ia=painel_chat_ia(uid), familia=None if leitor else _familia(uid),
-              afiliado=False if leitor else _afiliado(uid))
+              afiliado=False if leitor else _afiliado(uid), somente_leitura=leitor)

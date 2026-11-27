@@ -5,8 +5,8 @@ import type { CategoriaEstimada, Previsao, RotasPost, SimuladorHabitos } from ".
 import { existe } from "../../lib/extrato-dias";
 import { moneyText } from "../../lib/format.js";
 import { obj } from "../../lib/ia-cards";
-import { DEMO, ErroApi, escrever, sessaoDe } from "../../lib/v2";
-import { SESSAO } from "../../lib/conversaIa";
+import { DEMO, ErroApi, escrever, sessaoDe, somenteLeitura } from "../../lib/v2";
+import { textoSessao } from "../../lib/conversaIa";
 import { Alavanca, GENERICO, MUDOU, Resultado, de } from "../../widgets/SimuladorHabitos";
 import { naConta, useContaTrocada } from "./naConta";
 import { Sub } from "./previsao";
@@ -44,7 +44,7 @@ const espera = (ms: number, s: AbortSignal) => new Promise<void>((ok, no) => {
 });
 const mudou = (e: ErroApi) => e.status === 422 && !!e.details?.some((x) => x.type === "categoria_fora_da_estimativa");
 // A ordem do `lib/v2.ts`: o plano (403 com código) antes da sessão (401, ou 403 sem código), e o 422 de categoria é "ajuste de novo" (o bloco é foto: sem reler a previsão).
-const textoDoErro = (e: unknown) => !(e instanceof ErroApi) ? GENERICO : e.code === "pro_required" ? SEM_PLANO : sessaoDe(e) ? SESSAO : mudou(e) ? MUDOU : GENERICO;
+const textoDoErro = (e: unknown) => !(e instanceof ErroApi) ? GENERICO : e.code === "pro_required" ? SEM_PLANO : sessaoDe(e) || somenteLeitura(e) ? textoSessao(e) : mudou(e) ? MUDOU : GENERICO;
 
 function Controles({ cats, calculado, uid }: { cats: CategoriaEstimada[]; calculado: string; uid: number }) {
   const qc = useQueryClient(), raiz = useRef<HTMLDivElement>(null);

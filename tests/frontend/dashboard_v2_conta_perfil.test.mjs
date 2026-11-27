@@ -264,6 +264,9 @@ const ERROS = [
   ["409 contato em uso", JSON_ERRO(409, "Este e-mail ou telefone já está em uso."), "Este e-mail ou telefone já está em uso."],
   ["429", JSON_ERRO(429, "Muitas tentativas. Aguarde alguns minutos e tente novamente."), "Muitas tentativas. Aguarde alguns minutos e tente novamente."],
   ["403 (CSRF)", JSON_ERRO(403, "CSRF"), "Recarregue a página antes de salvar de novo."],
+  // mutação: tirar o ramo `somenteLeitura` de `falhaDe` (conta/api.ts): o leitor lê "Recarregue a página". A linha "403 (CSRF)" é o controle positivo.
+  ["403 somente_leitura (topo)", (r) => r.fulfill({ status: 403, json: { error: "somente_leitura" } }), "Acesso de visualização: só leitura."],
+  ["403 somente_leitura (detail)", (r) => r.fulfill({ status: 403, json: { detail: { error: "somente_leitura" } } }), "Acesso de visualização: só leitura."],
   ["422 (lista do Pydantic)", (r) => r.fulfill({ status: 422, json: { detail: [{ loc: ["body"], msg: "x" }] } }), "Não foi possível salvar. Seu rascunho foi mantido."],
   ["500", (r) => r.fulfill({ status: 500, body: "<html>erro</html>" }), "Não foi possível salvar. Seu rascunho foi mantido."],
   ["rede", (r) => r.abort("internetdisconnected"), "Não foi possível salvar. Seu rascunho foi mantido."],
@@ -287,6 +290,16 @@ test("erros do PATCH em role=alert: 400/409/429 verbatim, 403 e 422/5xx/rede com
   assert.deepEqual(vistos.filter((v) => v.length === 6).map((v) => [v[0], v[1] === ERROS.find((e) => e[0] === v[0])[2], v[2], v[3], v[4], v[5]]),
     ERROS.map(([nome]) => [nome, true, "rascunho@exemplo.com", "", "valor", 0]));
   assert.deepEqual(vistos.filter((v) => v.length === 2), [["500 releu", true]]);
+});
+
+test("403 somente_leitura em 390×844: texto de só leitura no alerta do modal, sem 'Recarregar' e sem rolagem lateral", async () => {
+  const p = await abrirPerfil({ width: 390, height: 844 });
+  p.s.patch = (r) => r.fulfill({ status: 403, json: { error: "somente_leitura" } });
+  await p.lapis("e-mail").click(); await p.campo.fill("rascunho@exemplo.com"); await p.senha.fill("abc"); await p.salvar.click();
+  await p.page.locator("dialog[open] [role=alert]").filter({ hasText: "Acesso de visualização: só leitura." }).waitFor();
+  const r = [await p.dialogo.getByRole("button", { name: "Recarregar" }).count(), await p.page.evaluate(() => document.documentElement.scrollWidth - innerWidth)];
+  await p.ctx.close();
+  assert.deepEqual(r, [0, 0]);
 });
 
 test("em voo: duplo envio no mesmo tick e duplo clique = 1 PATCH; campos desativados, botão 'Salvando…'", async () => {

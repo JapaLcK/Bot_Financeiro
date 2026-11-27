@@ -4,7 +4,7 @@
 // é a prioridade da frase quando há mais de um motivo.
 import type { CustoMensal, Meta, Ritmo } from "./api-v2.gen";
 import { ERRO_VALOR, monthName } from "./format.js";
-import { ErroApi, FUSO } from "./v2";
+import { ErroApi, FUSO, TEXTO_SOMENTE_LEITURA, somenteLeitura } from "./v2";
 import { rotulo } from "../parts/Selos";
 
 // Quantos dias de histórico o servidor exige para medir o ritmo (`RITMO_DIAS_MINIMOS` em db/metas_ritmo.py).
@@ -122,6 +122,7 @@ export function falhaDaEscrita(e: unknown, apagando = false): Falha {
   if (e.code === "meta_nao_encontrada") return { geral: "Essa meta não existe mais.", campos: {} };
   if (e.code === "pro_required") return { geral: "Seu plano atual não inclui investimentos. Dá para usar o saldo de uma conta.", campos: {}, acao: "planos" };
   if (e.code === "password_required") return { geral: "Crie sua senha para salvar suas metas. Depois de criar, volte para o painel novo.", campos: {}, acao: "senha" };
+  if (somenteLeitura(e)) return { geral: TEXTO_SOMENTE_LEITURA, campos: {} };
   if (e.status === 403) return { geral: "Recarregue a página antes de salvar de novo.", campos: {} };
   return { geral: "Não foi possível salvar. Seu rascunho foi mantido.", campos: {} };
 }

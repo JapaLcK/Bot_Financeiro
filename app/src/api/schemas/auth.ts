@@ -37,6 +37,8 @@ export const perfilSchema = z.object({
   has_password: z.boolean().optional(),
   /** Decide se a exclusão pede o código do autenticador (`mfa_obrigatorio` cobre o resto). */
   mfa_enabled: z.boolean().optional(),
+  /** Sessão de leitor (claim `ro`): só consulta; o 403 `somente_leitura` das escritas não é fim de sessão. */
+  somente_leitura: z.boolean().optional(),
 });
 
 /**

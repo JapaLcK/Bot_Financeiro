@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CenarioOut, Simulador, SimuladorIn } from "../lib/api-v2.gen";
 import { ERRO_VALOR, moneyText, normalizaValor } from "../lib/format.js";
 import { hojeNoFuso } from "../lib/metas-textos";
-import { ErroApi, apiPost, meQuery, usePlan } from "../lib/v2";
+import { ErroApi, TEXTO_SOMENTE_LEITURA, apiPost, meQuery, somenteLeitura, usePlan } from "../lib/v2";
 import { CRIAR_SENHA } from "../parts/Entrada";
 import { Frame } from "../parts/Frame";
 import { Info } from "../parts/Info";
@@ -86,6 +86,7 @@ function falhaDe(e: unknown, n: number): Falha {
     return { geral, reserva, cenarios };
   }
   if (e.status === 429) return { geral: "Muitas simulações seguidas. Espere um pouco e tente de novo.", cenarios: vazio };
+  if (somenteLeitura(e)) return { geral: TEXTO_SOMENTE_LEITURA, cenarios: vazio };
   if (e.status === 403) return { geral: "Recarregue a página antes de calcular de novo.", cenarios: vazio };
   return { geral: nao, cenarios: vazio };
 }
