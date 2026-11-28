@@ -96,10 +96,12 @@ def salvar(corpo: OrcamentoIn, uid: int = Depends(usuario_atual)) -> OrcamentosC
     if nome is None:
         raise _recusa("categoria", "Escolha uma das suas categorias.", "body")
     try:
-        budgets.upsert_budget(uid, nome, valor, limite=_limite(uid))
+        budgets.upsert_budget(uid, nome, valor, limite=_limite(uid), pedido=cat)
     except PlanLimitExceeded:
         raise HTTPException(status_code=403, detail={"error": "plan_limit"}) from None
-    except ValueError:
+    except ValueError as e:
+        if str(e) == "CATEGORIA_INVALIDA":
+            raise _recusa("categoria", "Escolha uma das suas categorias.", "body") from None
         raise _recusa("valor", "Valor inválido.", "body") from None
     return _monta(uid)
 

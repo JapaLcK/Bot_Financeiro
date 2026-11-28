@@ -231,7 +231,7 @@ def _set_budget_execute(user_id: int, args: dict[str, Any]) -> str:
         )
 
     try:
-        saved_cat, created = db.upsert_budget(user_id, canon, budget)
+        saved_cat, created = db.upsert_budget(user_id, canon, budget, pedido=raw_cat)
     except ValueError as e:  # db levanta códigos (CATEGORIA_INVALIDA...), não texto de usuário
         _log_falha("set_budget", user_id, e)
         return "🐷 Não consegui salvar esse orçamento. Confere a categoria e o valor."

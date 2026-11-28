@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from utils_text import valor_valido
+from utils_text import normalize_text, valor_valido
 
 from .connection import (
     get_conn, cat_key_sql, CAT_META_SQL, CAT_CANON_ORDER, TIPO_DESPESA_SQL,
@@ -82,7 +82,9 @@ def get_budget(user_id: int, categoria: str) -> dict[str, Any] | None:
             return {"categoria": row["categoria"], "budget": float(row["budget"])}
 
 
-def upsert_budget(user_id: int, categoria: str, budget: float, *, limite: int | None = None) -> tuple[str, bool]:
+def upsert_budget(
+    user_id: int, categoria: str, budget: float, *, limite: int | None = None, pedido: str | None = None
+) -> tuple[str, bool]:
     """Cria ou atualiza orçamento. Retorna `(categoria_canonical, created)`.
 
     `created=True` se foi INSERT, False se foi UPDATE.
@@ -92,13 +94,20 @@ def upsert_budget(user_id: int, categoria: str, budget: float, *, limite: int | 
 
     `limite` (teto de orçamentos do plano; None = sem teto) só vale para INSERT:
     atualizar um existente nunca conta. Estoura -> `PlanLimitExceeded`.
+
+    `pedido`: texto ORIGINAL do usuário quando o chamador já resolveu `categoria` (a porta resolve "gás" → "outros"
+    no condomínio); sem ele o "outros" resolvido pareceria pedido explícito e sobrescreveria o limite de "outros".
     """
     ensure_user(user_id)
     cat = (categoria or "").strip()
     if not cat:
         raise ValueError("CATEGORIA_INVALIDA")
     from .categories import categoria_da_conta  # condomínio: fora do plano → plano/"outros"; pessoal: igual
-    cat = categoria_da_conta(user_id, cat)
+    resolvida = categoria_da_conta(user_id, cat)
+    # Condomínio: nome fora do plano cai em "outros"; gravar isso sobrescreveria o limite de "outros" já existente.
+    if resolvida == "outros" and normalize_text(pedido or cat) != "outros":
+        raise ValueError("CATEGORIA_INVALIDA")
+    cat = resolvida
     if not valor_valido(budget):
         raise ValueError("BUDGET_INVALIDO")
 

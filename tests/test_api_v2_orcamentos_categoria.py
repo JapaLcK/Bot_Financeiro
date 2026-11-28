@@ -272,3 +272,36 @@ def test_sem_sessao_401_e_fora_do_beta_404(a_e_b, monkeypatch):
     monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", "")
     r = _get(a)
     assert (r.status_code, r.json()["error"]["code"]) == (404, "dashboard_v2_disabled")
+
+
+# ── conta de condomínio: nome fora do plano não pode cair em "outros" e sobrescrevê-lo ──
+def _outros_1000(uid, condo):
+    from scripts.ativar_conta_condominio import ativar
+    if condo:
+        ativar(uid)
+    r = _post(uid, {"categoria": "outros", "valor": "1000"})
+    assert r.status_code == 200, r.text
+
+
+def test_condominio_gas_recusa_e_outros_fica(a_e_b):
+    a, _ = a_e_b
+    _outros_1000(a, True)
+    for fora in ("moradia", "lazer"):  # rótulos do sistema fora do plano → resolveriam p/ "outros"
+        r = _post(a, {"categoria": fora, "valor": "300"})
+        assert r.status_code == 422 and "categoria" in r.text, (fora, r.text)
+    assert _linhas(a) == [("outros", 1000.0)]
+
+
+def test_condominio_plano_e_outros_explicito_gravam(a_e_b):
+    a, _ = a_e_b
+    _outros_1000(a, True)
+    assert _post(a, {"categoria": "energia elétrica", "valor": "200"}).status_code == 200
+    assert _post(a, {"categoria": "outros", "valor": "50"}).status_code == 200
+    assert _linhas(a) == [("energia elétrica", 200.0), ("outros", 50.0)]
+
+
+def test_pessoal_gas_grava(a_e_b):
+    a, _ = a_e_b
+    add_launch_and_update_balance(a, "despesa", 30.0, "t", "t", categoria="gás")
+    assert _post(a, {"categoria": "gás", "valor": "80"}).status_code == 200
+    assert _linhas(a) == [("gás", 80.0)]

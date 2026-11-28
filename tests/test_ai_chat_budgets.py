@@ -325,3 +325,11 @@ def test_sum_spent_filtra_internal_movement(user_id):
     )
     total = db.sum_spent_in_category_this_month(user_id, "investimento_aporte")
     assert total == 0.0
+
+
+def test_set_budget_condominio_fora_do_plano_nao_sobrescreve_outros(user_id):
+    from scripts.ativar_conta_condominio import ativar
+    ativar(user_id)
+    assert "✅" in _set_budget_execute(user_id, {"categoria": "outros", "budget": 1000})
+    assert "categoria" in _set_budget_execute(user_id, {"categoria": "moradia", "budget": 300}).lower()
+    assert db.get_budget(user_id, "outros")["budget"] == 1000.0

@@ -84,8 +84,11 @@ def test_recorrentes_quatro_portas(conta):
 
 def test_orcamento_boleto_e_cartao(conta):
     tipo, uid = conta
-    nome, _ = budgets.upsert_budget(uid, "moradia", 100)
-    assert nome == _esperado(tipo, "moradia", "outros")
+    if tipo == "condo":  # fora do plano não vira "outros": recusa (ver test_orcamento_condominio_*)
+        with pytest.raises(ValueError, match="CATEGORIA_INVALIDA"):
+            budgets.upsert_budget(uid, "moradia", 100)
+    else:
+        assert budgets.upsert_budget(uid, "moradia", 100)[0] == "moradia"
     b = create_boleto(uid, "Luz", 10, "2030-01-10", category="moradia")
     assert b["category"] == _esperado(tipo, "moradia", "outros")
     assert update_boleto(uid, b["id"], category="energia")["category"] == _esperado(tipo, "energia", "energia elétrica")
@@ -116,3 +119,37 @@ def test_lista_do_whatsapp(conta):
         assert nomes <= {n for n, _ in db.categories.plano_da_conta(uid)}
     else:
         assert PESSOAIS <= titulos
+
+
+def _limite(uid, cat):
+    return (budgets.get_budget(uid, cat) or {}).get("budget")
+
+
+def test_orcamento_condominio_fora_do_plano_nao_sobrescreve_outros():
+    uid = _novo(True)
+    try:
+        budgets.upsert_budget(uid, "outros", 1000)
+        for pedido in ("gás", "moradia"):
+            with pytest.raises(ValueError, match="CATEGORIA_INVALIDA"):
+                budgets.upsert_budget(uid, pedido, 300)
+        assert _limite(uid, "outros") == 1000
+    finally:
+        _cleanup_user(uid)
+
+
+def test_orcamento_condominio_casa_no_plano_ou_pede_outros():
+    uid = _novo(True)
+    try:
+        assert budgets.upsert_budget(uid, "energia", 200)[0] == "energia elétrica"
+        assert budgets.upsert_budget(uid, "Outros", 50)[0] == "outros"
+        assert _limite(uid, "outros") == 50
+    finally:
+        _cleanup_user(uid)
+
+
+def test_orcamento_pessoal_gas_grava_gas():
+    uid = _novo(False)
+    try:
+        assert budgets.upsert_budget(uid, "gás", 80)[0] == "gás"
+    finally:
+        _cleanup_user(uid)
