@@ -478,6 +478,21 @@ def _nome_ocupado(cur, user_id: int, norm: str, excluir_id: int | None = None) -
     return any(r["id"] != excluir_id and chave(r["name"]) == chave(norm) for r in cur.fetchall())
 
 
+# Fonte única de "onde a categoria do usuário mora como texto": quem pergunta "esta categoria está em uso?"
+# (`semear_condominio`) deriva daqui. `test_categoria_usos_espelha_cascata` compara com as tabelas que a cascata
+# abaixo atualiza: tabela nova entra nos dois lugares ou o teste fica vermelho.
+CATEGORIA_USOS: tuple[tuple[str, str], ...] = (
+    ("launches", "categoria"),
+    ("credit_transactions", "categoria"),
+    ("category_budgets", "categoria"),
+    ("budget_alert_sent", "categoria"),
+    ("user_category_rules", "category"),
+    ("recurring_expenses", "category"),
+    ("recurring_incomes", "category"),
+    ("bill_instances", "category"),
+)
+
+
 def cascata_nome_categoria(cur, user_id: int, antigo: str, novo: str) -> dict[str, int]:
     """Troca o texto `antigo` por `novo` em toda tabela que guarda a categoria.
     Do rename e do `scripts/fundir_categorias.py`; devolve o rowcount por tabela."""

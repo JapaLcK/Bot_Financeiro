@@ -10,7 +10,7 @@ Fonte única da lista: o relatório gerencial por centro da administradora
 """
 from utils_text import normalize_text
 
-from .categories import SYSTEM_CATEGORIES_SEED
+from .categories import CATEGORIA_USOS, SYSTEM_CATEGORIES_SEED
 from .connection import cat_norm_sql
 
 GRUPOS_CONDOMINIO = ("receitas", "pessoal", "funcionais", "manutencao", "tributarias", "outras")
@@ -119,7 +119,7 @@ def semear_condominio(cur, user_id: int) -> dict[str, int]:
     própria, por isso não roda aqui) — as canônicas existem e podem ser arquivadas.
     - categorias: reaproveita a que o usuário já tem com o mesmo nome (sem acento/caixa), desarquivando-a, e
       só preenche `grupo` se estiver nulo — nunca sobrescreve grupo já definido;
-    - canônicas pessoais sem uso DESTE usuário (lançamento, cartão, orçamento, recorrente) são arquivadas, nunca
+    - canônicas pessoais sem uso DESTE usuário (toda tabela de `CATEGORIA_USOS`: lançamento, cartão, orçamento, regra, recorrente, boleto...) são arquivadas, nunca
       apagadas; "outros" (fallback universal) fica;
     - regras: só a keyword que o usuário ainda não tem (comparada sem acento/caixa), nunca sobrescreve.
     """
@@ -140,15 +140,15 @@ def semear_condominio(cur, user_id: int) -> dict[str, int]:
                 "values (%s, %s, %s, %s, false, %s, to_timestamp(0))",
                 (user_id, nome, emoji, cor, grupo),
             )
+    usos = "\n           ".join(
+        f"and not exists (select 1 from {t} x where x.user_id = uc.user_id and {_N('x.' + c)} = {_N('uc.name')})"
+        for t, c in CATEGORIA_USOS
+    )
     cur.execute(
         f"""
         update user_categories uc set is_archived = true
          where uc.user_id = %s and uc.is_system and not uc.is_archived and uc.name = any(%s) and uc.name <> 'outros'
-           and not exists (select 1 from launches l where l.user_id = uc.user_id and {_N('l.categoria')} = {_N('uc.name')})
-           and not exists (select 1 from credit_transactions t where t.user_id = uc.user_id and {_N('t.categoria')} = {_N('uc.name')})
-           and not exists (select 1 from category_budgets b where b.user_id = uc.user_id and {_N('b.categoria')} = {_N('uc.name')})
-           and not exists (select 1 from recurring_expenses r where r.user_id = uc.user_id and {_N('r.category')} = {_N('uc.name')})
-           and not exists (select 1 from recurring_incomes r where r.user_id = uc.user_id and {_N('r.category')} = {_N('uc.name')})
+           {usos}
         """,
         (user_id, _CANONICAS),
     )

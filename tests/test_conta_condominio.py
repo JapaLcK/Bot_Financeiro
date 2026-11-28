@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 from conftest import _cleanup_user
-from db.categories import ensure_user_categories_seeded, list_user_categories_full, update_user_category
+from db.categories import CATEGORIA_USOS, cascata_nome_categoria, ensure_user_categories_seeded, list_user_categories_full, update_user_category
 from db.categorias_condominio import (
     CATEGORIAS_CONDOMINIO, GRUPOS_CONDOMINIO, REGRAS_CONDOMINIO, semear_condominio,
 )
@@ -316,3 +316,58 @@ def test_regra_anterior_a_ativacao_continua_valendo_e_semeadas_tambem(user_id):
     _semeia(user_id)
     assert infer_category(user_id, "inss guia", allow_ai=False).category == "outros"
     assert infer_category(user_id, "guia gps", allow_ai=False).category == "inss"
+
+
+def _usa(uid, fonte, cat):
+    """Grava `cat` (grafia livre) em UMA fonte de uso do usuário `uid`."""
+    k = uuid.uuid4().hex[:8]
+    if fonte == "launches":
+        _q("insert into launches (user_id, tipo, valor, categoria, source, external_id) "
+           "values (%s,'despesa',10,%s,'manual',%s)", (uid, cat, k))
+    elif fonte == "credit_transactions":
+        _cartao_com_compra(uid, cat)
+    elif fonte == "category_budgets":
+        _q("insert into category_budgets (user_id, categoria, budget) values (%s,%s,10)", (uid, cat))
+    elif fonte == "budget_alert_sent":
+        _q("insert into budget_alert_sent (user_id, categoria, ym, threshold) values (%s,%s,'2026-01',80)", (uid, cat))
+    elif fonte == "user_category_rules":
+        _q("insert into user_category_rules (user_id, keyword, category) values (%s,%s,%s)", (uid, k, cat))
+    elif fonte == "recurring_expenses":
+        _q("insert into recurring_expenses (user_id,name,amount,category,due_day,payment_type) "
+           "values (%s,'x',1,%s,5,'account')", (uid, cat))
+    elif fonte == "recurring_incomes":
+        _q("insert into recurring_incomes (user_id,name,amount,category,pay_day) values (%s,'x',1,%s,5)", (uid, cat))
+    elif fonte == "bill_instances":
+        rid = _q("insert into recurring_expenses (user_id,name,amount,category,due_day,payment_type) "
+                 "values (%s,'x',1,'outros',5,'account') returning id", (uid,))[0]["id"]
+        _q("insert into bill_instances (recurring_id,user_id,due_date,amount,category) "
+           "values (%s,%s,current_date,1,%s)", (rid, uid, cat))
+    else:
+        raise AssertionError(fonte)
+
+
+# Literal de propósito, NÃO derivada de CATEGORIA_USOS: derivada, tirar uma fonte de lá sumiria também do teste.
+FONTES = ["launches", "credit_transactions", "category_budgets", "budget_alert_sent", "user_category_rules",
+          "recurring_expenses", "recurring_incomes", "bill_instances"]
+
+
+def test_categoria_usos_espelha_cascata(user_id):
+    """Fonte de uso × tabelas que o rename cascateia: tabela nova tem de entrar nos dois."""
+    ensure_user_categories_seeded(user_id)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        n = cascata_nome_categoria(cur, user_id, "pets", "pets")
+        conn.rollback()
+    assert set(n) == set(FONTES) == {t for t, _ in CATEGORIA_USOS}
+
+
+@pytest.mark.parametrize("fonte", FONTES)
+def test_uso_em_cada_fonte_impede_arquivar_sem_acento(user_id, outro_user, fonte):
+    ensure_user_categories_seeded(outro_user)
+    _usa(outro_user, fonte, "EDUCACAO")      # uso de OUTRO usuário não segura
+    _usa(user_id, fonte, "SAUDE")            # grafia sem acento e caixa diferente
+    _semeia(user_id)
+    c = _cats(user_id)
+    assert c["saúde"]["is_archived"] is False
+    assert c["educação"]["is_archived"] is True
+    assert c["pets"]["is_archived"] is True   # positivo: sem uso arquiva
+    assert not any(v["is_archived"] for v in _cats(outro_user).values())
