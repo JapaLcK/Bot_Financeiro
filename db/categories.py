@@ -16,7 +16,7 @@ import unicodedata
 
 from .connection import get_conn
 from .users import ensure_user
-from utils_text import INTERNAL_MOVEMENT_CATEGORIES, canonicalize_category_label, normalize_text
+from utils_text import CATEGORIAS_DE_SISTEMA, canonicalize_category_label, normalize_text
 
 log = logging.getLogger(__name__)
 
@@ -132,23 +132,54 @@ def plano_da_conta(user_id: int) -> list[tuple[str, str | None]] | None:
 
 def categoria_no_plano(plano: list[tuple[str, str | None]], raw: str) -> str:
     """Resolvedor ÚNICO de categoria vinda de fora do plano (hashtag, LLM, recorrente, recategoriza) para uma conta de
-    condomínio: categoria de SISTEMA (movimentação interna, rendimentos, cripto) → intacta (o import deriva
-    `is_internal_movement` dela depois); nome completo exato → ele; senão, sem o "(grupo)" que o LLM às vezes devolve,
-    exato → ele; senão o ÚNICO nome do plano que compartilha token (ou prefixo de token, 5+ letras) com o texto → ele;
-    ambíguo ou sem casamento → "outros"."""
+    condomínio. Ordem: (1) categoria de SISTEMA (`CATEGORIAS_DE_SISTEMA`), com `_` ou espaço → intacta (o import deriva
+    `is_internal_movement` dela); (2) nome ORIGINAL exato; (3) nome completo igual a menos de caixa/acento/pontuação
+    (chave = `normalize_text`, ou o nome em minúsculas se a normalização apaga tudo, como em "☕"); (4) o mesmo sem o
+    "(grupo)" final; (5) o ÚNICO nome do plano que compartilha token (4+ letras) ou prefixo de token (5+) → ele;
+    (6) ambíguo ou sem casamento → "outros". Conta PESSOAL não passa por aqui (`categoria_da_conta` devolve `raw`).
+
+    Plano de referência P = energia elétrica, taxa condominial (ordinária), manutenção predial, manutenção de
+    elevador, jardinagem, fundo de obras (custom do síndico, sem grupo), ☕, 🍕, outros. P1 = ☕, outros.
+    Categoria arquivada não está no plano: cai nas linhas "sem casamento".
+
+    | entrada (condomínio)                         | saída                          | por quê                       |
+    |----------------------------------------------|--------------------------------|-------------------------------|
+    | "energia elétrica"                           | "energia elétrica"             | nome exato                    |
+    | "ENERGIA Eletrica"                           | "energia elétrica"             | caixa/acento                  |
+    | "taxa condominial (ordinária)"               | ele mesmo                      | nome completo com parênteses  |
+    | "energia elétrica (despesas fixas)"          | "energia elétrica"             | "(grupo)" inexistente é tirado|
+    | "jardinagem geral"                           | "jardinagem"                   | token único                   |
+    | "elevadores"                                 | "manutenção de elevador"       | prefixo >=5 único             |
+    | "manutenção"                                 | "outros"                       | ambíguo (2 nomes)             |
+    | "piscina"                                    | "outros"                       | sem casamento                 |
+    | "reforma antiga" (custom arquivada)          | "outros"                       | fora do plano                 |
+    | "fundo de obras" / "fundo de obras (x)"      | "fundo de obras"               | custom sem grupo              |
+    | cada INTERNAL_MOVEMENT + rendimentos +       | a canônica (`investimento_     | sistema, vale com `_`, espaço |
+    |   criptomoedas, "Investimento Aporte"        | aporte`…)                      | e caixa                       |
+    | "outros" / "OUTROS"                          | "outros"                       | explícito                     |
+    | "" / "   "                                   | "outros"                       | vazio                         |
+    | "🍕" em P / "☕" em P / "☕ " em P            | "🍕" / "☕" / "☕"                | emoji: exato, não o 1º        |
+    | "🍕" em P1                                   | "outros"                       | só emoji, sem casamento       |
+    | "12345" / "123 energia"                      | "outros" / "energia elétrica"  | número não casa; token casa   |
+
+    Conta pessoal: `categoria_da_conta` devolve `raw` como está, em todas as linhas acima."""
+    raw = raw or ""
     sistema = canonicalize_category_label(raw)
-    if sistema in INTERNAL_MOVEMENT_CATEGORIES or sistema in ("rendimentos", "criptomoedas"):
+    if sistema in CATEGORIAS_DE_SISTEMA:
         return sistema
     nomes = [n for n, _ in plano]
-    norm = normalize_text(raw or "")
-    for n in nomes:
-        if normalize_text(n) == norm:
-            return n
-    norm = normalize_text(re.sub(r"\s*\([^)]*\)\s*$", "", raw or ""))
-    for n in nomes:
-        if normalize_text(n) == norm:
-            return n
-    toks = [t for t in norm.split() if len(t) >= 4]
+    if raw in nomes:
+        return raw
+    sem_grupo = re.sub(r"\s*\([^)]*\)\s*$", "", raw)
+
+    def chave(x: str) -> str:  # mesma chave de `_nome_ocupado`: "☕" e "🍕" não podem virar ambos ""
+        return normalize_text(x) or _normalize_category_name(x)
+
+    for alvo in (raw, sem_grupo):
+        for n in nomes:
+            if chave(n) == chave(alvo):
+                return n
+    toks = [t for t in normalize_text(sem_grupo).split() if len(t) >= 4]
     achou = [
         n for n in nomes if n != "outros" and any(
             a == b or (min(len(a), len(b)) >= 5 and (a.startswith(b) or b.startswith(a))) for a in toks for b in normalize_text(n).split() if len(b) >= 4)

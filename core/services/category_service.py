@@ -11,6 +11,7 @@ from utils_text import (
     contains_word,
     extract_memory_candidates,
     canonicalize_category_label,
+    INTERNAL_MOVEMENT_CATEGORIES,
     EXACT_WORD_KEYWORDS,
     KEYWORD_BLOCKERS,
     STOPWORDS_PT,
@@ -198,16 +199,21 @@ class InferResult:
     reason: str  # 'explicit' | 'user_rule' | 'local_rule' | 'ticker_match' | 'default'
 
 
-def local_rule_category(text_norm: str) -> str | None:
+def local_rule_category(text_norm: str, *, so_sistema: bool = False) -> str | None:
     """
     Categoria canônica das LOCAL_RULES para um texto JÁ normalizado — sem regra
     de usuário, ticker ou IA. Fonte única do passo C de `infer_category` e também
     usada como guard no auto-aprendizado (não deixar um keyword canônico como
     "mercado" ser reaprendido com outra categoria).
+    `so_sistema`: só as regras de MOVIMENTAÇÃO INTERNA (aporte, resgate, transferência, fatura, ajuste). Não é
+    `CATEGORIAS_DE_SISTEMA` (que decide o que `categoria_no_plano` deixa passar intacto se pedido): rendimentos e
+    criptomoedas passam intactos, mas suas regras por palavra não rodam sozinhas no condomínio ("juros por atraso", "sol").
     """
     if not text_norm:
         return None
     for keywords, cat2 in LOCAL_RULES:
+        if so_sistema and canonicalize_category_label(cat2) not in INTERNAL_MOVEMENT_CATEGORIES:
+            continue
         for kw in keywords:
             kw_norm = normalize_text(kw)
             if not kw_norm:
@@ -247,7 +253,7 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
     """
     from db.categories import categoria_no_plano, plano_da_conta
     # Conta de condomínio (`plano` não é None): o plano de contas é o catálogo. Categoria explícita (hashtag, LLM, tool)
-    # passa por `categoria_no_plano`; LOCAL_RULES são das canônicas pessoais ("luz" → moradia) e não rodam; a IA já
+    # passa por `categoria_no_plano`; das LOCAL_RULES só rodam as de categoria de sistema ("luz" → moradia não); a IA já
     # devolve do plano. A leitura NÃO é capturada: cair no comportamento pessoal gravaria categoria errada em silêncio.
     if explicit_category:
         plano = plano_da_conta(user_id)
@@ -358,7 +364,8 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
         return InferResult(category=custom_cat, reason="user_category")
 
     # C) LOCAL_RULES
-    local_cat = None if plano is not None else local_rule_category(t)
+    # Condomínio: só as regras de movimentação interna ("aplicacao cdb" → investimento_aporte); as de despesa pessoal não.
+    local_cat = local_rule_category(t, so_sistema=plano is not None)
     if local_cat:
         return InferResult(category=local_cat, reason="local_rule")
 
