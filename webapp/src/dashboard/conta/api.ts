@@ -310,3 +310,31 @@ export function falhaDaEscrita(e: unknown, campo: Campo, temSenha: boolean | und
   if (campo === "email" && temSenha === false && e instanceof ErroApi && e.status === 409 && e.detalhe) return { texto: e.detalhe, acao: "definir-senha" };
   return falhaDe(e, "Não foi possível salvar. Seu rascunho foi mantido.");
 }
+
+// Acesso de visualização (`/conta/leitura`, api/v2/leitura.py): só o dono, atrás do freio `acesso_leitura` do /me. A senha nunca volta do servidor
+// e só vive no estado do formulário. PUT/DELETE levam o código de 6 dígitos que o POST /conta/leitura/codigo manda ao e-mail da conta.
+export type CredencialLeitura = { ativo: boolean; usuario: string | null };
+export const leituraQuery = queryOptions({
+  queryKey: ["conta", "leitura"],
+  queryFn: ({ signal }) => chamar<CredencialLeitura>("/conta/leitura", GET(signal)),
+  staleTime: 0, refetchOnWindowFocus: true, networkMode: "always", retry: meQuery.retry,
+  enabled: !DEMO,
+});
+export const pedirCodigoLeitura = () => comPrazo((s) => post<unknown>("/conta/leitura/codigo", {}, s));
+export const definirLeitura = (usuario: string, senha: string, codigo: string) => comPrazo((s) => escrever<CredencialLeitura>("PUT", "/conta/leitura", { usuario, senha, codigo }, s));
+export const desativarLeitura = (codigo: string) => comPrazo((s) => escrever<CredencialLeitura>("DELETE", "/conta/leitura", { codigo }, s));
+// O texto de cada recusa do servidor; o resto cai em `falhaDe` (somente leitura, sessão, rede) com a frase de reserva.
+const TEXTO_LEITURA: Record<string, string> = {
+  usuario_em_uso: "Esse usuário já está em uso. Escolha outro.",
+  codigo_invalido: "Código incorreto. Confira o e-mail e tente de novo.",
+  codigo_expirado: "O código expirou. Peça um novo.",
+  acesso_leitura_indisponivel: "O acesso de visualização ainda não está disponível para a sua conta.",
+};
+export function falhaLeitura(e: unknown, reserva: string): Falha {
+  if (e instanceof ErroApi) {
+    if (TEXTO_LEITURA[e.code]) return { texto: TEXTO_LEITURA[e.code] };
+    if (e.status === 422) return { texto: "Usuário de 4 a 40 caracteres (minúsculas, números, ponto, hífen ou _; sem @) e senha de 8 a 72 caracteres." };
+    if (e.status === 429) return { texto: "Muitas tentativas. Tente de novo mais tarde." };
+  }
+  return falhaDe(e, reserva, []);
+}

@@ -5,6 +5,7 @@ import { DETALHES, enviarLinkSenha, falhaDe, mfaStatusQuery, temSenhaQuery, uidV
 import { MfaForm, type ModoMfa } from "./MfaForm";
 import { Sessoes } from "./Sessoes";
 import { SemSenha } from "./SemSenha";
+import { AcessoLeitura } from "./AcessoLeitura";
 
 const vazio = (palavra: string) => <><span aria-hidden="true">—</span><span className="sr-only">{palavra}</span></>;
 
@@ -82,6 +83,7 @@ export function ContaSeguranca() {
         </dl>
         <p role="status" className="sr-only">{aviso}</p>
       </section>
+      <AcessoLeitura />
       {uidOk && <Sessoes uid={uid} />}
       {aberto === "sem-senha" && <SemSenha fechar={() => setAberto(null)} definir={() => botaoSenha.current?.focus()} />}
       {aberto && aberto !== "sem-senha" && !sessao && <MfaForm modo={aberto} fechar={() => setAberto(null)} salvou={setAviso} />}

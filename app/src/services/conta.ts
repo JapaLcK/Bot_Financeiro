@@ -1,5 +1,7 @@
+import { z } from "zod";
+
 import { chamar, comLimite } from "@/api/client";
-import { avisoDesligadoSchema, codigoEnviadoSchema, contatoSchema, exclusaoSchema, exportEnviadoSchema, linkCodeSchema, notificacoesSchema, type Notificacoes } from "@/api/schemas/conta";
+import { avisoDesligadoSchema, codigoEnviadoSchema, contatoSchema, credencialLeituraSchema, exclusaoSchema, exportEnviadoSchema, freioLeituraSchema, linkCodeSchema, notificacoesSchema, type Notificacoes } from "@/api/schemas/conta";
 
 /** Contato da conta (Perfil). Só leitura. */
 export const lerContato = (uid: number) => chamar(`/settings/${uid}/security`, contatoSchema, { sinal: comLimite() });
@@ -60,3 +62,17 @@ export const excluirConta = (dados: { password?: string; code: string; totp?: st
     credencialSecundaria: true,
     sinal: comLimite(60_000),
   });
+
+/** O freio da seção "Acesso de visualização" (Segurança). Falha de qualquer tipo = sem a seção: quem chama trata como `false`. */
+export const acessoLeituraLiberado = async () => (await chamar("/api/app/me", freioLeituraSchema, { sinal: comLimite() })).acesso_leitura === true;
+
+export const lerCredencialLeitura = () => chamar("/api/app/conta/leitura", credencialLeituraSchema, { sinal: comLimite() });
+
+/** Manda ao e-mail do dono o código que autoriza o PUT/DELETE abaixo (finalidade própria; 3/h por conta somando a da exclusão). */
+export const pedirCodigoLeitura = () => chamar("/api/app/conta/leitura/codigo", z.unknown(), { metodo: "POST", corpo: {}, sinal: comLimite() });
+
+export const definirLeitura = (usuario: string, senha: string, codigo: string) =>
+  chamar("/api/app/conta/leitura", credencialLeituraSchema, { metodo: "PUT", corpo: { usuario, senha, codigo }, sinal: comLimite() });
+
+export const desativarLeitura = (codigo: string) =>
+  chamar("/api/app/conta/leitura", credencialLeituraSchema, { metodo: "DELETE", corpo: { codigo }, sinal: comLimite() });

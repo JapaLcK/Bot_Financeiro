@@ -73,3 +73,9 @@ export const exclusaoSchema = z.unknown().transform((b) => ((b as { status?: unk
 
 export type Contato = z.infer<typeof contatoSchema>;
 export type Notificacoes = z.infer<typeof notificacoesSchema>;
+
+/** `GET|PUT|DELETE /api/app/conta/leitura`: a credencial de visualização do condomínio. A senha e o hash nunca voltam. */
+export const credencialLeituraSchema = z.object({ ativo: z.boolean(), usuario: z.string().nullable().optional() });
+
+/** `GET /api/app/me`: só o freio da tela "Acesso de visualização" (`ACESSO_LEITURA_USER_IDS`); ausente (servidor antigo) = desligado. */
+export const freioLeituraSchema = z.object({ acesso_leitura: z.boolean().optional() });

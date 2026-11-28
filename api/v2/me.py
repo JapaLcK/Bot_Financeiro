@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from api.v2.sessao import usuario_atual
 from db.affiliates import get_affiliate_by_user
 from db.family_views import my_family
-from core.services.plan_service import agents_ui_enabled, get_plan_tier, painel_chat_ia
+from core.services.plan_service import acesso_leitura, agents_ui_enabled, get_plan_tier, painel_chat_ia
 
 router = APIRouter()
 
@@ -23,6 +23,7 @@ class Me(BaseModel):
     chat_ia: bool  # o freio do chat com a IA no /painel: PAINEL_CHAT_IA_USER_IDS lista quem o vê (desligado por padrão)
     familia: FamiliaMe | None = None  # Plano Família: só o papel. Acréscimo: o app instalado não atualiza com o deploy
     afiliado: bool = False  # tem cadastro de afiliado, ativo ou desativado: mostra a área no /painel
+    acesso_leitura: bool = False  # freio da tela "Acesso de visualização" (ACESSO_LEITURA_USER_IDS); sempre False para o leitor
     somente_leitura: bool = False  # sessão de leitor (claim `ro`): o front trata o 403 `somente_leitura` como aviso, não como sessão caída
 
 
@@ -46,4 +47,5 @@ def me(request: Request, uid: int = Depends(usuario_atual)) -> Me:
     leitor = bool(getattr(request.state, "somente_leitura", False))
     return Me(plan_tier=get_plan_tier(uid), agents_ui_enabled=agents_ui_enabled(uid),
               chat_ia=painel_chat_ia(uid), familia=None if leitor else _familia(uid),
-              afiliado=False if leitor else _afiliado(uid), somente_leitura=leitor)
+              afiliado=False if leitor else _afiliado(uid), somente_leitura=leitor,
+              acesso_leitura=False if leitor else acesso_leitura(uid))
