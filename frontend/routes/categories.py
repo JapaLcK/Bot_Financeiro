@@ -9,6 +9,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from core.services.leitura_mascara import mascarar_para_leitor
 from frontend.routes import shared
 
 router = APIRouter()
@@ -140,9 +141,11 @@ async def category_launches_route(
     # (onde seria handle de delete) e volta só dentro do cursor, em texto claro e
     # de propósito (ver `_parse_cursor` e `list_launches_by_category`).
     next_cursor = _fmt_cursor(resumo.pop("next_after", None))
+    launches = [{**r, "data": r["data"].isoformat() if r["data"] else None} for r in rows]
     return {
         "ok": True,
-        "launches": [{**r, "data": r["data"].isoformat() if r["data"] else None} for r in rows],
+        # a rota é de UMA categoria: a linha pode não repetir a dela, então `herda`
+        "launches": await asyncio.to_thread(mascarar_para_leitor, user_id, request, launches, herda=cat),
         "resumo": resumo,
         "next_cursor": next_cursor,
         # Janela REALMENTE aplicada: o front avisa "desde dd/mm" quando o plano

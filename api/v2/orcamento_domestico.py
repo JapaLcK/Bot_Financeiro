@@ -6,12 +6,13 @@ dos POSTs é o `csrf_middleware` do pai, que cobre `/api/v2/*`."""
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from api.v2.lancamentos import _recusa
 from api.v2.resumo_mes import PADRAO_MES, mes_pedido
 from api.v2.sessao import usuario_atual
+from core.services.leitura_mascara import mascarar_para_leitor
 from core.services.plan_service import plan_gate_ok
 from db import household_budget as hb
 
@@ -94,8 +95,8 @@ def _d(x) -> Decimal | None:
     return None if x is None else Decimal(str(x)).quantize(Decimal("0.01"))
 
 
-def _monta(uid: int, mes: str) -> OrcamentoDomestico:
-    s = hb.get_household_budget_status(uid, mes)
+def _monta(uid: int, mes: str, request: Request | None = None) -> OrcamentoDomestico:
+    s = mascarar_para_leitor(uid, request, hb.get_household_budget_status(uid, mes))
     t = s["totals"]
     return OrcamentoDomestico(
         mes=s["month"],
@@ -119,8 +120,9 @@ def _mes(mes: str | None, onde: str) -> str:
 
 
 @router.get("/orcamento-domestico", response_model=OrcamentoDomestico)
-def ler(mes: str | None = Query(None, pattern=PADRAO_MES), uid: int = Depends(_orcamentista)) -> OrcamentoDomestico:
-    return _monta(uid, _mes(mes, "query"))
+def ler(request: Request = None, mes: str | None = Query(None, pattern=PADRAO_MES),
+        uid: int = Depends(_orcamentista)) -> OrcamentoDomestico:
+    return _monta(uid, _mes(mes, "query"), request)
 
 
 @router.post("/orcamento-domestico/potes", response_model=OrcamentoDomestico)

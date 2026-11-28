@@ -5,11 +5,12 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from api.v2.sessao import usuario_atual
 from core.services.assinaturas import listar_assinaturas
+from core.services.leitura_mascara import mascarar_para_leitor
 from core.services.plan_service import plan_gate_ok
 from db.of_recurring import marcar
 
@@ -59,8 +60,8 @@ def _assinante(uid: int = Depends(usuario_atual)) -> int:
 
 
 @router.get("/assinaturas", response_model=Assinaturas)
-def assinaturas(uid: int = Depends(_assinante)) -> Assinaturas:
-    return Assinaturas(**listar_assinaturas(uid, date.today()))
+def assinaturas(request: Request = None, uid: int = Depends(_assinante)) -> Assinaturas:
+    return Assinaturas(**mascarar_para_leitor(uid, request, listar_assinaturas(uid, date.today())))
 
 
 @router.post("/assinaturas/marca", response_model=Assinaturas)

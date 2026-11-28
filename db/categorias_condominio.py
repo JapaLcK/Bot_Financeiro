@@ -15,6 +15,12 @@ from .connection import cat_norm_sql
 
 GRUPOS_CONDOMINIO = ("receitas", "pessoal", "funcionais", "manutencao", "tributarias", "outras")
 
+# Grupos cujo nome (fornecedor, concessionária) o LEITOR da conta pode ver. Fail-closed: o que não está aqui
+# (pessoal, receitas, "outros", sem categoria, categoria fora do plano) tem o nome oculto. Fonte única.
+GRUPOS_VISIVEIS_AO_LEITOR = frozenset({"funcionais", "manutencao", "tributarias", "outras"})
+# Contas de grupo visível que pagam PESSOA FÍSICA (nome e CPF no texto): ocultas mesmo assim.
+OCULTAS_AO_LEITOR = frozenset({"serviços pf", "honorários contábeis", "honorários advocatícios"})
+
 # Cor por grupo (as categorias de um grupo se leem juntas na tela).
 _COR = {
     "receitas": "#22c55e", "pessoal": "#3b82f6", "funcionais": "#f59e0b",

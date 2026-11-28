@@ -133,6 +133,12 @@ from core import log_fila
 from core.pg_text import causa_segura, detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
+from core.services.leitura_mascara import (
+    mascarar_para_leitor as _mascarar_leitor,
+    neutralizar as _neutralizar_leitor,
+    rotulo_previsao as _rotulo_previsao,
+    sem_busca as _sem_busca_leitor,
+)
 from core.services.pkce import VERIFIER_PATTERN as _PKCE_VERIFIER_PATTERN
 from core.services.stripe_sdk import _is_missing_stripe_customer, _sg, uid_de_metadata
 from core.services.pkce import challenge_valido, s256 as pkce_s256
@@ -901,7 +907,7 @@ async def get_financial_data(
                 await _alert_cur.execute(
                     """
                     select rc.id, rc.amount, rc.charged_at, rc.ym,
-                           r.name, r.payment_type, r.id as recurring_id,
+                           r.name, r.category, r.payment_type, r.id as recurring_id,
                            (rc.launch_id is not null or rc.credit_tx_id is not null) as launched
                     from recurring_charges rc
                     join recurring_expenses r on r.id = rc.recurring_id
@@ -918,6 +924,7 @@ async def get_financial_data(
                         "charge_id":    r["id"],
                         "recurring_id": r["recurring_id"],
                         "name":         r["name"],
+                        "categoria":    r["category"],  # o leitor de condomínio não vê o nome de categoria `pessoal`
                         "amount":       float(r["amount"]),
                         "payment_type": r["payment_type"],
                         "ym":           r["ym"],
@@ -935,7 +942,7 @@ async def get_financial_data(
                 await _alert_cur.execute(
                     """
                     select ric.id, ric.amount, ric.credited_at, ric.ym,
-                           r.name, r.id as income_id
+                           r.name, r.category, r.id as income_id
                     from recurring_income_credits ric
                     join recurring_incomes r on r.id = ric.income_id
                     where ric.user_id = %s and ric.acknowledged = false
@@ -951,6 +958,7 @@ async def get_financial_data(
                         "credit_id":   r["id"],
                         "income_id":   r["income_id"],
                         "name":        r["name"],
+                        "categoria":   r["category"],
                         "amount":      float(r["amount"]),
                         "ym":          r["ym"],
                         "credited_at": r["credited_at"].isoformat() if r["credited_at"] else None,
@@ -8163,7 +8171,9 @@ async def get_data(
     q: str = "",
 ):
     _authorize_dashboard_access(request, user_id)
-    return await get_financial_data(user_id, year, month, page, limit, filter_type, q)
+    q = await asyncio.to_thread(_sem_busca_leitor, user_id, request, q)
+    data = await get_financial_data(user_id, year, month, page, limit, filter_type, q)
+    return await asyncio.to_thread(_mascarar_leitor, user_id, request, data)
 
 @app.get("/history/{user_id}")
 async def monthly_history(request: Request, user_id: int, months: int = 6):
@@ -8827,13 +8837,14 @@ async def history_list_route(
     earliest = await asyncio.to_thread(history_earliest_date, user_id)
     if earliest and (fd is None or fd < earliest):
         fd = earliest
+    q = await asyncio.to_thread(_sem_busca_leitor, user_id, request, q)
     result = await asyncio.to_thread(
         list_history,
         user_id, fd, td, categoria, tipo, q,
         bool(uncategorized), bool(refunds_only),
         page, limit,
     )
-    return {"ok": True, **result}
+    return {"ok": True, **await asyncio.to_thread(_mascarar_leitor, user_id, request, result)}
 
 
 @app.get("/history/{user_id}/quick-stats")
@@ -9133,7 +9144,7 @@ async def household_budget_status_route(
         status = await asyncio.to_thread(get_household_budget_status, user_id, month)
     except ValueError as exc:
         raise _hb_400(exc)
-    return {"ok": True, **status}
+    return {"ok": True, **await asyncio.to_thread(_mascarar_leitor, user_id, request, status)}
 
 
 @app.put("/household-budget/{user_id}/config")
@@ -9574,7 +9585,7 @@ async def boleto_projection_route(request: Request, user_id: int, date: str, amo
     percurso = await asyncio.to_thread(plan_gate_ok, user_id, 'cashflow')
     result = await asyncio.to_thread(project, user_id, target, extra, percurso=percurso)
 
-    return {"ok": True, "projection": result}
+    return {"ok": True, "projection": await asyncio.to_thread(_neutralizar_leitor, user_id, request, result, ("nome",), _rotulo_previsao)}
 
 
 @app.get("/forecast/{user_id}")
@@ -9598,7 +9609,7 @@ async def forecast_route(request: Request, user_id: int, threshold: float = 0.0)
         result = await asyncio.to_thread(forecast_with_trajectory, user_id, 90, threshold)
     else:
         result = await asyncio.to_thread(forecast_horizons, user_id, horizons)
-    return {"ok": True, "forecast": result}
+    return {"ok": True, "forecast": await asyncio.to_thread(_neutralizar_leitor, user_id, request, result, ("nome",), _rotulo_previsao)}
 
 
 @app.post("/recurring-bills/{user_id}")
@@ -9658,7 +9669,7 @@ async def recurring_list_route(request: Request, user_id: int, include_inactive:
     from db.recurring import list_recurring_expenses
 
     items = await asyncio.to_thread(list_recurring_expenses, user_id, include_inactive)
-    return {"ok": True, "recurring": items}
+    return {"ok": True, "recurring": await asyncio.to_thread(_mascarar_leitor, user_id, request, items)}
 
 
 @app.post("/recurring-expenses/{user_id}")
@@ -9810,7 +9821,7 @@ async def recurring_income_list_route(request: Request, user_id: int, include_in
     from db.recurring_income import list_recurring_incomes
 
     items = await asyncio.to_thread(list_recurring_incomes, user_id, include_inactive)
-    return {"ok": True, "incomes": items, "banco_conectado": False}
+    return {"ok": True, "incomes": await asyncio.to_thread(_mascarar_leitor, user_id, request, items), "banco_conectado": False}
 
 
 @app.post("/recurring-incomes/{user_id}")
@@ -10207,6 +10218,7 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
     try:
         # Send initial snapshot with current month
         data = await get_financial_data(user_id, now.year, now.month)
+        data = await asyncio.to_thread(_mascarar_leitor, user_id, ro, data)  # leitor de condomínio: sem nomes de pessoa
         await ws.send_text(jdump({"type": "snapshot", "data": data}))
 
         while True:
@@ -10231,7 +10243,9 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
                     limit = int(payload.get("limit", 25))
                     filter_type = str(payload.get("filter_type", "all"))
                     query = str(payload.get("q", ""))
+                    query = await asyncio.to_thread(_sem_busca_leitor, user_id, ro, query) or ""
                     data = await get_financial_data(user_id, y, m, page, limit, filter_type, query)
+                    data = await asyncio.to_thread(_mascarar_leitor, user_id, ro, data)
                     await ws.send_text(jdump({"type": "update", "data": data}))
 
                 elif t == "get_month":
@@ -10246,7 +10260,9 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
 
                     manager.set_month(ws, user_id, y, m)
 
+                    query = await asyncio.to_thread(_sem_busca_leitor, user_id, ro, query) or ""
                     data = await get_financial_data(user_id, y, m, page, limit, filter_type, query)
+                    data = await asyncio.to_thread(_mascarar_leitor, user_id, ro, data)
                     await ws.send_text(jdump({"type": "month_data", "data": data}))
 
                 elif t == "get_history":

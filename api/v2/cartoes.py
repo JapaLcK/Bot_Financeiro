@@ -3,11 +3,12 @@ A MESMA consulta da rota legada e do card do chat (`resumo_cartoes`, `list_insta
 card desenha e dinheiro como TEXTO. Sem gate de plano (a legada e o chat não têm)."""
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from api.v2.orcamento_domestico import _d
 from api.v2.sessao import usuario_atual
+from core.services.leitura_mascara import mascarar_para_leitor
 from db.cards import list_installment_groups_detailed
 from db.cartoes_resumo import resumo_cartoes
 
@@ -63,9 +64,9 @@ def cartoes(uid: int = Depends(usuario_atual)) -> Cartoes:
 
 
 @router.get("/parcelas", response_model=Parcelas)
-def parcelas(uid: int = Depends(usuario_atual)) -> Parcelas:
+def parcelas(request: Request = None, uid: int = Depends(usuario_atual)) -> Parcelas:
     return Parcelas(installments=[Parcelamento(
         name=g["name"], card_name=g["card_name"], installments_total=g["installments_total"], manual=g["manual"],
         parcelas=[ParcelaDoGrupo(installment_no=p["installment_no"], valor=_d(p["valor"]), is_paid=p["is_paid"],
                           is_next=p["is_next"], due_date=p["due_date"]) for p in g["parcelas"]],
-    ) for g in list_installment_groups_detailed(uid, "urgency")])
+    ) for g in mascarar_para_leitor(uid, request, list_installment_groups_detailed(uid, "urgency"))])

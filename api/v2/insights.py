@@ -4,11 +4,12 @@
 no máximo 1 geração por usuário em voo, também sob pedidos concorrentes: `generate_ai_insights` serializa a geração por
 usuário, por processo; sem rate limit próprio, a /api/v2 não tem limiter). A lista já vem projetada por plano e o modelo
 daqui só leva `title`/`message`. O gate `insights` (Plus) roda antes de ler ou gerar."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from api.v2.sessao import usuario_atual
 from core.ai_patterns import generate_ai_insights
+from core.services.leitura_mascara import e_leitor_de_condominio
 from frontend.routes.shared import require_plan_feature
 
 router = APIRouter()
@@ -29,5 +30,7 @@ def _assinante(uid: int = Depends(usuario_atual)) -> int:
 
 
 @router.get("/insights", response_model=Insights)
-def insights(uid: int = Depends(_assinante)) -> Insights:
+def insights(request: Request = None, uid: int = Depends(_assinante)) -> Insights:
+    if e_leitor_de_condominio(uid, request):  # texto gerado cita nomes e não tem categoria para mascarar: o leitor não recebe
+        return Insights(insights=[])
     return Insights(insights=[Insight(title=i["title"], message=i["message"]) for i in generate_ai_insights(uid, force=False) or []])
