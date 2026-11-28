@@ -236,7 +236,7 @@ if(PB_MFA)history.replaceState(null,'',location.pathname+location.search);
     try{
       var res=await fetch('/auth/leitura/login',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({usuario:usuario,senha:pass})});
       var d=await payload(res);
-      if(!res.ok){err('leitura-error',res.status===429?'Muitas tentativas. Aguarde alguns minutos e tente de novo.':res.status===422?'Confira o usuário e a senha.':'Usuário ou senha incorretos.');return}
+      if(!res.ok){err('leitura-error',res.status===429?'Muitas tentativas. Aguarde alguns minutos e tente de novo.':res.status===422?'Confira o usuário e a senha.':res.status===403?'O acesso de visualização desta conta ainda não está disponível.':'Usuário ou senha incorretos.');return}
       goDash(d.dashboard_url||'/painel');
     }catch(e){err('leitura-error','Erro de conexão. Tente novamente.')}
     finally{b.disabled=false;b.textContent='Entrar'}

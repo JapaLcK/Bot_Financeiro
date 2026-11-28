@@ -38,6 +38,7 @@ def _zera(usuario):
 def test_login_do_leitor_nao_pede_mfa_mesmo_com_mfa_do_dono(monkeypatch):
     monkeypatch.setenv("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
     c = conta_exclusao("P", mfa=True)
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", str(c.uid))
     assert db.get_mfa_status(c.uid)["enabled"]   # controle: o dono TEM MFA
     usuario = usuario_novo()
     db.definir_credencial_leitura(c.uid, usuario, SENHA_LEITOR)
@@ -53,6 +54,37 @@ def test_login_do_leitor_nao_pede_mfa_mesmo_com_mfa_do_dono(monkeypatch):
     jti = p["jti"]
     from core.sessions import get_active_session
     assert get_active_session(jti)["somente_leitura"] is True
+
+
+def _sessoes(uid):
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from auth_sessions where user_id = %s", (uid,))
+        return cur.fetchone()["n"]
+
+
+def test_dono_fora_do_rollout_v2_recusa_o_leitor_sem_emitir_sessao(conta, monkeypatch):
+    monkeypatch.delenv("DASHBOARD_V2_TODOS", raising=False)
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", "0")
+    monkeypatch.setenv("DASHBOARD_V2_BETA_EMAILS", "")
+    usuario = usuario_novo()
+    db.definir_credencial_leitura(conta, usuario, SENHA_LEITOR)
+    _zera(usuario)
+    antes = _sessoes(conta)
+    r = _login(usuario, SENHA_LEITOR)
+    assert r.status_code == 403 and r.json()["detail"]["error"] == "leitura_indisponivel", r.text
+    assert not r.cookies and _sessoes(conta) == antes
+    # a senha errada segue igual a antes: a elegibilidade só é checada depois da senha válida
+    _zera(usuario)
+    assert (_login(usuario, "senha-errada-123").status_code, _login("nao.existe.aqui", "x" * 12).status_code) == (401, 401)
+
+
+def test_dono_no_rollout_v2_entra_e_o_destino_e_sempre_o_painel(conta):
+    usuario = usuario_novo()
+    db.definir_credencial_leitura(conta, usuario, SENHA_LEITOR)
+    _zera(usuario)
+    r = _login(usuario, SENHA_LEITOR)
+    assert r.status_code == 200, r.text
+    assert r.json()["dashboard_url"].endswith("/painel")
 
 
 def _eventos_login(uid=None):

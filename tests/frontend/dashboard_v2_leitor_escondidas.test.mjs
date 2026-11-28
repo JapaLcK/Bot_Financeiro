@@ -72,3 +72,19 @@ caso("Ajuda: sem o formulário de Feedback; o contato segue", { rota: "/ajuda" }
   await page.locator(".ajuda-contato").waitFor();
   return { feedback: await n(page, ".ajuda-feedback"), enviar: await botao(page, "Enviar feedback") };
 }, { leitor: { feedback: 0, enviar: 0 }, dono: { feedback: 1, enviar: 1 } });
+
+// Organizar: o leitor mexe no painel só na memória; o localStorage é do dono (layout.v1.<perfil>). Cobre os três pontos de gravação do Board:
+// esconder (onChange do grid), Restaurar padrão e Adicionar bloco. NEGATIVO (medido): tirar o `!leitor` de um deles deixa a chave gravada no leitor.
+const L = "pigbank.dashboard.layout.v1.padrao";
+caso("Organizar: esconder, restaurar e adicionar bloco não gravam o layout no localStorage", { rota: "/" }, async (page) => {
+  const chaves = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("pigbank.dashboard.layout.v1.")).sort());
+  await page.getByRole("button", { name: "Organizar" }).click();
+  await page.locator("[data-slot=widget-remove]").first().click();
+  const esconder = await chaves();
+  await page.getByRole("button", { name: "Restaurar padrão" }).click();
+  const restaurar = await chaves();
+  await page.locator("[data-slot=widget-remove]").first().click();
+  await page.locator("#board-add").click();
+  await page.locator(".catalog-item").first().click();
+  return { esconder, restaurar, adicionar: await chaves() };
+}, { leitor: { esconder: [], restaurar: [], adicionar: [] }, dono: { esconder: [L, `${L}.contas`], restaurar: [`${L}.contas`], adicionar: [L, `${L}.contas`] } });

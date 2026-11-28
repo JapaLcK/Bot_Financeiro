@@ -158,12 +158,12 @@ export function Board({ s }: { s: DashState }) {
   };
   const add = (id: string) => {
     const next = [...ids, id];
-    saveLayout(shown, next);
+    if (!leitor) saveLayout(shown, next); // leitor: só memória, nunca o localStorage do dono
     setIds(next);
     setVersion((v) => v + 1);
     setSaid(`${ITEM.get(id)!.label} adicionado ao fim do painel`);
   };
-  const restore = () => { saveLayout(shown, null); setIds(layoutOf(shown, plan)); setVersion((v) => v + 1); };
+  const restore = () => { if (!leitor) saveLayout(shown, null); setIds(layoutOf(shown, plan)); setVersion((v) => v + 1); };
 
   if (!q.data && !leitor) {
     return (
@@ -212,7 +212,7 @@ export function Board({ s }: { s: DashState }) {
         fitRows={columns === 1}
         onChange={(next) => {
           const list = next.map((w) => w.id);
-          saveLayout(shown, list);
+          if (!leitor) saveLayout(shown, list);
           setIds(list);
           if (!list.length) document.getElementById("board-add")?.focus();
         }}

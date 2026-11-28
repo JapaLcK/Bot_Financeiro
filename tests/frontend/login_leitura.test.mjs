@@ -80,6 +80,18 @@ for (const tela of Object.keys(TELAS)) {
   });
 }
 
+test('403 leitura_indisponivel (conta fora do rollout do painel v2): texto próprio, fica no formulário, sem navegar', async () => {
+  const { page } = await abre('desktop', { leitura: (r) => json(r, { detail: { error: 'leitura_indisponivel', message: 'x' } }, 403) });
+  await abreLeitura(page);
+  await page.fill('#leitura-usuario', 'condomino');
+  await page.fill('#leitura-senha', 'senha-leitura');
+  await page.click('#btn-leitura');
+  await page.waitForFunction(() => document.getElementById('leitura-error').textContent === 'O acesso de visualização desta conta ainda não está disponível.');
+  assert.equal(new URL(page.url()).pathname, '/login.html');
+  assert.equal(await page.locator('#btn-leitura').isEnabled(), true);
+  await page.close();
+});
+
 test('sessão viva (cookie de leitor): o /auth/validate do topo manda ao painel, sem passar pelo formulário', async () => {
   const page = await browser.newPage();
   await page.context().addCookies([{ name: 'csrf_token', value: 'csrf-local', url: origin }]);
