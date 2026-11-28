@@ -2617,7 +2617,7 @@ sobrescreve grupo já definido nem keyword que o usuário já tem, reaproveita (
 Liga-se pelo script (não há rota): `python -m scripts.ativar_conta_condominio --user-id N`, que avisa se o plano não
 libera `custom_categories`/`ai_categorization`. `GET /categories/{uid}` e o POST/PATCH devolvem `grupo`.
 As regras casam por palavra OU substring (`get_memorized_rules`): keyword curta que aparece dentro de outra palavra
-não entra na lista. O NOME da categoria também casa por token (`custom_category_match`): nomes do plano não repetem token entre receita e despesa (a receita é "rateio das unidades"), e pares que dividem token ("serviços pf/pj") têm regra. Frases reais em `tests/test_conta_condominio.py` (`POSITIVAS`/`NEGATIVAS`).
+não entra na lista. O NOME da categoria também casa por token (`custom_category_match`): nomes do plano não repetem token entre receita e despesa (a receita é "receb. rateio": "unidades"/"obra" são palavras de despesa), e pares que dividem token ("serviços pf/pj") têm regra. Frases reais em `tests/test_conta_condominio.py` (`POSITIVAS`/`NEGATIVAS`).
 
 **"Testar o Piggy" (demo no WhatsApp, sem conta).** `GET /teste` (`frontend/routes/static_pages.py`)
 grava o clique em `demo_sessions` (utms) e abre o WhatsApp com "Quero testar o PigBank (teste CODIGO)";

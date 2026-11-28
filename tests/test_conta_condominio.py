@@ -191,6 +191,18 @@ def test_arquivamento_isolamento_cartao_e_usos(user_id, outro_user):
     assert not any(v["is_archived"] for v in _cats(outro_user).values())
 
 
+def test_arquivamento_ignora_orcamento_e_recorrentes_de_outro_usuario(user_id, outro_user):
+    ensure_user_categories_seeded(outro_user)
+    _q("insert into category_budgets (user_id, categoria, budget) values (%s,'lazer',10)", (outro_user,))
+    _q("insert into recurring_expenses (user_id,name,amount,category,due_day,payment_type) "
+       "values (%s,'x',1,'educação',5,'account')", (outro_user,))
+    _q("insert into recurring_incomes (user_id,name,amount,category,pay_day) values (%s,'x',1,'moradia',5)", (outro_user,))
+    _semeia(user_id)
+    c = _cats(user_id)
+    assert [c[n]["is_archived"] for n in ("lazer", "educação", "moradia")] == [True] * 3
+    assert not any(v["is_archived"] for v in _cats(outro_user).values())
+
+
 def test_canonica_custom_do_usuario_nao_e_arquivada(user_id):
     ensure_user_categories_seeded(user_id)
     _q("update user_categories set is_system=false where user_id=%s and name='pets'", (user_id,))
@@ -239,7 +251,10 @@ POSITIVAS = {
     "13º salário": "13º salário", "pagamento de férias": "férias", "férias funcionário": "férias",
     "taxa condominial recebida": "mensalidades", "cota condominial": "mensalidades",
     "vivo fibra": "telefone e internet", "conta de internet": "telefone e internet",
-    "juros de mora": "juros de mora e multas", "rateio das unidades": "rateio das unidades",
+    "juros de mora": "juros de mora e multas", "receb. rateio": "receb. rateio",
+    "mensalidade apto 101": "mensalidades", "recebi mensalidade": "mensalidades",
+    "mensalidade do condominio": "mensalidades", "recebi taxa do apto 12": "mensalidades",
+    "darf inss maio": "inss", "multa por atraso do boleto": "juros de mora e multas",
     "manut. veículos": "manut. veículos",
 }
 # Não podem cair na categoria que a keyword solta antiga atribuía.
@@ -247,6 +262,7 @@ NEGATIVAS = {
     "gpsoft assinatura": "inss", "venel loja": "energia elétrica", "vigilancia sanitaria": "segurança terceirizada",
     "mensalidade academia": "mensalidades", "multa de transito": "juros de mora e multas",
     "convivo": "telefone e internet", "internet banking tarifa": "telefone e internet",
+    "reforma unidades": "receb. rateio", "obra nas unidades": "receb. rateio",
 }
 
 

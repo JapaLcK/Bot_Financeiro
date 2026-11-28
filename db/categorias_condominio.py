@@ -28,7 +28,7 @@ _COR = {
 # Na planilha as quatro receitas aparecem todas com o código 4001; aqui vai como está lá.
 _CONTAS: list[tuple[str, str, str, str]] = [
     ("mensalidades", "receitas", "💵", "4001"),
-    ("rateio das unidades", "receitas", "🚰", "4001"),
+    ("receb. rateio", "receitas", "🚰", "4001"),
     ("antecipação de receitas", "receitas", "⏩", "4001"),
     ("amortiz. antecip. de receitas", "receitas", "⏪", "4001"),
     ("salários", "pessoal", "👷", "3101"),
@@ -82,7 +82,7 @@ CATEGORIAS_CONDOMINIO = [(n, g, e, _COR[g], c) for n, g, e, c in _CONTAS]
 # ficaram de fora. Empate de tamanho: "grrf" e "fgts" têm 4 letras, então "grrf fgts" cai na que o banco devolver primeiro.
 REGRAS_CONDOMINIO: dict[str, str] = {
     "folha de pagamento": "salários", "salário": "salários", "inss": "inss", "guia gps": "inss",
-    "darf inss": "inss", "fgts": "fgts", "grrf": "grrf/fgts", "irrf": "irrf",
+    "fgts": "fgts", "grrf": "grrf/fgts", "irrf": "irrf",
     "férias funcionário": "férias", "pagamento de férias": "férias",
     "13º salário": "13º salário", "13 salário": "13º salário", "décimo terceiro": "13º salário",
     "vale transporte": "vale transporte", "conta de água": "água", "sabesp": "água",
@@ -98,6 +98,11 @@ REGRAS_CONDOMINIO: dict[str, str] = {
     "multa por atraso": "juros de mora e multas",
     "segurança terceirizada": "segurança terceirizada", "vigilância patrimonial": "segurança terceirizada",
     "taxa condominial": "mensalidades", "cota condominial": "mensalidades",
+    # A mensalidade do síndico é receita; "mensalidade" solta cairia em educação (LOCAL_RULES).
+    "mensalidade do condominio": "mensalidades", "mensalidade condominial": "mensalidades",
+    "mensalidade apto": "mensalidades", "mensalidade apartamento": "mensalidades",
+    "mensalidade unidade": "mensalidades", "recebi mensalidade": "mensalidades",
+    "taxa do apto": "mensalidades",
 }
 
 _CANONICAS = [n for n, _, _ in SYSTEM_CATEGORIES_SEED]
