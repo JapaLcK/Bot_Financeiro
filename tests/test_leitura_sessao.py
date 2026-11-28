@@ -21,6 +21,7 @@ def conta(monkeypatch, user_id):
     monkeypatch.setenv("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
     promote_to_pro(user_id, plan="pro_max")
     monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", str(user_id))
+    monkeypatch.setenv("ACESSO_LEITURA_USER_IDS", str(user_id))
     return user_id
 
 
@@ -209,6 +210,44 @@ def test_endpoints_do_dono(conta):
     assert r.status_code == 200 and r.json() == {"ativo": False, "usuario": nome}
 
 
+# ── freio: acesso_leitura no /me e recusa do PUT ──────────────────────────────
+
+def _me(c, h):
+    return c.get("/api/v2/me", headers=h).json()["acesso_leitura"]
+
+
+def test_me_acesso_leitura_so_para_allowlist_e_nunca_para_leitor(conta, monkeypatch):
+    c, h = _dono(conta)
+    assert _me(c, h) is True
+    assert _me(c, leitor_de(conta)["bearer"]) is False  # leitor nunca vê, mesmo com o dono na lista
+    monkeypatch.setenv("ACESSO_LEITURA_USER_IDS", "")
+    assert _me(c, h) is False
+    monkeypatch.setenv("ACESSO_LEITURA_USER_IDS", f"1, {conta}x, {conta + 1}")
+    assert _me(c, h) is False
+    monkeypatch.setenv("ACESSO_LEITURA_USER_IDS", f"1, {conta}")
+    assert _me(c, h) is True
+
+
+@pytest.mark.parametrize("fora", ["allowlist", "rollout"])
+def test_put_fora_da_allowlist_ou_do_rollout_recusa_sem_gastar_codigo(conta, monkeypatch, fora):
+    c, h = _dono(conta)
+    codigo = _cod(conta)
+    if fora == "allowlist":
+        monkeypatch.setenv("ACESSO_LEITURA_USER_IDS", "")
+    else:
+        monkeypatch.delenv("DASHBOARD_V2_TODOS", raising=False)
+        monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", "0")
+        monkeypatch.setenv("DASHBOARD_V2_BETA_EMAILS", "")
+    r = _put(c, h, conta, usuario_novo(), SENHA_LEITOR, codigo=codigo)
+    assert (r.status_code, r.json()["error"]["code"]) == (403, "acesso_leitura_indisponivel")
+    assert db.obter_credencial_leitura(conta)["ativo"] is False
+    monkeypatch.setenv("ACESSO_LEITURA_USER_IDS", str(conta))  # controle positivo: o MESMO código ainda vale (não foi gasto)
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", str(conta))
+    assert _put(c, h, conta, usuario_novo(), SENHA_LEITOR, codigo=codigo).status_code == 200
+    monkeypatch.setenv("ACESSO_LEITURA_USER_IDS", "")  # desativar segue liberado fora da lista
+    assert _del(c, h, conta).status_code == 200 and c.get("/api/v2/conta/leitura", headers=h).status_code == 200
+
+
 # ── reautenticação por código de e-mail (PUT/DELETE) ─────────────────────────
 
 def _grava(c, h, uid, codigo):
@@ -267,6 +306,22 @@ def test_delete_sem_codigo_e_recusado_e_mantem_a_credencial(conta):
     assert _grava(c, h, conta, _cod(conta))[0] == 200
     assert c.delete("/api/v2/conta/leitura", headers=h, json={"codigo": "xxxxxx"}).status_code == 400
     assert db.obter_credencial_leitura(conta)["ativo"] is True
+
+
+def test_pedir_codigo_fora_da_allowlist_so_com_credencial_ativa(conta, emails, monkeypatch):
+    c, h = _dono(conta)
+    monkeypatch.setenv("ACESSO_LEITURA_USER_IDS", "")
+    r = c.post("/api/v2/conta/leitura/codigo", headers=h)  # sem acesso e sem credencial: nenhum e-mail
+    assert (r.status_code, r.json()["error"]["code"]) == (403, "acesso_leitura_indisponivel") and emails.codigos == []
+    db.definir_credencial_leitura(conta, usuario_novo(), SENHA_LEITOR)  # credencial criada antes: precisa do código para desativar
+    assert c.post("/api/v2/conta/leitura/codigo", headers=h).status_code == 200 and len(emails.codigos) == 1
+
+
+@pytest.mark.parametrize("sep", ["\n", "\t", " "])
+def test_env_aceita_espaco_em_branco_por_token(conta, monkeypatch, sep):
+    c, h = _dono(conta)
+    monkeypatch.setenv("ACESSO_LEITURA_USER_IDS", f"1,{sep}{conta}{sep}")
+    assert _me(c, h) is True
 
 
 def test_leitor_nao_pede_codigo(conta, emails):
@@ -555,6 +610,7 @@ def _pede(c, h, rota):
 ])
 def test_teto_de_3_por_hora_soma_leitura_e_exclusao(emails, antes, depois):
     conta = conta_exclusao()
+    db.definir_credencial_leitura(conta.uid, usuario_novo(), SENHA_LEITOR)  # fora da allowlist só quem tem credencial ativa pede código
     c, h = _Fresco(), {"Authorization": f"Bearer {sessao_de(conta.uid)['access']}"}
     assert [_pede(c, h, antes) for _ in range(3)] == [200] * 3
     assert _pede(c, h, depois) == 429
@@ -567,7 +623,9 @@ def test_pedir_codigo_de_leitura_tem_teto_por_ip_nos_dois_namespaces(emails, pre
     c = _Fresco()
     codigos = []
     for _ in range(6):   # contas diferentes: só o teto por IP (5/h) pode barrar
-        h = {"Authorization": f"Bearer {sessao_de(conta_exclusao().uid)['access']}"}
+        uid = conta_exclusao().uid
+        db.definir_credencial_leitura(uid, usuario_novo(), SENHA_LEITOR)
+        h = {"Authorization": f"Bearer {sessao_de(uid)['access']}"}
         codigos.append(c.post(prefixo + "/conta/leitura/codigo", headers=h, json={}).status_code)
     assert codigos == [200] * 5 + [429]
 

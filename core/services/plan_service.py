@@ -328,6 +328,15 @@ def agents_ui_enabled(user_id: int, email: str | None = None) -> bool:
 _chat_ia_avisado: str | None = None  # a env ruim que já foi avisada: o aviso sai uma vez por valor, não a cada /me
 
 
+def acesso_leitura(user_id: int) -> bool:
+    """Freio da tela "Acesso de visualização" (credencial de leitor): só os user_id listados em
+    ACESSO_LEITURA_USER_IDS (separados por vírgula, lida a cada chamada; vazia ou ausente = ninguém) E que
+    estão no rollout `dashboard_v2_enabled` (o login de leitura recusa o dono fora dele)."""
+    toks = (t.strip() for t in (os.getenv("ACESSO_LEITURA_USER_IDS") or "").split(","))  # strip por token: aceita \n e \t
+    ids = {int(t) for t in toks if t.isascii() and t.isdigit() and len(t) <= 18}
+    return int(user_id) in ids and dashboard_v2_enabled(user_id)
+
+
 def painel_chat_ia(user_id: int) -> bool:
     """Freio do chat com a IA no /painel: PAINEL_CHAT_IA_TODOS=1 abre para todos (teto = cota
     mensal por plano); senão só os user_id listados em PAINEL_CHAT_IA_USER_IDS

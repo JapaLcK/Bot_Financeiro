@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, StrictStr
 
 from api.v2.sessao import usuario_sessao
+from core.services.plan_service import acesso_leitura
 from db import (
     LeituraInvalida, UsernameEmUso, definir_credencial_leitura, desativar_credencial_leitura,
     obter_credencial_leitura, reauth_codes,
@@ -56,6 +57,9 @@ async def exigir_codigo(uid: int, codigo: str) -> None:
 async def pedir_codigo(request: Request, uid: int = Depends(usuario_sessao)) -> dict:
     """Manda ao e-mail do dono o código que autoriza o PUT/DELETE (só o dono: o leitor é barrado pelo guard)."""
     from frontend.routes.conta_reauth import enviar_codigo
+    # fora da allowlist só quem já tem credencial ativa pede código (para desativar): senão seria um disparador de e-mail sem uso possível
+    if not await asyncio.to_thread(acesso_leitura, uid) and not (await asyncio.to_thread(obter_credencial_leitura, uid))["ativo"]:
+        raise HTTPException(status_code=403, detail={"error": "acesso_leitura_indisponivel"})
     return await enviar_codigo(uid, reauth_codes.LEITURA)
 
 
@@ -66,6 +70,8 @@ async def ver(uid: int = Depends(usuario_sessao)) -> Credencial:
 
 @router.put("/conta/leitura", response_model=Credencial)
 async def definir(corpo: CredencialIn, uid: int = Depends(usuario_sessao)) -> Credencial:
+    if not await asyncio.to_thread(acesso_leitura, uid):  # antes de tudo, inclusive do código: criar/trocar é só da allowlist (desativar sempre pode)
+        raise HTTPException(status_code=403, detail={"error": "acesso_leitura_indisponivel"})
     try:  # usuário/senha inválidos recusam ANTES de gastar o código (só o 409 de corrida o gasta)
         normalizar_usuario(corpo.usuario)
         validar_senha(corpo.senha)

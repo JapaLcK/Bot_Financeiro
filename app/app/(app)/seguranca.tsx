@@ -5,6 +5,7 @@ import { ActivityIndicator, ScrollView, View } from "react-native";
 import { SessaoExpirada } from "@/api/client";
 import type { MfaStatus, Perfil } from "@/api/schemas/auth";
 import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
+import { AcessoLeitura } from "@/features/conta/AcessoLeitura";
 import { Desbloqueio } from "@/features/seguranca/Desbloqueio";
 import { useFalha } from "@/features/seguranca/falha";
 import { useVoltaDoFundo } from "@/features/seguranca/voltaDoFundo";
@@ -153,6 +154,8 @@ export default function Seguranca() {
             <Button rotulo="Ativar" onPress={() => router.push("/mfa-ativar")} />
           </View>
         ))}
+
+      <AcessoLeitura />
 
       <Desbloqueio />
     </ScrollView>
