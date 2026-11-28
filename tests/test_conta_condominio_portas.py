@@ -121,6 +121,17 @@ def test_lista_do_whatsapp(conta):
         assert PESSOAIS <= titulos
 
 
+def test_lista_do_whatsapp_nao_oferece_categoria_so_emoji():
+    # plano controlado: o emoji fica entre as 8 primeiras (sem isso o teste passaria por ordem alfabética)
+    plano = [("☕", None), ("água", "funcionais"), ("outros", None)]
+    enviado = {}
+    with mock.patch("db.categories.plano_da_conta", return_value=plano), \
+         mock.patch.object(wa_runtime, "send_interactive_list", side_effect=lambda **k: enviado.update(k)):
+        wa_runtime._send_recategorize_list("5511", "corpo", 7, 123)
+    nomes = {r["id"].split(":", 2)[2] for r in _rows(enviado["sections"]) if r["id"].count(":") >= 2}
+    assert "☕" not in nomes and "água" in nomes
+
+
 def _limite(uid, cat):
     return (budgets.get_budget(uid, cat) or {}).get("budget")
 

@@ -58,7 +58,7 @@ from db import (
     update_launch_category,
 )
 from utils_phone import mask_phone, mask_wamid
-from utils_text import sem_invisiveis
+from utils_text import normalize_text, sem_invisiveis
 
 logger = logging.getLogger(__name__)
 
@@ -455,7 +455,7 @@ def _send_recategorize_list(to_wa_id: str, body: str, launch_id: int, user_id: i
     # "Outra (digitar)" (cai no resolvedor). "Mais usadas" se o plano passar de ~9 nomes na prática.
     comuns = ([pick("alimentação"), pick("mercado"), pick("transporte"), pick("lazer"),
                pick("moradia"), pick("saúde"), pick("educação"), pick("assinaturas")] if plano is None
-              else [pick(n) for n, _ in plano if n != "outros"][:8])
+              else [pick(n) for n, _ in plano if n != "outros" and normalize_text(n)][:8])  # só-emoji: o resolvedor do clique recusa
     sections = [
         *([{"title": "Mais comuns", "rows": comuns}] if comuns else []),  # seção sem row o WhatsApp recusa
         {
