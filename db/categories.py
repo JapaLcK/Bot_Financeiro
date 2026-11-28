@@ -11,11 +11,12 @@ Duas tabelas distintas:
   que se conta (contar aqui envelhece).
 """
 import logging
+import re
 import unicodedata
 
 from .connection import get_conn
 from .users import ensure_user
-from utils_text import normalize_text
+from utils_text import CATEGORIAS_DE_SISTEMA, INVESTMENT_CATEGORY_HINTS, canonicalize_category_label, normalize_text
 
 log = logging.getLogger(__name__)
 
@@ -109,6 +110,102 @@ def list_categories(user_id: int) -> list[str]:
             )
             rows = cur.fetchall()
     return [r["category"] if isinstance(r, dict) else r[0] for r in rows]
+
+
+def plano_da_conta(user_id: int) -> list[tuple[str, str | None]] | None:
+    """Plano de contas da conta de CONDOMÍNIO `[(nome, grupo)]` (não arquivadas, só deste `user_id`, com "outros");
+    `None` se a conta é pessoal ou não existe. Uma leitura só (tipo_conta + lista), sem cache: lista global vazaria
+    uma conta na outra."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select u.tipo_conta, uc.name, uc.grupo from users u "
+            "left join user_categories uc on uc.user_id = u.id and not uc.is_archived "
+            "and u.tipo_conta = 'condominio' where u.id = %s order by uc.name",
+            (user_id,),
+        )
+        rows = cur.fetchall() or []
+    if not rows or rows[0]["tipo_conta"] != "condominio":
+        return None
+    plano = [(r["name"], r["grupo"]) for r in rows if r["name"]]
+    return plano if any(n == "outros" for n, _ in plano) else plano + [("outros", None)]
+
+
+def categoria_no_plano(plano: list[tuple[str, str | None]], raw: str) -> str:
+    """Resolvedor ÚNICO de categoria vinda de fora do plano (hashtag, LLM, recorrente, recategoriza) para uma conta de
+    condomínio. Ordem: (1) categoria de SISTEMA (`CATEGORIAS_DE_SISTEMA`), com `_` ou espaço → intacta (o import deriva
+    `is_internal_movement` dela); (2) nome ORIGINAL exato; (3) nome completo igual a menos de caixa/acento/pontuação
+    (chave = `normalize_text`, ou o nome em minúsculas se a normalização apaga tudo, como em "☕"); (4) o mesmo sem o
+    "(grupo)" final; (4b) texto inteiro normalizado em `INVESTMENT_CATEGORY_HINTS` sem nome no plano → intacta; (5) o ÚNICO nome do plano que compartilha token (4+ letras) ou prefixo de token (5+) → ele;
+    (6) ambíguo ou sem casamento → "outros". Conta PESSOAL não passa por aqui (`categoria_da_conta` devolve `raw`).
+
+    Plano de referência P = energia elétrica, taxa condominial (ordinária), manutenção predial, manutenção de
+    elevador, jardinagem, fundo de obras (custom do síndico, sem grupo), ☕, 🍕, outros. P1 = ☕, outros.
+    Categoria arquivada não está no plano: cai nas linhas "sem casamento".
+
+    | entrada (condomínio)                         | saída                          | por quê                       |
+    |----------------------------------------------|--------------------------------|-------------------------------|
+    | "energia elétrica"                           | "energia elétrica"             | nome exato                    |
+    | "ENERGIA Eletrica"                           | "energia elétrica"             | caixa/acento                  |
+    | "taxa condominial (ordinária)"               | ele mesmo                      | nome completo com parênteses  |
+    | "energia elétrica (despesas fixas)"          | "energia elétrica"             | "(grupo)" inexistente é tirado|
+    | "jardinagem geral"                           | "jardinagem"                   | token único                   |
+    | "elevadores"                                 | "manutenção de elevador"       | prefixo >=5 único             |
+    | "manutenção"                                 | "outros"                       | ambíguo (2 nomes)             |
+    | "piscina"                                    | "outros"                       | sem casamento                 |
+    | "reforma antiga" (custom arquivada)          | "outros"                       | fora do plano                 |
+    | "fundo de obras" / "fundo de obras (x)"      | "fundo de obras"               | custom sem grupo              |
+    | cada INTERNAL_MOVEMENT + rendimentos +       | a canônica (`investimento_     | sistema, vale com `_`, espaço |
+    |   criptomoedas, "Investimento Aporte"        | aporte`…)                      | e caixa                       |
+    |   "investimentos"/"Investimentos"/"cdb"        | a canônica, intacta            | texto inteiro é um hint       |
+    | "sol nascente" / "fundo cdb do síndico"      | "outros" / "fundo de obras"     | só CONTÉM o hint: vai pro plano|
+    |   / "tesouro direto"                         |                                |   interno, vai pro plano      |
+    | "fundo de reserva investimento" (custom)     | ele mesmo                      | nome do plano vence o hint    |
+    | "outros" / "OUTROS"                          | "outros"                       | explícito                     |
+    | "" / "   "                                   | "outros"                       | vazio                         |
+    | "🍕" em P / "☕" em P / "☕ " em P            | "🍕" / "☕" / "☕"                | emoji: exato, não o 1º        |
+    | "🍕" em P1                                   | "outros"                       | só emoji, sem casamento       |
+    | "12345" / "123 energia"                      | "outros" / "energia elétrica"  | número não casa; token casa   |
+
+    Conta pessoal: `categoria_da_conta` devolve `raw` como está, em todas as linhas acima."""
+    raw = raw or ""
+    sistema = canonicalize_category_label(raw)
+    if sistema in CATEGORIAS_DE_SISTEMA:
+        return sistema
+    nomes = [n for n, _ in plano]
+    if raw in nomes:
+        return raw
+    sem_grupo = re.sub(r"\s*\([^)]*\)\s*$", "", raw)
+
+    def chave(x: str) -> str:  # mesma chave de `_nome_ocupado`: "☕" e "🍕" não podem virar ambos ""
+        return normalize_text(x) or _normalize_category_name(x)
+
+    for alvo in (raw, sem_grupo):
+        for n in nomes:
+            if chave(n) == chave(alvo):
+                return n
+    if normalize_text(raw) in INVESTMENT_CATEGORY_HINTS:  # só o texto INTEIRO ("investimentos", "cdb"); "sol nascente" não
+        return sistema
+    toks = [t for t in normalize_text(sem_grupo).split() if len(t) >= 4]
+    achou = [
+        n for n in nomes if n != "outros" and any(
+            a == b or (min(len(a), len(b)) >= 5 and (a.startswith(b) or b.startswith(a))) for a in toks for b in normalize_text(n).split() if len(b) >= 4)
+    ]
+    return achou[0] if len(achou) == 1 else "outros"
+
+
+def categoria_da_conta(user_id: int, raw: str) -> str:
+    """`raw` como está se a conta é pessoal; senão resolvido contra o plano (`categoria_no_plano`)."""
+    plano = plano_da_conta(user_id)
+    return raw if plano is None else categoria_no_plano(plano, raw)
+
+
+def categorias_permitidas(user_id: int) -> list[str]:
+    """Fonte única das categorias que a classificação pode devolver PARA ESTA conta: o plano dela se for
+    condomínio, senão `ai_router.ALLOWED_CATEGORIES` (como sempre)."""
+    from ai_router import ALLOWED_CATEGORIES  # tardio: ai_router importa db
+
+    plano = plano_da_conta(user_id)
+    return list(ALLOWED_CATEGORIES) if plano is None else [n for n, _ in plano]
 
 
 def get_memorized_category(user_id: int, memo: str) -> str | None:
@@ -856,6 +953,21 @@ def resolve_category_input(
     create: bool = False,
     display_map: dict[str, str] | None = None,
 ) -> str | None:
+    """Porta única de categoria digitada (API, WhatsApp, imports): `_resolve_category_input` + o plano da conta de
+    condomínio (`categoria_da_conta`; pessoal passa intacta). Resolver AQUI, e não na porta, é o que impede o
+    `ensure_user_category`/a mensagem de ver a canônica pessoal que nunca foi gravada.
+    # ponytail: +1 leitura de plano por chamada (importação em lote paga por linha); cache por request se pesar."""
+    cat = _resolve_category_input(user_id, raw, create=create, display_map=display_map)
+    return cat and categoria_da_conta(user_id, cat)
+
+
+def _resolve_category_input(
+    user_id: int,
+    raw: str,
+    *,
+    create: bool = False,
+    display_map: dict[str, str] | None = None,
+) -> str | None:
     """Texto livre → nome de categoria pra gravar em `launches.categoria`.
 
     Normalizado é chave, forma de exibição é valor: devolve o nome que já
@@ -932,9 +1044,9 @@ def resolve_category_for_write(user_id: int, raw: str) -> str:
     # ponytail: 1 leitura de plano por escrita de recorrente (antes o
     # `resolve_category_input` só a fazia quando os passos 1-2 não achavam nada).
     # Passar o veredito como argumento só se aparecer no perfil.
-    return resolve_category_input(
+    return categoria_da_conta(user_id, resolve_category_input(
         user_id, raw, create=_custom_categories_allowed(user_id)
-    ) or raw
+    ) or raw)  # o `or raw` cru também passa pelo plano (condomínio)
 
 
 def _custom_categories_allowed(user_id: int) -> bool:

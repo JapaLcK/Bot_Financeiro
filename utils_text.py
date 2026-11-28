@@ -550,6 +550,9 @@ INTERNAL_MOVEMENT_CATEGORIES = {
     "ajuste_saldo",
 }
 
+# Categorias de SISTEMA: o import deriva `is_internal_movement` delas, então valem em qualquer plano (inclusive condomínio).
+CATEGORIAS_DE_SISTEMA = frozenset(INTERNAL_MOVEMENT_CATEGORIES | {"rendimentos", "criptomoedas"})
+
 CATEGORY_LABELS = {
     "alimentacao": "alimentação",
     "transporte": "transporte",

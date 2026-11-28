@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ai_router import ALLOWED_CATEGORIES
 from db import lancamentos_leitura
+from db.categories import categorias_permitidas
 from db.connection import cat_key
 from db.estabelecimentos import SEM_DESCRICAO
 from utils_date import now_tz
@@ -30,10 +30,10 @@ from ..cards import mostrar_da_tool
 
 MAX_NO_CARD = 10
 
-# O Extrato entrega a CHAVE da categoria (minúscula, sem acento); a conversa escreve o nome. As do catálogo
-# voltam com o nome canônico; as outras, como foram gravadas (`categoria_nome`: "Café", "salário"), que é o que o
+# O Extrato entrega a CHAVE da categoria (minúscula, sem acento); a conversa escreve o nome. As do catálogo DA CONTA
+# (`categorias_permitidas`: o plano no condomínio, as canônicas na pessoal; lido a cada lista, nunca no import)
+# voltam com o nome do catálogo; as outras, como foram gravadas (`categoria_nome`: "Café", "salário"), que é o que o
 # usuário vê e o que o `resolve_category_input` reencontra no "recategoriza" sem criar uma gêmea.
-_NOME = {cat_key(c): c for c in ALLOWED_CATEGORIES}
 
 
 def descricao_do_item(i: dict) -> str:
@@ -53,14 +53,14 @@ def texto_parcelamento(r: dict[str, Any]) -> str | None:
     return None
 
 
-def _para_ia(i: dict) -> dict:
+def _para_ia(i: dict, nome: dict[str, str]) -> dict:
     from core.handlers.launches import _INTERNAL_LABELS  # tardio: handler pesado, só aqui
 
     tipo = "receita" if i["tipo"] == "entrada" else "despesa"
     # só o texto pronto vai à IA: o `parcela` cru ({n, total}) casa com chave monetária do `ai_guard` e "total=12" virava R$ 12,00
     return {"id": i["id"], **({"user_seq": i["numero"]} if i.get("numero") else {}), "data": i["data"], "tipo": _INTERNAL_LABELS[tipo] if i["interno"] else tipo,
             "valor": float(i["valor"]), "moeda": i["moeda"], "descricao": descricao_do_item(i),
-            "categoria": _NOME.get(i["categoria"]) or i["categoria_nome"] or i["categoria"], "origem": i["origem"], "guardado": i["guardado"],
+            "categoria": nome.get(i["categoria"]) or i["categoria_nome"] or i["categoria"], "origem": i["origem"], "guardado": i["guardado"],
             "parcelamento": texto_parcelamento(i), "fatura": i["fatura"], "pode": i["pode"]}
 
 
@@ -78,7 +78,8 @@ def mostrar_itens(user_id: int, card: str, itens: list[dict], motivos: list[str]
 def _lista(user_id: int, args: dict[str, Any], sem_categoria: bool) -> dict[str, Any]:
     limit = max(1, min(int(args.get("limit") or 10), 50))
     d = lancamentos_leitura.recentes(user_id, now_tz(), limit, sem_categoria=sem_categoria)
-    resultado = {"itens": [_para_ia(i) for i in d["itens"]], "motivos": d["motivos"]}
+    nome = {cat_key(c): c for c in categorias_permitidas(user_id)}
+    resultado = {"itens": [_para_ia(i, nome) for i in d["itens"]], "motivos": d["motivos"]}
     if mostrar_itens(user_id, "sem_categoria" if sem_categoria else "ultimos_lancamentos", d["itens"], d["motivos"]):
         resultado["card_na_tela"] = True
         if len(d["itens"]) > MAX_NO_CARD:  # o card corta: o modelo escreve os que ficaram fora (Codex no #1107)
