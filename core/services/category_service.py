@@ -334,6 +334,15 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
             reason="user_rule",
         )
 
+    # Conta de condomínio: o plano de contas é o catálogo. LOCAL_RULES são das canônicas pessoais ("luz" → moradia,
+    # "mensalidade" → educação) e não rodam; resultado de B2 e da IA tem de estar no plano. Pessoal: `plano` é None.
+    try:
+        from db.categories import plano_da_conta
+        plano = plano_da_conta(user_id)
+    except Exception:
+        plano = None  # como o B2: hiccup de leitura não derruba o lançamento (cai no comportamento pessoal)
+    no_plano = None if plano is None else {normalize_text(n) for n, _ in plano}
+
     # B2) categoria CUSTOM criada pelo usuário (na tela) sem regra de keyword.
     #     Se o lançamento menciona um token distintivo do nome dela, usa. Vem
     #     antes das LOCAL_RULES porque é personalização explícita do usuário.
@@ -341,7 +350,7 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
         custom_cat = custom_category_match(user_id, t)
     except Exception:
         custom_cat = None
-    if custom_cat:
+    if custom_cat and (no_plano is None or normalize_text(custom_cat) in no_plano):
         # Retorna o nome EXATAMENTE como cadastrado em user_categories (pode ter
         # acento, ex.: "saúde da família"). Não passa por canonicalize_category_label
         # — isso removeria acentos e o lançamento deixaria de agrupar com a
@@ -349,7 +358,7 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
         return InferResult(category=custom_cat, reason="user_category")
 
     # C) LOCAL_RULES
-    local_cat = local_rule_category(t)
+    local_cat = None if plano is not None else local_rule_category(t)
     if local_cat:
         return InferResult(category=local_cat, reason="local_rule")
 
@@ -367,6 +376,8 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
             try:
                 from ai_router import classify_category_with_gpt
                 cat_ai = classify_category_with_gpt(t, user_id=user_id, source="core.services.category_service")
+                if cat_ai and no_plano is not None and normalize_text(cat_ai) not in no_plano:
+                    cat_ai = "outros"
                 if cat_ai:
                     # Aceita até "outros" do GPT — significa que ele analisou e
                     # decidiu que não há categoria clara, em vez de cair em

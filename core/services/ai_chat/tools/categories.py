@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 import db
-from ai_router import ALLOWED_CATEGORIES
+from db.categories import categorias_permitidas
 
 from ._base import Tool
 from .extrato_ia import ao_confirmar, recategorizar, resumo_categoria, validar_categoria
@@ -26,7 +26,7 @@ from .listas_ia import sem_categoria
 # ─── Read handlers ──────────────────────────────────────────────────────────
 
 def _list_categories(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    return {"categories": list(ALLOWED_CATEGORIES)}
+    return {"categories": categorias_permitidas(user_id)}
 
 
 def _list_user_rules(user_id: int, args: dict[str, Any]) -> dict[str, Any]:

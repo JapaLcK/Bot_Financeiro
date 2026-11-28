@@ -111,6 +111,33 @@ def list_categories(user_id: int) -> list[str]:
     return [r["category"] if isinstance(r, dict) else r[0] for r in rows]
 
 
+def plano_da_conta(user_id: int) -> list[tuple[str, str | None]] | None:
+    """Plano de contas da conta de CONDOMÍNIO `[(nome, grupo)]` (não arquivadas, só deste `user_id`, com "outros");
+    `None` se a conta é pessoal ou não existe. Uma leitura só (tipo_conta + lista), sem cache: lista global vazaria
+    uma conta na outra."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select u.tipo_conta, uc.name, uc.grupo from users u "
+            "left join user_categories uc on uc.user_id = u.id and not uc.is_archived "
+            "and u.tipo_conta = 'condominio' where u.id = %s order by uc.name",
+            (user_id,),
+        )
+        rows = cur.fetchall() or []
+    if not rows or rows[0]["tipo_conta"] != "condominio":
+        return None
+    plano = [(r["name"], r["grupo"]) for r in rows if r["name"]]
+    return plano if any(n == "outros" for n, _ in plano) else plano + [("outros", None)]
+
+
+def categorias_permitidas(user_id: int) -> list[str]:
+    """Fonte única das categorias que a classificação pode devolver PARA ESTA conta: o plano dela se for
+    condomínio, senão `ai_router.ALLOWED_CATEGORIES` (como sempre)."""
+    from ai_router import ALLOWED_CATEGORIES  # tardio: ai_router importa db
+
+    plano = plano_da_conta(user_id)
+    return list(ALLOWED_CATEGORIES) if plano is None else [n for n, _ in plano]
+
+
 def get_memorized_category(user_id: int, memo: str) -> str | None:
     """
     Retorna categoria memorizada se alguma keyword bater com o texto.

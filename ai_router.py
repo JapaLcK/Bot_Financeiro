@@ -126,16 +126,37 @@ def _norm(text: str) -> str:
     return t
 
 
-def _normalize_category(cat: str) -> str:
+def _normalize_category(cat: str, permitidas: list[str] | None = None) -> str:
     norm = _norm(cat)
+    allowed_norm_map = {_norm(c): c for c in (ALLOWED_CATEGORIES if permitidas is None else permitidas)}
+    # Lista da conta (condomínio): o nome exato dela vence o apelido pessoal; apelido cujo alvo não está na lista → "outros".
+    if permitidas is not None and norm in allowed_norm_map:
+        return allowed_norm_map[norm]
     mapped = _CATEGORY_ALIASES.get(norm, norm)
-    allowed_norm_map = {_norm(c): c for c in ALLOWED_CATEGORIES}
     return allowed_norm_map.get(_norm(mapped), "outros")
 
 
 # ---------------------------------------------------------------------------
 # classify_category_with_gpt
 # ---------------------------------------------------------------------------
+
+def _prompt_condominio(plano: list[tuple[str, str | None]], descricao: str) -> str:
+    lista = ", ".join(f"{n} ({g})" if g else n for n, g in plano)
+    return (
+        "Você classifica lançamentos de um condomínio residencial, lançados pelo síndico.\n"
+        "O síndico paga folha, encargos, concessionárias e manutenção, e recebe as mensalidades dos condôminos.\n"
+        "Responda com UMA única categoria exatamente dentre as opções abaixo, sem o grupo entre parênteses.\n"
+        "Não explique. Não use pontuação. Não escreva mais nada.\n"
+        "Categorias: " + lista + "\n\n"
+        "Exemplos:\n"
+        "folha de pagamento, salário do porteiro → salários\n"
+        "conta de luz, energia → energia elétrica\n"
+        "mensalidade do apto 101, condomínio recebido → mensalidades\n"
+        "Se nenhuma categoria servir, responda outros.\n\n"
+        f"Texto: {descricao}\n"
+        "Resposta:"
+    )
+
 
 def classify_category_with_gpt(descricao: str, *, user_id: int | None = None, source: str = "unknown") -> str:
     """
@@ -186,7 +207,16 @@ def classify_category_with_gpt(descricao: str, *, user_id: int | None = None, so
         )
         return "outros"
 
-    prompt = (
+    plano = None
+    if user_id is not None:
+        try:
+            from db.categories import plano_da_conta
+            plano = plano_da_conta(user_id)
+        except Exception:
+            plano = None  # leitura falhou: cai no comportamento pessoal de sempre
+    permitidas = None if plano is None else [n for n, _ in plano]
+
+    prompt = _prompt_condominio(plano, descricao) if plano is not None else (
         "Você é um classificador de categorias financeiras.\n"
         "Responda com UMA única categoria exatamente dentre as opções abaixo.\n"
         "Não explique. Não use pontuação. Não escreva mais nada.\n"
@@ -219,7 +249,7 @@ def classify_category_with_gpt(descricao: str, *, user_id: int | None = None, so
             messages=[{"role": "user", "content": prompt}],
         )
         cat_raw = (resp.choices[0].message.content or "").strip()
-        normalized = _normalize_category(cat_raw)
+        normalized = _normalize_category(cat_raw, permitidas)
         if normalized == "outros" and _norm(cat_raw) not in {"", "outros"}:
             _log_category_ai_event(
                 "warning",
