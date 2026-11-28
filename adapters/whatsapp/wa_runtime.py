@@ -57,7 +57,6 @@ from db import (
     set_whatsapp_updates_opt_out,
     update_launch_category,
 )
-from db.categories import plano_da_conta
 from utils_phone import mask_phone, mask_wamid
 from utils_text import sem_invisiveis
 
@@ -450,6 +449,7 @@ def _send_recategorize_list(to_wa_id: str, body: str, launch_id: int, user_id: i
     comuns + "Outra (digitar)" como fallback para texto livre.
     """
     pick = lambda c: {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:{c}", "title": c[:24]}  # título: teto de 24 do WhatsApp
+    from db.categories import plano_da_conta  # tardio: o harness seguro troca `db` por um módulo, não pacote
     plano = plano_da_conta(user_id) if user_id else None
     # condomínio: o plano da conta, nunca as canônicas pessoais. ponytail: as 8 primeiras por nome; além delas,
     # "Outra (digitar)" (cai no resolvedor). "Mais usadas" se o plano passar de ~9 nomes na prática.
