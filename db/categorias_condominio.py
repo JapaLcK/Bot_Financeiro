@@ -21,11 +21,14 @@ _COR = {
 }
 
 # (nome, grupo, emoji, código contábil). Nomes minúsculos e sem colisão entre si nem com as
-# canônicas pessoais ("água" ≠ "receb. água"; "alimentação funcionários" ≠ "alimentação").
+# canônicas pessoais ("alimentação funcionários" ≠ "alimentação"). Nome de categoria também casa por
+# token distintivo (`custom_category_match`): não repita token entre uma receita e uma despesa (a receita de
+# rateio já se chamou "receb. água" e "paguei a conta de água" caía nela). Pares que dividem token
+# ("serviços pf/pj") e nomes curtos dependem de REGRA para desempatar.
 # Na planilha as quatro receitas aparecem todas com o código 4001; aqui vai como está lá.
 _CONTAS: list[tuple[str, str, str, str]] = [
     ("mensalidades", "receitas", "💵", "4001"),
-    ("receb. água", "receitas", "🚰", "4001"),
+    ("rateio das unidades", "receitas", "🚰", "4001"),
     ("antecipação de receitas", "receitas", "⏩", "4001"),
     ("amortiz. antecip. de receitas", "receitas", "⏪", "4001"),
     ("salários", "pessoal", "👷", "3101"),
@@ -73,23 +76,28 @@ _CONTAS: list[tuple[str, str, str, str]] = [
 CATEGORIAS_CONDOMINIO = [(n, g, e, _COR[g], c) for n, g, e, c in _CONTAS]
 
 # keyword → categoria. A busca (`get_memorized_rules`) casa por PALAVRA **ou por substring** do texto
-# normalizado, então só entra palavra que não aparece dentro de outra. Descartadas por isso: "pis"
-# (ex.: "pista"), "vt", "luz" (ex.: "luzia"), "folha" (casa "folhagem" do jardim; usa-se
-# "folha de pagamento") e "claro" (casa "declaro"/"esclarecimento"). Empate de tamanho: "grrf" e
-# "fgts" têm 4 letras, então "grrf fgts" cai na que o banco devolver primeiro.
+# normalizado, então só entra frase que não aparece dentro de outra palavra/assunto: nada de "gps", "enel",
+# "vivo", "internet", "multa", "férias", "segurança", "mensalidade" soltos (casavam "gpsoft", "venel", "convivo",
+# "internet banking", "multa de trânsito", "livro de férias"...). "pis", "vt", "luz", "folha", "claro" também
+# ficaram de fora. Empate de tamanho: "grrf" e "fgts" têm 4 letras, então "grrf fgts" cai na que o banco devolver primeiro.
 REGRAS_CONDOMINIO: dict[str, str] = {
-    "folha de pagamento": "salários", "salário": "salários", "inss": "inss", "gps": "inss",
-    "fgts": "fgts", "grrf": "grrf/fgts", "irrf": "irrf", "férias": "férias",
+    "folha de pagamento": "salários", "salário": "salários", "inss": "inss", "guia gps": "inss",
+    "darf inss": "inss", "fgts": "fgts", "grrf": "grrf/fgts", "irrf": "irrf",
+    "férias funcionário": "férias", "pagamento de férias": "férias",
     "13º salário": "13º salário", "13 salário": "13º salário", "décimo terceiro": "13º salário",
-    "vale transporte": "vale transporte", "sabesp": "água",
-    "enel": "energia elétrica", "eletropaulo": "energia elétrica",
-    "vivo": "telefone e internet", "internet": "telefone e internet",
+    "vale transporte": "vale transporte", "conta de água": "água", "sabesp": "água",
+    "conta de luz": "energia elétrica", "enel distribui": "energia elétrica", "eletropaulo": "energia elétrica",
+    "conta de internet": "telefone e internet", "vivo fibra": "telefone e internet",
+    "vivo empresas": "telefone e internet",
     "tarifa bancária": "tarifas bancárias", "cesta de serviços": "tarifas bancárias",
+    "internet banking": "tarifas bancárias",
+    "serviços pf": "serviços pf", "serviços pj": "serviços pj", "elevador": "manut. máquinas",
     "contador": "honorários contábeis", "contabilidade": "honorários contábeis",
     "advogado": "honorários advocatícios", "jardinagem": "manut. jardins", "rescisão": "rescisões",
-    "iptu": "impostos e taxas", "juros de mora": "juros de mora e multas", "multa": "juros de mora e multas",
-    "segurança": "segurança terceirizada", "vigilância": "segurança terceirizada",
-    "mensalidade": "mensalidades", "taxa condominial": "mensalidades",
+    "iptu": "impostos e taxas", "juros de mora": "juros de mora e multas",
+    "multa por atraso": "juros de mora e multas",
+    "segurança terceirizada": "segurança terceirizada", "vigilância patrimonial": "segurança terceirizada",
+    "taxa condominial": "mensalidades", "cota condominial": "mensalidades",
 }
 
 _CANONICAS = [n for n, _, _ in SYSTEM_CATEGORIES_SEED]
@@ -100,26 +108,36 @@ def semear_condominio(cur, user_id: int) -> dict[str, int]:
 
     Pré-requisito de quem chama: `ensure_user_categories_seeded(user_id)` já rodou (ele abre conexão
     própria, por isso não roda aqui) — as canônicas existem e podem ser arquivadas.
-    - categorias: `on conflict … do update set grupo … where grupo is null` — não sobrescreve grupo já definido;
-    - canônicas pessoais sem uso (lançamento ou cartão) DESTE usuário são arquivadas, nunca apagadas;
+    - categorias: reaproveita a que o usuário já tem com o mesmo nome (sem acento/caixa), desarquivando-a, e
+      só preenche `grupo` se estiver nulo — nunca sobrescreve grupo já definido;
+    - canônicas pessoais sem uso DESTE usuário (lançamento, cartão, orçamento, recorrente) são arquivadas, nunca
+      apagadas; "outros" (fallback universal) fica;
     - regras: só a keyword que o usuário ainda não tem (comparada sem acento/caixa), nunca sobrescreve.
     """
+    cur.execute("select name from user_categories where user_id = %s", (user_id,))
+    existentes = {normalize_text(r["name"]): r["name"] for r in cur.fetchall()}
     for nome, grupo, emoji, cor, _codigo in CATEGORIAS_CONDOMINIO:
-        cur.execute(
-            """
-            insert into user_categories (user_id, name, emoji, color, is_system, grupo)
-            values (%s, %s, %s, %s, false, %s)
-            on conflict (user_id, name) do update set grupo = excluded.grupo
-              where user_categories.grupo is null
-            """,
-            (user_id, nome, emoji, cor, grupo),
-        )
+        if normalize_text(nome) in existentes:
+            cur.execute(
+                "update user_categories set is_archived = false, grupo = coalesce(grupo, %s) "
+                "where user_id = %s and name = %s",
+                (grupo, user_id, existentes[normalize_text(nome)]),
+            )
+        else:
+            cur.execute(
+                "insert into user_categories (user_id, name, emoji, color, is_system, grupo) "
+                "values (%s, %s, %s, %s, false, %s)",
+                (user_id, nome, emoji, cor, grupo),
+            )
     cur.execute(
         """
         update user_categories uc set is_archived = true
-         where uc.user_id = %s and uc.is_system and not uc.is_archived and uc.name = any(%s)
+         where uc.user_id = %s and uc.is_system and not uc.is_archived and uc.name = any(%s) and uc.name <> 'outros'
            and not exists (select 1 from launches l where l.user_id = uc.user_id and lower(l.categoria) = uc.name)
            and not exists (select 1 from credit_transactions t where t.user_id = uc.user_id and lower(t.categoria) = uc.name)
+           and not exists (select 1 from category_budgets b where b.user_id = uc.user_id and lower(b.categoria) = uc.name)
+           and not exists (select 1 from recurring_expenses r where r.user_id = uc.user_id and lower(r.category) = uc.name)
+           and not exists (select 1 from recurring_incomes r where r.user_id = uc.user_id and lower(r.category) = uc.name)
         """,
         (user_id, _CANONICAS),
     )
@@ -130,10 +148,9 @@ def semear_condominio(cur, user_id: int) -> dict[str, int]:
     for kw, cat in REGRAS_CONDOMINIO.items():
         if normalize_text(kw) in tem:
             continue
-        # clock_timestamp(): regra POSTERIOR à categoria (a obsolescência compara as datas; ver `_regra_ficou_obsoleta`).
         cur.execute(
-            "insert into user_category_rules (user_id, keyword, category, created_at) "
-            "values (%s, %s, %s, clock_timestamp()) on conflict (user_id, keyword) do nothing",
+            "insert into user_category_rules (user_id, keyword, category) values (%s, %s, %s) "
+            "on conflict (user_id, keyword) do nothing",
             (user_id, kw, cat),
         )
         novas += cur.rowcount

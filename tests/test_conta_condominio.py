@@ -15,6 +15,7 @@ from db.categorias_condominio import (
     CATEGORIAS_CONDOMINIO, GRUPOS_CONDOMINIO, REGRAS_CONDOMINIO, semear_condominio,
 )
 from db.users import is_conta_condominio
+from core.services.category_service import infer_category
 from scripts.ativar_conta_condominio import ativar, main
 from token_utils import make_dashboard_token
 from utils_text import normalize_text
@@ -131,7 +132,7 @@ def test_regras_nao_sobrescrevem_keyword_existente(user_id):
         "select keyword, category from user_category_rules where user_id=%s", (user_id,))}
     assert regras["inss"] == "outros"                       # mesma keyword
     assert "salário" not in regras and regras["SALARIO"] == "outros"  # mesma keyword a menos de acento/caixa
-    assert regras["gps"] == "inss"
+    assert regras["guia gps"] == "inss"
 
 
 def test_rename_mantem_grupo_e_cascateia_regras(user_id):
@@ -140,7 +141,7 @@ def test_rename_mantem_grupo_e_cascateia_regras(user_id):
     update_user_category(user_id, cid, new_name="taxa de condomínio")
     c = _cats(user_id)["taxa de condomínio"]
     assert c["grupo"] == "receitas"
-    assert _q("select category from user_category_rules where user_id=%s and keyword='mensalidade'",
+    assert _q("select category from user_category_rules where user_id=%s and keyword='taxa condominial'",
               (user_id,))[0]["category"] == "taxa de condomínio"
 
 
@@ -161,6 +162,112 @@ def test_script_idempotente(user_id):
     r2 = ativar(user_id)
     assert (r2["arquivadas"], r2["regras_novas"]) == (0, 0)
     assert _q("select count(*) n from user_categories where user_id=%s", (user_id,))[0]["n"] == antes
+
+
+def _cartao_com_compra(uid, categoria):
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("insert into credit_cards (user_id, name, closing_day, due_day) values (%s,'c',5,10) returning id", (uid,))
+        card = cur.fetchone()["id"]
+        cur.execute("insert into credit_bills (user_id, card_id, period_start, period_end) "
+                    "values (%s,%s,current_date,current_date) returning id", (uid, card))
+        bill = cur.fetchone()["id"]
+        cur.execute("insert into credit_transactions (bill_id,user_id,card_id,valor,categoria,purchased_at) "
+                    "values (%s,%s,%s,5,%s,current_date)", (bill, uid, card, categoria))
+        conn.commit()
+
+
+def test_arquivamento_isolamento_cartao_e_usos(user_id, outro_user):
+    ensure_user_categories_seeded(outro_user)
+    _cartao_com_compra(outro_user, "pets")  # compra no cartão de OUTRO usuário não conta
+    _cartao_com_compra(user_id, "Beleza")
+    _q("insert into category_budgets (user_id, categoria, budget) values (%s,'lazer',10)", (user_id,))
+    _q("insert into recurring_expenses (user_id,name,amount,category,due_day,payment_type) "
+       "values (%s,'x',1,'Educação',5,'account')", (user_id,))
+    _q("insert into recurring_incomes (user_id,name,amount,category,pay_day) values (%s,'x',1,'moradia',5)", (user_id,))
+    _semeia(user_id)
+    c = _cats(user_id)
+    assert [c[n]["is_archived"] for n in ("beleza", "lazer", "educação", "moradia")] == [False] * 4
+    assert c["pets"]["is_archived"] is True and c["outros"]["is_archived"] is False
+    assert not any(v["is_archived"] for v in _cats(outro_user).values())
+
+
+def test_canonica_custom_do_usuario_nao_e_arquivada(user_id):
+    ensure_user_categories_seeded(user_id)
+    _q("update user_categories set is_system=false where user_id=%s and name='pets'", (user_id,))
+    _semeia(user_id)
+    assert _cats(user_id)["pets"]["is_archived"] is False
+
+
+def test_seed_reaproveita_nome_igual_e_desarquiva(user_id):
+    ensure_user_categories_seeded(user_id)
+    _q("insert into user_categories (user_id, name, is_archived) values (%s,'Salarios',false),(%s,'ÁGUA',true)",
+       (user_id, user_id))
+    _semeia(user_id)
+    nomes = [c["name"] for c in list_user_categories_full(user_id)]
+    assert "salários" not in nomes and "água" not in nomes  # sem duplicata por caixa/acento
+    c = _cats(user_id)
+    assert c["Salarios"]["grupo"] == "pessoal" and c["ÁGUA"]["grupo"] == "funcionais"
+    assert c["ÁGUA"]["is_archived"] is False
+
+
+def test_regras_de_outro_usuario_nao_suprimem_as_deste(user_id, outro_user):
+    ensure_user_categories_seeded(outro_user)
+    _q("insert into user_category_rules (user_id, keyword, category) values (%s,'inss','outros')", (outro_user,))
+    assert _semeia(user_id)["regras_novas"] == len(REGRAS_CONDOMINIO)
+    assert _q("select category from user_category_rules where user_id=%s and keyword='inss'", (outro_user,))[0]["category"] == "outros"
+
+
+def test_ativar_recusa_user_inexistente():
+    with pytest.raises(ValueError):
+        ativar(-7)
+    assert not _q("select 1 from users where id=-7")
+
+
+# Frases do síndico, com a inferência REAL (regras do usuário + token de nome + LOCAL_RULES; sem IA).
+POSITIVAS = {
+    "paguei a conta de água": "água", "conta de agua": "água", "sabesp": "água",
+    "conta de luz enel": "energia elétrica", "enel distribuição": "energia elétrica",
+    "folha de pagamento": "salários", "salário do porteiro": "salários",
+    "inss guia gps": "inss", "guia gps": "inss", "fgts": "fgts", "grrf": "grrf/fgts",
+    "serviços pj": "serviços pj", "pagamento serviços pj": "serviços pj",
+    "serviços pf": "serviços pf", "pagamento serviços pf": "serviços pf",
+    "manutenção do elevador": "manut. máquinas", "jardinagem": "manut. jardins",
+    "material de limpeza": "material de limpeza", "material de escritório": "material de escritório",
+    "tarifa bancária": "tarifas bancárias", "internet banking tarifa": "tarifas bancárias",
+    "honorários do contador": "honorários contábeis", "segurança terceirizada": "segurança terceirizada",
+    "vigilância patrimonial": "segurança terceirizada", "iptu": "impostos e taxas", "rescisão": "rescisões",
+    "13º salário": "13º salário", "pagamento de férias": "férias", "férias funcionário": "férias",
+    "taxa condominial recebida": "mensalidades", "cota condominial": "mensalidades",
+    "vivo fibra": "telefone e internet", "conta de internet": "telefone e internet",
+    "juros de mora": "juros de mora e multas", "rateio das unidades": "rateio das unidades",
+    "manut. veículos": "manut. veículos",
+}
+# Não podem cair na categoria que a keyword solta antiga atribuía.
+NEGATIVAS = {
+    "gpsoft assinatura": "inss", "venel loja": "energia elétrica", "vigilancia sanitaria": "segurança terceirizada",
+    "mensalidade academia": "mensalidades", "multa de transito": "juros de mora e multas",
+    "convivo": "telefone e internet", "internet banking tarifa": "telefone e internet",
+}
+
+
+def test_frases_do_sindico_positivas_e_negativas(user_id):
+    _semeia(user_id)
+    errados = {f: r.category for f, esp in POSITIVAS.items()
+               if (r := infer_category(user_id, f, allow_ai=False)).category != esp}
+    assert not errados
+    indevidas = {f: r.category for f, proibida in NEGATIVAS.items()
+                 if (r := infer_category(user_id, f, allow_ai=False)).category == proibida}
+    assert not indevidas
+
+
+def test_limite_conhecido_token_do_nome_casa_sem_regra(user_id):
+    """Nome de categoria casa por token (`custom_category_match`), igual a qualquer categoria custom:
+    não há keyword para tirar. Documentado, não resolvido aqui."""
+    _semeia(user_id)
+    for frase, cat in {"seguranca do app": "segurança terceirizada", "comprei livro de ferias": "férias",
+                       "pix recebido internet": "telefone e internet"}.items():
+        r = infer_category(user_id, frase, allow_ai=False)
+        assert (r.category, r.reason) == (cat, "user_category")
 
 
 def test_script_recusa_user_inexistente_e_avisa_plano(user_id, capsys):

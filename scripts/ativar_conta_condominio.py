@@ -19,6 +19,8 @@ from db.categorias_condominio import semear_condominio
 
 
 def ativar(user_id: int) -> dict[str, int]:
+    if not db.user_exists(user_id):
+        raise ValueError(f"user {user_id} não existe")  # ensure_user criaria a conta
     ensure_user_categories_seeded(user_id)  # conexão própria; cria as canônicas que o seed vai arquivar
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute("update users set tipo_conta='condominio' where id=%s", (user_id,))
