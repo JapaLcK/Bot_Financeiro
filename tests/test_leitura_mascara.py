@@ -275,7 +275,7 @@ def test_categoria_desconhecida_e_com_sufixo_de_grupo(mundo):
                       {"categoria": "", "descricao": "João"}, {"categoria": "outros", "descricao": "João"},
                       {"categoria": "mensalidades", "descricao": "Maria"}, {"descricao": "sem chave de categoria"}]}
     assert [i["descricao"] for i in _leitor_mascara(uid, dado)["itens"]] == [
-        "inexistente", "Sabesp", "Sabesp", "Sem categoria", "Sem categoria", "outros", "mensalidades", "sem chave de categoria"]
+        "Oculto", "Sabesp", "Sabesp", "Sem categoria", "Sem categoria", "outros", "mensalidades", "sem chave de categoria"]
 
 
 def test_m1_subdict_sem_categoria_herda_a_mascara_do_pai(mundo):
@@ -372,3 +372,24 @@ def test_history_list_ignora_q_do_leitor_e_filtra_para_o_dono(mundo):
     assert com_q == sem_q and len(json.dumps(sem_q)) > 200  # a busca por texto livre não filtra nem conta
     dono_q = m["c"].get(u + "?q=Sabesp", headers=m["dono"]).json()
     assert dono_q != m["c"].get(u, headers=m["dono"]).json()  # positivo: para o dono ela filtra
+
+
+def test_pessoa_fisica_e_categoria_renomeada_ficam_ocultas(mundo):
+    """Tester passada 2: "serviços pf"/honorários pagam pessoa; nome próprio na categoria não vira rótulo."""
+    uid = mundo["uid"]
+    dado = {"itens": [{"categoria": "serviços pf", "descricao": "Joaquim CPF 123"},
+                      {"categoria": "honorários advocatícios", "descricao": "Dr. Joaquim"},
+                      {"categoria": "Salário Joaquim", "descricao": "Joaquim"},
+                      {"categoria": "serviços pj", "descricao": "Elevadores SA"}]}
+    assert [i["descricao"] for i in _leitor_mascara(uid, dado)["itens"]] == [
+        "serviços pf", "honorários advocatícios", "Oculto", "Elevadores SA"]
+
+
+def test_categoria_renomeada_em_grupo_visivel_fecha(mundo):
+    uid = mundo["uid"]
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("insert into user_categories (user_id, name, grupo) values (%s, 'salario Joaquim', 'funcionais')",
+                    (uid,))
+        conn.commit()
+    item = _leitor_mascara(uid, {"itens": [{"categoria": "salario Joaquim", "descricao": "Joaquim"}]})["itens"][0]
+    assert item["descricao"] == "Oculto"

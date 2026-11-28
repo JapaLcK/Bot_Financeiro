@@ -12,7 +12,7 @@ requisição, sem cache global (lista compartilhada vazaria uma conta na outra).
 """
 import re
 
-from db.categorias_condominio import GRUPOS_VISIVEIS_AO_LEITOR
+from db.categorias_condominio import _CONTAS, GRUPOS_VISIVEIS_AO_LEITOR, OCULTAS_AO_LEITOR
 from db.connection import get_conn
 from frontend.routes.leitura_guard import e_leitor
 from utils_text import normalize_text
@@ -58,13 +58,23 @@ def categorias_visiveis(uid: int, request) -> frozenset[str] | None:
         rows = cur.fetchall() or []
     if not rows or rows[0]["tipo_conta"] != "condominio":
         return None
-    return frozenset(_chave(r["name"]) for r in rows if r["name"] and r["grupo"] in GRUPOS_VISIVEIS_AO_LEITOR)
+    # só o nome ORIGINAL do plano abre (renomear "água" para um nome de pessoa fecha de novo)
+    return frozenset(_chave(r["name"]) for r in rows if r["name"] and r["grupo"] in GRUPOS_VISIVEIS_AO_LEITOR
+                     and _chave(r["name"]) in _VISIVEIS_DO_PLANO)
+
+
+# Nomes do plano semeado: só eles servem de rótulo; categoria própria/renomeada pode conter nome de pessoa.
+_NOMES_DO_PLANO = frozenset(_chave(n) for n, *_ in _CONTAS) | {_chave("outros")}
+_VISIVEIS_DO_PLANO = frozenset(_chave(n) for n, g, *_ in _CONTAS
+                               if g in GRUPOS_VISIVEIS_AO_LEITOR and n not in OCULTAS_AO_LEITOR)
+OCULTO = "Oculto"
 
 
 def _rotulo(visiveis, categoria) -> str | None:
     """None = o nome fica; senão o rótulo que o substitui (a própria categoria; sem categoria, `SEM_CATEGORIA`)."""
     if isinstance(categoria, str) and categoria.strip():
-        return None if _chave(categoria) in visiveis else categoria
+        k = _chave(categoria)
+        return None if k in visiveis else (categoria if k in _NOMES_DO_PLANO else OCULTO)
     return SEM_CATEGORIA
 
 
