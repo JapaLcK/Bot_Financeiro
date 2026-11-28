@@ -106,11 +106,12 @@ def test_llm_moradia_condominio_vira_outros_e_pessoal_fica(condo, pessoal, monke
     assert ai_router.classify_category_with_gpt("xyz", user_id=condo) == "energia elétrica"
 
 
-def test_infer_filtra_ia_pela_lista(condo, monkeypatch):
+def test_infer_ia_condominio_so_devolve_plano(condo, monkeypatch):
     monkeypatch.setattr("core.services.wa_ia_primeiro.SEM_LLM_NO_TURNO", mock.Mock(get=lambda: False))
-    monkeypatch.setenv("OPENAI_API_KEY", "x")
-    monkeypatch.setattr("ai_router.classify_category_with_gpt", lambda *a, **k: "moradia")
+    _llm(monkeypatch, "moradia")
     assert category_service.infer_category(condo, "zzz sem regra nenhuma").category == "outros"
+    _llm(monkeypatch, "energia elétrica (funcionais)")  # o LLM devolveu o grupo junto
+    assert category_service.infer_category(condo, "zzz sem regra nenhuma").category == "energia elétrica"
 
 
 def test_prompt_pessoal_byte_a_byte_e_prompt_do_condominio(condo, pessoal, monkeypatch):
@@ -162,3 +163,104 @@ def test_conversa_pessoal_luz_continua_moradia(pessoal):
     _diga(pessoal, "paguei a conta de luz 480")
     _diga(pessoal, "paguei 480 de luz")
     assert _lancamentos(pessoal) == [("despesa", "moradia")] * 2
+
+
+# ── categoria explícita / recorrente / recategoriza: um resolvedor só contra o plano ──
+
+@pytest.mark.parametrize("hashtag,esperado", [
+    ("copa", "despesas de copa"),             # token do nome
+    ("energia", "energia elétrica"),          # a hashtag pega UMA palavra
+    ("moradia", "outros"),                    # canônica pessoal: fora do plano
+    ("energia elétrica", "energia elétrica"), # nome exato (acento)
+])
+def test_hashtag_condominio_passa_pelo_plano(condo, hashtag, esperado):
+    _diga(condo, f"gastei 90 em coisa #{hashtag}")
+    assert _lancamentos(condo) == [("despesa", esperado)]
+
+
+def test_hashtag_pessoal_intacta(pessoal):
+    _diga(pessoal, "gastei 90 em coisa #moradia")
+    assert _lancamentos(pessoal) == [("despesa", "moradia")]
+
+
+def test_luz_com_hashtag_energia(condo):
+    _diga(condo, "gastei 90 de luz #energia")
+    assert _lancamentos(condo) == [("despesa", "energia elétrica")]
+
+
+def test_resolvedor_ambiguo_exato_e_grupo(condo):
+    plano = db.categories.plano_da_conta(condo)
+    r = lambda raw: db.categories.categoria_no_plano(plano, raw)
+    assert r("material") == "outros"                          # casa várias → ambíguo
+    assert r("supermercado") == "outros"                      # nada no plano
+    assert r("serviços pf (terceiros)") == "serviços pf"     # sufixo de grupo: sem tirá-lo, o token casa pf e pj → outros
+    assert r("serviços pf") == "serviços pf"
+    assert r("") == "outros"
+
+
+def test_nome_exato_da_conta_vence_alias_pessoal(condo):
+    # "supermercado" custom na conta: o exato vale, não o apelido pessoal "mercado"
+    plano = db.categories.plano_da_conta(condo) + [("supermercado", None)]
+    assert db.categories.categoria_no_plano(plano, "supermercado") == "supermercado"
+    assert db.categories.categoria_no_plano(plano[:-1], "supermercado") == "outros"
+
+
+def test_outros_arquivada_continua_no_plano(condo):
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update user_categories set is_archived=true where user_id=%s and name='outros'", (condo,))
+    assert "outros" in categorias_permitidas(condo)
+
+
+def test_recorrente_condominio_categoria_fora_do_plano(condo, pessoal):
+    from core.handlers import recurring
+    from db.recurring import list_recurring_expenses
+    ent = {"valor": 480, "dia": 10, "categoria": "moradia", "nome": "Luz"}
+    for uid in (condo, pessoal):
+        recurring.add(uid, "gasto fixo de 480 todo dia 10", dict(ent))
+    assert [r["category"] for r in list_recurring_expenses(condo)] == ["outros"]
+    assert [r["category"] for r in list_recurring_expenses(pessoal)] == ["moradia"]
+    recurring.add(condo, "gasto fixo", {**ent, "categoria": "energia", "nome": "Luz 2"})
+    assert sorted(r["category"] for r in list_recurring_expenses(condo)) == ["energia elétrica", "outros"]
+
+
+def test_recategorizar_condominio_pelo_plano(condo):
+    from core.services.ai_chat.tools import extrato_ia
+    _diga(condo, "paguei sabesp 300")
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select id from launches where user_id=%s", (condo,))
+        lid = cur.fetchone()["id"]
+    with mock.patch.object(extrato_ia, "_reler", return_value=("l", lid, {})), \
+            mock.patch.object(extrato_ia, "_resumo_item", return_value={"parcelas": 1}), \
+            mock.patch.object(extrato_ia, "_quem", return_value="x"):
+        extrato_ia.recategorizar(condo, {"new_category": "moradia"})
+    assert _lancamentos(condo) == [("despesa", "outros")]
+
+
+# ── falha de leitura do plano: propaga, não cai no comportamento pessoal ──
+
+def test_leitura_do_plano_falha_nada_gravado_e_mensagem_padrao(condo, monkeypatch):
+    def falha(uid):
+        raise RuntimeError("banco caiu")
+    def regras():
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("select count(*) n from user_category_rules where user_id=%s", (condo,))
+            return cur.fetchone()["n"]
+    antes = regras()
+    monkeypatch.setattr("db.categories.plano_da_conta", falha)
+    resp = _diga(condo, "gastei 90 de luz")  # não pode estourar: o handler devolve a mensagem de falha
+    assert resp.strip()
+    assert _lancamentos(condo) == [] and regras() == antes
+
+
+def test_leitura_ok_conta_pessoal_inalterada(pessoal):
+    _diga(pessoal, "paguei 480 de luz")
+    assert _lancamentos(pessoal) == [("despesa", "moradia")]
+
+
+def test_infer_propaga_falha_do_plano(condo, monkeypatch):
+    def falha(uid):
+        raise RuntimeError("banco caiu")
+    monkeypatch.setattr("db.categories.plano_da_conta", falha)
+    for texto, explicita in (("paguei 480 de luz", None), ("", "moradia")):
+        with pytest.raises(RuntimeError):
+            category_service.infer_category(condo, texto, explicita)

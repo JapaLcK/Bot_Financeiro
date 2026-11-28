@@ -1076,10 +1076,6 @@ def resolver_categoria_da_ia(user_id: int, categoria: str, nota_clean: str) -> t
     também chamada pela confirmação do `add_launch`, para o resumo mostrar a
     categoria que o "sim" vai gravar."""
     categoria_ai = infer_category(user_id, "", categoria).category
-    from db.categories import plano_da_conta
-    plano = plano_da_conta(user_id)  # condomínio: o LLM conhece as canônicas pessoais ("moradia"), a conta não
-    if plano is not None and normalize_text(categoria_ai) not in {normalize_text(n) for n, _ in plano}:
-        categoria_ai = "outros"
     local = infer_category(user_id, nota_clean, None, allow_ai=False)
     if local.reason in MOTIVOS_CONFIANTES and local.category != categoria_ai:
         logger.info(

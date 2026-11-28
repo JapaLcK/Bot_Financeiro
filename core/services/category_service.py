@@ -245,7 +245,14 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
     IA e só se quer o veredito determinístico (regra do usuário/ticker/local)
     pra fazer cross-check, sem gastar uma segunda chamada de LLM.
     """
+    from db.categories import categoria_no_plano, plano_da_conta
+    # Conta de condomínio (`plano` não é None): o plano de contas é o catálogo. Categoria explícita (hashtag, LLM, tool)
+    # passa por `categoria_no_plano`; LOCAL_RULES são das canônicas pessoais ("luz" → moradia) e não rodam; a IA já
+    # devolve do plano. A leitura NÃO é capturada: cair no comportamento pessoal gravaria categoria errada em silêncio.
     if explicit_category:
+        plano = plano_da_conta(user_id)
+        if plano is not None:
+            return InferResult(category=categoria_no_plano(plano, explicit_category), reason="explicit")
         # Texto livre do usuário (hashtag `#McDonald's`, `categoria` da tool
         # `add_launch`): tem de virar a grafia do catálogo, senão o lançamento
         # nasce em `mcdonald s` e abre fatia gêmea da `mcdonald's` que já
@@ -334,14 +341,7 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
             reason="user_rule",
         )
 
-    # Conta de condomínio: o plano de contas é o catálogo. LOCAL_RULES são das canônicas pessoais ("luz" → moradia,
-    # "mensalidade" → educação) e não rodam; resultado de B2 e da IA tem de estar no plano. Pessoal: `plano` é None.
-    try:
-        from db.categories import plano_da_conta
-        plano = plano_da_conta(user_id)
-    except Exception:
-        plano = None  # como o B2: hiccup de leitura não derruba o lançamento (cai no comportamento pessoal)
-    no_plano = None if plano is None else {normalize_text(n) for n, _ in plano}
+    plano = plano_da_conta(user_id)
 
     # B2) categoria CUSTOM criada pelo usuário (na tela) sem regra de keyword.
     #     Se o lançamento menciona um token distintivo do nome dela, usa. Vem
@@ -350,7 +350,7 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
         custom_cat = custom_category_match(user_id, t)
     except Exception:
         custom_cat = None
-    if custom_cat and (no_plano is None or normalize_text(custom_cat) in no_plano):
+    if custom_cat:
         # Retorna o nome EXATAMENTE como cadastrado em user_categories (pode ter
         # acento, ex.: "saúde da família"). Não passa por canonicalize_category_label
         # — isso removeria acentos e o lançamento deixaria de agrupar com a
@@ -376,8 +376,6 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
             try:
                 from ai_router import classify_category_with_gpt
                 cat_ai = classify_category_with_gpt(t, user_id=user_id, source="core.services.category_service")
-                if cat_ai and no_plano is not None and normalize_text(cat_ai) not in no_plano:
-                    cat_ai = "outros"
                 if cat_ai:
                     # Aceita até "outros" do GPT — significa que ele analisou e
                     # decidiu que não há categoria clara, em vez de cair em

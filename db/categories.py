@@ -11,6 +11,7 @@ Duas tabelas distintas:
   que se conta (contar aqui envelhece).
 """
 import logging
+import re
 import unicodedata
 
 from .connection import get_conn
@@ -127,6 +128,29 @@ def plano_da_conta(user_id: int) -> list[tuple[str, str | None]] | None:
         return None
     plano = [(r["name"], r["grupo"]) for r in rows if r["name"]]
     return plano if any(n == "outros" for n, _ in plano) else plano + [("outros", None)]
+
+
+def categoria_no_plano(plano: list[tuple[str, str | None]], raw: str) -> str:
+    """Resolvedor ÚNICO de categoria vinda de fora do plano (hashtag, LLM, recorrente, recategoriza) para uma conta de
+    condomínio: nome exato (sem o "(grupo)" que o LLM às vezes devolve) → ele; senão o ÚNICO nome do plano que
+    compartilha token (ou prefixo de token, 5+ letras) com o texto → ele; ambíguo ou sem casamento → "outros"."""
+    norm = normalize_text(re.sub(r"\s*\([^)]*\)\s*$", "", raw or ""))
+    nomes = [n for n, _ in plano]
+    for n in nomes:
+        if normalize_text(n) == norm:
+            return n
+    toks = [t for t in norm.split() if len(t) >= 4]
+    achou = [
+        n for n in nomes if n != "outros" and any(
+            a == b or (min(len(a), len(b)) >= 5 and (a.startswith(b) or b.startswith(a))) for a in toks for b in normalize_text(n).split() if len(b) >= 4)
+    ]
+    return achou[0] if len(achou) == 1 else "outros"
+
+
+def categoria_da_conta(user_id: int, raw: str) -> str:
+    """`raw` como está se a conta é pessoal; senão resolvido contra o plano (`categoria_no_plano`)."""
+    plano = plano_da_conta(user_id)
+    return raw if plano is None else categoria_no_plano(plano, raw)
 
 
 def categorias_permitidas(user_id: int) -> list[str]:

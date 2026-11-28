@@ -126,13 +126,10 @@ def _norm(text: str) -> str:
     return t
 
 
-def _normalize_category(cat: str, permitidas: list[str] | None = None) -> str:
+def _normalize_category(cat: str) -> str:
     norm = _norm(cat)
-    allowed_norm_map = {_norm(c): c for c in (ALLOWED_CATEGORIES if permitidas is None else permitidas)}
-    # Lista da conta (condomínio): o nome exato dela vence o apelido pessoal; apelido cujo alvo não está na lista → "outros".
-    if permitidas is not None and norm in allowed_norm_map:
-        return allowed_norm_map[norm]
     mapped = _CATEGORY_ALIASES.get(norm, norm)
+    allowed_norm_map = {_norm(c): c for c in ALLOWED_CATEGORIES}
     return allowed_norm_map.get(_norm(mapped), "outros")
 
 
@@ -207,14 +204,8 @@ def classify_category_with_gpt(descricao: str, *, user_id: int | None = None, so
         )
         return "outros"
 
-    plano = None
-    if user_id is not None:
-        try:
-            from db.categories import plano_da_conta
-            plano = plano_da_conta(user_id)
-        except Exception:
-            plano = None  # leitura falhou: cai no comportamento pessoal de sempre
-    permitidas = None if plano is None else [n for n, _ in plano]
+    from db.categories import plano_da_conta
+    plano = plano_da_conta(user_id) if user_id is not None else None  # falha propaga (não cai no pessoal em silêncio)
 
     prompt = _prompt_condominio(plano, descricao) if plano is not None else (
         "Você é um classificador de categorias financeiras.\n"
@@ -249,7 +240,11 @@ def classify_category_with_gpt(descricao: str, *, user_id: int | None = None, so
             messages=[{"role": "user", "content": prompt}],
         )
         cat_raw = (resp.choices[0].message.content or "").strip()
-        normalized = _normalize_category(cat_raw, permitidas)
+        if plano is not None:
+            from db.categories import categoria_no_plano
+            normalized = categoria_no_plano(plano, cat_raw)
+        else:
+            normalized = _normalize_category(cat_raw)
         if normalized == "outros" and _norm(cat_raw) not in {"", "outros"}:
             _log_category_ai_event(
                 "warning",

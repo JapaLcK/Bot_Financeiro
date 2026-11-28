@@ -280,7 +280,7 @@ def apagar(user_id: int, args: dict[str, Any]) -> str:
 def recategorizar(user_id: int, args: dict[str, Any]) -> str:
     from db.accounts import LaunchDateLockedError, update_launch_fields
     from db.cards import update_credit_transaction_fields
-    from db.categories import ensure_user_category
+    from db.categories import categoria_da_conta, ensure_user_category
 
     r = _reler(user_id, args, "categoria")
     if isinstance(r, str):
@@ -289,6 +289,7 @@ def recategorizar(user_id: int, args: dict[str, Any]) -> str:
     nova = resolve_category_input(user_id, args.get("new_category") or "", create=True)
     if not nova:
         return _FALTOU_CATEGORIA
+    nova = categoria_da_conta(user_id, nova)  # condomínio: fora do plano → plano/"outros"; pessoal: igual
     try:
         if tabela == "l":
             ok = update_launch_fields(user_id, n, categoria=nova, exigir_pode=True)

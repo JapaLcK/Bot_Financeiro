@@ -155,6 +155,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
     if frequency == "annual" and not (mes and 1 <= mes <= 12):
         mes = (start_date.month if start_date else date.today().month)
 
+    from db.categories import categoria_da_conta  # condomínio: fora do plano → plano/"outros"; pessoal: igual
     if is_income:
         from core.services.fonte_unica import FonteUnicaOF
         from db.recurring_income import create_recurring_income
@@ -162,7 +163,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
         name = nome or cat.capitalize() or "Renda fixa"
         try:
             rec = create_recurring_income(
-                user_id, name, valor, cat, dia, notes=text, start_date=start_date,
+                user_id, name, valor, categoria_da_conta(user_id, cat), dia, notes=text, start_date=start_date,
                 frequency=frequency, pay_month=mes,
             )
         except FonteUnicaOF as exc:  # R2 (corrida: o banco conectou depois da 1ª checagem): texto puro
@@ -190,7 +191,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
     name = nome or cat.capitalize() or ("Conta a pagar" if is_manual else "Gasto fixo")
     try:
         rec = create_recurring_expense(
-            user_id, name, valor, cat, dia, "account",
+            user_id, name, valor, categoria_da_conta(user_id, cat), dia, "account",
             notes=text, start_date=start_date,
             frequency=frequency, due_month=mes,
             payment_mode="manual" if is_manual else "autopay",
