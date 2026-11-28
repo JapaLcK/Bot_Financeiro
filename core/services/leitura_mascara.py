@@ -12,7 +12,7 @@ requisição, sem cache global (lista compartilhada vazaria uma conta na outra).
 """
 import re
 
-from db.categorias_condominio import _CONTAS, GRUPOS_VISIVEIS_AO_LEITOR, OCULTAS_AO_LEITOR
+from db.categorias_condominio import _CONTAS, GRUPOS_CONDOMINIO, GRUPOS_VISIVEIS_AO_LEITOR, OCULTAS_AO_LEITOR
 from db.connection import get_conn
 from frontend.routes.leitura_guard import e_leitor
 from utils_text import normalize_text
@@ -33,9 +33,16 @@ CAMPOS_NOME = frozenset({
 })
 
 
+_GRUPOS = frozenset(GRUPOS_CONDOMINIO)
+
+
 def _chave(nome: str) -> str:
     # a v2 devolve a chave sem acento ("salarios"), a legada o nome ("Salários") e o import "nome (grupo)"
-    return normalize_text(re.sub(r"\s*\([^)]*\)\s*$", "", nome)) or nome.strip().lower()
+    # só tira o sufixo quando é um grupo do plano: "água (João)" não pode virar "agua"
+    m = re.match(r"^(.*?)\s*\(([^)]*)\)\s*$", nome)
+    if m and normalize_text(m.group(2)) in _GRUPOS:
+        nome = m.group(1)
+    return normalize_text(nome) or nome.strip().lower()
 
 
 def leitor_da_requisicao(request) -> bool:
@@ -138,3 +145,21 @@ def rotulo_previsao(d: dict) -> str | None:
         return "Receita do banco"
     return {"gasto_recorrente": "Gasto fixo", "receita_recorrente": "Receita fixa", "recorrencia_banco": "Recorrência do banco",
             "instancia": "Compromisso"}.get(d.get("fonte"))
+
+
+def ids_opacos(uid: int, request, dados, campos=("origem_id", "chave")):
+    """Ids derivados de texto do banco ("maria cpf 123#0") viram hash para o leitor de condomínio (a v2 já é opaca)."""
+    import hashlib
+
+    def h(v):
+        return hashlib.sha256(str(v).encode()).hexdigest()[:16]
+    if not e_leitor_de_condominio(uid, request):
+        return dados
+
+    def anda(x):
+        if isinstance(x, (list, tuple)):
+            return [anda(i) for i in x]
+        if not isinstance(x, dict):
+            return x
+        return {k: (h(v) if k in campos and isinstance(v, str) else anda(v)) for k, v in x.items()}
+    return anda(dados)

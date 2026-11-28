@@ -393,3 +393,21 @@ def test_categoria_renomeada_em_grupo_visivel_fecha(mundo):
         conn.commit()
     item = _leitor_mascara(uid, {"itens": [{"categoria": "salario Joaquim", "descricao": "Joaquim"}]})["itens"][0]
     assert item["descricao"] == "Oculto"
+
+
+def test_sufixo_com_nome_de_pessoa_nao_vira_categoria_do_plano(mundo):
+    """Codex #1641: "água (João)" não pode casar com "água"; só sufixo de GRUPO sai."""
+    uid = mundo["uid"]
+    dado = {"itens": [{"categoria": "água (João da Silva)", "descricao": "João"},
+                      {"categoria": "salários (João da Silva)", "descricao": "João"},
+                      {"categoria": "água (manutenção)", "descricao": "Sabesp"}]}
+    assert [i["descricao"] for i in _leitor_mascara(uid, dado)["itens"]] == ["Oculto", "Oculto", "Sabesp"]
+
+
+def test_ids_do_forecast_legado_ficam_opacos_ao_leitor(mundo):
+    """Codex #1641: origem_id/chave derivados da descrição do banco carregam nome e CPF."""
+    from core.services.leitura_mascara import ids_opacos
+    uid = mundo["uid"]
+    dado = {"pontos": [{"origem_id": "maria cpf 123#0", "motivos": [{"origem_id": "maria cpf 123#0"}]}]}
+    assert "maria" not in json.dumps(ids_opacos(uid, True, dado))
+    assert ids_opacos(uid, False, dado) == dado  # dono intacto
