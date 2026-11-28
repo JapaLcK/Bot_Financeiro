@@ -172,6 +172,10 @@ def init_db():
           reminders_days_before int not null default 3
         )
         """,
+        # Conta de condomínio (síndico): `tipo_conta` liga o catálogo por grupos. `add column if not exists`
+        # com o check inline é idempotente: na 2ª rodada a coluna existe e a cláusula inteira é ignorada.
+        "alter table users add column if not exists tipo_conta text not null default 'pessoal' "
+        "check (tipo_conta in ('pessoal','condominio'))",
         """
         create table if not exists accounts (
           user_id bigint primary key references users(id) on delete cascade,
@@ -1742,6 +1746,8 @@ def init_db():
           unique (user_id, name)
         )
         """,
+        # Grupo do plano de contas do condomínio; null = conta pessoal (sem grupo).
+        "alter table user_categories add column if not exists grupo text",
 
         # ─── Gastos Fixos / Recorrentes (Sprint 4) ──────────────────────────────
         # Pro-only. Só PREVÊ (Q42): autopay entra na Previsão, 'manual' vira conta a pagar.
