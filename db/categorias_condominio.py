@@ -11,6 +11,7 @@ Fonte única da lista: o relatório gerencial por centro da administradora
 from utils_text import normalize_text
 
 from .categories import SYSTEM_CATEGORIES_SEED
+from .connection import cat_norm_sql
 
 GRUPOS_CONDOMINIO = ("receitas", "pessoal", "funcionais", "manutencao", "tributarias", "outras")
 
@@ -108,6 +109,9 @@ REGRAS_CONDOMINIO: dict[str, str] = {
 _CANONICAS = [n for n, _, _ in SYSTEM_CATEGORIES_SEED]
 
 
+_N = cat_norm_sql
+
+
 def semear_condominio(cur, user_id: int) -> dict[str, int]:
     """Semeia o plano de contas do condomínio para `user_id`, na transação de `cur`. Idempotente.
 
@@ -130,19 +134,21 @@ def semear_condominio(cur, user_id: int) -> dict[str, int]:
             )
         else:
             cur.execute(
-                "insert into user_categories (user_id, name, emoji, color, is_system, grupo) "
-                "values (%s, %s, %s, %s, false, %s)",
+                # created_at epoch (como o espelho de `ensure_user_categories_seeded`): com now() o guard
+                # `_regra_ficou_obsoleta` descartaria regra do usuário anterior à ativação (ex.: inss -> outros).
+                "insert into user_categories (user_id, name, emoji, color, is_system, grupo, created_at) "
+                "values (%s, %s, %s, %s, false, %s, to_timestamp(0))",
                 (user_id, nome, emoji, cor, grupo),
             )
     cur.execute(
-        """
+        f"""
         update user_categories uc set is_archived = true
          where uc.user_id = %s and uc.is_system and not uc.is_archived and uc.name = any(%s) and uc.name <> 'outros'
-           and not exists (select 1 from launches l where l.user_id = uc.user_id and lower(l.categoria) = uc.name)
-           and not exists (select 1 from credit_transactions t where t.user_id = uc.user_id and lower(t.categoria) = uc.name)
-           and not exists (select 1 from category_budgets b where b.user_id = uc.user_id and lower(b.categoria) = uc.name)
-           and not exists (select 1 from recurring_expenses r where r.user_id = uc.user_id and lower(r.category) = uc.name)
-           and not exists (select 1 from recurring_incomes r where r.user_id = uc.user_id and lower(r.category) = uc.name)
+           and not exists (select 1 from launches l where l.user_id = uc.user_id and {_N('l.categoria')} = {_N('uc.name')})
+           and not exists (select 1 from credit_transactions t where t.user_id = uc.user_id and {_N('t.categoria')} = {_N('uc.name')})
+           and not exists (select 1 from category_budgets b where b.user_id = uc.user_id and {_N('b.categoria')} = {_N('uc.name')})
+           and not exists (select 1 from recurring_expenses r where r.user_id = uc.user_id and {_N('r.category')} = {_N('uc.name')})
+           and not exists (select 1 from recurring_incomes r where r.user_id = uc.user_id and {_N('r.category')} = {_N('uc.name')})
         """,
         (user_id, _CANONICAS),
     )

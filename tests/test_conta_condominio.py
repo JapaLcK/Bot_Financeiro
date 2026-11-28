@@ -293,3 +293,26 @@ def test_script_recusa_user_inexistente_e_avisa_plano(user_id, capsys):
     main(["--user-id", str(user_id)])  # conta grátis: não libera categorias personalizadas
     out = capsys.readouterr().out
     assert "AVISO" in out and "condominio" in out
+
+
+def test_arquivamento_compara_sem_acento_em_todas_as_fontes_de_uso(user_id):
+    """Uso legado gravado sem acento ("alimentacao") conta como uso da canônica "alimentação"."""
+    ensure_user_categories_seeded(user_id)
+    _q("insert into launches (user_id, tipo, valor, categoria, source, external_id) "
+       "values (%s,'despesa',10,'alimentacao','manual',%s)", (user_id, uuid.uuid4().hex))
+    _q("insert into category_budgets (user_id, categoria, budget) values (%s,'EDUCACAO',10)", (user_id,))
+    _q("insert into recurring_expenses (user_id,name,amount,category,due_day,payment_type) "
+       "values (%s,'x',1,'saude',5,'account')", (user_id,))
+    _q("insert into recurring_incomes (user_id,name,amount,category,pay_day) values (%s,'x',1,'MORADIA',5)", (user_id,))
+    _semeia(user_id)
+    c = _cats(user_id)
+    assert [c[n]["is_archived"] for n in ("alimentação", "educação", "saúde", "moradia")] == [False] * 4
+    assert c["pets"]["is_archived"] is True              # positivo: sem uso continua arquivada
+
+
+def test_regra_anterior_a_ativacao_continua_valendo_e_semeadas_tambem(user_id):
+    ensure_user_categories_seeded(user_id)
+    _q("insert into user_category_rules (user_id, keyword, category) values (%s,'inss','outros')", (user_id,))
+    _semeia(user_id)
+    assert infer_category(user_id, "inss guia", allow_ai=False).category == "outros"
+    assert infer_category(user_id, "guia gps", allow_ai=False).category == "inss"
