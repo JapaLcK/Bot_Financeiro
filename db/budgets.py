@@ -97,6 +97,8 @@ def upsert_budget(user_id: int, categoria: str, budget: float, *, limite: int | 
     cat = (categoria or "").strip()
     if not cat:
         raise ValueError("CATEGORIA_INVALIDA")
+    from .categories import categoria_da_conta  # condomínio: fora do plano → plano/"outros"; pessoal: igual
+    cat = categoria_da_conta(user_id, cat)
     if not valor_valido(budget):
         raise ValueError("BUDGET_INVALIDO")
 

@@ -11,6 +11,7 @@ from utils_text import valor_valido
 
 from .connection import get_conn
 from .users import ensure_user
+from .categories import categoria_da_conta  # condomínio: fora do plano → plano/"outros"; pessoal: igual
 from .accounts import add_launch_and_update_balance
 from .parcelas_of import cobre_todas, nome_grupo, progresso
 
@@ -982,6 +983,7 @@ def add_credit_purchase(
     from core.services.fonte_unica import exigir
     exigir(user_id, "cartao")
     ensure_user(user_id)
+    categoria = categoria and categoria_da_conta(user_id, categoria)
     bill_id = get_or_create_open_bill(user_id, card_id, purchased_at)
     v = Decimal(str(valor))
 
@@ -1039,6 +1041,7 @@ def add_credit_purchase_installments(
                 raise ValueError("Cartão não encontrado ou não pertence a este usuário.")
             closing_day = row["closing_day"]
 
+    categoria = categoria and categoria_da_conta(user_id, categoria)
     group_id = uuid4()
     vtotal = Decimal(str(valor_total))
     n = max(1, int(installments))
@@ -1097,6 +1100,7 @@ def add_credit_refund(
     purchased_at: date,
 ):
     ensure_user(user_id)
+    categoria = categoria and categoria_da_conta(user_id, categoria)
     bill_id = get_or_create_open_bill(user_id, card_id, purchased_at)
     v = Decimal(str(valor))
     if v <= 0:
@@ -1152,7 +1156,7 @@ def update_credit_transaction_fields(
     if categoria is not None:
         # a marca segura a categoria do cliente contra o sync do Open Finance (#712)
         sets.append("categoria = %s, categoria_editada = true")
-        params.append(categoria)
+        params.append(categoria_da_conta(user_id, categoria) if categoria else categoria)
     if nota is not None:
         sets.append("nota = %s")
         params.append(nota)
@@ -1674,7 +1678,7 @@ def update_installment_group_meta(user_id: int, group_id: str,
         params.append((nome or "").strip() or None)
     if categoria is not None:
         sets.append("categoria = %s, categoria_editada = true")  # #712: o sync não desfaz
-        params.append((categoria or "").strip() or None)
+        params.append(categoria_da_conta(user_id, (categoria or "").strip()) if (categoria or "").strip() else None)
     params.extend([user_id, group_id])
 
     with get_conn() as conn:

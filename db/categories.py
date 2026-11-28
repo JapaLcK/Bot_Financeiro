@@ -907,6 +907,21 @@ def resolve_category_input(
     create: bool = False,
     display_map: dict[str, str] | None = None,
 ) -> str | None:
+    """Porta única de categoria digitada (API, WhatsApp, imports): `_resolve_category_input` + o plano da conta de
+    condomínio (`categoria_da_conta`; pessoal passa intacta). Resolver AQUI, e não na porta, é o que impede o
+    `ensure_user_category`/a mensagem de ver a canônica pessoal que nunca foi gravada.
+    # ponytail: +1 leitura de plano por chamada (importação em lote paga por linha); cache por request se pesar."""
+    cat = _resolve_category_input(user_id, raw, create=create, display_map=display_map)
+    return cat and categoria_da_conta(user_id, cat)
+
+
+def _resolve_category_input(
+    user_id: int,
+    raw: str,
+    *,
+    create: bool = False,
+    display_map: dict[str, str] | None = None,
+) -> str | None:
     """Texto livre → nome de categoria pra gravar em `launches.categoria`.
 
     Normalizado é chave, forma de exibição é valor: devolve o nome que já
@@ -983,9 +998,9 @@ def resolve_category_for_write(user_id: int, raw: str) -> str:
     # ponytail: 1 leitura de plano por escrita de recorrente (antes o
     # `resolve_category_input` só a fazia quando os passos 1-2 não achavam nada).
     # Passar o veredito como argumento só se aparecer no perfil.
-    return resolve_category_input(
+    return categoria_da_conta(user_id, resolve_category_input(
         user_id, raw, create=_custom_categories_allowed(user_id)
-    ) or raw
+    ) or raw)  # o `or raw` cru também passa pelo plano (condomínio)
 
 
 def _custom_categories_allowed(user_id: int) -> bool:

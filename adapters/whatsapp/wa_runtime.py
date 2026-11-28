@@ -57,6 +57,7 @@ from db import (
     set_whatsapp_updates_opt_out,
     update_launch_category,
 )
+from db.categories import plano_da_conta
 from utils_phone import mask_phone, mask_wamid
 from utils_text import sem_invisiveis
 
@@ -375,7 +376,7 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
                 logger.warning("WA send launch action buttons failed, fallback list: %s", exc)
             # Fallback: lista direta de categorias (sem o botão Desfazer)
             try:
-                _send_recategorize_list(to_wa_id, body, lid)
+                _send_recategorize_list(to_wa_id, body, lid, user_id)
                 return
             except Exception as exc:
                 logger.warning("WA send recategorize list failed, fallback texto: %s", exc)
@@ -442,30 +443,21 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
     _send_reply(to_wa_id, body)
 
 
-def _send_recategorize_list(to_wa_id: str, body: str, launch_id: int) -> None:
+def _send_recategorize_list(to_wa_id: str, body: str, launch_id: int, user_id: int | None = None) -> None:
     """Envia a confirmação como lista interativa com as categorias disponíveis.
 
     WhatsApp limita a 10 rows totais por lista, então mostramos as mais
     comuns + "Outra (digitar)" como fallback para texto livre.
     """
-    pick = lambda c: {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:{c}", "title": c}
+    pick = lambda c: {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:{c}", "title": c[:24]}  # título: teto de 24 do WhatsApp
+    plano = plano_da_conta(user_id) if user_id else None
+    # condomínio: o plano da conta, nunca as canônicas pessoais. ponytail: as 8 primeiras por nome; além delas,
+    # "Outra (digitar)" (cai no resolvedor). "Mais usadas" se o plano passar de ~9 nomes na prática.
+    comuns = ([pick("alimentação"), pick("mercado"), pick("transporte"), pick("lazer"),
+               pick("moradia"), pick("saúde"), pick("educação"), pick("assinaturas")] if plano is None
+              else [pick(n) for n, _ in plano if n != "outros"][:8])
     sections = [
-        {
-            "title": "Mais comuns",
-            "rows": [
-                # Limite de 10 rows por lista no WhatsApp (8 aqui + 2 em "Outras").
-                # "mercado" entrou no lugar de "compras online", que é bem menos
-                # frequente — quem precisa dela usa "✏️ Outra (digitar)".
-                pick("alimentação"),
-                pick("mercado"),
-                pick("transporte"),
-                pick("lazer"),
-                pick("moradia"),
-                pick("saúde"),
-                pick("educação"),
-                pick("assinaturas"),
-            ],
-        },
+        *([{"title": "Mais comuns", "rows": comuns}] if comuns else []),  # seção sem row o WhatsApp recusa
         {
             "title": "Outras",
             "rows": [
@@ -1033,6 +1025,7 @@ def process_message(message: InboundMessage) -> None:
                             reply_to,
                             f"Escolha a nova categoria para o lançamento #{_disp(uid, launch_id)}.",
                             launch_id,
+                            uid,
                         )
                     except Exception as exc:
                         logger.warning("WA send recat list failed: %s", exc)

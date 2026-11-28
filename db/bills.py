@@ -17,6 +17,7 @@ from typing import Any
 from utils_text import TETO_ENTRADA, valor_valido
 
 from .connection import get_conn
+from .categories import categoria_da_conta  # condomínio: fora do plano → plano/"outros"; pessoal: igual
 
 
 def _row(r: Any) -> dict[str, Any]:
@@ -97,6 +98,7 @@ def create_boleto(user_id: int, name: str, amount: float, due_date: Any,
     if not valor_valido(amount): raise ValueError("VALOR_INVALIDO")  # teto de linhas do arquivo (350)
     due = _parse_due(due_date)
     cat = (category or "").strip() or None
+    cat = cat and categoria_da_conta(user_id, cat)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -127,7 +129,8 @@ def update_boleto(user_id: int, bill_id: int, *, name: str | None = None,
     if due_date is not None:
         sets.append("due_date = %s"); params.append(_parse_due(due_date))
     if category is not None:
-        sets.append("category = %s"); params.append((category or "").strip() or None)
+        cat = (category or "").strip() or None
+        sets.append("category = %s"); params.append(cat and categoria_da_conta(user_id, cat))
     if not sets:
         return get_bill(user_id, bill_id)
     params.extend([int(user_id), int(bill_id)])
