@@ -35,7 +35,7 @@ class ContasAPagar(BaseModel):
 
 
 @router.get("/contas-a-pagar", response_model=ContasAPagar)
-def contas_a_pagar(request: Request, uid: int = Depends(_agenda)) -> ContasAPagar:
+def contas_a_pagar(request: Request = None, uid: int = Depends(_agenda)) -> ContasAPagar:
     r = mascarar_para_leitor(uid, request, _get_bills_to_pay(uid, {}, sync=False))
     return ContasAPagar(
         hoje=r["today"], pendentes=r["count_pending"], vencidas=r["overdue_count"],

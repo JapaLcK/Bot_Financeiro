@@ -60,7 +60,7 @@ def _assinante(uid: int = Depends(usuario_atual)) -> int:
 
 
 @router.get("/assinaturas", response_model=Assinaturas)
-def assinaturas(request: Request, uid: int = Depends(_assinante)) -> Assinaturas:
+def assinaturas(request: Request = None, uid: int = Depends(_assinante)) -> Assinaturas:
     return Assinaturas(**mascarar_para_leitor(uid, request, listar_assinaturas(uid, date.today())))
 
 

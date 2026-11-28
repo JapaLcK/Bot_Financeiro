@@ -98,7 +98,9 @@ def _fonte_carteira(uid: int) -> dict:
 
 
 class _Req:
-    """Request mudo: `authorize_dashboard_access` é neutralizado no teste."""
+    """Request mudo: `authorize_dashboard_access` é neutralizado no teste (sem token: não é leitor)."""
+    headers: dict = {}
+    cookies: dict = {}
 
 
 @pytest.fixture

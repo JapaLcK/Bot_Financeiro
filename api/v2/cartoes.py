@@ -64,7 +64,7 @@ def cartoes(uid: int = Depends(usuario_atual)) -> Cartoes:
 
 
 @router.get("/parcelas", response_model=Parcelas)
-def parcelas(request: Request, uid: int = Depends(usuario_atual)) -> Parcelas:
+def parcelas(request: Request = None, uid: int = Depends(usuario_atual)) -> Parcelas:
     return Parcelas(installments=[Parcelamento(
         name=g["name"], card_name=g["card_name"], installments_total=g["installments_total"], manual=g["manual"],
         parcelas=[ParcelaDoGrupo(installment_no=p["installment_no"], valor=_d(p["valor"]), is_paid=p["is_paid"],

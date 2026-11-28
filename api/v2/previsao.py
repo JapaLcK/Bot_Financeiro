@@ -149,7 +149,7 @@ def _assinante(uid: int = Depends(usuario_atual)) -> int:
 
 
 @router.get("/previsao", response_model=Previsao)
-def previsao(request: Request, dias: Literal["30", "60", "90"] | None = Query(None),
+def previsao(request: Request = None, dias: Literal["30", "60", "90"] | None = Query(None),
              uid: int = Depends(_assinante)) -> Previsao:
     permitidos = forecast_horizons_for(uid)
     efetivos = int(dias) if dias is not None else min(permitidos)

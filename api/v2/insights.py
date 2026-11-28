@@ -30,7 +30,7 @@ def _assinante(uid: int = Depends(usuario_atual)) -> int:
 
 
 @router.get("/insights", response_model=Insights)
-def insights(request: Request, uid: int = Depends(_assinante)) -> Insights:
+def insights(request: Request = None, uid: int = Depends(_assinante)) -> Insights:
     if e_leitor_de_condominio(uid, request):  # texto gerado cita nomes e não tem categoria para mascarar: o leitor não recebe
         return Insights(insights=[])
     return Insights(insights=[Insight(title=i["title"], message=i["message"]) for i in generate_ai_insights(uid, force=False) or []])

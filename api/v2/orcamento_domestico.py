@@ -120,7 +120,7 @@ def _mes(mes: str | None, onde: str) -> str:
 
 
 @router.get("/orcamento-domestico", response_model=OrcamentoDomestico)
-def ler(request: Request, mes: str | None = Query(None, pattern=PADRAO_MES),
+def ler(request: Request = None, mes: str | None = Query(None, pattern=PADRAO_MES),
         uid: int = Depends(_orcamentista)) -> OrcamentoDomestico:
     return _monta(uid, _mes(mes, "query"), request)
 

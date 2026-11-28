@@ -84,7 +84,7 @@ def _dia_diverge(dias) -> bool:
 
 
 @router.get("/gastos", response_model=Gastos)
-def gastos_do_mes(request: Request, mes: str | None = Query(None, pattern=PADRAO_MES),
+def gastos_do_mes(request: Request = None, mes: str | None = Query(None, pattern=PADRAO_MES),
                   uid: int = Depends(usuario_atual)) -> Gastos:
     d = gastos.ler_mes(uid, *mes_pedido(mes))
     if d["total"] is not None and (
@@ -134,7 +134,7 @@ class GastosDaCategoria(BaseModel):
 
 
 @router.get("/gastos/categoria", response_model=GastosDaCategoria)
-def gastos_da_categoria(request: Request, mes: str | None = Query(None, pattern=PADRAO_MES),
+def gastos_da_categoria(request: Request = None, mes: str | None = Query(None, pattern=PADRAO_MES),
                         categoria: str = Query(..., min_length=1, max_length=CATEGORY_NAME_MAX_LEN),
                         uid: int = Depends(usuario_atual)) -> GastosDaCategoria:
     ano, m, agora = mes_pedido(mes)

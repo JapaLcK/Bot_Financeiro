@@ -73,7 +73,7 @@ def _recusa(campo: str, msg: str, onde: str = "query"):
 
 
 @router.get("/lancamentos", response_model=Lancamentos)
-def listar(request: Request, mes: str | None = Query(None, pattern=PADRAO_MES),
+def listar(request: Request = None, mes: str | None = Query(None, pattern=PADRAO_MES),
            origem: Literal[lancamentos.ORIGENS] | None = None,
            conta: int | None = None,
            cartao: int | None = None,
