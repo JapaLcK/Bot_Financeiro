@@ -411,3 +411,12 @@ def test_ids_do_forecast_legado_ficam_opacos_ao_leitor(mundo):
     dado = {"pontos": [{"origem_id": "maria cpf 123#0", "motivos": [{"origem_id": "maria cpf 123#0"}]}]}
     assert "maria" not in json.dumps(ids_opacos(uid, True, dado))
     assert ids_opacos(uid, False, dado) == dado  # dono intacto
+
+
+def test_neutralizar_tira_ids_da_descricao_em_toda_previsao(mundo):
+    """Codex #1641: /recurring-bills/{uid}/projection (e toda rota que neutraliza) devolvia motivos[].origem_id."""
+    from core.services.leitura_mascara import neutralizar
+    dado = {"motivos": [{"origem_id": "maria cpf 123#0"}], "itens": [{"nome": "Maria", "chave": "maria#0"}]}
+    saida = neutralizar(mundo["uid"], True, dado, ("nome",), lambda d: "Gasto fixo")
+    assert "maria" not in json.dumps(saida).lower()
+    assert neutralizar(mundo["uid"], False, dado, ("nome",), lambda d: "x") == dado

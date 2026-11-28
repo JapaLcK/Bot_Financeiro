@@ -9609,9 +9609,7 @@ async def forecast_route(request: Request, user_id: int, threshold: float = 0.0)
         result = await asyncio.to_thread(forecast_with_trajectory, user_id, 90, threshold)
     else:
         result = await asyncio.to_thread(forecast_horizons, user_id, horizons)
-    result = await asyncio.to_thread(_neutralizar_leitor, user_id, request, result, ("nome",), _rotulo_previsao)
-    from core.services.leitura_mascara import ids_opacos
-    return {"ok": True, "forecast": await asyncio.to_thread(ids_opacos, user_id, request, result)}
+    return {"ok": True, "forecast": await asyncio.to_thread(_neutralizar_leitor, user_id, request, result, ("nome",), _rotulo_previsao)}
 
 
 @app.post("/recurring-bills/{user_id}")

@@ -136,7 +136,8 @@ def neutralizar(uid: int, request, dados, campos, rotulo):
             if novo.get(k) is not None and not isinstance(novo[k], (dict, list)) and (r := rotulo(novo)) is not None:
                 novo[k] = r
         return novo
-    return anda(dados)
+    # ids derivados da descrição do banco ("maria cpf 123#0") também saem: toda previsão passa por aqui
+    return ids_opacos(uid, request, anda(dados))
 
 
 def rotulo_previsao(d: dict) -> str | None:
