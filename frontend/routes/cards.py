@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from core.observability import _log_falha
 from core.pg_text import violacao_finito
+from core.services.leitura_mascara import mascarar_para_leitor
 from db import create_card
 from db.cartoes_resumo import resumo_cartoes
 from db.cards import MAX_CARD_NAME_LEN, MSG_FATURA_DO_BANCO
@@ -316,7 +317,7 @@ async def installments_list_route(
     if sort not in ("urgency", "recent"):
         sort = "urgency"
     groups = await asyncio.to_thread(list_installment_groups_detailed, user_id, sort)
-    return {"ok": True, "installments": groups}
+    return {"ok": True, "installments": await asyncio.to_thread(mascarar_para_leitor, user_id, request, groups)}
 
 
 @router.get("/installments/{user_id}/{group_id}/delete-impact")
@@ -571,7 +572,8 @@ async def get_bill_detail_route(request: Request, user_id: int, bill_id: int):
             "installments_total": t.get("installments_total"),
         })
 
-    return {"ok": True, "bill": _serialize_bill(dict(bill_row)), "transactions": transactions}
+    return {"ok": True, "bill": _serialize_bill(dict(bill_row)),
+            "transactions": await asyncio.to_thread(mascarar_para_leitor, user_id, request, transactions)}
 
 
 class PayBillPayload(BaseModel):

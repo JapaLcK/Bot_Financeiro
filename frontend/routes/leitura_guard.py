@@ -54,8 +54,12 @@ NEGADO_LEITOR = tuple(re.compile(p) for p in (
     r"^/auth/mfa/",                       # estado do MFA
     r"^/auth/dashboard-profile$",         # perfil/nome do dono
     r"^/api/(v2|app)/perfil$",            # perfil do quiz do dono
-    r"^/open-finance/[^/]+/connectors$",  # conexão/consentimento do Open Finance
+    r"^/open-finance/",                   # conexão/consentimento e extrato bruto do banco (contraparte, CPF/CNPJ sem categoria para mascarar)
+    r"^/pockets/",                        # histórico da caixinha: nota livre sem categoria para mascarar
+    r"^/agents/",                         # feed e Xerife: texto gerado e lançamentos esperados citam nomes; UI de agentes fechada ao leitor
     r"^/api/affiliate/",                  # afiliado: chave Pix e comissões
+    r"^/analytics/[^/]+/top-merchants$",  # ranking por contraparte (nome de funcionário/condômino), sem categoria para mascarar
+    r"^/(cards|installments)/[^/]+/[^/]+/delete-impact$",  # confirmação de exclusão: o leitor não exclui; traz a nota da compra
     r"^/ai/messages$",                    # histórico da conversa privada do dono com a IA
     r"^/debug/", r"^/admin",              # operação interna
     r"^/api/(v2|app)/familia",            # Plano Família: decisão do dono

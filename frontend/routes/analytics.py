@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 from core.observability import get_logger
 from core.pg_text import recusa_veneno
 from core.services.insights_contrato import CHAVE_MAX, GRAVIDADE
+from core.services.leitura_mascara import e_leitor_de_condominio, mascarar_para_leitor
 from frontend.routes import shared
 
 router = APIRouter()
@@ -46,7 +47,7 @@ async def analytics_kpis_route(
     result = await asyncio.to_thread(compute_kpis, user_id, fd, td, False)
     from core.services.plan_service import plan_gate_ok
     if not await asyncio.to_thread(plan_gate_ok, user_id, "financial_comparison"):
-        return {"ok": True, "kpis": result}
+        return {"ok": True, "kpis": await asyncio.to_thread(mascarar_para_leitor, user_id, request, result)}
     pct = {"income": None, "expense": None}
     result["delta_pct"], result["delta_escolha"], result["delta_meses"] = pct, None, None
     if not (from_ and to):
@@ -65,7 +66,7 @@ async def analytics_kpis_route(
             result["delta_escolha"] = f"{FORA_DO_HISTORICO} {r['escolha']}" if fora else r["escolha"]
             for chave, linha in (("income", r["receita"]), ("expense", r["despesa"])):
                 pct[chave] = float(linha["pct"]) if linha and linha["pct"] is not None else None
-    return {"ok": True, "kpis": result}
+    return {"ok": True, "kpis": await asyncio.to_thread(mascarar_para_leitor, user_id, request, result)}  # `largest_expense` traz alvo/nota
 
 
 @router.get("/analytics/{user_id}/evolution")
@@ -158,6 +159,8 @@ async def insights_current_route(request: Request, user_id: int):
     `?force=true` em loop e martelar o banco.
     """
     shared.authorize_dashboard_access(request, user_id)
+    if await asyncio.to_thread(e_leitor_de_condominio, user_id, request):  # texto gerado cita nomes
+        return {"ok": True, "insights": [], "motivo": "sem_destaques"}
     from core.ai_patterns import generate_ai_insights, motivo_vazio
     await asyncio.to_thread(shared.require_plan_feature, user_id, "insights")
     result = await asyncio.to_thread(generate_ai_insights, user_id, force=False)
@@ -222,6 +225,8 @@ async def analytics_patterns_route(
     cliente (cada chamada é uma completion paga; evita queimar tokens em loop).
     """
     shared.authorize_dashboard_access(request, user_id)
+    if await asyncio.to_thread(e_leitor_de_condominio, user_id, request):  # narrativa gerada cita estabelecimentos
+        return {"ok": True, "patterns": []}
     from core.ai_patterns import generate_ai_patterns
     await asyncio.to_thread(shared.require_plan_feature, user_id, "insights")
     result = await asyncio.to_thread(generate_ai_patterns, user_id, force=False)

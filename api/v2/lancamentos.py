@@ -14,13 +14,14 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
 
 from api.v2.resumo_mes import PADRAO_MES, mes_pedido
 from api.v2.sessao import usuario_atual
 from core.pg_text import limpa_para_pg
+from core.services.leitura_mascara import mascarar_para_leitor, sem_busca
 from db import lancamentos, lancamentos_leitura, resumo_mes
 from db.categories import CATEGORY_NAME_MAX_LEN
 from utils_date import day_tz, now_tz
@@ -72,7 +73,7 @@ def _recusa(campo: str, msg: str, onde: str = "query"):
 
 
 @router.get("/lancamentos", response_model=Lancamentos)
-def listar(mes: str | None = Query(None, pattern=PADRAO_MES),
+def listar(request: Request, mes: str | None = Query(None, pattern=PADRAO_MES),
            origem: Literal[lancamentos.ORIGENS] | None = None,
            conta: int | None = None,
            cartao: int | None = None,
@@ -101,13 +102,13 @@ def listar(mes: str | None = Query(None, pattern=PADRAO_MES),
         raise _recusa("valor_min", "O valor mínimo não pode passar do máximo.")
     ano, m, agora = mes_pedido(mes)
     try:
-        dados = lancamentos_leitura.pagina(uid, ano, m, agora, cursor=cursor, limite=min(limite, _TETO), q=q,
+        dados = lancamentos_leitura.pagina(uid, ano, m, agora, cursor=cursor, limite=min(limite, _TETO), q=sem_busca(uid, request, q),
                                            origem=origem, conta=conta, cartao=cartao, dia=dia_pedido,
                                            categoria=categoria, tipo=tipo, com_guardado=guardado,
                                            valor_min=minimo, valor_max=maximo)
     except lancamentos.CursorInvalido as e:
         raise _recusa("cursor", str(e)) from None
-    return Lancamentos(**dados)
+    return Lancamentos(**mascarar_para_leitor(uid, request, dados))
 
 
 # ── escrita (PR 2a) ─────────────────────────────────────────────────────────

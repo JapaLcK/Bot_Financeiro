@@ -3,10 +3,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from api.v2.sessao import usuario_atual
+from core.services.leitura_mascara import neutralizar, rotulo_previsao
 from core.services.plan_service import forecast_horizons_for, plan_gate_ok
 from core.services.previsao_recorrencias import CONFIRMADA, NEGADA
 from core.services.previsao_v2 import ler_previsao
@@ -148,14 +149,14 @@ def _assinante(uid: int = Depends(usuario_atual)) -> int:
 
 
 @router.get("/previsao", response_model=Previsao)
-def previsao(dias: Literal["30", "60", "90"] | None = Query(None),
+def previsao(request: Request, dias: Literal["30", "60", "90"] | None = Query(None),
              uid: int = Depends(_assinante)) -> Previsao:
     permitidos = forecast_horizons_for(uid)
     efetivos = int(dias) if dias is not None else min(permitidos)
     if efetivos not in permitidos:
         raise HTTPException(status_code=403, detail={"error": "forecast_horizon_not_allowed"})
     detalhes = plan_gate_ok(uid, "cashflow")
-    return Previsao(**ler_previsao(uid, efetivos, permitidos, detalhes))
+    return Previsao(**neutralizar(uid, request, ler_previsao(uid, efetivos, permitidos, detalhes), ("nome",), rotulo_previsao))
 
 
 _MARCA = {"sim": CONFIRMADA, "nao": NEGADA, "desfazer": "nenhuma"}

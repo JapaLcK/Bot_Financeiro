@@ -21,24 +21,43 @@ from test_rotas_senha_obrigatoria import _rotas
 BARRADO = {"error": "somente_leitura"}
 NAO_SEGUROS = {"POST", "PUT", "PATCH", "DELETE"}
 
-# Classificação de TODA rota GET que o leitor pode chamar (o resto está em NEGADO_LEITOR).
-_V2 = ("assinaturas|bancos|caixinhas|cartoes|categorias|comparacao|contas|contas-a-pagar|eventos|gastos|guia|insights|"
-       "investido|lancamentos|me|metas|orcamento-domestico|orcamentos-categoria|parcelas|patrimonio|previsao|"
-       "progresso-milhao|renda|rendimento|resumo-do-mes|mes-detalhes")
-PERMITIDO_LEITOR = tuple(re.compile(p) for p in (
-    r"\.(js|css|png|json|xml|txt|html)$",                       # asset estático
-    r"^/(fonts|brand|quiz/assets|static)/",                      # idem
-    r"^/(\.well-known/apple-app-site-association|health|auth/validate|auth/me|wa/webhook|webhook)$",
-    r"^/(app|agents|afiliado|assinar|black-friday|blog|cadastro|changelog|comandos|comandos-app|como-funciona|"
-    r"completar-cadastro|continuar-compra|familia/entrar|funcionalidades|home|inicio-antiga|login|lp|oferta|"
-    r"onboarding|painel|precos|privacy|q|quiz|recuperar-senha|redefinir-senha|reset-password|settings|suporte|"
-    r"suporte/contato|teste|termos|vsl|wa|whatsapp)?$",          # páginas (HTML): sem dado de usuário
-    r"^/blog/[^/]+$", r"^/api/(blog/news|commands-catalog)$",   # conteúdo público
-    r"^/api/(v2|app)/(" + _V2 + r")(/categoria)?$",             # dados do dono pela sessão
-    r"^/(account|agents|analytics|bills|budgets|cards|categories|expenses|forecast|goals|history|"
-    r"household-budget|insights|installments|investments|open-finance|pockets|recurring-bills|"
-    r"recurring-expenses|recurring-incomes|data|onboarding)/",   # dados por {user_id} (o dono da sessão)
-))
+# Classificação de TODA rota GET que o leitor pode chamar (o resto está em NEGADO_LEITOR). Cada linha leva a classe:
+#   "mascara"  = devolve lançamento/conta/recorrente/previsão/texto livre com nome; sai pelo helper único
+#                (`core/services/leitura_mascara.py`) e entra na tabela de `tests/test_leitura_mascara.py`
+#   "sem_nome" = asset, página, agregado ou catálogo: nenhum campo de pessoa
+# Rota GET nova sem linha aqui (nem em NEGADO_LEITOR) reprova `test_toda_rota_get_esta_classificada`.
+_V2_SEM_NOME = ("bancos|caixinhas|cartoes|categorias|comparacao|contas|eventos|guia|investido|me|metas|orcamentos-categoria|"
+                "patrimonio|progresso-milhao|renda|rendimento|resumo-do-mes|mes-detalhes")
+_V2_MASCARA = "assinaturas|contas-a-pagar|gastos|insights|lancamentos|orcamento-domestico|parcelas|previsao"
+_C = lambda classe, *ps: tuple((re.compile(p), classe) for p in ps)  # noqa: E731
+PERMITIDO_LEITOR = (
+    *_C("sem_nome",
+        r"\.(js|css|png|json|xml|txt|html)$",                       # asset estático
+        r"^/(fonts|brand|quiz/assets|static)/",                      # idem
+        r"^/(\.well-known/apple-app-site-association|health|auth/validate|auth/me|wa/webhook|webhook)$",
+        r"^/(app|agents|afiliado|assinar|black-friday|blog|cadastro|changelog|comandos|comandos-app|como-funciona|"
+        r"completar-cadastro|continuar-compra|familia/entrar|funcionalidades|home|inicio-antiga|login|lp|oferta|"
+        r"onboarding|painel|precos|privacy|q|quiz|recuperar-senha|redefinir-senha|reset-password|settings|suporte|"
+        r"suporte/contato|teste|termos|vsl|wa|whatsapp)?$",          # páginas (HTML): sem dado de usuário
+        r"^/blog/[^/]+$", r"^/api/(blog/news|commands-catalog)$",   # conteúdo público
+        r"^/api/(v2|app)/(" + _V2_SEM_NOME + r")$",                  # dados do dono pela sessão, sem texto de pessoa
+        r"^/account/[^/]+/setup-status$", r"^/analytics/[^/]+/(categories|evolution|weekday-pattern)$",  # agregados
+        r"^/bills/[^/]+$", r"^/budgets/[^/]+(/status)?$", r"^/cards/[^/]+/summary$", r"^/categories/[^/]+$",
+        r"^/expenses/daily/[^/]+$", r"^/goals/[^/]+/status$", r"^/history/[^/]+(/quick-stats)?$",
+        r"^/investments/[^/]+/rates$", r"^/onboarding/",
+        ),
+    *_C("mascara",
+        r"^/api/(v2|app)/(" + _V2_MASCARA + r")$", r"^/api/(v2|app)/gastos/categoria$",
+        r"^/data/[^/]+$", r"^/history/[^/]+/list$", r"^/forecast/[^/]+$", r"^/recurring-bills/[^/]+/projection$",
+        r"^/recurring-(expenses|incomes)/[^/]+$", r"^/household-budget/[^/]+/status$",
+        r"^/categories/[^/]+/launches$", r"^/analytics/[^/]+/(kpis|patterns)$", r"^/insights/[^/]+/current$",
+        r"^/bills/[^/]+/[^/]+$", r"^/installments/[^/]+/list$",
+        ),
+)
+
+
+def classe_da_rota(url: str) -> str | None:
+    return next((c for g, c in PERMITIDO_LEITOR if g.search(url)), None)
 
 
 def _gets():
@@ -123,11 +142,11 @@ def test_403_sai_com_security_headers_e_sem_cache(mundo):
 def test_toda_rota_get_esta_classificada():
     nao = [p for p, u in _gets()
            if not any(n.search(u) for n in leitura_guard.NEGADO_LEITOR)
-           and not any(g.search(u) for g in PERMITIDO_LEITOR)]
+           and classe_da_rota(u) is None]
     assert not nao, f"rota GET sem classificação (NEGADO no guard ou PERMITIDO aqui): {nao}"
     # a classificação não é vacuamente larga: os dois lados têm rota
     assert any(n.search(u) for p, u in _gets() for n in leitura_guard.NEGADO_LEITOR)
-    assert any(g.search(u) for p, u in _gets() for g in PERMITIDO_LEITOR)
+    assert {classe_da_rota(u) for p, u in _gets()} >= {"mascara", "sem_nome"}
 
 
 def test_get_negada_da_403_ao_leitor_e_nao_ao_dono(mundo):
@@ -178,6 +197,8 @@ GET_NEGADO_LITERAL = (
     "/api/v2/perfil", "/api/app/perfil", "/open-finance/1/connectors", "/api/affiliate/me",
     "/ai/messages", "/debug/x", "/admin", "/admin/x", "/api/v2/familia", "/api/app/familia/x",
     "/api/v2/conta/leitura", "/api/app/conta/leitura",
+    "/open-finance/1", "/open-finance/1/movements", "/pockets/1/caixa/history", "/agents/1/feed", "/agents/1",
+    "/analytics/1/top-merchants", "/cards/1/2/delete-impact", "/installments/1/g/delete-impact",  # PR 3d: sem categoria para mascarar
 )
 
 

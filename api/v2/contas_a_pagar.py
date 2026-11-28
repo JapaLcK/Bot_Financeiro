@@ -3,12 +3,13 @@
 antiga `/recurring-bills`). Gate `recurring_expenses`, o da agenda de boletos. Dinheiro sai como TEXTO."""
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from api.v2.gastos_fixos import _assinante as _agenda  # o gate da agenda de boletos (recurring_expenses), uma fonte só
 from api.v2.orcamento_domestico import _d
 from core.services.ai_chat.tools.bills import _get_bills_to_pay
+from core.services.leitura_mascara import mascarar_para_leitor
 
 router = APIRouter()
 
@@ -34,8 +35,8 @@ class ContasAPagar(BaseModel):
 
 
 @router.get("/contas-a-pagar", response_model=ContasAPagar)
-def contas_a_pagar(uid: int = Depends(_agenda)) -> ContasAPagar:
-    r = _get_bills_to_pay(uid, {}, sync=False)
+def contas_a_pagar(request: Request, uid: int = Depends(_agenda)) -> ContasAPagar:
+    r = mascarar_para_leitor(uid, request, _get_bills_to_pay(uid, {}, sync=False))
     return ContasAPagar(
         hoje=r["today"], pendentes=r["count_pending"], vencidas=r["overdue_count"],
         total_estimado=_d(r["total_estimated_value"]), tem_variavel=r["has_variable"],

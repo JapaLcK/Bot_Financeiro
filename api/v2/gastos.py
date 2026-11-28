@@ -12,12 +12,13 @@ das mesmas linhas. Nunca sai `raw`, CNPJ, nome do recebedor, `businessName` nem 
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from api.nativo.dinheiro import soma_arredondada_diverge
 from api.v2.resumo_mes import PADRAO_MES, mes_pedido
 from api.v2.sessao import usuario_atual
+from core.services.leitura_mascara import mascarar_para_leitor
 from db import CATEGORY_NAME_MAX_LEN, gastos, lancamentos
 
 router = APIRouter()
@@ -83,7 +84,7 @@ def _dia_diverge(dias) -> bool:
 
 
 @router.get("/gastos", response_model=Gastos)
-def gastos_do_mes(mes: str | None = Query(None, pattern=PADRAO_MES),
+def gastos_do_mes(request: Request, mes: str | None = Query(None, pattern=PADRAO_MES),
                   uid: int = Depends(usuario_atual)) -> Gastos:
     d = gastos.ler_mes(uid, *mes_pedido(mes))
     if d["total"] is not None and (
@@ -92,7 +93,7 @@ def gastos_do_mes(mes: str | None = Query(None, pattern=PADRAO_MES),
                                         d["total"])
             or _dia_diverge(d["dias"])):
         d["motivos"] = [m for m in gastos.MOTIVOS_GASTOS if m in {*d["motivos"], "arredondamento_por_grupo"}]
-    return Gastos(**d)
+    return Gastos(**mascarar_para_leitor(uid, request, d))
 
 
 class CompraRecente(BaseModel):
@@ -133,7 +134,7 @@ class GastosDaCategoria(BaseModel):
 
 
 @router.get("/gastos/categoria", response_model=GastosDaCategoria)
-def gastos_da_categoria(mes: str | None = Query(None, pattern=PADRAO_MES),
+def gastos_da_categoria(request: Request, mes: str | None = Query(None, pattern=PADRAO_MES),
                         categoria: str = Query(..., min_length=1, max_length=CATEGORY_NAME_MAX_LEN),
                         uid: int = Depends(usuario_atual)) -> GastosDaCategoria:
     ano, m, agora = mes_pedido(mes)
@@ -141,4 +142,5 @@ def gastos_da_categoria(mes: str | None = Query(None, pattern=PADRAO_MES),
     if d["total"] is not None and soma_arredondada_diverge(
             [x["total"] for x in d["dias"]] + [d["fora_da_grade"]["valor"]], d["total"]):
         d["motivos"] = [m for m in gastos.MOTIVOS_GASTOS if m in {*d["motivos"], "arredondamento_por_grupo"}]
-    return GastosDaCategoria(**d)
+    # a resposta é de UMA categoria: `ultimas` e `estabelecimentos` não repetem a categoria no item
+    return GastosDaCategoria(**mascarar_para_leitor(uid, request, d, herda=d["categoria"]["nome"]))
