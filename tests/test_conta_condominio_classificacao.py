@@ -124,6 +124,22 @@ def test_prompt_pessoal_byte_a_byte_e_prompt_do_condominio(condo, pessoal, monke
     assert "condomínio" in p[2] and "energia elétrica (funcionais)" in p[2] and "moradia" not in p[2]
 
 
+def test_orcamento_de_tokens_cobre_nome_longo_so_no_condominio(condo, pessoal, monkeypatch):
+    from db.categories import create_user_category
+    nome = "manutenção preventiva do sistema de bombeamento " + "x" * 30  # 78 chars
+    create_user_category(condo, nome)
+    got = []
+    cli = mock.Mock()
+    cli.chat.completions.create = lambda **kw: got.append(kw.get("max_completion_tokens") or kw.get("max_tokens")) or \
+        mock.Mock(choices=[mock.Mock(message=mock.Mock(content="outros"))])
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    monkeypatch.setattr(ai_router, "_get_client", lambda: cli)
+    monkeypatch.setattr("core.ai_rate_limiter.is_allowed", lambda u: True)
+    ai_router.classify_category_with_gpt("bomba", user_id=condo)
+    ai_router.classify_category_with_gpt("bomba", user_id=pessoal)
+    assert got[0] >= len(nome) and got[1] == 10
+
+
 # ── a conversa (handle_incoming, estado real, LLM sem chave) ─────────────────
 
 @pytest.fixture(autouse=True)

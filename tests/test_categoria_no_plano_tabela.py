@@ -145,6 +145,15 @@ def test_infer_category_condominio_so_movimentacao_interna(contas):
                 assert (r.category, r.reason) == esp, texto
 
 
+def test_infer_category_condominio_investimento_generico_e_interno(contas):
+    condo, _ = contas
+    r = category_service.infer_category(condo, "investimento", allow_ai=False)
+    assert (r.category, r.reason) == ("investimentos", "local_rule") and is_internal_category(r.category)
+    # controles: o filtro não reabre cripto nem rendimentos
+    assert category_service.infer_category(condo, "sol nascente portaria", allow_ai=False).category != "criptomoedas"
+    assert category_service.infer_category(condo, "aplicacao cdb", allow_ai=False).category == "investimento_aporte"
+
+
 def test_infer_category_condominio_hashtag_investimentos_fica_intacta(contas):
     condo, _ = contas
     r = category_service.infer_category(condo, "aporte mensal", explicit_category="investimentos", allow_ai=False)

@@ -212,7 +212,9 @@ def local_rule_category(text_norm: str, *, so_sistema: bool = False) -> str | No
     if not text_norm:
         return None
     for keywords, cat2 in LOCAL_RULES:
-        if so_sistema and canonicalize_category_label(cat2) not in INTERNAL_MOVEMENT_CATEGORIES:
+        # "investimentos" (rótulo da regra genérica "investimento") entra de propósito: sem ela o condomínio
+        # perdia o is_internal. NÃO usar is_internal_category aqui: ele é True p/ criptomoedas e rendimentos.
+        if so_sistema and canonicalize_category_label(cat2) not in INTERNAL_MOVEMENT_CATEGORIES | {"investimentos"}:
             continue
         for kw in keywords:
             kw_norm = normalize_text(kw)

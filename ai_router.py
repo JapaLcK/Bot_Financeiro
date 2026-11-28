@@ -234,9 +234,12 @@ def classify_category_with_gpt(descricao: str, *, user_id: int | None = None, so
         "Resposta:"
     )
 
+    # Condomínio: o nome da categoria pode ter até 80 chars; 10 tokens cortava o nome (prefixo comum -> "outros").
+    # bytes UTF-8 >= tokens, então o maior nome em bytes sempre cabe.
+    budget = max(10, max(len(n.encode()) for n, _ in plano)) if plano else 10
     try:
         resp = current_client.chat.completions.create(
-            **completion_options(MODEL, 10, 0),
+            **completion_options(MODEL, budget, 0),
             messages=[{"role": "user", "content": prompt}],
         )
         cat_raw = (resp.choices[0].message.content or "").strip()
