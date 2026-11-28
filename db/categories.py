@@ -16,7 +16,7 @@ import unicodedata
 
 from .connection import get_conn
 from .users import ensure_user
-from utils_text import CATEGORIAS_DE_SISTEMA, canonicalize_category_label, normalize_text
+from utils_text import CATEGORIAS_DE_SISTEMA, INVESTMENT_CATEGORY_HINTS, canonicalize_category_label, normalize_text
 
 log = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ def categoria_no_plano(plano: list[tuple[str, str | None]], raw: str) -> str:
     condomínio. Ordem: (1) categoria de SISTEMA (`CATEGORIAS_DE_SISTEMA`), com `_` ou espaço → intacta (o import deriva
     `is_internal_movement` dela); (2) nome ORIGINAL exato; (3) nome completo igual a menos de caixa/acento/pontuação
     (chave = `normalize_text`, ou o nome em minúsculas se a normalização apaga tudo, como em "☕"); (4) o mesmo sem o
-    "(grupo)" final; (5) o ÚNICO nome do plano que compartilha token (4+ letras) ou prefixo de token (5+) → ele;
+    "(grupo)" final; (4b) texto inteiro normalizado em `INVESTMENT_CATEGORY_HINTS` sem nome no plano → intacta; (5) o ÚNICO nome do plano que compartilha token (4+ letras) ou prefixo de token (5+) → ele;
     (6) ambíguo ou sem casamento → "outros". Conta PESSOAL não passa por aqui (`categoria_da_conta` devolve `raw`).
 
     Plano de referência P = energia elétrica, taxa condominial (ordinária), manutenção predial, manutenção de
@@ -156,6 +156,10 @@ def categoria_no_plano(plano: list[tuple[str, str | None]], raw: str) -> str:
     | "fundo de obras" / "fundo de obras (x)"      | "fundo de obras"               | custom sem grupo              |
     | cada INTERNAL_MOVEMENT + rendimentos +       | a canônica (`investimento_     | sistema, vale com `_`, espaço |
     |   criptomoedas, "Investimento Aporte"        | aporte`…)                      | e caixa                       |
+    |   "investimentos"/"Investimentos"/"cdb"        | a canônica, intacta            | texto inteiro é um hint       |
+    | "sol nascente" / "fundo cdb do síndico"      | "outros" / "fundo de obras"     | só CONTÉM o hint: vai pro plano|
+    |   / "tesouro direto"                         |                                |   interno, vai pro plano      |
+    | "fundo de reserva investimento" (custom)     | ele mesmo                      | nome do plano vence o hint    |
     | "outros" / "OUTROS"                          | "outros"                       | explícito                     |
     | "" / "   "                                   | "outros"                       | vazio                         |
     | "🍕" em P / "☕" em P / "☕ " em P            | "🍕" / "☕" / "☕"                | emoji: exato, não o 1º        |
@@ -179,6 +183,8 @@ def categoria_no_plano(plano: list[tuple[str, str | None]], raw: str) -> str:
         for n in nomes:
             if chave(n) == chave(alvo):
                 return n
+    if normalize_text(raw) in INVESTMENT_CATEGORY_HINTS:  # só o texto INTEIRO ("investimentos", "cdb"); "sol nascente" não
+        return sistema
     toks = [t for t in normalize_text(sem_grupo).split() if len(t) >= 4]
     achou = [
         n for n in nomes if n != "outros" and any(

@@ -13,10 +13,11 @@ from db.categories import (
     add_category_rule, categoria_da_conta, categoria_no_plano, create_user_category, set_user_category_archived,
 )
 from scripts.ativar_conta_condominio import ativar
-from utils_text import INTERNAL_MOVEMENT_CATEGORIES
+from utils_text import INTERNAL_MOVEMENT_CATEGORIES, is_internal_category
 
 P = [(n, None) for n in ("energia elétrica", "taxa condominial (ordinária)", "manutenção predial",
                          "manutenção de elevador", "jardinagem", "fundo de obras", "☕", "🍕", "outros")]
+PINV = P + [("fundo de reserva investimento", None)]
 P1 = [("☕", None), ("outros", None)]
 
 SISTEMA = sorted(INTERNAL_MOVEMENT_CATEGORIES) + ["rendimentos", "criptomoedas"]
@@ -43,6 +44,15 @@ LINHAS_PLANO = [
     (P1, "🍕", "outros"),
     (P, "12345", "outros"),
     (P, "123 energia", "energia elétrica"),
+    (P, "investimentos", "investimentos"),
+    (P, "Investimentos", "investimentos"),
+    (P, "investimento", "investimento"),
+    (P, "cdb", "cdb"),
+    (P, "tesouro direto", "outros"),  # só CONTÉM o hint (direto não é hint)
+    (P, "sol nascente", "outros"),
+    (P, "fundo cdb do síndico", "fundo de obras"),  # casa o plano por token, não vira hint
+    (PINV, "fundo de reserva investimento", "fundo de reserva investimento"),
+    (PINV, "Fundo de Reserva Investimento", "fundo de reserva investimento"),
 ] + [(P, v, c) for c in SISTEMA for v in (c, c.replace("_", " "), c.replace("_", " ").title())]
 
 
@@ -133,3 +143,9 @@ def test_infer_category_condominio_so_movimentacao_interna(contas):
                 assert r.reason != "local_rule" and r.category not in ("rendimentos", "criptomoedas"), (texto, r)
             else:
                 assert (r.category, r.reason) == esp, texto
+
+
+def test_infer_category_condominio_hashtag_investimentos_fica_intacta(contas):
+    condo, _ = contas
+    r = category_service.infer_category(condo, "aporte mensal", explicit_category="investimentos", allow_ai=False)
+    assert r.category == "investimentos" and is_internal_category(r.category)
