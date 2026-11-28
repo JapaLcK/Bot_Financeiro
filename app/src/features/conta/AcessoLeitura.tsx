@@ -3,21 +3,21 @@ import { View } from "react-native";
 
 import { filtrarTotp, TAMANHO_TOTP } from "@/features/auth/totp";
 import { useFalha } from "@/features/seguranca/falha";
-import { acessoLeituraLiberado, definirLeitura, desativarLeitura, lerCredencialLeitura, pedirCodigoLeitura } from "@/services/conta";
+import { definirLeitura, desativarLeitura, lerCredencialLeitura, lerFreioLeitura, pedirCodigoLeitura } from "@/services/conta";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
 import { Input } from "@/ui/componentes/Input";
 import { Texto } from "@/ui/componentes/Texto";
 import { espaco } from "@/ui/tokens";
 
-import { textoDaLeitura } from "./leitura";
+import { gastouOCodigo, textoDaLeitura } from "./leitura";
 
 type Modo = "criar" | "trocar" | "desativar";
 type Credencial = { ativo: boolean; usuario?: string | null };
 
 /**
- * "Acesso de visualização" (Segurança): atrás do freio `acesso_leitura` do `/api/app/me` (`ACESSO_LEITURA_USER_IDS`); leitor e quem está fora da lista
- * não veem nada (falha de leitura do freio = sem a seção). Criar, trocar a senha e desativar pedem o código de 6 dígitos que o servidor manda ao e-mail
+ * "Acesso de visualização" (Segurança): atrás do freio `acesso_leitura` do `/api/app/me` (`ACESSO_LEITURA_USER_IDS`); o leitor não vê nada (falha de
+ * leitura do /me = sem a seção). Fora da lista, só quem já tem credencial ativa vê o usuário e "Desativar" (o GET e o DELETE seguem liberados ao dono). Criar, trocar a senha e desativar pedem o código de 6 dígitos que o servidor manda ao e-mail
  * do dono (só no toque em "Enviar código"). A senha vive só no estado do formulário e nunca volta do servidor.
  */
 export function AcessoLeitura() {
@@ -36,14 +36,14 @@ export function AcessoLeitura() {
 
   useEffect(() => {
     let vivo = true;
-    void acessoLeituraLiberado()
-      .then(async (ok) => (ok ? await lerCredencialLeitura() : null))
-      .then((c) => { if (vivo && c) { setCred(c); setLiberado(true); } })
+    void lerFreioLeitura()
+      .then(async (me) => (me.somente_leitura ? null : { ok: me.acesso_leitura === true, c: await lerCredencialLeitura() }))
+      .then((r) => { if (vivo && r) { setCred(r.c); setLiberado(r.ok); } })
       .catch(() => undefined);
     return () => { vivo = false; };
   }, []);
 
-  if (!liberado || !cred) return null;
+  if (!cred || (!liberado && !cred.ativo && !aviso)) return null; // fora da lista: só a credencial ativa aparece (para desativar); depois de desativar fica o aviso
 
   const abrir = (m: Modo) => {
     setModo(m); setUsuario(m === "trocar" ? (cred.usuario ?? "") : ""); setSenha(""); setConfirma(""); setCodigo(""); setEnviado(false); setAviso(null);
@@ -56,7 +56,7 @@ export function AcessoLeitura() {
     try { await acao(); } catch (e) {
       const texto = textoDaLeitura(e) ?? falha(e);
       if (texto !== null) setAviso({ tom: "danger", texto: texto === "Não foi possível completar a ação." ? reserva : texto });
-      setCodigo("");
+      if (gastouOCodigo(e)) setCodigo("");
     } finally { voando.current = false; setOcupado(false); }
   };
   const pedir = () => rodar(async () => { await pedirCodigoLeitura(); setEnviado(true); }, "Não foi possível enviar o código. Tente de novo.");
@@ -78,10 +78,10 @@ export function AcessoLeitura() {
       {modo === null && (cred.ativo ? (
         <>
           <Texto variante="corpo">Usuário: {cred.usuario}</Texto>
-          <Button rotulo="Trocar senha" variante="secondary" onPress={() => abrir("trocar")} />
+          {liberado && <Button rotulo="Trocar senha" variante="secondary" onPress={() => abrir("trocar")} />}
           <Button rotulo="Desativar acesso" variante="ghost" onPress={() => abrir("desativar")} />
         </>
-      ) : (
+      ) : liberado && (
         <Button rotulo="Criar acesso" onPress={() => abrir("criar")} />
       ))}
       {modo !== null && (

@@ -10,6 +10,9 @@ const TEXTOS: Record<string, string> = {
   acesso_leitura_indisponivel: "O acesso de visualização ainda não está disponível para a sua conta.",
 };
 
+/** A recusa que já gastou o código do e-mail (errado, vencido, ou 409 de corrida depois de conferido): o campo limpa. As demais (422, 403, 429, rede) o mantêm. */
+export const gastouOCodigo = (e: unknown) => e instanceof ErroDeApi && (e.status === 409 || ["codigo_invalido", "codigo_expirado"].includes(String(codigoDe(e))));
+
 /** O texto de uma recusa do acesso de visualização; `null` = não é recusa conhecida (quem chama cai no `useFalha`). */
 export function textoDaLeitura(e: unknown): string | null {
   if (!(e instanceof ErroDeApi)) return null;

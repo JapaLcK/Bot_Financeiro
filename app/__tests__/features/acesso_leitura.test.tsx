@@ -28,8 +28,29 @@ const abrirSeg = (freio: object | "falha", estado: { ativo: boolean; usuario: st
   });
 
 describe("Acesso de visualização — o freio", () => {
-  it.each([[{ acesso_leitura: false }], [{}], ["falha" as const]])("freio %j: sem a seção e sem ler a credencial", async (freio) => {
+  it.each([[{ acesso_leitura: false }], [{}]])("fora do freio %j e sem credencial: a seção não existe", async (freio) => {
     await abrirSeg(freio, { ativo: false, usuario: null });
+    await waitFor(() => expect(chamadasA(LEITURA).length).toBe(1));
+    expect(screen.queryByText("Acesso de visualização")).toBeNull();
+  });
+
+  it.each([[{ acesso_leitura: false }], [{ acesso_leitura: false, somente_leitura: false }]])("fora do freio %j e com credencial ativa: usuário e só Desativar", async (freio) => {
+    let estado = { ativo: true, usuario: "sindico.ana" as string | null };
+    await abrirSeg(freio, estado, { [LEITURA]: (o) => (o.method === "DELETE" ? resposta(200, (estado = { ativo: false, usuario: null })) : resposta(200, estado)) });
+    await screen.findByText("Usuário: sindico.ana");
+    expect(screen.queryByRole("button", { name: "Trocar senha" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Criar acesso" })).toBeNull();
+    await tocar("Desativar acesso");
+    await tocar("Enviar código para meu e-mail");
+    digitar("Código do e-mail", "111222");
+    await tocar("Desativar");
+    expect(metodoDe(LEITURA)).toBe("DELETE");
+    await screen.findByText("Acesso de visualização desativado.");
+    expect(screen.queryByRole("button", { name: "Criar acesso" })).toBeNull();
+  });
+
+  it.each([[{ acesso_leitura: false, somente_leitura: true }], ["falha" as const]])("leitor ou /me que falha %j: sem a seção e sem ler a credencial", async (freio) => {
+    await abrirSeg(freio, { ativo: true, usuario: "sindico.ana" });
     await waitFor(() => expect(chamadasA(ME).length).toBe(1));
     expect(screen.queryByText("Acesso de visualização")).toBeNull();
     expect(chamadasA(LEITURA)).toEqual([]);
@@ -123,5 +144,24 @@ describe("Acesso de visualização — recusas do servidor", () => {
     await tocar("Salvar");
     await screen.findByText(texto);
     expect(screen.getByLabelText("Senha").props.value).toBe("senha-de-leitura-1");
+  });
+
+  it.each([
+    [422, "leitura_invalida", /Usuário de 4 a 40/, "123456"],
+    [403, "acesso_leitura_indisponivel", /ainda não está disponível/, "123456"],
+    [400, "codigo_invalido", /Código incorreto/, ""],
+    [400, "codigo_expirado", /O código expirou/, ""],
+    [409, "usuario_em_uso", /já está em uso/, ""],
+  ])("%i %s: o campo do código fica com %j", async (status, code, texto, restante) => {
+    await abrirSeg({ acesso_leitura: true }, { ativo: false, usuario: null }, { [LEITURA]: (o) => (o.method === "PUT" ? erro(status, code) : resposta(200, { ativo: false, usuario: null })) });
+    await esperarBotao("Criar acesso");
+    await tocar("Criar acesso");
+    digitar("Usuário", "sindico.ana");
+    digitar("Senha", "senha-de-leitura-1");
+    digitar("Confirmar senha", "senha-de-leitura-1");
+    digitar("Código do e-mail", "123456");
+    await tocar("Salvar");
+    await screen.findByText(texto);
+    expect(screen.getByLabelText("Código do e-mail").props.value).toBe(restante);
   });
 });

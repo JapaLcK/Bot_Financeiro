@@ -308,6 +308,22 @@ def test_delete_sem_codigo_e_recusado_e_mantem_a_credencial(conta):
     assert db.obter_credencial_leitura(conta)["ativo"] is True
 
 
+def test_pedir_codigo_fora_da_allowlist_so_com_credencial_ativa(conta, emails, monkeypatch):
+    c, h = _dono(conta)
+    monkeypatch.setenv("ACESSO_LEITURA_USER_IDS", "")
+    r = c.post("/api/v2/conta/leitura/codigo", headers=h)  # sem acesso e sem credencial: nenhum e-mail
+    assert (r.status_code, r.json()["error"]["code"]) == (403, "acesso_leitura_indisponivel") and emails.codigos == []
+    db.definir_credencial_leitura(conta, usuario_novo(), SENHA_LEITOR)  # credencial criada antes: precisa do código para desativar
+    assert c.post("/api/v2/conta/leitura/codigo", headers=h).status_code == 200 and len(emails.codigos) == 1
+
+
+@pytest.mark.parametrize("sep", ["\n", "\t", " "])
+def test_env_aceita_espaco_em_branco_por_token(conta, monkeypatch, sep):
+    c, h = _dono(conta)
+    monkeypatch.setenv("ACESSO_LEITURA_USER_IDS", f"1,{sep}{conta}{sep}")
+    assert _me(c, h) is True
+
+
 def test_leitor_nao_pede_codigo(conta, emails):
     r = TestClient(dashboard.app).post("/api/v2/conta/leitura/codigo", headers=leitor_de(conta)["bearer"])
     assert r.status_code == 403 and emails.codigos == []
@@ -594,6 +610,7 @@ def _pede(c, h, rota):
 ])
 def test_teto_de_3_por_hora_soma_leitura_e_exclusao(emails, antes, depois):
     conta = conta_exclusao()
+    db.definir_credencial_leitura(conta.uid, usuario_novo(), SENHA_LEITOR)  # fora da allowlist só quem tem credencial ativa pede código
     c, h = _Fresco(), {"Authorization": f"Bearer {sessao_de(conta.uid)['access']}"}
     assert [_pede(c, h, antes) for _ in range(3)] == [200] * 3
     assert _pede(c, h, depois) == 429
@@ -606,7 +623,9 @@ def test_pedir_codigo_de_leitura_tem_teto_por_ip_nos_dois_namespaces(emails, pre
     c = _Fresco()
     codigos = []
     for _ in range(6):   # contas diferentes: só o teto por IP (5/h) pode barrar
-        h = {"Authorization": f"Bearer {sessao_de(conta_exclusao().uid)['access']}"}
+        uid = conta_exclusao().uid
+        db.definir_credencial_leitura(uid, usuario_novo(), SENHA_LEITOR)
+        h = {"Authorization": f"Bearer {sessao_de(uid)['access']}"}
         codigos.append(c.post(prefixo + "/conta/leitura/codigo", headers=h, json={}).status_code)
     assert codigos == [200] * 5 + [429]
 

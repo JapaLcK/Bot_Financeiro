@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NATIVE, useDialogo } from "../parts/dialog";
 import { meQuery } from "../lib/v2";
-import { definirLeitura, desativarLeitura, falhaLeitura, leituraQuery, pedirCodigoLeitura, type Falha } from "./api";
+import { definirLeitura, desativarLeitura, falhaLeitura, gastouOCodigo, leituraQuery, pedirCodigoLeitura, type Falha } from "./api";
 
 type Modo = "criar" | "trocar" | "desativar";
 const TITULO: Record<Modo, string> = { criar: "Criar acesso de visualização", trocar: "Trocar a senha de visualização", desativar: "Desativar o acesso de visualização" };
@@ -32,7 +32,7 @@ function LeituraForm({ modo, usuarioAtual, fechar, salvou }: { modo: Modo; usuar
     voando.current = true;
     setPendente(true);
     setFalha(null);
-    try { await f(); } catch (e) { setFalha(falhaLeitura(e, reserva)); setCodigo(""); } finally { voando.current = false; setPendente(false); }
+    try { await f(); } catch (e) { setFalha(falhaLeitura(e, reserva)); if (gastouOCodigo(e)) setCodigo(""); } finally { voando.current = false; setPendente(false); }
   };
   const pedir = () => rodar(async () => { await pedirCodigoLeitura(); setEnviado(true); }, "Não foi possível enviar o código. Tente de novo.");
   const enviar = (e: FormEvent) => {
@@ -84,14 +84,17 @@ function LeituraForm({ modo, usuarioAtual, fechar, salvou }: { modo: Modo; usuar
   </>;
 }
 
-// "Acesso de visualização" (Configurações › Segurança): atrás do freio `acesso_leitura` do /me (ACESSO_LEITURA_USER_IDS). Leitor e quem está fora da lista não montam nada.
+// "Acesso de visualização" (Configurações › Segurança): atrás do freio `acesso_leitura` do /me (ACESSO_LEITURA_USER_IDS). O leitor não monta nada. O dono lê a credencial
+// sempre (GET é liberado): fora da lista, só a credencial ATIVA aparece, com o usuário e "Desativar" (o DELETE também é liberado); sem credencial, nada.
 export function AcessoLeitura() {
-  const liberado = useQuery(meQuery).data?.acesso_leitura === true;
-  const q = useQuery({ ...leituraQuery, enabled: leituraQuery.enabled && liberado });
+  const me = useQuery(meQuery).data;
+  const liberado = me?.acesso_leitura === true;
+  const dono = me !== undefined && me.somente_leitura !== true;
+  const q = useQuery({ ...leituraQuery, enabled: leituraQuery.enabled && dono });
   const [aberto, setAberto] = useState<Modo | null>(null);
   const [aviso, setAviso] = useState("");
-  if (!liberado) return null;
   const dados = q.isError ? undefined : q.data; // erro de carga nunca vira "desativado": sem "Criar acesso"
+  if (!dono || (!liberado && !dados?.ativo && !aviso)) return null; // fora da lista o erro de carga é silencioso; depois de desativar fica o aviso
   const abrir = (m: Modo) => { setAviso(""); setAberto(m); };
   const botao = (m: Modo, texto: string, primaria = false) => <button type="button" className={`btn ${primaria ? "btn-primary" : "btn-ghost"}`} onClick={() => abrir(m)}>{texto}</button>;
   return (
@@ -99,11 +102,11 @@ export function AcessoLeitura() {
       <section className="panel span-12 conta-perfil conta-seguranca" aria-labelledby="leit-t">
         <h2 id="leit-t">Acesso de visualização</h2>
         <p>Quem entra com este usuário vê a conta inteira e não consegue lançar, editar nem pagar.</p>
-        {q.isPending && <p className="faint" role="status">Carregando…</p>}
-        {q.isError && <p role="alert" className="warn">Não deu para carregar o acesso de visualização. <button type="button" className="btn btn-ghost retry" onClick={() => q.refetch()}>Tentar de novo</button></p>}
+        {liberado && q.isPending && <p className="faint" role="status">Carregando…</p>}
+        {liberado && q.isError && <p role="alert" className="warn">Não deu para carregar o acesso de visualização. <button type="button" className="btn btn-ghost retry" onClick={() => q.refetch()}>Tentar de novo</button></p>}
         {dados && (dados.ativo
-          ? <><p>Usuário: <strong>{dados.usuario}</strong></p><div className="seg-extra seg-acoes">{botao("trocar", "Trocar senha")}{botao("desativar", "Desativar")}</div></>
-          : <div className="seg-extra seg-acoes">{botao("criar", "Criar acesso", true)}</div>)}
+          ? <><p>Usuário: <strong>{dados.usuario}</strong></p><div className="seg-extra seg-acoes">{liberado && botao("trocar", "Trocar senha")}{botao("desativar", "Desativar")}</div></>
+          : liberado && <div className="seg-extra seg-acoes">{botao("criar", "Criar acesso", true)}</div>)}
         <p role="status" className="sr-only">{aviso}</p>
       </section>
       {aberto && <LeituraForm modo={aberto} usuarioAtual={aberto === "trocar" ? dados?.usuario ?? "" : ""} fechar={() => setAberto(null)} salvou={setAviso} />}

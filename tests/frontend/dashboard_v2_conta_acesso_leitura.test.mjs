@@ -1,6 +1,7 @@
 /**
  * /painel#/conta/configuracoes (conta/AcessoLeitura.tsx, conta/api.ts): o card "Acesso de visualização" da Segurança, atrás do freio `acesso_leitura` do /me.
- *   · sem o freio (ou ausente) o card não existe e nenhum GET /conta/leitura sai; com ele: desativado = "Criar acesso"; ativo = usuário, "Trocar senha", "Desativar";
+ *   · sem o freio (ou ausente): sem credencial o card não existe; com credencial ativa só o usuário e "Desativar" (o dono sempre lê, GET e DELETE são liberados) (o leitor, que não chega a esta rota no painel, é coberto no jest);
+ *     com o freio: desativado = "Criar acesso"; ativo = usuário, "Trocar senha", "Desativar";
  *   · criar: o código só sai no clique em "Enviar código", o PUT leva usuário, senha e código; a senha nunca volta à tela; trocar e desativar (DELETE com corpo {codigo});
  *   · cada recusa do servidor tem texto próprio; sem rolagem lateral em 1440×900 e 390×844.
  */
@@ -47,14 +48,27 @@ async function preenche(p, { usuario, senha = SENHA, confirma = senha }) {
 }
 const pedeCodigo = async (p) => { await p.bt("Enviar código para meu e-mail").click(); await p.dlg.getByText("Código enviado. Confira seu e-mail.").waitFor(); };
 
-test("fora do freio o card não existe e nada é lido; com o freio, desativado mostra só Criar acesso", async () => {
+test("fora do freio: sem credencial o card não existe; ativa, só usuário e Desativar (que funciona); com o freio, desativado mostra só Criar acesso", async () => {
   for (const freio of [false, "ausente"]) {
     const p = await abrirLeitura({ freio });
     await p.page.waitForTimeout(600);
     assert.equal(await p.card.count(), 0, `freio ${freio}`);
-    assert.equal(p.L.gets, 0, `freio ${freio}`);
+    assert.equal(p.L.gets, 1, `freio ${freio}: o dono lê a credencial`);
     await p.ctx.close();
   }
+  const f = await abrirLeitura({ freio: false, estado: { ativo: true, usuario: "sindico.ana" } });
+  await f.card.getByText("sindico.ana").waitFor();
+  assert.equal(await f.bt("Trocar senha").count() + await f.bt("Criar acesso").count(), 0);
+  await f.bt("Desativar").click();
+  assert.equal(await f.dlg.locator("input[name=usuario]").count(), 0);
+  await f.bt("Enviar código para meu e-mail").click();
+  await f.dlg.locator("input[name=codigo]").fill("111222");
+  await f.dlg.getByRole("button", { name: "Desativar", exact: true }).click();
+  await f.dlg.waitFor({ state: "detached" });
+  assert.deepEqual(f.L.dels.map((d) => d.codigo), ["111222"]);
+  assert.equal(await f.card.locator("[role=status].sr-only").textContent(), "Acesso de visualização desativado.");
+  assert.equal(await f.bt("Criar acesso").count(), 0);
+  await f.ctx.close();
   const p = await abrirLeitura();
   await p.card.waitFor();
   await p.bt("Criar acesso").waitFor();
@@ -129,6 +143,7 @@ test("cada recusa do servidor tem texto próprio; o código só é pedido pelo b
     await p.dlg.locator("input[name=codigo]").fill("123456");
     await p.bt("Salvar").click();
     await p.alerta.filter({ hasText: texto }).waitFor();
+    assert.equal(await p.dlg.locator("input[name=codigo]").inputValue(), [422, 403, 429, 500].includes(status) ? "123456" : "", `código após ${status}`);
     assert.equal(await p.dlg.locator("input[name=senha]").inputValue(), SENHA, "a senha digitada fica para corrigir o resto");
     assert.equal(await p.card.count(), 1);
   }

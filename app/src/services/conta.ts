@@ -63,8 +63,8 @@ export const excluirConta = (dados: { password?: string; code: string; totp?: st
     sinal: comLimite(60_000),
   });
 
-/** O freio da seção "Acesso de visualização" (Segurança). Falha de qualquer tipo = sem a seção: quem chama trata como `false`. */
-export const acessoLeituraLiberado = async () => (await chamar("/api/app/me", freioLeituraSchema, { sinal: comLimite() })).acesso_leitura === true;
+/** O freio da seção "Acesso de visualização" (Segurança) e se a sessão é de leitor. Falha de qualquer tipo = sem a seção: quem chama trata como sem nada. */
+export const lerFreioLeitura = () => chamar("/api/app/me", freioLeituraSchema, { sinal: comLimite() });
 
 export const lerCredencialLeitura = () => chamar("/api/app/conta/leitura", credencialLeituraSchema, { sinal: comLimite() });
 

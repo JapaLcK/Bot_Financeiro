@@ -77,5 +77,5 @@ export type Notificacoes = z.infer<typeof notificacoesSchema>;
 /** `GET|PUT|DELETE /api/app/conta/leitura`: a credencial de visualização do condomínio. A senha e o hash nunca voltam. */
 export const credencialLeituraSchema = z.object({ ativo: z.boolean(), usuario: z.string().nullable().optional() });
 
-/** `GET /api/app/me`: só o freio da tela "Acesso de visualização" (`ACESSO_LEITURA_USER_IDS`); ausente (servidor antigo) = desligado. */
-export const freioLeituraSchema = z.object({ acesso_leitura: z.boolean().optional() });
+/** `GET /api/app/me`: o freio da tela "Acesso de visualização" (`ACESSO_LEITURA_USER_IDS`; ausente = desligado) e se a sessão é de leitor. */
+export const freioLeituraSchema = z.object({ acesso_leitura: z.boolean().optional(), somente_leitura: z.boolean().optional() });

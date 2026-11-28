@@ -57,6 +57,9 @@ async def exigir_codigo(uid: int, codigo: str) -> None:
 async def pedir_codigo(request: Request, uid: int = Depends(usuario_sessao)) -> dict:
     """Manda ao e-mail do dono o código que autoriza o PUT/DELETE (só o dono: o leitor é barrado pelo guard)."""
     from frontend.routes.conta_reauth import enviar_codigo
+    # fora da allowlist só quem já tem credencial ativa pede código (para desativar): senão seria um disparador de e-mail sem uso possível
+    if not await asyncio.to_thread(acesso_leitura, uid) and not (await asyncio.to_thread(obter_credencial_leitura, uid))["ativo"]:
+        raise HTTPException(status_code=403, detail={"error": "acesso_leitura_indisponivel"})
     return await enviar_codigo(uid, reauth_codes.LEITURA)
 
 

@@ -330,6 +330,8 @@ const TEXTO_LEITURA: Record<string, string> = {
   codigo_expirado: "O código expirou. Peça um novo.",
   acesso_leitura_indisponivel: "O acesso de visualização ainda não está disponível para a sua conta.",
 };
+// A recusa que já gastou o código do e-mail (errado, vencido, ou o 409 de corrida depois de conferido): o campo limpa. 422, 403, 429 e rede o mantêm.
+export const gastouOCodigo = (e: unknown) => e instanceof ErroApi && (e.status === 409 || e.code === "codigo_invalido" || e.code === "codigo_expirado");
 export function falhaLeitura(e: unknown, reserva: string): Falha {
   if (e instanceof ErroApi) {
     if (TEXTO_LEITURA[e.code]) return { texto: TEXTO_LEITURA[e.code] };

@@ -332,8 +332,8 @@ def acesso_leitura(user_id: int) -> bool:
     """Freio da tela "Acesso de visualização" (credencial de leitor): só os user_id listados em
     ACESSO_LEITURA_USER_IDS (separados por vírgula, lida a cada chamada; vazia ou ausente = ninguém) E que
     estão no rollout `dashboard_v2_enabled` (o login de leitura recusa o dono fora dele)."""
-    ids = {int(t) for t in (os.getenv("ACESSO_LEITURA_USER_IDS") or "").replace(" ", "").split(",")
-           if t.isascii() and t.isdigit() and len(t) <= 18}
+    toks = (t.strip() for t in (os.getenv("ACESSO_LEITURA_USER_IDS") or "").split(","))  # strip por token: aceita \n e \t
+    ids = {int(t) for t in toks if t.isascii() and t.isdigit() and len(t) <= 18}
     return int(user_id) in ids and dashboard_v2_enabled(user_id)
 
 
