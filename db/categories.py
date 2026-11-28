@@ -315,8 +315,8 @@ def list_user_categories_full(
 ) -> list[dict]:
     """Lista categorias da tabela `user_categories` com contagem de uso.
 
-    Retorna dicts com: id, name, emoji, color, is_archived, is_system,
-    usage_count (qtd de launches+credit_transactions com esse texto).
+    Retorna dicts com: id, name, emoji, color, is_archived, is_system, grupo
+    (nulo na conta pessoal), usage_count (qtd de launches+credit_transactions com esse texto).
     Ordenação: não arquivadas primeiro, depois alfabético.
     """
     ensure_user(user_id)
@@ -338,7 +338,7 @@ def list_user_categories_full(
                 )
                 select
                   uc.id, uc.name, uc.emoji, uc.color,
-                  uc.is_archived, uc.is_system,
+                  uc.is_archived, uc.is_system, uc.grupo,
                   coalesce((select sum(n) from usage where usage.name = uc.name), 0)::int as usage_count
                 from user_categories uc
                 where uc.user_id=%s
@@ -357,6 +357,7 @@ def list_user_categories_full(
             "color": r["color"],
             "is_archived": bool(r["is_archived"]),
             "is_system": bool(r["is_system"]),
+            "grupo": r["grupo"],
             "usage_count": int(r["usage_count"] or 0),
         })
     return out
@@ -450,7 +451,7 @@ def get_user_category(user_id: int, cat_id: int) -> dict | None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, name, emoji, color, is_archived, is_system "
+                "select id, name, emoji, color, is_archived, is_system, grupo "
                 "from user_categories where user_id=%s and id=%s",
                 (user_id, int(cat_id)),
             )
@@ -460,7 +461,7 @@ def get_user_category(user_id: int, cat_id: int) -> dict | None:
             return {
                 "id": r["id"], "name": r["name"], "emoji": r["emoji"],
                 "color": r["color"], "is_archived": bool(r["is_archived"]),
-                "is_system": bool(r["is_system"]),
+                "is_system": bool(r["is_system"]), "grupo": r["grupo"],
             }
 
 

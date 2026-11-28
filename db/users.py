@@ -35,6 +35,15 @@ def ensure_user(user_id: int):
         conn.commit()
 
 
+def is_conta_condominio(user_id: int) -> bool:
+    """A conta é de condomínio (`users.tipo_conta`)? Conta inexistente → False."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select tipo_conta from users where id=%s", (user_id,))
+            r = cur.fetchone()
+    return bool(r) and r["tipo_conta"] == "condominio"
+
+
 def user_exists(user_id: int) -> bool:
     """A conta existe? Pergunta para quem NÃO pode criá-la ao consultar.
 

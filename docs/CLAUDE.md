@@ -2609,6 +2609,16 @@ Categorização tem uma armadilha própria: **categoria e regra de categoria sã
 diferentes** (`user_categories` × `user_category_rules`) e a regra ganha da categoria
 na inferência.
 
+**Conta de condomínio (síndico).** `users.tipo_conta` (`'pessoal'` por padrão, `'condominio'`; CHECK no banco;
+leitura em `db.users.is_conta_condominio`) e `user_categories.grupo` (nulo = conta pessoal; o plano de contas da
+administradora usa os grupos de `GRUPOS_CONDOMINIO`). O catálogo, o código contábil (que não vai ao banco) e as
+regras de keyword moram em `db/categorias_condominio.py`; `semear_condominio(cur, user_id)` é idempotente, não
+sobrescreve grupo já definido nem keyword que o usuário já tem, e só arquiva canônica pessoal sem uso DESTE usuário.
+Liga-se pelo script (não há rota): `python -m scripts.ativar_conta_condominio --user-id N`, que avisa se o plano não
+libera `custom_categories`/`ai_categorization`. `GET /categories/{uid}` e o POST/PATCH devolvem `grupo`.
+As regras casam por palavra OU substring (`get_memorized_rules`): keyword curta que aparece dentro de outra palavra
+não entra na lista.
+
 **"Testar o Piggy" (demo no WhatsApp, sem conta).** `GET /teste` (`frontend/routes/static_pages.py`)
 grava o clique em `demo_sessions` (utms) e abre o WhatsApp com "Quero testar o PigBank (teste CODIGO)";
 `adapters/whatsapp/wa_demo.py` desvia a mensagem no começo de `process_message`, ANTES de
