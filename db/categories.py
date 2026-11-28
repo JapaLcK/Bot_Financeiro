@@ -16,7 +16,7 @@ import unicodedata
 
 from .connection import get_conn
 from .users import ensure_user
-from utils_text import normalize_text
+from utils_text import INTERNAL_MOVEMENT_CATEGORIES, canonicalize_category_label, normalize_text
 
 log = logging.getLogger(__name__)
 
@@ -132,10 +132,19 @@ def plano_da_conta(user_id: int) -> list[tuple[str, str | None]] | None:
 
 def categoria_no_plano(plano: list[tuple[str, str | None]], raw: str) -> str:
     """Resolvedor ÚNICO de categoria vinda de fora do plano (hashtag, LLM, recorrente, recategoriza) para uma conta de
-    condomínio: nome exato (sem o "(grupo)" que o LLM às vezes devolve) → ele; senão o ÚNICO nome do plano que
-    compartilha token (ou prefixo de token, 5+ letras) com o texto → ele; ambíguo ou sem casamento → "outros"."""
-    norm = normalize_text(re.sub(r"\s*\([^)]*\)\s*$", "", raw or ""))
+    condomínio: categoria de SISTEMA (movimentação interna, rendimentos, cripto) → intacta (o import deriva
+    `is_internal_movement` dela depois); nome completo exato → ele; senão, sem o "(grupo)" que o LLM às vezes devolve,
+    exato → ele; senão o ÚNICO nome do plano que compartilha token (ou prefixo de token, 5+ letras) com o texto → ele;
+    ambíguo ou sem casamento → "outros"."""
+    sistema = canonicalize_category_label(raw)
+    if sistema in INTERNAL_MOVEMENT_CATEGORIES or sistema in ("rendimentos", "criptomoedas"):
+        return sistema
     nomes = [n for n, _ in plano]
+    norm = normalize_text(raw or "")
+    for n in nomes:
+        if normalize_text(n) == norm:
+            return n
+    norm = normalize_text(re.sub(r"\s*\([^)]*\)\s*$", "", raw or ""))
     for n in nomes:
         if normalize_text(n) == norm:
             return n

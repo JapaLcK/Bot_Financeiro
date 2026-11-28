@@ -24,6 +24,7 @@ import unicodedata
 from typing import Any
 
 import db
+from db.categories import categoria_da_conta
 from utils_text import valor_valido
 from core.observability import _log_falha
 
@@ -192,6 +193,11 @@ def _set_budget_execute(user_id: int, args: dict[str, Any]) -> str:
         canon, action = _resolve_category(user_id, raw_cat, force_new=force_new)
         if action == "block":
             return canon  # mensagem pro user
+        # Condomínio: "energia" → "energia elétrica" ANTES do lookup do existente (senão o upsert sobrescreve sem
+        # confirmar). Fora do plano → "outros": mantém `canon`, o `upsert_budget` recusa (não é o orçamento de "outros").
+        resolvida = categoria_da_conta(user_id, canon)
+        if resolvida != "outros":
+            canon = resolvida
 
     existing = db.get_budget(user_id, canon)
     if existing and not confirmed:

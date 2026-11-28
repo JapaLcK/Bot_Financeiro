@@ -153,3 +153,62 @@ def test_orcamento_pessoal_gas_grava_gas():
         assert budgets.upsert_budget(uid, "gás", 80)[0] == "gás"
     finally:
         _cleanup_user(uid)
+
+
+# ── categoria de SISTEMA / casamento completo / orçamento do chat (condomínio) ──
+
+def _internos(uid):
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select categoria, is_internal_movement from launches where user_id=%s", (uid,))
+        return [(r["categoria"], r["is_internal_movement"]) for r in cur.fetchall()]
+
+
+def test_categoria_de_sistema_passa_intacta_no_condominio(conta):
+    tipo, uid = conta
+    for raw in ("investimento_aporte", "pagamento_fatura", "transferencia_interna"):
+        assert db.categories.categoria_da_conta(uid, raw) == raw
+    if tipo == "condo":  # grafia com espaço: canonicaliza em vez de virar "outros"
+        assert db.categories.categoria_da_conta(uid, "investimento aporte") == "investimento_aporte"
+
+
+def test_import_statement_aplicacao_cdb_e_movimento_interno(conta):
+    pytest.importorskip("ofxparse")  # statement_import importa ofx_import
+    from statement_import import import_statement_bytes
+    tipo, uid = conta
+    csv_bytes = "Data,Descrição,Valor\n02/08/2026,APLICACAO CDB,\"-100,00\"\n".encode()
+    import_statement_bytes(uid, csv_bytes, "extrato.csv", "csv")
+    assert _internos(uid) == [("investimento_aporte", True)]
+
+
+def test_import_ofx_aplicacao_cdb_e_movimento_interno(conta):
+    pytest.importorskip("ofxparse")
+    from ofx_import import import_ofx_bytes
+    from test_finito_ataque import _CAB
+    tipo, uid = conta
+    ofx = (_CAB + "<OFX><BANKMSGSRSV1><STMTTRNRS><TRNUID>1<STATUS><CODE>0<SEVERITY>INFO</STATUS>"
+           f"<STMTRS><CURDEF>BRL<BANKACCTFROM><BANKID>0001<ACCTID>{uid}<ACCTTYPE>CHECKING</BANKACCTFROM>"
+           "<BANKTRANLIST><DTSTART>20260801<DTEND>20260831<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260803"
+           f"<TRNAMT>-100.00<FITID>{uid}TX1<MEMO>APLICACAO CDB</STMTTRN></BANKTRANLIST>"
+           "<LEDGERBAL><BALAMT>100.00<DTASOF>20260831</LEDGERBAL></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>").encode()
+    import_ofx_bytes(uid, ofx, "f.ofx")
+    assert _internos(uid) == [("investimento_aporte", True)]
+
+
+def test_nome_completo_custom_vence_o_sufixo_de_grupo():
+    from db.categories import categoria_no_plano
+    plano = [("água", "moradia"), ("água (piscina)", None), ("outros", None)]
+    assert categoria_no_plano(plano, "água (piscina)") == "água (piscina)"
+    assert categoria_no_plano(plano, "água (moradia)") == "água"  # sufixo de grupo só sem casamento completo
+
+
+def test_chat_set_budget_energia_pede_confirmacao_no_condominio():
+    from core.services.ai_chat.tools.budgets import _set_budget_execute
+    uid = _novo(True)
+    try:
+        budgets.upsert_budget(uid, "energia elétrica", 500)
+        msg = _set_budget_execute(uid, {"categoria": "energia", "budget": 300})
+        assert "Atualizar" in msg and "energia elétrica" in msg
+        assert _limite(uid, "energia elétrica") == 500  # não gravou direto
+        assert "Atualizar" not in _set_budget_execute(uid, {"categoria": "gás", "budget": 300})
+    finally:
+        _cleanup_user(uid)
