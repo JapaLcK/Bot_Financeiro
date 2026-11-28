@@ -1,19 +1,23 @@
 """Ocultação de nomes para o LEITOR de uma conta de condomínio (PR 3d).
 
-Na sessão `ro` (credencial de visualização) de conta condomínio, todo item cuja categoria é de grupo
-`pessoal` ou `receitas` (funcionário, condômino) perde os campos que identificam pessoa: eles viram o
-nome da categoria. Valor, data, categoria e grupo ficam. Dono, conta pessoal e leitor de conta pessoal:
-nada muda (`plano_da_conta` é `None` fora do condomínio).
+Na sessão `ro` (credencial de visualização) de conta condomínio, o item só mantém os campos que identificam pessoa
+se a categoria dele é de grupo VISÍVEL (`GRUPOS_VISIVEIS_AO_LEITOR`: funcionais, manutencao, tributarias, outras).
+Todo o resto (pessoal, receitas, "outros", sem categoria, categoria fora do plano) vira o nome da categoria
+("Sem categoria" se não houver): fail-closed. Valor, data, categoria e grupo ficam. Dono, conta pessoal e leitor
+de conta pessoal: nada muda (`categorias_visiveis` é `None` fora do condomínio).
 
 Helper ÚNICO, aplicado no SERVIDOR, na saída de cada rota GET que o leitor pode chamar (a classificação de
 cada uma está em `tests/test_leitura_guard.py::PERMITIDO_LEITOR`). Os grupos são lidos uma vez por
 requisição, sem cache global (lista compartilhada vazaria uma conta na outra).
 """
-from db.categories import plano_da_conta
+import re
+
+from db.categorias_condominio import GRUPOS_VISIVEIS_AO_LEITOR
+from db.connection import get_conn
 from frontend.routes.leitura_guard import e_leitor
 from utils_text import normalize_text
 
-GRUPOS_OCULTOS = frozenset({"pessoal", "receitas"})
+SEM_CATEGORIA = "Sem categoria"
 
 # Campo que traz a categoria do item, e campos que identificam pessoa (descrição, nota, contraparte,
 # documento, chave Pix, comprovante). Nome de campo de todo o repositório que carrega texto livre de lançamento.
@@ -29,6 +33,11 @@ CAMPOS_NOME = frozenset({
 })
 
 
+def _chave(nome: str) -> str:
+    # a v2 devolve a chave sem acento ("salarios"), a legada o nome ("Salários") e o import "nome (grupo)"
+    return normalize_text(re.sub(r"\s*\([^)]*\)\s*$", "", nome)) or nome.strip().lower()
+
+
 def leitor_da_requisicao(request) -> bool:
     """`request` pode ser o `Request` ou o `bool` que o chamador já tem (o `/ws` guarda `ro`)."""
     if isinstance(request, bool):
@@ -38,46 +47,55 @@ def leitor_da_requisicao(request) -> bool:
                                     or e_leitor(request))
 
 
-def categorias_ocultas(uid: int, request) -> frozenset[str]:
-    """Nomes (normalizados) das categorias a ocultar; vazio quando o pedido não é de leitor de condomínio."""
+def categorias_visiveis(uid: int, request) -> frozenset[str] | None:
+    """Chaves das categorias cujo nome o leitor PODE ver; `None` quando o pedido não é de leitor de condomínio (nada a
+    mascarar). TODAS as categorias da conta, inclusive arquivadas (arquivar não desmascara lançamento antigo)."""
     if not leitor_da_requisicao(request):
-        return frozenset()
-    plano = plano_da_conta(uid)
-    return frozenset(normalize_text(n) for n, g in plano or () if g in GRUPOS_OCULTOS)
+        return None
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select u.tipo_conta, uc.name, uc.grupo from users u left join user_categories uc "
+                    "on uc.user_id = u.id where u.id = %s", (uid,))
+        rows = cur.fetchall() or []
+    if not rows or rows[0]["tipo_conta"] != "condominio":
+        return None
+    return frozenset(_chave(r["name"]) for r in rows if r["name"] and r["grupo"] in GRUPOS_VISIVEIS_AO_LEITOR)
 
 
-def e_oculta(ocultas: frozenset[str], categoria) -> bool:
-    # a v2 devolve a chave sem acento ("salarios") e a legada o nome ("Salários"): compara pela normalização
-    return isinstance(categoria, str) and normalize_text(categoria) in ocultas
+def _rotulo(visiveis, categoria) -> str | None:
+    """None = o nome fica; senão o rótulo que o substitui (a própria categoria; sem categoria, `SEM_CATEGORIA`)."""
+    if isinstance(categoria, str) and categoria.strip():
+        return None if _chave(categoria) in visiveis else categoria
+    return SEM_CATEGORIA
 
 
-def _anda(x, ocultas, campos, herda=None):
+def _anda(x, visiveis, campos, pai=None):
+    """`pai`: rótulo de máscara herdado (item pai oculto, ou categoria oculta da rota inteira). O filho nunca reabre."""
     if isinstance(x, (list, tuple)):
-        return [_anda(i, ocultas, campos, herda) for i in x]
+        return [_anda(i, visiveis, campos, pai) for i in x]
     if not isinstance(x, dict):
         return x
-    novo = {k: _anda(v, ocultas, campos, herda) for k, v in x.items()}
-    propria = any(isinstance(novo.get(c), str) for c in CAMPOS_CATEGORIA)
-    cat = next((novo[c] for c in CAMPOS_CATEGORIA if e_oculta(ocultas, novo.get(c))), None)
-    if cat is None and not propria and e_oculta(ocultas, herda):
-        cat = herda
-    if cat is not None:
+    # item = dict com campo de categoria (str ou nulo); dict sem categoria (ex.: cash_declaration) só herda do pai
+    rotulo = pai or next((r for c in CAMPOS_CATEGORIA if c in x and (x[c] is None or isinstance(x[c], str))
+                          and (r := _rotulo(visiveis, x[c]))), None)
+    novo = {k: _anda(v, visiveis, campos, rotulo) for k, v in x.items()}
+    if rotulo:
         for k in novo:
-            if k in campos and novo[k] is not None and not isinstance(novo[k], (dict, list)):
-                novo[k] = cat
+            if k in campos and novo[k] is not None and not isinstance(novo[k], dict):
+                novo[k] = [rotulo if i is not None and not isinstance(i, (dict, list)) else i for i in novo[k]] \
+                    if isinstance(novo[k], list) else rotulo
     return novo
 
 
 def mascarar_para_leitor(uid: int, request, dados, campos=CAMPOS_NOME, herda=None):
     """`herda`: categoria de TODA a resposta (rota por categoria), para o item que não traz a sua. Cópia de `dados` (dict/lista aninhados) com os `campos` dos itens de categoria oculta trocados pelo nome
     da categoria. Sem efeito para dono e conta pessoal. `dados` nunca é alterado (pode vir de cache)."""
-    ocultas = categorias_ocultas(uid, request)
-    return _anda(dados, ocultas, campos, herda) if ocultas else dados
+    visiveis = categorias_visiveis(uid, request)
+    return dados if visiveis is None else _anda(dados, visiveis, campos, _rotulo(visiveis, herda) if herda else None)
 
 
 def e_leitor_de_condominio(uid: int, request) -> bool:
     """Leitor de conta de condomínio: o texto livre gerado (insights) não tem categoria para mascarar, então sai."""
-    return leitor_da_requisicao(request) and plano_da_conta(uid) is not None
+    return categorias_visiveis(uid, request) is not None
 
 
 def sem_busca(uid: int, request, q):

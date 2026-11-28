@@ -32,7 +32,7 @@ _V2_MASCARA = "assinaturas|contas-a-pagar|gastos|insights|lancamentos|orcamento-
 _C = lambda classe, *ps: tuple((re.compile(p), classe) for p in ps)  # noqa: E731
 PERMITIDO_LEITOR = (
     *_C("sem_nome",
-        r"\.(js|css|png|json|xml|txt|html)$",                       # asset estático
+        r"^/[^/]+\.(js|css|png|json|xml|txt|html)$",                 # asset estático da raiz: UM segmento, nunca /api/…/x.json
         r"^/(fonts|brand|quiz/assets|static)/",                      # idem
         r"^/(\.well-known/apple-app-site-association|health|auth/validate|auth/me|wa/webhook|webhook)$",
         r"^/(app|agents|afiliado|assinar|black-friday|blog|cadastro|changelog|comandos|comandos-app|como-funciona|"
@@ -256,3 +256,9 @@ def test_me_do_v2_expoe_somente_leitura_so_ao_leitor(mundo):
     c = TestClient(dashboard.app)
     assert c.get("/api/v2/me", headers=leitor["bearer"]).json()["somente_leitura"] is True
     assert c.get("/api/v2/me", headers=dono).json()["somente_leitura"] is False
+
+
+def test_asset_estatico_so_na_raiz_rota_de_dado_com_extensao_nao_vira_sem_nome():
+    assert classe_da_rota("/app-mode.css") == "sem_nome"
+    for u in ("/api/v2/futuro/dados.json", "/data/1/extrato.txt", "/history/1/export.xml"):
+        assert classe_da_rota(u) is None, u  # rota de dado futura tem de ser classificada de propósito

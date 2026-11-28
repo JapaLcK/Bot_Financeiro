@@ -135,7 +135,7 @@ def test_leitor_de_conta_pessoal_ve_tudo_como_antes(monkeypatch, user_id):
     c, leitor = TestClient(dashboard.app), leitor_de(user_id)["bearer"]
     for url in ("/api/v2/lancamentos", f"/data/{user_id}", f"/history/{user_id}/list"):
         assert "João da Silva" in _texto(c.get(url, headers=leitor)), url
-    assert leitura_mascara.categorias_ocultas(user_id, _Req(True)) == frozenset()
+    assert leitura_mascara.categorias_visiveis(user_id, _Req(True)) is None
 
 
 class _Req:  # só o que o helper lê de um Request
@@ -199,7 +199,7 @@ def test_alerta_do_snapshot_nao_carrega_nome_de_gasto_fixo(mundo):
 
 def test_controle_negativo_helper_desligado_deixa_as_rotas_vermelhas(mundo, monkeypatch):
     m = mundo
-    monkeypatch.setattr(leitura_mascara, "plano_da_conta", lambda uid: None)  # todo chamador lê o plano por aqui
+    monkeypatch.setattr(leitura_mascara, "categorias_visiveis", lambda uid, request: None)  # todo chamador passa por aqui
     vermelhas = [rota for rota, (_, dono_ve, _) in ROTAS.items()
                  if dono_ve and _vazou(_texto(m["c"].get(_url(m, rota), headers=m["leitor"])))]
     assert set(vermelhas) == {r for r, (_, dono_ve, _) in ROTAS.items() if dono_ve}, set(ROTAS) - set(vermelhas)
@@ -227,3 +227,148 @@ def test_helper_nao_altera_a_entrada_e_so_age_no_leitor(mundo):
     assert [i["descricao"] for i in out["itens"]] == ["Salários", "Sabesp"] and out["itens"][0]["valor"] == 1
     assert leitura_mascara.mascarar_para_leitor(uid, _Req(False), dado) is dado  # dono: o próprio objeto
     assert leitura_mascara.mascarar_para_leitor(uid, True, dado)["itens"][0]["descricao"] == "Salários"  # flag do /ws
+
+
+# ── 7. regra INVERTIDA (fail-closed): o nome só fica em grupo funcionais/manutencao/tributarias/outras ──
+
+def _leitor_mascara(uid, dado, **kw):
+    return leitura_mascara.mascarar_para_leitor(uid, _Req(True), dado, **kw)
+
+
+def _lanca(uid, valor, alvo, nota, categoria):
+    db.add_launch_and_update_balance(uid, "despesa", valor, alvo, nota, categoria)
+
+
+def test_i1_arquivar_a_categoria_nao_desmascara_lancamento_antigo(mundo):
+    m = mundo
+    antes = m["c"].get("/api/v2/lancamentos", headers=m["leitor"]).text
+    assert _vazou(antes) == []
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update user_categories set is_archived = true where user_id=%s and name in ('salários','mensalidades','água')",
+                    (m["uid"],))
+        assert cur.rowcount == 3
+        conn.commit()
+    for url in ("/api/v2/lancamentos", f"/data/{m['uid']}", f"/history/{m['uid']}/list"):
+        assert _vazou(_texto(m["c"].get(url, headers=m["leitor"]))) == [], url
+    assert VISIVEL in m["c"].get("/api/v2/lancamentos", headers=m["leitor"]).text  # o arquivado de grupo visível também (o mapa usa todas as categorias da conta)
+
+
+_ROTAS_I2 = ("/api/v2/lancamentos", "/api/v2/gastos", "/data/{u}", "/history/{u}/list", "/api/v2/orcamento-domestico")
+
+
+@pytest.mark.parametrize("categoria", ["outros", None])
+def test_i2_mensagem_comum_em_outros_ou_sem_categoria_nao_vaza_nome(mundo, categoria):
+    m = mundo
+    _lanca(m["uid"], 800.0, "Maria faxineira", "pix 800 pra Maria faxineira CPF 123.456.789-00", categoria)
+    _lanca(m["uid"], 700.0, "José porteiro", "pagamento do José porteiro", categoria)
+    for rota in _ROTAS_I2:
+        url = rota.replace("{u}", str(m["uid"]))
+        assert _vazou(_texto(m["c"].get(url, headers=m["leitor"]))) == [], url
+    # positivo: o dono vê o nome nas rotas de lançamento (sem isto o teste passaria numa rota vazia)
+    assert _vazou(_texto(m["c"].get("/api/v2/lancamentos", headers=m["dono"])))
+
+
+def test_categoria_desconhecida_e_com_sufixo_de_grupo(mundo):
+    uid = mundo["uid"]
+    dado = {"itens": [{"categoria": "inexistente", "descricao": "João"}, {"categoria": "água (funcionais)", "descricao": "Sabesp"},
+                      {"categoria": "Água", "descricao": "Sabesp"}, {"categoria": None, "descricao": "João"},
+                      {"categoria": "", "descricao": "João"}, {"categoria": "outros", "descricao": "João"},
+                      {"categoria": "mensalidades", "descricao": "Maria"}, {"descricao": "sem chave de categoria"}]}
+    assert [i["descricao"] for i in _leitor_mascara(uid, dado)["itens"]] == [
+        "inexistente", "Sabesp", "Sabesp", "Sem categoria", "Sem categoria", "outros", "mensalidades", "sem chave de categoria"]
+
+
+def test_m1_subdict_sem_categoria_herda_a_mascara_do_pai(mundo):
+    uid = mundo["uid"]
+    item = {"categoria": "salários", "alvo": "João", "cash_declaration": {"alvo": "João", "nota": "Maria", "valor": 5,
+            "itens": [{"descricao": "José"}], "notes": ["CPF 123", None]},
+            "filho": {"categoria": "água", "descricao": "Sabesp-do-filho"}}
+    out = _leitor_mascara(uid, item)
+    assert out["cash_declaration"] == {"alvo": "salários", "nota": "salários", "valor": 5,
+                                       "itens": [{"descricao": "salários"}], "notes": ["salários", None]}
+    assert out["filho"]["descricao"] == "salários"  # filho visível sob pai oculto: não reabre
+    pai_visivel = {"categoria": "água", "descricao": "Sabesp", "filho": {"categoria": "salários", "descricao": "João"},
+                   "neto": {"nota": "Sabesp"}}
+    out = _leitor_mascara(uid, pai_visivel)
+    assert (out["descricao"], out["filho"]["descricao"], out["neto"]["nota"]) == ("Sabesp", "salários", "Sabesp")
+
+
+def test_m1_history_list_cash_declaration_da_rota_nao_vaza(mundo, monkeypatch):
+    """O sub-dict sem categoria própria que a rota real devolve dentro de um item oculto."""
+    m = mundo
+    orig = db.list_history
+
+    def com_decl(*a, **k):
+        r = orig(*a, **k)
+        for i in (i for i in r["items"] if i["categoria"] != "água"):  # sob grupo visível o nome ficaria, e é o certo
+            i["cash_declaration"] = {"alvo": "João da Silva", "nota": "CPF 123.456.789-00"}
+        return r
+    monkeypatch.setattr(db, "list_history", com_decl)
+    url = f"/history/{m['uid']}/list"
+    assert "cash_declaration" in _texto(m["c"].get(url, headers=m["dono"]))  # positivo: o sub-dict chegou à resposta
+    assert _vazou(_texto(m["c"].get(url, headers=m["leitor"]))) == []
+
+
+# Cada campo de nome: o item oculto o perde. Tirar um nome de CAMPOS_NOME deixa o caso vermelho.
+_CAMPOS = ["descricao", "description", "descricao_original", "memo", "nota", "note", "notes", "mensagem", "message", "texto",
+           "text", "raw_text", "observacao", "observacoes", "obs", "titulo", "title", "label", "alvo", "target",
+           "contraparte", "counterparty", "counterpart", "payee", "payer", "merchant", "estabelecimento", "favorecido",
+           "beneficiario", "pagador", "recebedor", "remetente", "destinatario", "nome", "name", "nome_contraparte",
+           "cpf", "cnpj", "cpf_cnpj", "documento", "document", "document_number", "chave_pix", "pix_key", "chave",
+           "arquivo", "filename", "file_name", "comprovante", "comprovante_nome", "receipt_name", "display_name",
+           "counterparty_name", "payee_name", "merchant_name", "description_raw", "raw_description"]
+
+
+@pytest.mark.parametrize("campo", _CAMPOS)
+def test_cada_campo_de_nome_e_mascarado_no_item_oculto_e_fica_no_visivel(mundo, campo):
+    uid = mundo["uid"]
+    out = _leitor_mascara(uid, [{"categoria": "salários", campo: "João 123.456.789-00"},
+                                {"categoria": "água", campo: "Sabesp"}, {"categoria": "salários", campo: None}])
+    assert out == [{"categoria": "salários", campo: "salários"}, {"categoria": "água", campo: "Sabesp"},
+                   {"categoria": "salários", campo: None}]
+
+
+def test_herda_da_rota_por_categoria_oculta_e_visivel(mundo):
+    uid = mundo["uid"]
+    assert _leitor_mascara(uid, {"launches": [{"alvo": "João"}]}, herda="salários") == {"launches": [{"alvo": "salários"}]}
+    assert _leitor_mascara(uid, {"launches": [{"alvo": "Sabesp"}]}, herda="água") == {"launches": [{"alvo": "Sabesp"}]}
+
+
+# ── 8. assinaturas (Open Finance), projeção e busca do histórico ──
+
+def test_assinaturas_do_open_finance_nao_mostra_o_comerciante_ao_leitor(mundo):
+    from _apoio_assinaturas import conta, mensais, rp, semeia
+    m = mundo
+    txs = mensais("mf", [-900.0] * 3, desc="MARIA FAXINEIRA CPF 123.456.789-00", ultima=date.today().replace(day=5))
+    semeia(m["uid"], [conta("acc-mf", txs)], [rp("MARIA FAXINEIRA CPF 123.456.789-00", -900.0, txs)])
+    dono = _texto(m["c"].get("/api/v2/assinaturas", headers=m["dono"]))
+    assert "MARIA FAXINEIRA" in dono  # positivo: sem o nome no dono o teste não mede nada
+    leitor = _texto(m["c"].get("/api/v2/assinaturas", headers=m["leitor"]))
+    assert "MARIA" not in leitor.upper() and "123.456" not in leitor and "FAXINEIRA" not in leitor.upper()
+    assert "900" in leitor  # o valor fica
+
+
+def test_projecao_dono_ve_o_nome_e_leitor_nao(mundo, monkeypatch):
+    """`cashflow.project` hoje não devolve `nome` (a rota sai limpa nos dois lados); o teste injeta o que um compromisso
+    nomeado traria e mede a fiação do `neutralizar`: dono vê, leitor recebe o tipo."""
+    from core.services import cashflow
+    m = mundo
+    fake = {"projetado": 1.0, "compromissos": [{"nome": "Maria faxineira", "fonte": "gasto_recorrente", "valor": 900.0},
+                                              {"nome": "Mensalidade Maria", "fonte": "receita_recorrente", "valor": 450.0}]}
+    monkeypatch.setattr(cashflow, "project", lambda *a, **k: fake)
+    url = f"/recurring-bills/{m['uid']}/projection?date=2027-01-15"
+    dono = _texto(m["c"].get(url, headers=m["dono"]))
+    assert "Maria faxineira" in dono and "Mensalidade Maria" in dono
+    leitor = m["c"].get(url, headers=m["leitor"]).json()["projection"]
+    assert [c["nome"] for c in leitor["compromissos"]] == ["Gasto fixo", "Receita fixa"] and _vazou(json.dumps(leitor)) == []
+    assert leitor["compromissos"][0]["valor"] == 900.0
+
+
+def test_history_list_ignora_q_do_leitor_e_filtra_para_o_dono(mundo):
+    m = mundo
+    u = f"/history/{m['uid']}/list"
+    sem_q = m["c"].get(u, headers=m["leitor"]).json()
+    com_q = m["c"].get(u + "?q=Sabesp", headers=m["leitor"]).json()
+    assert com_q == sem_q and len(json.dumps(sem_q)) > 200  # a busca por texto livre não filtra nem conta
+    dono_q = m["c"].get(u + "?q=Sabesp", headers=m["dono"]).json()
+    assert dono_q != m["c"].get(u, headers=m["dono"]).json()  # positivo: para o dono ela filtra
