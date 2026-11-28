@@ -1,6 +1,12 @@
 import { Stack, type NativeStackNavigationOptions } from "expo-router";
+import type { ReactNode } from "react";
+import { View } from "react-native";
+import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { useSessao } from "@/features/auth/sessao";
 
 import { PrivacidadeProvider } from "@/features/painel/privacidade";
+import { FaixaLeitura } from "@/ui/componentes/FaixaLeitura";
 import { OPCOES_SHEET } from "@/ui/componentes/Sheet";
 import { useTema } from "@/ui/tema";
 import { texto } from "@/ui/tokens";
@@ -16,7 +22,7 @@ export const unstable_settings = { initialRouteName: "index" };
 /** Os códigos de backup não cabem em meia tela: sheet só inteira, e sem alça (não há o que arrastar). */
 const SHEET_INTEIRA: NativeStackNavigationOptions = { ...OPCOES_SHEET, sheetAllowedDetents: [1], sheetGrabberVisible: false };
 
-function PilhaApp() {
+function PilhaApp({ leitor }: { leitor: boolean }) {
   const { cores } = useTema();
   const CABECALHO: NativeStackNavigationOptions = {
     headerShown: true,
@@ -30,34 +36,48 @@ function PilhaApp() {
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: cores.bg } }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="(painel)" />
-      <Stack.Screen name="conectar-banco" />
-      <Stack.Screen name="autorizando" />
-      <Stack.Screen name="open-finance-volta" />
-      <Stack.Screen name="configuracoes" options={{ headerShown: true, title: "Configurações", headerBackButtonDisplayMode: "minimal" }} />
-      <Stack.Screen name="conexoes" options={{ headerShown: true, title: "Bancos conectados", headerBackButtonDisplayMode: "minimal" }} />
-      <Stack.Screen name="seguranca" options={{ ...CABECALHO, title: "Segurança" }} />
-      <Stack.Screen name="ferramentas" options={{ ...CABECALHO, title: "Ferramentas" }} />
       <Stack.Screen name="progresso-milhao" options={{ ...CABECALHO, title: "Progresso ao milhão" }} />
-      <Stack.Screen name="agentes" options={{ ...CABECALHO, title: "Agentes" }} />
-      <Stack.Screen name="perfil" options={{ ...CABECALHO, title: "Perfil" }} />
-      <Stack.Screen name="notificacoes" options={{ ...CABECALHO, title: "Notificações" }} />
-      {/* Folha de meta (criar, editar, apagar): a altura do conteúdo, só aqui; `OPCOES_SHEET` e `SHEET_INTEIRA` seguem como estão. */}
-      <Stack.Screen name="meta" options={{ ...OPCOES_SHEET, sheetAllowedDetents: "fitToContents" }} />
-      <Stack.Screen name="simulador-compra" options={SHEET_INTEIRA} />
-      <Stack.Screen name="mfa-ativar" options={SHEET_INTEIRA} />
-      <Stack.Screen name="mfa-novos-codigos" options={SHEET_INTEIRA} />
-      <Stack.Screen name="mfa-desativar" options={SHEET_INTEIRA} />
-      <Stack.Screen name="excluir-conta" options={SHEET_INTEIRA} />
-      <Stack.Screen name="exportar-dados" options={SHEET_INTEIRA} />
+      {/* Leitor (credencial de visualização): fora do roteador também por deep link. Conta, notificações, bancos (conectar, autorizar, voltar do Open Finance), ferramentas, agentes e as folhas que escrevem (meta, simulador, MFA, exclusão, exportação). */}
+      <Stack.Protected guard={!leitor}>
+        <Stack.Screen name="conectar-banco" />
+        <Stack.Screen name="autorizando" />
+        <Stack.Screen name="open-finance-volta" />
+        <Stack.Screen name="configuracoes" options={{ headerShown: true, title: "Configurações", headerBackButtonDisplayMode: "minimal" }} />
+        <Stack.Screen name="conexoes" options={{ headerShown: true, title: "Bancos conectados", headerBackButtonDisplayMode: "minimal" }} />
+        <Stack.Screen name="seguranca" options={{ ...CABECALHO, title: "Segurança" }} />
+        <Stack.Screen name="ferramentas" options={{ ...CABECALHO, title: "Ferramentas" }} />
+        <Stack.Screen name="agentes" options={{ ...CABECALHO, title: "Agentes" }} />
+        <Stack.Screen name="perfil" options={{ ...CABECALHO, title: "Perfil" }} />
+        <Stack.Screen name="notificacoes" options={{ ...CABECALHO, title: "Notificações" }} />
+        {/* Folha de meta (criar, editar, apagar): a altura do conteúdo, só aqui; `OPCOES_SHEET` e `SHEET_INTEIRA` seguem como estão. */}
+        <Stack.Screen name="meta" options={{ ...OPCOES_SHEET, sheetAllowedDetents: "fitToContents" }} />
+        <Stack.Screen name="simulador-compra" options={SHEET_INTEIRA} />
+        <Stack.Screen name="mfa-ativar" options={SHEET_INTEIRA} />
+        <Stack.Screen name="mfa-novos-codigos" options={SHEET_INTEIRA} />
+        <Stack.Screen name="mfa-desativar" options={SHEET_INTEIRA} />
+        <Stack.Screen name="excluir-conta" options={SHEET_INTEIRA} />
+        <Stack.Screen name="exportar-dados" options={SHEET_INTEIRA} />
+      </Stack.Protected>
     </Stack>
+  );
+}
+
+/** A faixa do leitor ocupa a área segura de cima: as telas abaixo (`Screen`) a leem como 0, para não somar duas vezes. */
+function ComFaixa({ children }: { children: ReactNode }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={{ flex: 1 }}>
+      <FaixaLeitura />
+      <SafeAreaInsetsContext.Provider value={{ ...insets, top: 0 }}>
+        <View style={{ flex: 1 }}>{children}</View>
+      </SafeAreaInsetsContext.Provider>
+    </View>
   );
 }
 
 /** "Ocultar valores" vive aqui, acima do Painel: Bancos conectados (fora dele) respeita a mesma escolha. */
 export default function LayoutApp() {
-  return (
-    <PrivacidadeProvider>
-      <PilhaApp />
-    </PrivacidadeProvider>
-  );
+  const { leitor } = useSessao();
+  const pilha = <PilhaApp leitor={leitor} />;
+  return <PrivacidadeProvider>{leitor ? <ComFaixa>{pilha}</ComFaixa> : pilha}</PrivacidadeProvider>;
 }

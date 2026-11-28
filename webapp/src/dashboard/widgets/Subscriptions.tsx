@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Assinatura, Assinaturas, MarcaIn } from "../lib/api-v2.gen";
 import { dayMonth, isoDay, money, money0, monthYear } from "../lib/format.js";
-import { ErroApi, apiPost, assinaturasQuery, comPrazoLeitura } from "../lib/v2";
+import { ErroApi, apiPost, assinaturasQuery, comPrazoLeitura, useLeitor } from "../lib/v2";
 import { conectarBanco } from "../router";
 import { Frame } from "../parts/Frame";
 import { Info } from "../parts/Info";
@@ -118,6 +118,7 @@ function Linha({ a, children }: { a: Assinatura; children: ReactNode }) {
 export function SubscriptionList() {
   const { data, estado } = useAssinaturas();
   const qc = useQueryClient();
+  const leitor = useLeitor();
   const [aviso, setAviso] = useState<{ texto: string; desfazer?: MarcaIn } | null>(null);
   const avisoRef = useRef<HTMLParagraphElement>(null);
   const desfazerRef = useRef<HTMLButtonElement>(null);
@@ -187,7 +188,7 @@ export function SubscriptionList() {
       desfazer: { chave: a.chave, status: ignorada ? "ignorar" : a.marcada ? "assinatura" : "nenhuma" },
     });
   };
-  const botao = (a: Assinatura, status: MarcaIn["status"], rotulo: string, cls = "btn-quiet") => (
+  const botao = (a: Assinatura, status: MarcaIn["status"], rotulo: string, cls = "btn-quiet") => leitor ? null : (
     <button type="button" className={`btn ${cls}`} disabled={pendente} onClick={() => marcar(a, status)}
       aria-label={status === "ignorar" ? `${rotulo} ${a.nome}` : `${rotulo}: ${a.nome}`}>{rotulo}</button>
   );

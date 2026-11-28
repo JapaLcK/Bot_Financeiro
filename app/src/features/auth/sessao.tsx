@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { sair as sairNoServidor, temSessao } from "@/services/auth";
-import type { Credenciais } from "@/storage/secure";
+import { sair as sairNoServidor } from "@/services/auth";
+import { lerCredenciais, leitorDe, type Credenciais } from "@/storage/secure";
 
 /**
  * Estado de sessão do app inteiro. Monta UMA vez na raiz (`_layout.tsx`) e
@@ -18,8 +18,12 @@ export type EstadoSessao =
 
 interface Sessao {
   estado: EstadoSessao;
+  /** Sessão de leitor (credencial de visualização): vem da claim `ro` do access guardado no cofre, no boot e no login. Só esconde UI e o registro de push; o servidor barra a escrita. */
+  leitor: boolean;
   /** Chamado assim que uma credencial é gravada (login ou MFA). */
   autenticar: () => void;
+  /** O mesmo, para o login de visualização: a sessão é de leitor. */
+  autenticarLeitor: () => void;
   /** `/auth/me` (ou qualquer chamada autenticada) tomou `SessaoExpirada`; só age em `autenticado`. */
   expirou: (aviso: string) => void;
   /**
@@ -52,6 +56,11 @@ export function useSessao(): Sessao {
   return contexto;
 }
 
+/** Só o `leitor`, sem exigir o provider: os componentes do painel que escondem ações para o leitor também são montados sozinhos nos testes (e, sem provider, o dono). */
+export function useLeitor(): boolean {
+  return useContext(Contexto)?.leitor ?? false;
+}
+
 const MENSAGEM_FALHA_COFRE =
   "Não conseguimos abrir sua sessão neste aparelho. Tente de novo.";
 
@@ -64,14 +73,15 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
   // Guarda de toque duplo do Sair: só este provider existe na árvore, então
   // um `ref` de instância já basta (sem precisar de estado de módulo).
   const saindoEmVoo = useRef(false);
+  const [leitor, setLeitor] = useState(false);
 
   useEffect(() => {
     let cancelado = false;
     setEstado({ fase: "verificando" });
     (async () => {
       try {
-        const tem = await temSessao();
-        if (!cancelado) setEstado(tem ? { fase: "autenticado" } : { fase: "anonimo" });
+        const cred = await lerCredenciais();
+        if (!cancelado) { setLeitor(!!cred && leitorDe(cred.access)); setEstado(cred ? { fase: "autenticado" } : { fase: "anonimo" }); }
       } catch {
         // Falha do cofre: o estado da sessão neste aparelho é desconhecido.
         if (!cancelado) setEstado({ fase: "erro", mensagem: MENSAGEM_FALHA_COFRE });
@@ -85,7 +95,9 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
   const valor = useMemo<Sessao>(
     () => ({
       estado,
-      autenticar: () => setEstado({ fase: "autenticado" }),
+      leitor: estado.fase === "autenticado" && leitor,
+      autenticar: () => { setLeitor(false); setEstado({ fase: "autenticado" }); },
+      autenticarLeitor: () => { setLeitor(true); setEstado({ fase: "autenticado" }); },
       expirou: (aviso) => {
         // Com a saída comum em voo, um `SessaoExpirada` é efeito dela (o cofre já foi
         // limpo): virar anônimo aqui abriria Entrar antes de `sair()` terminar,
@@ -124,7 +136,7 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
       },
       tentarDeNovo: () => setTentativa((t) => t + 1),
     }),
-    [estado],
+    [estado, leitor],
   );
 
   return <Contexto.Provider value={valor}>{children}</Contexto.Provider>;

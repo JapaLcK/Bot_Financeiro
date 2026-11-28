@@ -10,7 +10,7 @@ import { flushSync } from "react-dom";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Previsao, ReceitaDoBanco, RespostaReceitaIn } from "../lib/api-v2.gen";
 import { moneyText } from "../lib/format.js";
-import { apiPost, comPrazoLeitura } from "../lib/v2";
+import { apiPost, comPrazoLeitura, useLeitor } from "../lib/v2";
 import { Frame } from "../parts/Frame";
 import type { AvisoDaPilha } from "../parts/PilhaAvisos";
 
@@ -123,6 +123,7 @@ export function itensDeReceita(lista: Previsao["receitas_do_banco"], r: Receitas
 export function RespondidasDoBanco({ lista }: { lista: Previsao["receitas_do_banco"] }) {
   const r = useReceitas("respondidas");
   const respondidas = lista.filter((x) => x.status !== "pendente");
+  if (useLeitor()) return null; // só o Desfazer escreve; leitor não vê a seção
   // A seção fica montada enquanto houver o que anunciar: o Desfazer da última respondida esvazia a lista,
   // e o aviso e o foco precisam de onde pousar. Sem itens e sem erro ela vira marcação sr-only: nada visível, só o anúncio e o alvo do foco.
   if (!respondidas.length && !r.dito.t && !r.falhou) return null;

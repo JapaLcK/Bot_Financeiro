@@ -4,7 +4,7 @@ import type { Lancamento, NovoLancamento, QueryGet } from "../lib/api-v2.gen";
 import type { DashState } from "../lib/types";
 import { useActions } from "../lib/actions";
 import { escolherMes, mesDe } from "../lib/store.js";
-import { categoriasQuery, contasQuery, lancamentosQuery } from "../lib/v2";
+import { categoriasQuery, contasQuery, lancamentosQuery, useLeitor } from "../lib/v2";
 import { isoDay, longDate } from "../lib/format.js";
 import { ATALHOS, diasDoExtrato, rotuloDia } from "../lib/extrato-dias";
 import { hojeNoFuso } from "../lib/metas-textos";
@@ -38,6 +38,7 @@ export function Lancamentos({ s }: { s: DashState }) {
   const cats = useQuery(categoriasQuery);
   const contas = useQuery(contasQuery);
   const escrita = useLancamentoMutation();
+  const leitor = useLeitor();
   const itens = lista.data?.pages.flatMap((p) => p.itens) ?? [];
   const hoje = hojeNoFuso();
   const abrir = (item: "novo" | Lancamento, rascunho?: NovoLancamento) => { setDraft(rascunho); voltar.current = document.activeElement as HTMLElement; setForm(item); };
@@ -69,7 +70,7 @@ export function Lancamentos({ s }: { s: DashState }) {
   const visiveis = fichas.filter((f) => f.k === "dia" || !painel);
   return <Frame id="lancamentos" title="Lançamentos" className="lancamentos" real><div className="lanc-content">
     <div className="lanc-toolbar">
-      <button className="btn btn-primary" type="button" disabled={escrita.pendente} onClick={() => abrir("novo")}>Lançar na Carteira</button>
+      {!leitor && <button className="btn btn-primary" type="button" disabled={escrita.pendente} onClick={() => abrir("novo")}>Lançar na Carteira</button>}
       <button className="btn btn-ghost" type="button" disabled={escrita.pendente || lista.isFetching} onClick={() => conferir()}>Atualizar lista</button>
     </div>
     <p ref={avisoRef} className="lanc-aviso" role="status" tabIndex={-1}>{escrita.aviso}</p>
@@ -105,7 +106,7 @@ export function Lancamentos({ s }: { s: DashState }) {
     {lista.data && !itens.length && <p className="empty">Nenhum lançamento encontrado.</p>}
     {diasDoExtrato(itens, !lista.hasNextPage).map(({ dia, itens: linhas, total }) => <section key={dia} className="lanc-dia" aria-label={`${longDate(isoDay(dia))}${historico ? ` ${dia.slice(0, 4)}` : ""}`}>
       <h3><span>{rotuloDia(dia, hoje)}</span>{total && <span className="sr-only">, </span>}{total && <span className={`num ${total.ganho ? "gain" : ""}`}>{total.texto}</span>}</h3>
-      <ul>{linhas.map((item) => <LancamentoLinha key={item.id} item={item} semData historico={historico} categorias={cats.data?.categorias ?? []} abrir={() => abrir(item)} />)}</ul>
+      <ul>{linhas.map((item) => <LancamentoLinha key={item.id} item={item} semData historico={historico} categorias={cats.data?.categorias ?? []} abrir={leitor ? undefined : () => abrir(item)} />)}</ul>
     </section>)}
     {lista.hasNextPage && <div className="lanc-mais">
       {lista.isFetchNextPageError && <p role="alert">Não foi possível carregar mais lançamentos.</p>}

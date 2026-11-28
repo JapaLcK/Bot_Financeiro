@@ -1,3 +1,4 @@
+import { useLeitor } from "@/features/auth/sessao";
 import { Acao } from "./base";
 import { ATUALIZANDO_SOZINHO, FALHA } from "./atualizarBanco";
 import { useNavegacaoPainel } from "./navegacao";
@@ -10,6 +11,11 @@ import { useAtualizarBanco } from "./usarAtualizarBanco";
  * `bancos` = quem está velho, calculado por quem monta o aviso. Sem a leitura do snapshot (lendo ou falhou) fica o botão de sempre, "Ver bancos conectados".
  */
 export function CorpoAvisoBanco({ bancos }: { bancos: string[] }) {
+  // Leitor: só o aviso, sem "Atualizar agora" (POST), "Reconectar" nem a ida a Bancos conectados.
+  if (useLeitor()) return <Texto tom="inkMuted">{`Os dados de ${bancos.length ? bancos.join(", ") : "um banco conectado"} estão desatualizados. Alguns valores podem estar incompletos.`}</Texto>;
+  return <CorpoComAcao bancos={bancos} />;
+}
+function CorpoComAcao({ bancos }: { bancos: string[] }) {
   const { navegar } = useNavegacaoPainel();
   const { acao, maquina, atualizar } = useAtualizarBanco();
   const padrao = <Texto tom="inkMuted">{`Os dados de ${bancos.length ? bancos.join(", ") : "um banco conectado"} precisam ser atualizados. Alguns valores podem estar incompletos.`}</Texto>;

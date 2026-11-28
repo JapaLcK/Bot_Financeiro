@@ -5,7 +5,7 @@ import { useIsMutating, useQuery } from "@tanstack/react-query";
 import type { Orcamento, OrcamentosCategoria } from "../lib/api-v2.gen";
 import { moneyText } from "../lib/format.js";
 import { ehNegativo, mesAno } from "../lib/metas-textos";
-import { DEMO, ErroApi, orcamentosCategoriaQuery } from "../lib/v2";
+import { DEMO, ErroApi, orcamentosCategoriaQuery, useLeitor } from "../lib/v2";
 import { Frame } from "../parts/Frame";
 import { IconeCategoria } from "../parts/IconeCategoria";
 import { CHAVE_ESCRITA, OrcamentoCategoriaForm } from "../parts/OrcamentoCategoriaForm";
@@ -34,6 +34,7 @@ export function Linha({ o }: { o: Orcamento }) {
 function Corpo({ d, busy, antigo }: { d: OrcamentosCategoria; busy: boolean; antigo: ReactNode }) {
   const [aberto, setAberto] = useState<Orcamento | "novo" | null>(null);
   const trava = useIsMutating({ mutationKey: CHAVE_ESCRITA }) > 0;
+  const so = DEMO || useLeitor(); // protótipo e leitor: só leitura
   const noLimite = d.limite !== null && d.orcamentos.length >= d.limite;
   const t = d.total;
   const passou = ehNegativo(t.restante);
@@ -49,7 +50,7 @@ function Corpo({ d, busy, antigo }: { d: OrcamentosCategoria; busy: boolean; ant
         </dl>
       )}
       {d.limite !== null && <p className="orc-dica" role="status">{d.orcamentos.length} de {d.limite} orçamentos no seu plano</p>}
-      {!DEMO && d.orcamentos.length > 0 && (
+      {!so && d.orcamentos.length > 0 && (
         <div className="orc-acoes">
           <button type="button" className="btn btn-primary" disabled={trava || noLimite} onClick={() => setAberto("novo")}>Novo orçamento</button>
           {noLimite && <a className="btn btn-ghost" href="/precos">Ver planos</a>}
@@ -58,14 +59,14 @@ function Corpo({ d, busy, antigo }: { d: OrcamentosCategoria; busy: boolean; ant
       {d.orcamentos.length === 0 ? (
         <div className="empty">
           <p><b>Nenhum orçamento ainda</b></p>
-          <p>Crie um teto para uma categoria e acompanhe o mês.</p>
-          {!DEMO && <button type="button" className="btn btn-primary" disabled={trava} onClick={() => setAberto("novo")}>Criar orçamento</button>}
+          {!so && <p>Crie um teto para uma categoria e acompanhe o mês.</p>}
+          {!so && <button type="button" className="btn btn-primary" disabled={trava} onClick={() => setAberto("novo")}>Criar orçamento</button>}
         </div>
       ) : (
         <ul className="orc-lista">
           {d.orcamentos.map((o) => (
             <li key={o.categoria}>
-              {DEMO ? <div className="orc-linha"><Linha o={o} /></div>
+              {so ? <div className="orc-linha"><Linha o={o} /></div>
                 : <button type="button" className="orc-linha" disabled={trava} aria-label={`Editar o orçamento de ${o.categoria}`} onClick={() => setAberto(o)}><Linha o={o} /></button>}
             </li>
           ))}

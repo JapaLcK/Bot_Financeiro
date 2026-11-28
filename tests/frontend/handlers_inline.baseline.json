@@ -217,9 +217,12 @@
   },
   "login.html": {
     "funcoes": [
+      "cancelLeitura",
       "cancelMfa",
+      "doLeitura",
       "doLogin",
-      "doMfa"
+      "doMfa",
+      "showLeitura"
     ],
     "variaveis": []
   },

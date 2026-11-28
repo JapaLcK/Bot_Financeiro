@@ -7,7 +7,7 @@ import { useIsMutating, useQuery } from "@tanstack/react-query";
 import type { OrcamentoDomestico } from "../lib/api-v2.gen";
 import { moneyText } from "../lib/format.js";
 import { mesAno } from "../lib/metas-textos";
-import { DEMO, ErroApi, orcamentoQuery } from "../lib/v2";
+import { DEMO, ErroApi, orcamentoQuery, useLeitor } from "../lib/v2";
 import { mesDe } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { Bloqueio } from "../parts/Bloqueio";
@@ -21,6 +21,7 @@ import { CHAVE_ESCRITA, OrcamentoForm, useEscrita, type Modo } from "../parts/Or
 
 function Corpo({ d, mes, busy, antigo, slot }: { d: OrcamentoDomestico; mes: string; busy: boolean; antigo: ReactNode; slot: HTMLElement | null }) {
   const [aberto, setAberto] = useState<Modo | null>(null);
+  const edita = !DEMO && !useLeitor(); // leitor: só leitura, sem os botões de editar
   const [poteAberto, setPoteAberto] = useState<string | null>(null);
   const escrita = useEscrita(mes);
   const trava = useIsMutating({ mutationKey: CHAVE_ESCRITA }) > 0;
@@ -30,7 +31,7 @@ function Corpo({ d, mes, busy, antigo, slot }: { d: OrcamentoDomestico; mes: str
   const avisos = antigo || escrita.isError || sem;
   return <div className="orc-conteudo" aria-busy={busy}>
     {/* "Editar percentuais" no cabeçalho da página (pages.tsx dá o lugar); no protótipo não há escrita. */}
-    {!DEMO && slot && createPortal(
+    {edita && slot && createPortal(
       <button type="button" className="btn btn-ghost" disabled={trava} onClick={() => setAberto("potes")}><i className="ph ph-sliders-horizontal" aria-hidden="true" /> Editar percentuais</button>, slot)}
     {avisos && (
       <div className="span-12 orc-avisos">
@@ -44,13 +45,13 @@ function Corpo({ d, mes, busy, antigo, slot }: { d: OrcamentoDomestico; mes: str
       <div className="panel">
         <Frame id="orcamento-renda" className="orc-w" real title="Renda do mês"
           info={<Info rotulo="Como os potes são calculados"><p>Os percentuais valem sobre a sua renda. Metas e Liberdade financeira contam o que você guardou; os outros potes, o que você gastou.</p></Info>}
-          aside={!DEMO && <button type="button" className="btn btn-ghost orc-editar" disabled={trava} onClick={() => setAberto("renda")}><i className="ph ph-pencil-simple" aria-hidden="true" /> Editar</button>}>
+          aside={edita && <button type="button" className="btn btn-ghost orc-editar" disabled={trava} onClick={() => setAberto("renda")}><i className="ph ph-pencil-simple" aria-hidden="true" /> Editar</button>}>
           <p className="orc-renda-num num">{moneyText(d.renda.valor)}</p>
           <div className="orc-origem">
             <span className="orc-ico orc-ico-neutro" aria-hidden="true"><i className="ph ph-bank" /></span>
             {informada ? <>
               <span><b>Informada por você</b></span>
-              {!DEMO && <button type="button" className="btn btn-quiet" disabled={trava} onClick={() => escrita.mutate({ renda: { mes, valor: null } })}>Usar a calculada</button>}
+              {edita && <button type="button" className="btn btn-quiet" disabled={trava} onClick={() => escrita.mutate({ renda: { mes, valor: null } })}>Usar a calculada</button>}
             </> : <span><b>Calculada automaticamente</b><small className="faint">Soma das suas receitas no mês</small></span>}
           </div>
         </Frame>
@@ -70,7 +71,8 @@ export function OrcamentoPainel({ s, slot }: { s: DashState; slot: HTMLElement |
   const d = !e4 ? q.data : undefined;
   // O gasto fixo tem plano próprio (Essencial, e o orçamento é Plus): fica de pé com o orçamento carregando, com erro ou bloqueado.
   const [gastoFixo, setGastoFixo] = useState<"form" | "feito" | null>(null);
-  const gasto = !DEMO && <>
+  const leitor = useLeitor();
+  const gasto = !DEMO && !leitor && <>
     {slot && createPortal(<button type="button" className="btn btn-ghost" onClick={() => setGastoFixo("form")}><i className="ph ph-plus" aria-hidden="true" /> Gasto fixo</button>, slot)}
     {gastoFixo === "feito" && <div className="span-12 orc-avisos"><p role="status" className="orc-dica">Gasto fixo cadastrado. Ele entra na Previsão.</p></div>}
     {gastoFixo === "form" && <GastoFixoForm feito={() => setGastoFixo("feito")} fechar={() => setGastoFixo((g) => g === "form" ? null : g)} />}

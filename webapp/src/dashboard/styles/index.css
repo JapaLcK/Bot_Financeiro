@@ -23,6 +23,7 @@
 @import "./afiliado.css";
 @import "./pilha.css";
 @import "./flexgap.css";
+@import "./leitor.css";
 
 /* Só os utilitários: o grid arrastável é escrito em Tailwind. Sem base (preflight
    desligado no config) e sem components. */

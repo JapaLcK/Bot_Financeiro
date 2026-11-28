@@ -3701,6 +3701,17 @@ async def auth_leitura_login(request: Request, response: Response, body: Leitura
         await log_auth_login_event("", False, ip_address=ip, user_agent=ua, failure_reason="leitura_invalid_credentials")
         raise HTTPException(status_code=401, detail="Usuário ou senha incorretos.")
     user_id = cred["user_id"]
+    # Leitor só existe no painel v2: fora do rollout o destino seria o /home legado (sem modo leitura).
+    # Checa só DEPOIS da senha válida (não vira oráculo) e ANTES de emitir sessão; falha da chave = fechado.
+    from core.services.plan_service import dashboard_v2_enabled
+    try:
+        v2 = await asyncio.to_thread(dashboard_v2_enabled, user_id)
+    except Exception:
+        v2 = False
+    if not v2:
+        raise HTTPException(status_code=403, detail={
+            "error": "leitura_indisponivel",
+            "message": "O acesso de visualização desta conta ainda não está disponível."})
     await log_auth_login_event("", True, user_id=user_id, ip_address=ip, user_agent=ua, failure_reason="leitura_login")
     _raise_if_account_scheduled_for_deletion(user_id)
     token, jti, refresh = _issue_session_token(user_id, "", request, leitura_versao=cred["versao"])
@@ -3708,7 +3719,7 @@ async def auth_leitura_login(request: Request, response: Response, body: Leitura
         request, response, user_id=user_id, access=token, jti=jti, refresh=refresh, ro=True
     )
     return {"user_id": user_id, "somente_leitura": True,
-            "dashboard_url": _post_login_url(user_id, request), **credenciais}
+            "dashboard_url": _dashboard_url("/painel"), **credenciais}
 
 
 async def _mfa_ligado(user_id: int) -> bool:

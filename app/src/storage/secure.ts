@@ -211,6 +211,16 @@ export function jtiDe(access: string): string | null {
   }
 }
 
+/** A claim `ro` do access: sessão de leitor (credencial de visualização). Só esconde UI e o registro de push; quem barra a escrita é o servidor. */
+export function leitorDe(access: string): boolean {
+  try {
+    const carga = access.split(".")[1];
+    return !!carga && (JSON.parse(deBase64Url(carga)) as { ro?: unknown }).ro === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Apaga se a sessão guardada for a MESMA que `access` identifica.
  *

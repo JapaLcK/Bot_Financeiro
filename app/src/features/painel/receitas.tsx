@@ -9,6 +9,7 @@ import { Acao, Linha } from "./base";
 import { LinhaExpansivel } from "./expansao";
 import type { AvisoDaPilha } from "./pilhaAvisos";
 import { usePainel, type Dados } from "./provider";
+import { useLeitor } from "@/features/auth/sessao";
 import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 type Receita = Dados["previsao"]["receitas_do_banco"][number];
 type Resposta = "sim" | "nao" | "desfazer";
@@ -32,7 +33,7 @@ export const ReceitasDoBanco = ({ children }: { children: (r: Apresentacao) => R
  * Nome, chave e valor são do pagador: nada disso vai para analytics ou Sentry.
  */
 function Caixa({ children }: { children: (r: Apresentacao) => ReactNode }) {
-  const p = usePainel(); const r = p.dados.previsao; const toast = useToast(); const { ampliado } = useTipografiaPainel();
+  const p = usePainel(); const leitor = useLeitor(); const r = p.dados.previsao; const toast = useToast(); const { ampliado } = useTipografiaPainel();
   const [ocupado, setOcupado] = useState(false); const [falhou, setFalhou] = useState(false); const [espera, setEspera] = useState<Espera | null>(null); const [abertas, setAbertas] = useState(false);
   const voo = useRef<symbol | null>(null); const viu = useRef(false); const ultima = useRef<Receita[]>([]); const atual = useRef(r); atual.current = r;
   const pronto = r?.fase === "pronto" ? r.dado.receitas_do_banco : null;
@@ -63,7 +64,7 @@ function Caixa({ children }: { children: (r: Apresentacao) => ReactNode }) {
     if (erro) { p.falhou(erro); if (erro instanceof SessaoExpirada || (erro instanceof ErroDeApi && erro.status === 402)) return soltar(); }
     viu.current = false; setEspera({ chave: rec.chave, nome: rec.nome, resposta, postOk: !erro, antes: atual.current }); p.relerPrevisao();
   };
-  if (!r || r.fase === "negado" || (!lista.length && !falhou)) return <>{children({ itens: [], erro: null, respondidas: null })}</>; // negado (plano sem Previsão, p.ex. caiu para Essencial com o app aberto): nem aviso nem erro; `erro` mantém o aviso, que o "Tentar novamente" do card apaga
+  if (leitor || !r || r.fase === "negado" || (!lista.length && !falhou)) return <>{children({ itens: [], erro: null, respondidas: null })}</>; // negado (plano sem Previsão, p.ex. caiu para Essencial com o app aberto): nem aviso nem erro; `erro` mantém o aviso, que o "Tentar novamente" do card apaga
   const pendentes = lista.filter((x) => x.status === "pendente"), respondidas = lista.filter((x) => x.status !== "pendente");
   const itens: AvisoDaPilha[] = pendentes.map((x) => ({ id: `receita:${x.chave}`, tom: "decisao", icone: "Wallet", titulo: "Receitas do extrato", corpo: <Linha titulo={x.nome} valor={x.valor} detalhe={`todo dia ${x.dia}. É sua receita fixa?`}>
     <View style={{ flexDirection: ampliado ? "column" : "row", flexWrap: "wrap", alignItems: "flex-start", gap: 8 }}>

@@ -18,9 +18,9 @@ import { ContaPerfil } from "./conta/Perfil";
 import { ContaFamilia } from "./familia/Familia";
 import { PaginaCasa } from "./familia/CasaPagina";
 import { PaginaAfiliado } from "./afiliado/Afiliado";
-import { DEMO, useAgentesLigados } from "./lib/v2";
+import { DEMO, useAgentesLigados, useLeitor } from "./lib/v2";
 import { useMedia } from "./useMedia";
-import { FERRAMENTAS, go, href, route, type Path } from "./router";
+import { FERRAMENTAS, go, href, noMenu, route, type Path } from "./router";
 import { Bills } from "./widgets/Bills";
 import { Calendar } from "./widgets/Calendar";
 import { Categories } from "./widgets/Categories";
@@ -53,6 +53,7 @@ import { Wealth } from "./widgets/Wealth";
 // `acoes`: o lugar (à direita do título, abaixo do texto no celular) onde a página põe os botões dela.
 // A linha de subtítulo saiu da tela: `lede` abre no ⓘ ao lado do título. `estado` é aviso de estado da tela (fica à vista).
 function Page({ path, lede, estado, acoes, children }: { path: Path; lede?: ReactNode; estado?: ReactNode; acoes?: ReactNode; children: ReactNode }) {
+  const leitor = useLeitor();
   return (
     <>
       <header className={`page-head${acoes ? " page-head-acoes" : ""}`}>
@@ -60,7 +61,7 @@ function Page({ path, lede, estado, acoes, children }: { path: Path; lede?: Reac
         {estado && <p className="page-lede">{estado}</p>}
         {acoes}
       </header>
-      <DicaDaTela path={path} />
+      {!leitor && <DicaDaTela path={path} />}
       <div className="page-grid">{children}</div>
     </>
   );
@@ -227,10 +228,11 @@ const TOOLS: { label: string; line: string; icon: string; to?: (typeof FERRAMENT
 
 function Tools() {
   const agentes = useAgentesLigados();
+  const leitor = useLeitor();
   return (
     <Page path="/ferramentas" lede="Tudo o que ajuda a decidir, num lugar só.">
       <ul className="span-12 tools">
-        {TOOLS.filter((t) => agentes || t.to !== "/agentes").map((t) => {
+        {TOOLS.filter((t) => (agentes || t.to !== "/agentes") && !(leitor && (t.run || t.url || (t.to && !noMenu(t.to, true, true))))).map((t) => {
           const body = <><i className={`ph ${t.icon}`} aria-hidden="true" /><b>{t.label}</b><span>{t.line}</span></>;
           const link = t.url ?? (t.to && href(t.to));
           return (

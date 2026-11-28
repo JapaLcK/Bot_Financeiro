@@ -2,6 +2,7 @@ import { ContratoInvalido, ErroDeApi } from "@/api/client";
 import {
   abandonarEntrada,
   entrar as entrarNoServidor,
+  entrarLeitura,
   verificarMfa,
   EntradaSuperada,
   type ProvedorSocial,
@@ -166,9 +167,11 @@ export async function enviar(
   email: string,
   senha: string,
   autenticar: () => void,
+  leitura = false,
 ): Promise<EstadoEntrar | null> {
   try {
-    const r = await entrarNoServidor(email.trim(), senha);
+    // `leitura`: o campo é o usuário da credencial de visualização, e a sessão é de leitor (sem MFA: nunca volta `mfa`).
+    const r = await (leitura ? entrarLeitura(email.trim(), senha) : entrarNoServidor(email.trim(), senha));
     if (r.fase === "mfa") return { fase: "mfa", desafio: r.desafio, email: r.email, modo: "totp" };
     autenticar();
     // Não chega a renderizar: o guard do `_layout` troca a tela assim que

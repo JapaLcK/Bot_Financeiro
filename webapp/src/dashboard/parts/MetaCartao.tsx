@@ -43,16 +43,16 @@ function Ritmo({ m, mostra }: { m: Meta; mostra: boolean }) {
   );
 }
 
-function Precisa({ m, editar }: { m: Meta; editar: () => void }) {
+function Precisa({ m, editar }: { m: Meta; editar?: () => void }) {
   if (m.prazo_passou && m.data_alvo) {
-    return <><p>O prazo era {mesAno(m.data_alvo)}</p><button type="button" className="btn btn-ghost" onClick={editar}>Mudar prazo</button></>;
+    return <><p>O prazo era {mesAno(m.data_alvo)}</p>{editar && <button type="button" className="btn btn-ghost" onClick={editar}>Mudar prazo</button>}</>;
   }
   if (!m.data_alvo) return <p className="meta-nota">Sem prazo. Escolha uma data e eu digo quanto guardar por mês.</p>;
   const por = m.por_mes && moneyText(m.por_mes);
   return <p className="meta-numero num">{por ? `${por}/mês até ${mesAno(m.data_alvo)}` : `Prazo: ${mesAno(m.data_alvo)}`}</p>;
 }
 
-export function MetaCartao({ m, custo, editar }: { m: Meta; custo: CustoMensal; editar: (definirValor?: boolean) => void }) {
+export function MetaCartao({ m, custo, editar }: { m: Meta; custo: CustoMensal; editar?: (definirValor?: boolean) => void }) { // sem `editar` (leitor): só leitura, sem botão
   const id = useId();
   const reserva = m.tipo === "reserva";
   const atual = m.atual === null ? null : moneyText(m.atual);
@@ -69,7 +69,7 @@ export function MetaCartao({ m, custo, editar }: { m: Meta; custo: CustoMensal; 
     <article className="meta" aria-labelledby={`${id}-h`}>
       <header className="meta-topo">
         <h3 id={`${id}-h`}>{m.nome}</h3>
-        <button type="button" className="btn btn-ghost" aria-label={`Editar ${m.nome}`} onClick={() => editar()}><i className="ph ph-pencil-simple" aria-hidden="true" />Editar</button>
+        {editar && <button type="button" className="btn btn-ghost" aria-label={`Editar ${m.nome}`} onClick={() => editar()}><i className="ph ph-pencil-simple" aria-hidden="true" />Editar</button>}
       </header>
       {sub && <p className="faint meta-nota">{sub}{reserva && m.fonte.rotulo ? ` · ${m.fonte.rotulo}` : ""}</p>}
       {avisoCusto && <p className="meta-nota">{avisoCusto}</p>}
@@ -86,12 +86,12 @@ export function MetaCartao({ m, custo, editar }: { m: Meta; custo: CustoMensal; 
       {reserva && m.alvo === null && (
         <>
           <p className="meta-nota">{fraseCusto(custo) ?? "Não consegui calcular suas contas fixas."}</p>
-          <button type="button" className="btn btn-ghost" onClick={() => editar(true)}>Definir o valor eu mesmo</button>
+          {editar && <button type="button" className="btn btn-ghost" onClick={() => editar(true)}>Definir o valor eu mesmo</button>}
         </>
       )}
       {!batida && (
         <div className="meta-ritmos">
-          <section aria-label="O que precisa"><h4>Precisa</h4><Precisa m={m} editar={() => editar()} /></section>
+          <section aria-label="O que precisa"><h4>Precisa</h4><Precisa m={m} editar={editar && (() => editar())} /></section>
           <section aria-label="Seu ritmo"><h4>Seu ritmo</h4><Ritmo m={m} mostra={atual !== null} /></section>
         </div>
       )}

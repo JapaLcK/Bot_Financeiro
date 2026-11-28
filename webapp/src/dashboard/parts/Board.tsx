@@ -5,7 +5,7 @@ import type { NovoPerfil, Perfil } from "../lib/api-v2.gen";
 import { TODAY } from "../lib/api";
 import { PROFILES, locked, readLayout, saveLayout, saveProfile } from "../lib/profiles.js";
 import { set } from "../lib/store.js";
-import { DEMO, ErroApi, FUSO, apiPut, perfilQuery, usePlan } from "../lib/v2";
+import { DEMO, ErroApi, FUSO, apiPut, perfilQuery, useLeitor, usePlan } from "../lib/v2";
 import { useMedia } from "../useMedia";
 import type { Path } from "../router";
 import { FrameLink } from "./Frame";
@@ -98,8 +98,10 @@ const hoje = () => new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "lo
 
 export function Board({ s }: { s: DashState }) {
   const qc = useQueryClient();
-  const q = useQuery(perfilQuery);
-  const profile = q.data?.perfil; // null: nunca escolheu, o modal abre
+  // Leitor: o GET /perfil é negado a ele e o PUT escreve: fica o perfil padrão, sem o seletor, sem o modal de escolha e sem o convite ao Piggy.
+  const leitor = useLeitor();
+  const q = useQuery({ ...perfilQuery, enabled: perfilQuery.enabled && !leitor });
+  const profile = leitor ? "padrao" : q.data?.perfil; // null: nunca escolheu, o modal abre
   const shown = profile ?? "padrao";
   const plan = usePlan();
   const [ids, setIds] = useState(() => layoutOf(shown, plan));
@@ -156,14 +158,14 @@ export function Board({ s }: { s: DashState }) {
   };
   const add = (id: string) => {
     const next = [...ids, id];
-    saveLayout(shown, next);
+    if (!leitor) saveLayout(shown, next); // leitor: só memória, nunca o localStorage do dono
     setIds(next);
     setVersion((v) => v + 1);
     setSaid(`${ITEM.get(id)!.label} adicionado ao fim do painel`);
   };
-  const restore = () => { saveLayout(shown, null); setIds(layoutOf(shown, plan)); setVersion((v) => v + 1); };
+  const restore = () => { if (!leitor) saveLayout(shown, null); setIds(layoutOf(shown, plan)); setVersion((v) => v + 1); };
 
-  if (!q.data) {
+  if (!q.data && !leitor) {
     return (
       <section className="board" aria-label="Seu painel">
         {q.isPending ? <p role="status" className="faint">Carregando…</p> : (
@@ -179,7 +181,7 @@ export function Board({ s }: { s: DashState }) {
   return (
     <section className="board" data-editing={s.editing || undefined} data-fit={columns === 1 || undefined} aria-label="Seu painel">
       <div className="board-head">
-        <ProfileSelect value={shown} busy={m.isPending} onPick={choose} />
+        {!leitor && <ProfileSelect value={shown} busy={m.isPending} onPick={choose} />}
         <p className="board-hint" aria-live="polite">
           {s.editing
             ? <>Arraste os blocos para organizar. No celular, segure antes de arrastar. No teclado: <kbd>Alt</kbd> + setas.</>
@@ -194,13 +196,13 @@ export function Board({ s }: { s: DashState }) {
         </div>
       </div>
       <p className="board-aviso" aria-live="polite">{aviso}</p>
-      <PiggyBand key={shown} s={s} profile={shown} />
-      {s.editing && <Catalog missing={ALL.filter((w) => !ids.includes(w.id))} onAdd={add} />}
+      {!leitor && <PiggyBand key={shown} s={s} profile={shown} />}
+      {s.editing && <Catalog missing={ALL.filter((w) => !ids.includes(w.id) && !(leitor && w.id === "simulador"))} onAdd={add} />}
       <p className="sr-only" aria-live="polite">{said}</p>
       {!ids.length && !s.editing && <p className="board-empty faint">Toque em Organizar para adicionar blocos</p>}
       <DraggableWidgetGrid
         key={version}
-        items={ids.map((id) => ITEM.get(id)!)}
+        items={ids.filter((id) => !(leitor && id === "simulador")).map((id) => ITEM.get(id)!)}
         editable={s.editing}
         onRemove
         maxColumns={columns}
@@ -210,7 +212,7 @@ export function Board({ s }: { s: DashState }) {
         fitRows={columns === 1}
         onChange={(next) => {
           const list = next.map((w) => w.id);
-          saveLayout(shown, list);
+          if (!leitor) saveLayout(shown, list);
           setIds(list);
           if (!list.length) document.getElementById("board-add")?.focus();
         }}

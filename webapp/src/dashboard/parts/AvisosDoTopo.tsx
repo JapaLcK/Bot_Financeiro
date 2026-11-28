@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CONTA, type Path } from "../router";
 import { locked } from "../lib/profiles.js";
-import { DEMO, ErroApi, avisoDeBancoQuery, contasQuery, perfilQuery, previsaoQuery, usePlan } from "../lib/v2";
+import { DEMO, ErroApi, avisoDeBancoQuery, contasQuery, perfilQuery, previsaoQuery, useLeitor, usePlan } from "../lib/v2";
 import { FeedbackReceita, itensDeReceita, useFalhaReceita, useListaDaPagina, useReceitas } from "../widgets/ReceitasDoBanco";
 import { comCardPrevisao } from "./Board";
 import { CorpoAvisoBanco } from "./CorpoAvisoBanco";
@@ -20,6 +20,7 @@ const MOTIVOS_BANCO: readonly string[] = ["banco_desatualizado", "conexao_pausad
 const bancoVelho = (motivos?: readonly string[]) => !!motivos?.some((m) => MOTIVOS_BANCO.includes(m));
 
 export function AvisosDoTopo({ path }: { path: Path }) {
+  const leitor = useLeitor(); // leitor: sem receitas a confirmar (POST), sem /perfil (403) e sem "Atualizar agora"
   const dentro = !DEMO && !SEM_PILHA.includes(path);
   const [fechado, setFechado] = useState(false); // o X do banco vale até recarregar a página (como no app, até o processo morrer)
   const [, setFalhaEm] = useFalhaReceita();
@@ -29,7 +30,7 @@ export function AvisosDoTopo({ path }: { path: Path }) {
   const bancos = useQuery({ ...avisoDeBancoQuery, enabled: dentro });
   const comAviso = bancoVelho(bancos.data?.motivos) && !fechado;
   // O estado do "Atualizar agora" mora AQUI (o anfitrião sempre montado), não no corpo do aviso, que desmonta a cada troca de ponto. `dentro`: só se anuncia com a pilha na tela.
-  const banco = useAtualizarBanco({ ativo: dentro && comAviso, semMotivo: !!bancos.data && !bancoVelho(bancos.data.motivos), dentro });
+  const banco = useAtualizarBanco({ ativo: dentro && comAviso && !leitor, semMotivo: !!bancos.data && !bancoVelho(bancos.data.motivos), dentro });
   useEffect(() => { banco.calar(); }, [path]); // o anúncio do banco também não atravessa telas
   const contas = useQuery({ ...contasQuery, enabled: dentro });
   // Receitas pendentes: nas telas com card/página da previsão, a lista é a que ELE leu (`useListaDaPagina`, no horizonte que ele mostra): um segundo observador da chave
@@ -38,7 +39,7 @@ export function AvisosDoTopo({ path }: { path: Path }) {
   // Nas outras telas não há receita nem GET /previsao. Só o plano com previsão a lê (o mesmo critério do bloco "hero" do Resumo, `locked`): Essencial e Free levariam 403 a cada visita e foco de aba.
   // Espera o /perfil: é ele que diz se o card vai existir (`comCardPrevisao`); sem isso a pilha leria antes e o card, ao montar, abriria um 2º GET. Perfil com erro: o Board não monta card.
   const plano = usePlan();
-  const resumo = dentro && path === "/" && !locked("hero", plano);
+  const resumo = dentro && path === "/" && !locked("hero", plano) && !leitor;
   const perfil = useQuery({ ...perfilQuery, enabled: resumo, subscribed: resumo });
   const comCard = !!perfil.data && comCardPrevisao(perfil.data.perfil ?? "padrao", plano);
   const sozinha = resumo && !perfil.isPending && !comCard;
@@ -50,9 +51,9 @@ export function AvisosDoTopo({ path }: { path: Path }) {
   const itens: AvisoDaPilha[] = [
     ...(comAviso ? [{
       id: "banco", tom: "alerta" as const, icone: "ph-warning", titulo: "Dados do banco desatualizados", aoFechar: () => { banco.cancelar(); setFechado(true); },
-      corpo: <CorpoAvisoBanco padrao={`Os dados de ${nomes.length ? nomes.join(", ") : "um banco conectado"} precisam ser atualizados. Alguns valores podem estar incompletos.`} acao={banco.acao} maquina={banco.maquina} atualizar={banco.atualizar} />,
+      corpo: leitor ? <p className="pilha-texto">{`Os dados de ${nomes.length ? nomes.join(", ") : "um banco conectado"} estão desatualizados. Alguns valores podem estar incompletos.`}</p> : <CorpoAvisoBanco padrao={`Os dados de ${nomes.length ? nomes.join(", ") : "um banco conectado"} precisam ser atualizados. Alguns valores podem estar incompletos.`} acao={banco.acao} maquina={banco.maquina} atualizar={banco.atualizar} />,
     }] : []),
-    ...itensDeReceita((dentro && (path === "/previsao" || (resumo && comCard)) ? listaDaPagina?.receitas_do_banco : sozinha && !e4 ? previsao.data?.receitas_do_banco : null) ?? [], r),
+    ...itensDeReceita(leitor ? [] : (dentro && (path === "/previsao" || (resumo && comCard)) ? listaDaPagina?.receitas_do_banco : sozinha && !e4 ? previsao.data?.receitas_do_banco : null) ?? [], r),
   ];
   // As regiões de alerta e anúncio existem enquanto há receita a responder ou algo a anunciar (um alerta/status vazio em toda tela atrapalharia o resto do painel).
   // O alerta de falha só vale na tela de onde o POST saiu: o que volta 500 depois de o usuário trocar de tela não deixa alerta onde não há receita a repetir.

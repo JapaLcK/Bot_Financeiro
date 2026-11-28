@@ -20,6 +20,13 @@ export const loginSchema = credenciaisSchema.extend({
   dashboard_url: z.string().optional(),
 });
 
+/** `POST /auth/leitura/login`: as credenciais do leitor, SEM e-mail (o servidor não o devolve) e sem MFA. */
+export const loginLeituraSchema = credenciaisSchema.extend({
+  user_id: z.number().int(),
+  somente_leitura: z.boolean().optional(),
+  dashboard_url: z.string().optional(),
+});
+
 /** `/auth/me` devolve a linha inteira da conta; aqui só o que a Fase 1 usa. */
 export const perfilSchema = z.object({
   user_id: z.number().int(),

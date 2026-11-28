@@ -18,6 +18,8 @@ export async function carregarAcessoBancario(): Promise<AcessoBancario> {
   if (p.precisa_criar_senha) return { perfil: p, fase: "senha" };
   if (p.app_access === false) return { perfil: p, fase: "sem-acesso" };
   if (p.app_access !== true) throw new Error("Não conseguimos confirmar seu acesso. Tente de novo.");
+  // Leitor: não conecta banco nem passa pelo onboarding (o servidor o nega); o acesso é o do dono, já conferido acima.
+  if (p.somente_leitura) return { perfil: p, fase: "inicio" };
   const marco = await onboardingBancario();
   await conferirSessao(esperada);
   if (marco.completed) return { perfil: p, fase: "inicio" };
